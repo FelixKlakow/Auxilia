@@ -298,6 +298,7 @@ The following minor points remain open for the detailed design phase:
 | 3 | **Pre-flight retry policy granularity** - Is retry-on-availability configured globally, per workflow, or per work item source? | UX, reliability |
 | 4 | **TFVC scope** - Full branch/merge support confirmed as needed. Clarify whether TFS on-prem server versions down to TFS 2015/2017 are in scope or only TFS 2019+ / Azure DevOps Server. | Adapter implementation effort |
 
+| 5 | **State Management in Backend Services** - Backend Services will have different state, even if there's no in memory state or local JSON files, the fact that different backend services have different repos checked out makes them stateful. This must be managed and load must be balanced accordingly, up and downscaling must also happen accordingly | State Management, Backend Scalability |
 ---
 
 
