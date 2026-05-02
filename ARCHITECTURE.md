@@ -300,6 +300,140 @@ The following minor points remain open for the detailed design phase:
 
 ---
 
+
+
+*Document maintained in ARCHITECTURE.md - update alongside major design decisions.*
+
+## 11. Scaling
+
+The frontend and the steering layer have different scaling characteristics and are solved independently.
+
+---
+
+### 11.1 Blazor Server Scaling
+
+Blazor Server holds a live SignalR circuit per browser client, tied to a specific server instance. Two mechanisms work together to scale out:
+
+- **Sticky sessions** at the load balancer - a client always returns to the same instance for the lifetime of its circuit
+- **Redis SignalR backplane** - backend events are published to Redis which fans them out to all Blazor Server instances; each instance delivers only to circuits subscribed to that workflow
+
+Blazor Server instances are stateless from a data perspective. Instances can be added or removed at any time.
+
+```mermaid
+graph LR
+    subgraph Browsers
+        B1[Browser A]
+        B2[Browser B]
+        B3[Browser C]
+    end
+    LB[Load Balancer sticky sessions]
+    subgraph BlazorInstances
+        BS1[Blazor Instance 1 owns circuit A]
+        BS2[Blazor Instance 2 owns circuits B and C]
+    end
+    BACKPLANE[Redis SignalR Backplane]
+    ORCH[Orchestration Service]
+    B1 -->|Sticky| LB
+    B2 -->|Sticky| LB
+    B3 -->|Sticky| LB
+    LB --> BS1
+    LB --> BS2
+    ORCH -->|Workflow event| BACKPLANE
+    BACKPLANE --> BS1
+    BACKPLANE --> BS2
+    BS1 -->|Only to circuit A| B1
+    BS2 -->|Only to circuits B and C| B2
+    BS2 --> B3
+```
+
+---
+
+### 11.2 Steering Instance Scaling
+
+Steering instances scale via **competing consumers** on the RabbitMQ command queue - adding instances increases dispatch throughput automatically.
+
+Once a steering instance picks up a workflow it becomes the **owner** for its lifetime (it holds the container/process handle). Two concerns follow:
+
+- **Ownership tracking** - Redis records which steering instance owns which workflow instance
+- **Failover** - each steering instance emits a heartbeat; if it stops, the Orchestrator detects orphaned instances and reassigns them or marks them Failed with retry
+
+```mermaid
+graph TB
+    subgraph MessageBus[Message Bus RabbitMQ]
+        CMD[Command Queue competing consumers]
+        EVT[Event Exchange fanout]
+    end
+    subgraph SteeringPool[Steering Instance Pool]
+        SI1[Steering Instance 1 owns WF-101 WF-102]
+        SI2[Steering Instance 2 owns WF-103]
+        SI3[Steering Instance 3 idle]
+    end
+    subgraph Workflows[Workflow Containers / Processes]
+        WF101[Workflow WF-101]
+        WF102[Workflow WF-102]
+        WF103[Workflow WF-103]
+    end
+    REDIS[Redis Ownership Store and Heartbeat]
+    ORCH[Orchestration Service]
+    ORCH -->|Dispatch command| CMD
+    CMD -->|Competing consume| SI1
+    CMD -->|Competing consume| SI2
+    CMD -->|Competing consume| SI3
+    SI1 <--> WF101
+    SI1 <--> WF102
+    SI2 <--> WF103
+    SI1 -->|Heartbeat and ownership| REDIS
+    SI2 -->|Heartbeat and ownership| REDIS
+    SI3 -->|Heartbeat| REDIS
+    ORCH -->|Monitor heartbeats detect orphans| REDIS
+    SI1 -->|Status events| EVT
+    SI2 -->|Status events| EVT
+    EVT --> ORCH
+```
+
+---
+
+### 11.3 Full Scaled Event Flow
+
+End-to-end path of a workflow status update from container to browser when fully scaled out:
+
+```mermaid
+sequenceDiagram
+    participant WF as Workflow Container
+    participant BUS as RabbitMQ
+    participant SI as Steering Instance owner
+    participant ORCH as Orchestration Service
+    participant REDIS as Redis Backplane
+    participant BS1 as Blazor Instance 1
+    participant BS2 as Blazor Instance 2
+    participant UA as Browser A subscribed
+    WF->>BUS: StepCompleted message
+    BUS->>SI: Delivered to owning Steering Instance
+    SI->>BUS: Publish WorkflowStatusUpdated event
+    BUS->>ORCH: Event consumed
+    ORCH->>REDIS: Publish to SignalR backplane
+    REDIS->>BS1: Fan out to all Blazor instances
+    REDIS->>BS2: Fan out to all Blazor instances
+    BS1->>UA: Push to subscribed circuit only
+    Note over BS2: No subscribed circuit for this workflow - silent drop
+```
+
+---
+
+### 11.4 Infrastructure Summary per Mode
+
+| Component | Local / Dev | On-premise | Cloud (Azure) |
+|---|---|---|---|
+| Blazor Server instances | 1 (no backplane needed) | N + sticky LB + Redis backplane | N + Azure Front Door + Azure Cache for Redis |
+| Steering instances | 1 | Pool via competing consumers | Pool via competing consumers with auto-scale |
+| Ownership and heartbeat store | Not needed | Redis | Azure Cache for Redis |
+| Message bus | RabbitMQ single in Docker | RabbitMQ cluster | Azure Service Bus |
+| Workflow runtime | OS Process | Docker / k3s | AKS node pool |
+
+Redis serves a dual purpose in non-dev modes: **SignalR backplane** and **steering ownership store**. A single Redis instance or cluster covers both.
+
+---
+
 *Next step: Use Case document (USE-CASES.md)*
 
 *Document maintained in ARCHITECTURE.md - update alongside major design decisions.*
