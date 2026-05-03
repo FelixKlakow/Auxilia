@@ -1,5 +1,8 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using OpenTelemetry;
+using OpenTelemetry.Context.Propagation;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 
@@ -8,6 +11,7 @@ namespace Auxilia.Messaging;
 /// <summary>
 ///     Production RabbitMQ implementation of <see cref="IMessageBusClient" />.
 ///     Messages are JSON-serialised with System.Text.Json.
+///     Spans and metrics are recorded via <see cref="MessagingTelemetry" />.
 /// </summary>
 public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
 {
@@ -39,8 +43,29 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
 
     public async Task PublishAsync<T>(string topic, T message, CancellationToken cancellationToken = default)
     {
+        using var activity = MessagingTelemetry.ActivitySource.StartActivity(
+            "rabbitmq.publish", ActivityKind.Producer);
+        activity?.SetTag("messaging.system", "rabbitmq");
+        activity?.SetTag("messaging.destination", topic);
+        activity?.SetTag("messaging.operation", "publish");
+
+        // Propagate W3C trace context into message headers
+        var headers = new Dictionary<string, object?>();
+        Propagators.DefaultTextMapPropagator.Inject(
+            new PropagationContext(
+                activity?.Context ?? Activity.Current?.Context ?? default,
+                Baggage.Current),
+            headers,
+            static (carrier, key, value) => carrier[key] = value);
+
         var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(message));
-        var props = new BasicProperties { Persistent = true, ContentType = "application/json" };
+        var props = new BasicProperties
+        {
+            Persistent = true,
+            ContentType = "application/json",
+            Headers = headers
+        };
+
         await _publishChannel.BasicPublishAsync(
             string.Empty,
             topic,
@@ -48,6 +73,8 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
             props,
             body,
             cancellationToken);
+
+        MessagingTelemetry.PublishCounter.Add(1, new TagList { { "messaging.topic", topic } });
     }
 
     public async Task<IAsyncDisposable> SubscribeAsync<T>(
@@ -59,10 +86,32 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
         var consumer = new AsyncEventingBasicConsumer(channel);
         consumer.ReceivedAsync += async (_, ea) =>
         {
+            // Extract W3C trace context from message headers
+            var parentContext = Propagators.DefaultTextMapPropagator.Extract(
+                default,
+                ea.BasicProperties.Headers,
+                static (headers, key) =>
+                {
+                    if (headers == null || !headers.TryGetValue(key, out var val))
+                        return [];
+                    var str = val is byte[] bytes ? Encoding.UTF8.GetString(bytes) : val?.ToString();
+                    return str is null ? [] : [str];
+                });
+
+            using var activity = MessagingTelemetry.ActivitySource.StartActivity(
+                "rabbitmq.consume",
+                ActivityKind.Consumer,
+                parentContext.ActivityContext);
+            activity?.SetTag("messaging.system", "rabbitmq");
+            activity?.SetTag("messaging.destination", queueName);
+            activity?.SetTag("messaging.operation", "receive");
+
+            MessagingTelemetry.ReceiveCounter.Add(1, new TagList { { "messaging.queue", queueName } });
+
             var body = Encoding.UTF8.GetString(ea.Body.ToArray());
-            var message = JsonSerializer.Deserialize<T>(body);
-            if (message is not null)
-                await handler(message, CancellationToken.None);
+            var msg = JsonSerializer.Deserialize<T>(body);
+            if (msg is not null)
+                await handler(msg, CancellationToken.None);
             await channel.BasicAckAsync(ea.DeliveryTag, false);
         };
         var consumerTag = await channel.BasicConsumeAsync(queueName, false, consumer, cancellationToken);
