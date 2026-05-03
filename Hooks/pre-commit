@@ -1,0 +1,21 @@
+#!/bin/sh
+# pre-commit hook
+# Runs Unit-category tests only (fast, no infrastructure required).
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+
+printf '  Running unit tests before commit...\n'
+
+dotnet test "$REPO_ROOT/Auxilia.BackendService.Tests/Auxilia.BackendService.Tests.csproj" \
+    --filter "Category=Unit" \
+    --no-build \
+    --configuration Debug \
+    --logger "console;verbosity=minimal"
+
+if [ $? -ne 0 ]; then
+    printf '\n❌  Unit tests failed. Commit aborted.\n'
+    exit 1
+fi
+
+printf '✅  All unit tests passed.\n'
+exit 0
