@@ -6,7 +6,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 
 printf '  Running unit tests before commit...\n'
 
-dotnet test "$REPO_ROOT/Auxilia.BackendService.Tests/Auxilia.BackendService.Tests.csproj" \
+dotnet test "$REPO_ROOT/Auxilia.slnx" \
     --filter "Category=Unit" \
     --no-build \
     --configuration Debug \

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Auxilia.Messaging;
 using Auxilia.Messaging.Messages;
 using Microsoft.Extensions.Configuration;
@@ -7,6 +8,7 @@ namespace Auxilia.BackendService;
 /// <summary>
 ///     Listens on the BackendService queue and responds to <see cref="IdentificationRequestMessage" />
 ///     with an <see cref="IdentificationResponseMessage" />.
+///     Each handled request opens a telemetry activity and records metrics.
 /// </summary>
 public sealed class IdentificationRequestHandler(
     IMessageBusClient messageBusClient,
@@ -36,18 +38,40 @@ public sealed class IdentificationRequestHandler(
 
     private async Task HandleAsync(IdentificationRequestMessage request, CancellationToken cancellationToken)
     {
-        logger.LogInformation(
-            "Received identification request {MessageId} from {RequestingServiceId}",
-            request.MessageId, request.RequestingServiceId);
+        using var activity = BackendServiceTelemetry.ActivitySource.StartActivity(
+            "identification.request.handle");
+        activity?.SetTag("request.message_id", request.MessageId.ToString());
+        activity?.SetTag("request.service_id", request.RequestingServiceId.ToString());
 
-        var response = new IdentificationResponseMessage(
-            serviceInfo.ServiceId,
-            "AuxiliaBackendService",
-            serviceInfo.Version,
-            serviceInfo.StartupTimeUtc);
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            logger.LogInformation(
+                "Received identification request {MessageId} from {RequestingServiceId}",
+                request.MessageId, request.RequestingServiceId);
 
-        await messageBusClient.PublishAsync(request.ResponseTopic, response, cancellationToken);
+            var response = new IdentificationResponseMessage(
+                serviceInfo.ServiceId,
+                "AuxiliaBackendService",
+                serviceInfo.Version,
+                serviceInfo.StartupTimeUtc);
 
-        logger.LogInformation("Sent identification response to '{ResponseTopic}'", request.ResponseTopic);
+            await messageBusClient.PublishAsync(request.ResponseTopic, response, cancellationToken);
+
+            logger.LogInformation("Sent identification response to '{ResponseTopic}'", request.ResponseTopic);
+        }
+        catch (Exception ex)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            throw;
+        }
+        finally
+        {
+            sw.Stop();
+            BackendServiceTelemetry.IdentificationRequestsReceived.Add(
+                1, new TagList { { "queue", QueueName } });
+            BackendServiceTelemetry.IdentificationRequestDuration.Record(
+                sw.Elapsed.TotalMilliseconds);
+        }
     }
 }

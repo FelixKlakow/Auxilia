@@ -1,29 +1,108 @@
-﻿using Auxilia.BackendService;
+﻿using System.Reflection;
+using Auxilia.BackendService;
 using Auxilia.Messaging;
+using OpenTelemetry.Exporter;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+using Serilog;
 
-var builder = WebApplication.CreateBuilder(args);
+// Pre-generate the instance ID so the log file name matches ServiceInfo.ServiceId
+var instanceId = Guid.NewGuid();
+var logDir = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+    "Auxilia", "Logs");
+Directory.CreateDirectory(logDir);
+var logPath = Path.Combine(logDir, $"Backend_{instanceId}.log");
 
-// --- Service identity (singleton, captured once at startup) ---
-builder.Services.AddSingleton<ServiceInfo>();
+// Bootstrap logger (used before the DI host is built)
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Debug()
+    .WriteTo.Console()
+    .WriteTo.File(logPath, rollingInterval: RollingInterval.Day, retainedFileCountLimit: 31)
+    .CreateBootstrapLogger();
 
-// --- Messaging ---
-builder.Services.AddSingleton<IMessageBusClient>(_ =>
-    RabbitMqClient.CreateAsync(
-        builder.Configuration["RabbitMq:Host"] ?? "localhost",
-        int.Parse(builder.Configuration["RabbitMq:Port"] ?? "5672"),
-        builder.Configuration["RabbitMq:UserName"] ?? "guest",
-        builder.Configuration["RabbitMq:Password"] ?? "guest"
-    ).GetAwaiter().GetResult());
+try
+{
+    var builder = WebApplication.CreateBuilder(args);
 
-// --- Hosted services ---
-builder.Services.AddHostedService<QueueInitializer>();
-builder.Services.AddHostedService<IdentificationRequestHandler>();
+    // --- Serilog ---
+    builder.Host.UseSerilog((ctx, services, lc) => lc
+        .ReadFrom.Configuration(ctx.Configuration)
+        .ReadFrom.Services(services)
+        .Enrich.FromLogContext()
+        .WriteTo.Console()
+        .WriteTo.File(logPath, rollingInterval: RollingInterval.Day, retainedFileCountLimit: 31));
 
-var app = builder.Build();
+    // --- Service identity (singleton, captured once at startup) ---
+    builder.Services.AddSingleton(new ServiceInfo(instanceId));
 
-app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
+    // --- Messaging ---
+    builder.Services.AddSingleton<IMessageBusClient>(_ =>
+        RabbitMqClient.CreateAsync(
+            builder.Configuration["RabbitMq:Host"] ?? "localhost",
+            int.Parse(builder.Configuration["RabbitMq:Port"] ?? "5672"),
+            builder.Configuration["RabbitMq:UserName"] ?? "guest",
+            builder.Configuration["RabbitMq:Password"] ?? "guest"
+        ).GetAwaiter().GetResult());
 
-app.Run();
+    // --- OpenTelemetry (tracing + metrics) ---
+    var otlpEndpoint = builder.Configuration["Otlp:Endpoint"];
+    var serviceVersion = Assembly.GetExecutingAssembly()
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+        ?.InformationalVersion ?? "0.0.0";
+
+    builder.Services.AddOpenTelemetry()
+        .ConfigureResource(r => r
+            .AddService(
+                serviceName: "Auxilia.BackendService",
+                serviceVersion: serviceVersion,
+                serviceInstanceId: instanceId.ToString()))
+        .WithTracing(tracing =>
+        {
+            tracing
+                .AddSource(BackendServiceTelemetry.ActivitySourceName)
+                .AddSource(MessagingTelemetry.ActivitySourceName)
+                .AddAspNetCoreInstrumentation();
+            if (!string.IsNullOrWhiteSpace(otlpEndpoint))
+                tracing.AddOtlpExporter(o =>
+                {
+                    o.Endpoint = new Uri(otlpEndpoint);
+                    o.Protocol = OtlpExportProtocol.Grpc;
+                });
+        })
+        .WithMetrics(metrics =>
+        {
+            metrics
+                .AddMeter(BackendServiceTelemetry.MeterName)
+                .AddMeter(MessagingTelemetry.MeterName)
+                .AddAspNetCoreInstrumentation()
+                .AddPrometheusExporter();
+            if (!string.IsNullOrWhiteSpace(otlpEndpoint))
+                metrics.AddOtlpExporter((o, r) =>
+                {
+                    o.Endpoint = new Uri(otlpEndpoint);
+                    o.Protocol = OtlpExportProtocol.Grpc;
+                    // Use a short export interval so system tests don't have to wait 60 s
+                    r.PeriodicExportingMetricReaderOptions.ExportIntervalMilliseconds = 5_000;
+                });
+        });
+
+    // --- Hosted services ---
+    builder.Services.AddHostedService<QueueInitializer>();
+    builder.Services.AddHostedService<IdentificationRequestHandler>();
+
+    var app = builder.Build();
+
+    app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
+    app.MapPrometheusScrapingEndpoint(); // GET /metrics
+
+    app.Run();
+}
+finally
+{
+    await Log.CloseAndFlushAsync();
+}
 
 // Make the implicit Program class visible to test projects
 public partial class Program
