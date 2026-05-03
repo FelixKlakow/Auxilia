@@ -1,6 +1,6 @@
 ﻿# Auxilia - Architecture Overview
 
-> **Status:** Draft v0.3
+> **Status:** Draft v0.5
 > **Stack:** C# / ASP.NET Core / Blazor Server
 
 ---
@@ -11,12 +11,16 @@
 2. Core Concepts
 3. High-Level Architecture
 4. Key Components
-5. Workflow Lifecycle
-6. Security and Signing
-7. Resource Access Model
-8. Multi-Account Model
-9. Deployment Modes
-10. Open Questions and Concerns
+5. AI Integration Layer
+6. Workflow Lifecycle
+7. Security and Signing
+8. Resource Access Model
+9. Workspace Management
+10. Network Isolation Model
+11. Multi-Account Model
+12. Deployment Modes
+13. Open Questions and Concerns
+14. Scaling
 
 ---
 
@@ -42,6 +46,11 @@ Auxilia is a **workflow-driven distributed system** where:
 | **Account Bundle** | A set of credentials grouped by purpose (e.g. user identity, AI service, source control) |
 | **Resource Proxy** | A platform-managed, audited access point through which workflows reach external APIs and databases |
 | **Trust Chain** | Signature chain ensuring a workflow is authorized to run in this environment |
+| **Artifact Input** | A named artifact from a prior workflow run injected into a new WorkflowContext as input |
+| **Workspace Manager** | Platform component that manages persistent per-repo warm caches and per-run isolated CoW snapshots |
+| **Network Policy** | Per-workflow declarative allowlist of permitted outbound endpoints, enforced at the kernel network namespace level |
+| **Package Proxy** | Optional platform-managed mirror of public package registries (NuGet, npm, PyPI, etc.) providing caching and security scanning |
+| **Work Item Index** | Optional background-indexed store of historical work items enabling similarity search (deferred) |
 
 ---
 
@@ -51,9 +60,10 @@ Auxilia is a **workflow-driven distributed system** where:
 graph TB
     subgraph Sources["External Sources"]
         TASKS["Task Sources (Jira, ADO, TFS, Trello, GitHub)"]
-        SC["Source Control (Git, TFVC)"]
+        SC["Source Control - multiple systems (Git, TFVC)"]
         IDP["Identity Providers (AAD, LDAP, OIDC, Local)"]
-        EXT["External Resources (APIs, Databases)"]
+        EXT["External Resources (APIs, Databases, CI systems)"]
+        PKG_REG["Package Registries (NuGet, npm, PyPI...)"]
     end
     subgraph Clients["Clients"]
         UI["Blazor Server Frontend"]
@@ -68,6 +78,9 @@ graph TB
         SIGNING["Workflow Trust Service (ISigningProvider)"]
         ADAPTERS["Integration Adapters"]
         PROXY["Resource Proxy"]
+        WM["Workspace Manager"]
+        NET["Network Egress Layer"]
+        PKG_PROXY["Package Proxy (optional)"]
         BUS["Message Bus (IMessageBus - RabbitMQ default)"]
         SI["Steering Instance Pool"]
     end
@@ -87,9 +100,15 @@ graph TB
     ORCH --> ADAPTERS
     ORCH --> BUS
     BUS <--> SI
-    SI <--> WF
+    SI --> WM
+    WM -->|CoW snapshot mounted| WF
     WF -->|Resource requests via bus| PROXY
+    WF -->|Declared network calls| NET
+    NET --> PKG_PROXY
+    NET -->|Undeclared - blocked and logged| NET
+    PKG_PROXY --> PKG_REG
     PROXY --> EXT
+    WM -->|Fetch and push via| PROXY
     SIGNING --> WR
     REG --> WR
     WR --> WF
@@ -115,8 +134,8 @@ graph TB
 
 ### Orchestration Service
 - Receives work items from adapters and selects the appropriate workflow
-- Pre-flight checks before dispatch: verifies signature, required account bundles, and resource proxy availability
-- Manages the full workflow instance lifecycle (see section 5)
+- Pre-flight checks before dispatch: verifies signature, required account bundles, resource proxy availability, and resolves named artifact inputs
+- Manages the full workflow instance lifecycle (see section 6)
 - Publishes commands and consumes status updates via IMessageBus
 
 ### Message Bus - IMessageBus
@@ -131,41 +150,118 @@ graph TB
 - Streams live status to the frontend
 - Notifies human / AI when a workflow is waiting for input due to resource unavailability
 
+### Workspace Manager
+- Manages **warm cache** entries for each repository — cloned once, kept current via background fetches via the Resource Proxy
+- On workflow dispatch: checks repository access rights per repo per source system, then creates an **isolated CoW snapshot** per repository for that run
+- Mounts all declared repository snapshots into the container under `/workspace/repos/<id>/` using Linux mount namespaces — the container sees only its own snapshots
+- Supports **multiple repositories from different source systems** in a single workflow run (Git, TFVC, GitHub, ADO — each using the correct Account Bundle)
+- After container exit: collects outputs (commits, generated files) and pushes them back via the Resource Proxy using scoped credentials — the container never pushes directly
+- Enforces per-repo and per-tenant storage quotas
+- Sensitive repositories can be marked `no-cache` in the workflow manifest — these are fetched fresh per run and deleted immediately after
+
 ### Workflow Trust Service - ISigningProvider
 - Verifies every workflow artifact before execution - no unsigned execution path exists
 - In dev mode signing can be disabled entirely; no dev CA ceremony required locally
-- Three production implementations depending on deployment mode (see section 9)
+- Three production implementations depending on deployment mode (see section 12)
 - Private key never touches the application process - only hash-in / signature-out
 
 ### Workflow Runner - IWorkflowRunner
 - Abstracts how workflows are launched
-- Three implementations depending on deployment mode (see section 9)
+- Three implementations depending on deployment mode (see section 12)
 
 ### Workflow C# SDK - NuGet Package
 - Reference SDK for authoring workflows in C#; other language SDKs follow the same message contract
-- Workflows declare: required bundle types, produced artifacts, and named resource dependencies
+- Workflows declare in their manifest: required bundle types, produced artifacts, named resource dependencies, accepted artifact inputs, repository references (single or multi, multi-source), baseline network endpoints (minimum required, `package-proxy` preference), and `no-cache` flags per repository
+- The manifest does **not** declare `allow-all` — that is a run-time operator decision resolved by the Policy Resolver at dispatch
+- WorkflowContext carries: the originating work item, resolved named artifact inputs, scoped credentials, and repository mount paths
 - Workflows compile to a self-contained executable, then are signed and pushed to the registry
 
 ### AI Integration Layer
-- Routes AIAssistanceRequest messages (published by workflows) to the configured model
+- Routes AIAssistanceRequest messages (published by workflows) to the configured model adapter
 - Pluggable adapters: GitHub Copilot, Azure OpenAI, custom models
-- Pre-flight check includes verifying the required AI bundle is available before dispatch
+- AI bundles carry usage quotas and purpose restrictions; pre-flight verifies the required bundle is available before dispatch
 - All AI decisions are written to the audit log with full context
+- See **section 5** for the full AI integration design including the MCP interface, audit contract, and bundle scoping
 
 ### Resource Proxy
-- Platform-managed gateway through which workflows access external APIs and databases
-- Workflow declares named dependencies (e.g. "github-api", "customer-db") at authoring time
+- Platform-managed gateway through which workflows access external APIs, databases, build systems, and scan tools
+- Workflow declares named dependencies (e.g. "github-api", "customer-db", "ci-runner") at authoring time
 - At runtime the Steering Instance resolves, scopes, and injects proxy endpoints - the workflow never holds raw credentials
+- Supports two call patterns: **synchronous** (request/response) and **async long-running** (submit job, receive handle, poll or await callback via message bus)
 - All proxy calls are audited; rate limiting and access policy enforced per workflow identity
+
+### Network Egress Layer
+- Enforces the **effective network policy** for each run, resolved at dispatch time from manifest baseline + run configuration + platform policy ceiling
+- Default mode: **default-deny** — only endpoints in the resolved allowlist are reachable; all other outbound traffic is blocked and logged
+- Optional mode: **allow-all** — requested via run configuration or global tenant config; all traffic is still fully logged; platform policy can prohibit this mode entirely
+- Build tools and package managers (`dotnet restore`, `npm install`, `pip install`, etc.) work transparently within allowed endpoints — no per-tool abstraction required
+- All outbound traffic (allowed and blocked attempts) is written to the run audit log
+
+### Package Proxy (optional)
+- Platform-managed mirror of public package registries (NuGet, npm, PyPI, Cargo, Go modules, etc.)
+- When enabled: the Network Egress Layer routes all package manager traffic through the proxy rather than directly to the public registry
+- Provides: **caching** (packages fetched once, served locally on subsequent runs), **security scanning** (packages scanned before serving), and **air-gap support** (enterprise environments with no internet access)
+- Can be configured per registry — e.g. route NuGet through the proxy but allow npm direct access
+- Not required — workflows function without it as long as the registry endpoints are declared and reachable
 
 ### MCP Server
 - Exposes every user-facing operation as an MCP tool
 - AI agents authenticate with their own Account Bundle - subject to the same policy rules as humans
 - Key tools: trigger_workflow, get_workflow_status, send_input, approve_step, cancel_workflow, list_work_items
 
+### Integration Adapters
+- **ITaskSourceAdapter** — read work items (full detail including linked items, history, attachments), update status, create work items, create sub-tasks, attach artifact references (`AttachArtifact`)
+- **ISourceControlAdapter** — clone, diff, branch, commit, push, create PR; plus lightweight introspection: ListDirectory, GetFileContent, DetectFrameworks (no full clone required)
+
 ---
 
-## 5. Workflow Lifecycle
+## 5. AI Integration Layer
+
+AI agents are first-class citizens in Auxilia. They interact through the same interfaces as human users — via the MCP Server — and are subject to the same policy, audit, and identity rules.
+
+```mermaid
+graph TD
+    subgraph AIClients["AI Clients"]
+        COPILOT["GitHub Copilot"]
+        AOAI["Azure OpenAI"]
+        CUSTOM["Custom Models"]
+    end
+    subgraph Platform["Platform"]
+        MCP["MCP Server"]
+        AI_LAYER["AI Integration Layer"]
+        WF["Running Workflow"]
+        BUS["Message Bus"]
+        AUDIT["Audit Log"]
+        SEC["Policy Engine"]
+    end
+    COPILOT <-->|MCP Protocol| MCP
+    AOAI <-->|MCP Protocol| MCP
+    CUSTOM <-->|MCP Protocol| MCP
+    MCP --> SEC
+    SEC -->|Allowed| AI_LAYER
+    SEC -->|Denied| BLOCK["Blocked"]
+    WF -->|AIAssistanceRequest message| BUS
+    BUS --> AI_LAYER
+    AI_LAYER -->|Routes to configured model adapter| AIClients
+    AIClients --> AI_LAYER
+    AI_LAYER -->|AIAssistanceResponse message| BUS
+    BUS --> WF
+    AI_LAYER --> AUDIT
+```
+
+**Key properties:**
+- AI agents authenticate with their own **Account Bundle** (AI bundle) — subject to the same policy checks as human users
+- Workflows request AI assistance by publishing an `AIAssistanceRequest` message to the bus; they do not call the model directly
+- The AI Integration Layer resolves the appropriate model adapter from the AI bundle, makes the call, and returns the response via the bus
+- Multiple AI bundles of different types can be configured (e.g. Azure OpenAI for code generation, a custom model for security analysis)
+- AI bundles carry **usage quotas** and **purpose restrictions** — a bundle scoped to code review cannot be used for arbitrary queries
+- Every AI decision is written to the **immutable audit log** with full context: the request, the model used, the response, and the workflow step that requested it
+- Pre-flight check verifies the required AI bundle is present and within quota before a workflow is dispatched
+- **MCP tools** give AI agents the same operations as the human UI: trigger workflow, get status, send input, approve step, cancel, list work items — no hidden operations
+
+---
+
+## 6. Workflow Lifecycle
 
 ```mermaid
 stateDiagram-v2
@@ -194,7 +290,7 @@ stateDiagram-v2
 
 ---
 
-## 6. Security and Signing
+## 7. Security and Signing
 
 ```mermaid
 graph TD
@@ -218,37 +314,228 @@ graph TD
 
 **Key principles:**
 - Signing can be **fully disabled in dev mode** - there is no ceremony, no dev CA required locally
-- In all non-dev modes signing is mandatory with no bypass; permissions are declared at signing time and cannot be escalated at runtime
-- Workflows have no outbound network access of their own - all external access goes through the Resource Proxy
+- In all non-dev modes signing is mandatory with no bypass; the signed artifact records what the workflow *is* — permissions and network policy are resolved at runtime, not locked into the artifact
+- Workflows have **no arbitrary outbound network access** — effective network policy is resolved at dispatch from three layers (manifest baseline, run configuration, platform policy ceiling) and enforced at the kernel level; see section 10
+- Structured API calls (task sources, source control, databases) go through the Resource Proxy; build toolchain calls (package restore, etc.) go through the Network Egress Layer
 - Every action (human or AI) is written to an immutable audit log
 - TFVC / TFS is explicitly supported as a source control target for enterprises that have not yet migrated
 
 ---
 
-## 7. Resource Access Model
+## 8. Resource Access Model
 
-Workflows often need to reach external systems (APIs, databases, source control). Direct access is not permitted - all external access flows through the **Resource Proxy**.
+Workflows interact with external systems through two distinct channels depending on the nature of the call.
 
 ```mermaid
-graph LR
-    WF["Workflow"] -->|Named resource request via message bus| PROXY["Resource Proxy"]
-    PROXY --> ACCT["Account Manager (resolves credentials)"]
-    PROXY --> POLICY["Policy Engine (is this workflow allowed to use this resource?)"]
-    PROXY --> AUDIT["Audit Log"]
-    PROXY -->|Scoped, time-limited call| EXT["External API / Database / Source Control"]
+graph TB
+    subgraph Container["Workflow Container (own network and mount namespace)"]
+        WF["Workflow / AI Agent"]
+        BUILD["Build Tools (dotnet, npm, pip...)"]
+    end
+
+    subgraph StructuredAccess["Structured Access - Resource Proxy"]
+        PROXY["Resource Proxy"]
+        ACCT["Account Manager"]
+        AUDIT1["Audit Log"]
+    end
+
+    subgraph NetworkAccess["Network Access - Egress Layer"]
+        NET["Network Egress Layer"]
+        PKG_PROXY["Package Proxy (optional)"]
+        AUDIT2["Audit Log (all traffic including blocked)"]
+    end
+
+    EXT["External APIs / Databases / CI systems"]
+    PKG_REG["Package Registries (NuGet, npm, PyPI...)"]
+    BLOCKED["Undeclared endpoints - blocked"]
+
+    WF -->|Named resource request via message bus| PROXY
+    PROXY --> ACCT
+    PROXY --> AUDIT1
+    PROXY -->|Scoped credentialed call| EXT
     EXT --> PROXY
     PROXY -->|Response via message bus| WF
+
+    BUILD -->|package restore, build commands| NET
+    WF -->|declared direct network calls| NET
+    NET -->|declared endpoint| PKG_PROXY
+    NET -->|declared endpoint| EXT
+    NET -->|undeclared endpoint| BLOCKED
+    NET --> AUDIT2
+    PKG_PROXY --> PKG_REG
 ```
 
-**How it works:**
-- The workflow declares named resource dependencies in its manifest (e.g. "github-api", "jira-instance", "customer-db")
-- At runtime the platform resolves which Account Bundle and connection details map to that named resource for this user/context
-- The workflow sends a resource request message and receives a response - it never holds a raw connection string, token, or API key
-- The proxy enforces per-workflow rate limits and access policy; all calls are logged
+**Resource Proxy (structured calls):**
+- Used for all calls where the platform mediates credentials: task sources, source control push, databases, CI triggers
+- Workflow declares named dependencies in its manifest; at runtime the platform resolves the correct Account Bundle
+- Supports synchronous and async long-running patterns (trigger + poll/callback via message bus)
+- The workflow never holds raw credentials — it sends a request message and receives a response
+
+**Network Egress Layer (toolchain and direct calls):**
+- Used for build tools, package managers, and any other direct network calls the workflow needs
+- The manifest declares allowed endpoints and their purpose; enforcement is at the kernel network namespace level
+- Build tools work transparently — `dotnet restore` hits the declared NuGet endpoint with no per-tool abstraction
+- All traffic is logged; blocked attempts are flagged in the audit trail
+
+**Network policy modes:**
+
+| Mode | Behaviour | When to use |
+|---|---|---|
+| **default-deny** (default) | Only declared endpoints are reachable; all else blocked and logged | All production workflows |
+| **allow-all** | All outbound traffic permitted; everything still logged | Requested via run configuration or global tenant config; platform policy can prohibit entirely |
 
 ---
 
-## 8. Multi-Account Model
+## 9. Workspace Management
+
+Workflows operate on local filesystem copies of repositories rather than streaming content through the message bus. The **Workspace Manager** manages this entirely on behalf of the workflow.
+
+```mermaid
+graph TB
+    subgraph WorkspaceManager["Workspace Manager (privileged host process)"]
+        CACHE["Warm Cache\n(one entry per repo, never mounted into containers)"]
+        COW["CoW Snapshot Engine"]
+        ACCESS["Access Check (per repo per run)"]
+    end
+
+    subgraph RunA["Container A - own mount namespace"]
+        MNT_A["/workspace/repos/main-app\n/workspace/repos/shared-lib"]
+        WF_A["Workflow Agent A"]
+    end
+
+    subgraph RunB["Container B - own mount namespace"]
+        MNT_B["/workspace/repos/legacy-module"]
+        WF_B["Workflow Agent B"]
+    end
+
+    PROXY["Resource Proxy"]
+    SC1["GitHub (main-app)"]
+    SC2["Azure DevOps (shared-lib)"]
+    SC3["TFS (legacy-module)"]
+    POLICY["Policy Engine"]
+
+    PROXY -->|fetch via Account Bundle| SC1
+    PROXY -->|fetch via Account Bundle| SC2
+    PROXY -->|fetch via Account Bundle| SC3
+    SC1 --> CACHE
+    SC2 --> CACHE
+    SC3 --> CACHE
+
+    ACCESS --> POLICY
+    POLICY -->|granted| COW
+    POLICY -->|denied| REJECT["Snapshot refused - run blocked"]
+    CACHE -->|CoW fork| COW
+    COW -->|bind-mount into namespace| MNT_A
+    COW -->|bind-mount into namespace| MNT_B
+    MNT_A --> WF_A
+    MNT_B --> WF_B
+    WF_A -.->|cannot reach| MNT_B
+    WF_B -.->|cannot reach| MNT_A
+    WF_A -.->|cannot reach| CACHE
+```
+
+**Multi-source repository support:**
+- A workflow manifest declares all required repositories with their source system and identifier
+- Each repository is fetched and cached independently using the correct Account Bundle for its source
+- All declared repos are mounted into the container under `/workspace/repos/<manifest-id>/`
+- Access is checked independently per repository — a workflow only gets snapshots for repos it is authorised to access
+
+**Isolation layers:**
+
+| Layer | Mechanism |
+|---|---|
+| Run-to-run isolation | Each run gets its own CoW snapshot; writes do not affect other runs or the warm cache |
+| Cross-run filesystem | Linux mount namespaces — a container can only see its own mounted snapshots |
+| UID isolation | Each container runs as a distinct unprivileged UID; snapshot ownership prevents cross-run reads even if namespace fails |
+| Warm cache protection | Cache directory is host-only, owned by the Workspace Manager, never bind-mounted into any container |
+| Output collection | Container writes locally; Workspace Manager collects and pushes outputs after exit via Resource Proxy using scoped credentials |
+
+**Warm cache behaviour:**
+- Cache entries are populated on first fetch and kept current by background `git fetch` / equivalent per source system
+- A cache entry may only be used to create a snapshot if the requesting identity independently passes an access check for that repository
+- Repositories marked `no-cache` in the manifest are fetched fresh per run and deleted immediately after — for high-sensitivity codebases
+- Per-tenant cache storage is physically separate in multi-tenant deployments, encrypted at rest using tenant-specific keys
+
+---
+
+## 10. Network Isolation Model
+
+The container network model separates three categories of outbound communication and handles each appropriately.
+
+### Policy resolution
+
+The effective network policy for a run is resolved from three independent layers at dispatch time — the signing record is not involved:
+
+```mermaid
+flowchart TD
+    MANIFEST["Workflow Manifest (signed)\nbaseline endpoint declarations"]
+    RUNCONFIG["Run Configuration\n(trigger / user / AI per-run settings)"]
+    PLATFORM["Platform Policy (administrator)\nhard ceiling e.g. block allow-all globally"]
+
+    MANIFEST --> MERGE["Policy Resolver\nmerge manifest + run config, clamp by platform policy"]
+    RUNCONFIG --> MERGE
+    PLATFORM --> MERGE
+
+    MERGE --> EFFECTIVE["Effective Network Policy for this run\nrecorded in run audit log"]
+    EFFECTIVE --> MODE{Effective mode}
+    MODE -->|default-deny| ALLOWLIST["Only resolved endpoints reachable"]
+    MODE -->|allow-all| ALLOWALL["All endpoints reachable\nstill fully logged"]
+
+    ALLOWLIST --> CAT{Call category}
+    CAT -->|Structured API call| PROXY["Resource Proxy\n(credentials managed by platform)"]
+    CAT -->|Build toolchain call| EGRESS["Network Egress Layer\n(transparent to the tool)"]
+    CAT -->|Undeclared endpoint| BLOCK["Blocked and logged"]
+
+    EGRESS --> PKG_CHECK{Package proxy enabled?}
+    PKG_CHECK -->|Yes| PKG_PROXY["Package Proxy\n(cache + scan)"]
+    PKG_CHECK -->|No| DIRECT["Direct to declared endpoint"]
+    PKG_PROXY --> REG["Public Registry"]
+    DIRECT --> REG
+
+    ALLOWALL --> LOG["Full traffic log"]
+    BLOCK --> AUDIT["Audit log - flagged"]
+```
+
+**Layer responsibilities:**
+
+| Layer | Set by | Scope | Examples |
+|---|---|---|---|
+| **Workflow manifest** | Workflow author (signed) | Per workflow artifact | Minimum required endpoints, `no-cache` repo flags, `package-proxy` preference |
+| **Run configuration** | Trigger, user, or AI at dispatch | Per run | Additional allowed endpoints for this invocation, `allow-all` for a sandbox run |
+| **Platform policy** | Administrator | Global or per-tenant | Maximum permitted mode (e.g. deny `allow-all` entirely), mandatory endpoint blocklists |
+
+The effective policy is `merge(manifest_baseline, run_config)` clamped by `platform_policy`. It is computed at dispatch and written to the run audit log — not stored in the signed artifact.
+
+**Manifest declaration (baseline, signed with the workflow):**
+```yaml
+network:
+  allow:
+    - endpoint: api.nuget.org
+      purpose: NuGet package restore
+    - endpoint: registry.npmjs.org
+      purpose: npm install
+  package-proxy: true
+```
+
+**Run configuration (per-run, set at trigger time, not signed):**
+```yaml
+network:
+  mode: allow-all           # operator opt-in for this run only
+  allow:
+    - endpoint: internal-api.corp.local
+      purpose: integration test target
+```
+
+**allow-all mode:**
+- Requested in the run configuration (per-run) or in platform configuration (global default for a tenant)
+- Not part of the signed workflow artifact — the same binary can run in `default-deny` in production and `allow-all` in a sandbox without re-signing
+- All traffic is still fully logged — the difference from `default-deny` is that nothing is blocked, not that nothing is observed
+- Platform policy is the hard ceiling: administrators can prohibit `allow-all` entirely, regardless of what any run configuration requests
+- The effective mode and the identity that requested it are always recorded in the run audit log
+
+---
+
+## 11. Multi-Account Model
 
 A user or service principal holds multiple **Account Bundles**, each scoped to a purpose.
 
@@ -271,7 +558,7 @@ graph LR
 
 ---
 
-## 9. Deployment Modes
+## 12. Deployment Modes
 
 All modes share the same codebase. Runtime behaviour is driven entirely by configuration and pluggable interface implementations.
 
@@ -286,32 +573,48 @@ The core platform has no hard dependency on RabbitMQ, Docker, Vault, or AAD.
 
 ---
 
-## 10. Open Questions and Concerns
+## 13. Open Questions and Concerns
 
-All previously raised architectural questions have been resolved and incorporated above.
-The following minor points remain open for the detailed design phase:
+### Resolved from use case analysis (USE-CASES.md)
+
+| # | Decision |
+|---|---|
+| 1 | WorkflowContext carries: originating work item, named artifact inputs from prior runs, scoped credentials, and optional multi-repo references |
+| 2 | ITaskSourceAdapter extended with GetWorkItemDetail (full graph), CreateWorkItem, CreateSubTask, and AttachArtifact |
+| 3 | ISourceControlAdapter extended with ListDirectory, GetFileContent, DetectFrameworks for lightweight introspection |
+| 4 | Resource Proxy supports both synchronous and async long-running call patterns (trigger + poll/callback) |
+| 5 | WorkflowContext supports single or multi-repository references declared in the workflow manifest |
+| 6 | Workspace Manager added: warm cache per repo, CoW snapshots per run, mount namespace isolation, multi-source repo support, no-cache flag, output collection via Resource Proxy |
+| 7 | Network Egress Layer added: layered policy resolution (manifest baseline + run config + platform ceiling), default-deny, allow-all opt-in, build tool transparency, full audit |
+| 8 | Package Proxy added: optional platform mirror for package registries, caching, security scanning, air-gap support |
+
+### Still open
 
 | # | Question | Impact |
 |---|---|---|
-| 1 | **Resource Proxy transport** - Should resource request/response go through the main message bus or a dedicated side-channel? Main bus is simpler; side-channel allows lower latency for high-frequency database calls. | Performance, architecture |
-| 2 | **Workflow artifact storage backend** - Where are produced artifacts stored? Options: blob storage (Azure Blob, S3-compatible, local filesystem), linked back to work item on completion. Should be configurable per deployment mode. | Workflow contract |
-| 3 | **Pre-flight retry policy granularity** - Is retry-on-availability configured globally, per workflow, or per work item source? | UX, reliability |
-| 4 | **TFVC scope** - Full branch/merge support confirmed as needed. Clarify whether TFS on-prem server versions down to TFS 2015/2017 are in scope or only TFS 2019+ / Azure DevOps Server. | Adapter implementation effort |
+| 6 | **Artifact storage backend** - Where are workflow artifacts physically stored? Blob storage (Azure Blob, S3-compatible, local filesystem), configurable per deployment mode. | Workflow contract, ops |
+| 7 | **Pre-flight retry granularity** - Is retry-on-availability configured globally, per workflow type, or per work item? | UX, reliability |
+| 8 | **TFVC version scope** - TFS 2015/2017 in scope or only TFS 2019+ / Azure DevOps Server? | Adapter effort |
+| 9 | **Work Item Index (deferred)** - Optional similarity search service for refinement quality. Not required for v1. | Future use case quality |
 
-| 5 | **State Management in Backend Services** - Backend Services will have different state, even if there's no in memory state or local JSON files, the fact that different backend services have different repos checked out makes them stateful. This must be managed and load must be balanced accordingly, up and downscaling must also happen accordingly | State Management, Backend Scalability |
+### Intentional design decisions
+
+| # | Decision |
+|---|---|
+| 10 | **Network policy is layered, not signing-time** — the manifest declares a baseline (minimum required endpoints); run configuration can extend it (e.g. `allow-all` for a sandbox run); platform policy is the hard ceiling (can prohibit `allow-all` entirely). Effective policy is resolved at dispatch and recorded in the run audit log — the signed artifact is unchanged |
+| 11 | **AI has full parity with the human UI** - MCP tools are generated from the same API layer, not maintained separately |
+| 12 | **Signing is mandatory with no bypass in non-dev modes** - dev mode can disable signing entirely |
+| 13 | IMessageBus, IWorkflowRunner, ISigningProvider, IIdentityProvider, and IResourceProxy are all pluggable - no hard dependency on any specific technology |
+
 ---
 
-
-
-*Document maintained in ARCHITECTURE.md - update alongside major design decisions.*
-
-## 11. Scaling
+## 14. Scaling
 
 The frontend and the steering layer have different scaling characteristics and are solved independently.
 
 ---
 
-### 11.1 Blazor Server Scaling
+### 14.1 Blazor Server Scaling
 
 Blazor Server holds a live SignalR circuit per browser client, tied to a specific server instance. Two mechanisms work together to scale out:
 
@@ -349,7 +652,7 @@ graph LR
 
 ---
 
-### 11.2 Steering Instance Scaling
+### 14.2 Steering Instance Scaling
 
 Steering instances scale via **competing consumers** on the RabbitMQ command queue - adding instances increases dispatch throughput automatically.
 
@@ -394,7 +697,7 @@ graph TB
 
 ---
 
-### 11.3 Full Scaled Event Flow
+### 14.3 Full Scaled Event Flow
 
 End-to-end path of a workflow status update from container to browser when fully scaled out:
 
@@ -421,7 +724,7 @@ sequenceDiagram
 
 ---
 
-### 11.4 Infrastructure Summary per Mode
+### 14.4 Infrastructure Summary per Mode
 
 | Component | Local / Dev | On-premise | Cloud (Azure) |
 |---|---|---|---|
@@ -435,6 +738,4 @@ Redis serves a dual purpose in non-dev modes: **SignalR backplane** and **steeri
 
 ---
 
-*Next step: Use Case document (USE-CASES.md)*
-
-*Document maintained in ARCHITECTURE.md - update alongside major design decisions.*
+*Document maintained in ARCHITECTURE.md — update alongside major design decisions. See also USE-CASES.md.*
