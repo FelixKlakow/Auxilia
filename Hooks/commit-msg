@@ -4,16 +4,27 @@
 
 COMMIT_MSG_FILE="$1"
 
+# ── Auto-fix git-generated merge commit messages ──────────────────────────────
+# Git creates messages like "Merge branch 'x' into y" or "Merge pull request …"
+# Rewrite the first line to "merge: <rest>" so it passes Conventional Commits.
+SUBJECT=$(head -1 "$COMMIT_MSG_FILE")
+if printf '%s' "$SUBJECT" | grep -qE "^Merge "; then
+    REST=$(printf '%s' "$SUBJECT" | sed 's/^Merge //')
+    awk -v rest="$REST" 'NR==1 { print "merge: " rest; next } { print }' \
+        "$COMMIT_MSG_FILE" > "${COMMIT_MSG_FILE}.tmp" \
+        && mv "${COMMIT_MSG_FILE}.tmp" "$COMMIT_MSG_FILE"
+fi
+
 # ── Validate Conventional Commits format ──────────────────────────────────────
 SUBJECT=$(head -1 "$COMMIT_MSG_FILE")
-ALLOWED_TYPES="feat|fix|refactor|plan|docs|style|merge|revert"
+ALLOWED_TYPES="feat|fix|chore|refactor|plan|docs|style|merge|revert"
 
 if ! printf '%s' "$SUBJECT" | grep -qE "^($ALLOWED_TYPES)(\([^)]+\))?(!)?: .+"; then
     printf '\n'
     printf '❌  Commit message rejected: does not follow Conventional Commits.\n'
     printf '\n'
     printf '    Format : <type>(optional scope): <description>\n'
-    printf '    Allowed types: feat, fix, refactor, plan, docs, style, merge, revert\n'
+    printf '    Allowed types: feat, fix, chore, refactor, plan, docs, style, merge, revert\n'
     printf '\n'
     printf '    Examples:\n'
     printf '      feat: add queue initializer\n'
