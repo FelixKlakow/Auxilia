@@ -1,6 +1,19 @@
 <Solution>
-  <Folder Name="/Docs/">
-    <File Path="ARCHITECTURE.md" />
-    <File Path="USE-CASES.md" />
+  <Folder Name="/Hooks/">
+    <File Path="Hooks\commit-msg" />
+    <File Path="Hooks\pre-commit" />
+    <File Path="Hooks\RegisterHooks.ps1" />
   </Folder>
+  <Folder Name="/Overview/">
+    <File Path="ARCHITECTURE.md" />
+    <File Path="README.md" />
+    <File Path="CommitConventions.md" />
+    <File Path="TestStrategy.md" />
+  </Folder>
+  <Project Path="Auxilia.BackendService.Tests\Auxilia.BackendService.Tests.csproj" Type="Classic C#" />
+  <Project Path="Auxilia.SteeringInstance.Tests\Auxilia.SteeringInstance.Tests.csproj" Type="Classic C#" />
+  <Project Path="Auxilia.SystemTestSuite\Auxilia.SystemTestSuite.csproj" Type="Classic C#" />
+  <Project Path="Source\Auxilia.BackendService\Auxilia.BackendService.csproj" />
+  <Project Path="Source\Auxilia.Messaging\Auxilia.Messaging.csproj" Type="Classic C#" />
+  <Project Path="Source\Auxilia.SteeringInstance\Auxilia.SteeringInstance.csproj" Type="Classic C#" />
 </Solution>

@@ -1,0 +1,62 @@
+#!/bin/sh
+# commit-msg hook
+# Enforces Conventional Commits and auto-appends "Refs: #<id>" when on a feature/bugfix branch.
+
+COMMIT_MSG_FILE="$1"
+
+# ── Validate Conventional Commits format ──────────────────────────────────────
+SUBJECT=$(head -1 "$COMMIT_MSG_FILE")
+ALLOWED_TYPES="feat|fix|refactor|plan|docs|style|merge|revert"
+
+if ! printf '%s' "$SUBJECT" | grep -qE "^($ALLOWED_TYPES)(\([^)]+\))?(!)?: .+"; then
+    printf '\n'
+    printf '❌  Commit message rejected: does not follow Conventional Commits.\n'
+    printf '\n'
+    printf '    Format : <type>(optional scope): <description>\n'
+    printf '    Allowed types: feat, fix, refactor, plan, docs, style, merge, revert\n'
+    printf '\n'
+    printf '    Examples:\n'
+    printf '      feat: add queue initializer\n'
+    printf '      fix(messaging): handle null body in consumer\n'
+    printf '      refactor!: rename ServiceInfo properties\n'
+    printf '\n'
+    exit 1
+fi
+
+# ── Auto-append Refs: #<id> when branch name contains a ticket number ─────────
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+
+# Match 4+ digit ticket number surrounded by / or at start/end of branch name
+TICKET_ID=$(printf '%s' "$BRANCH" | grep -oE '(^|/)[0-9]{4,}(/|$)' | grep -oE '[0-9]{4,}' | head -1)
+
+if [ -n "$TICKET_ID" ]; then
+    REFS_LINE="Refs: #$TICKET_ID"
+
+    if ! grep -qF "$REFS_LINE" "$COMMIT_MSG_FILE"; then
+        # Rewrite the file: subject + optional body + refs line.
+        # awk collects all lines, strips trailing blank lines, then appends refs.
+        awk -v refs="$REFS_LINE" '
+        { lines[NR] = $0 }
+        END {
+            last = NR
+            while (last > 0 && lines[last] ~ /^[[:space:]]*$/) last--
+
+            subject = lines[1]
+
+            body = ""
+            for (i = 2; i <= last; i++) {
+                if (body != "") body = body "\n"
+                body = body lines[i]
+            }
+
+            if (body != "") {
+                printf "%s\n\n%s\n\n%s\n", subject, body, refs
+            } else {
+                printf "%s\n\n%s\n", subject, refs
+            }
+        }
+        ' "$COMMIT_MSG_FILE" > "${COMMIT_MSG_FILE}.tmp" && mv "${COMMIT_MSG_FILE}.tmp" "$COMMIT_MSG_FILE"
+    fi
+fi
+
+exit 0
