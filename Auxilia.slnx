@@ -2,6 +2,20 @@
   <Folder Name="/.github/">
     <File Path=".github/copilot-instructions.md" />
   </Folder>
+  <Folder Name="/01_CommonDomain/">
+    <Project Path="Auxilia.UniversalDataAccess.Tests\Auxilia.UniversalDataAccess.Tests.csproj" Type="Classic C#" />
+    <Project Path="Auxilia.UniversalDataAccess\Auxilia.UniversalDataAccess.csproj" Type="Classic C#" />
+    <Project Path="Source\Auxilia.Messaging\Auxilia.Messaging.csproj" Type="Classic C#" />
+  </Folder>
+  <Folder Name="/02_FrontendDomain/" />
+  <Folder Name="/03_SteeringDomain/">
+    <Project Path="Auxilia.SteeringInstance.Tests\Auxilia.SteeringInstance.Tests.csproj" Type="Classic C#" />
+    <Project Path="Source\Auxilia.SteeringInstance\Auxilia.SteeringInstance.csproj" Type="Classic C#" />
+  </Folder>
+  <Folder Name="/04_BackendDomain/">
+    <Project Path="Auxilia.BackendService.Tests\Auxilia.BackendService.Tests.csproj" Type="Classic C#" />
+    <Project Path="Source\Auxilia.BackendService\Auxilia.BackendService.csproj" />
+  </Folder>
   <Folder Name="/Hooks/">
     <File Path="Hooks\commit-msg" />
     <File Path="Hooks\pre-commit" />
@@ -15,8 +29,8 @@
   </Folder>
   <Project Path="Auxilia.BackendService.Tests\Auxilia.BackendService.Tests.csproj" />
   <Project Path="Auxilia.SteeringInstance.Tests\Auxilia.SteeringInstance.Tests.csproj" />
-  <Project Path="Auxilia.SystemTestSuite\Auxilia.SystemTestSuite.csproj" />
   <Project Path="Source\Auxilia.BackendService\Auxilia.BackendService.csproj" />
   <Project Path="Source\Auxilia.Messaging\Auxilia.Messaging.csproj" />
   <Project Path="Source\Auxilia.SteeringInstance\Auxilia.SteeringInstance.csproj" />
+  <Project Path="Auxilia.SystemTestSuite\Auxilia.SystemTestSuite.csproj" Type="Classic C#" />
 </Solution>
