@@ -25,6 +25,9 @@ dotnet test Auxilia.slnx
 _## Messaging
 Use `IMessageBusClient` (abstraction in `Auxilia.Messaging`) for all RabbitMQ interactions so tests can inject `FakeMessageBusClient`._
 
+## Diagrams
+Always use **Mermaid** for diagrams in markdown documents.
+
 ## Commit convention
 `<type>: <description>` – allowed types: `feat fix refactor plan docs style merge revert`.
 
