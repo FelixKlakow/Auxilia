@@ -27,10 +27,5 @@
     <File Path="CommitConventions.md" />
     <File Path="TestStrategy.md" />
   </Folder>
-  <Project Path="Auxilia.BackendService.Tests\Auxilia.BackendService.Tests.csproj" />
-  <Project Path="Auxilia.SteeringInstance.Tests\Auxilia.SteeringInstance.Tests.csproj" />
-  <Project Path="Source\Auxilia.BackendService\Auxilia.BackendService.csproj" />
-  <Project Path="Source\Auxilia.Messaging\Auxilia.Messaging.csproj" />
-  <Project Path="Source\Auxilia.SteeringInstance\Auxilia.SteeringInstance.csproj" />
   <Project Path="Auxilia.SystemTestSuite\Auxilia.SystemTestSuite.csproj" Type="Classic C#" />
 </Solution>
