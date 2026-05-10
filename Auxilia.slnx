@@ -13,6 +13,8 @@
     <Project Path="Source\Auxilia.SteeringInstance\Auxilia.SteeringInstance.csproj" Type="Classic C#" />
   </Folder>
   <Folder Name="/04_BackendDomain/">
+    <Project Path="Auxilia.Ai.Tests\Auxilia.Ai.Tests.csproj" Type="Classic C#" />
+    <Project Path="Auxilia.AI\Auxilia.AI.csproj" Type="Classic C#" />
     <Project Path="Auxilia.BackendService.Tests\Auxilia.BackendService.Tests.csproj" Type="Classic C#" />
     <Project Path="Source\Auxilia.BackendService\Auxilia.BackendService.csproj" />
   </Folder>
@@ -27,10 +29,5 @@
     <File Path="CommitConventions.md" />
     <File Path="TestStrategy.md" />
   </Folder>
-  <Project Path="Auxilia.BackendService.Tests\Auxilia.BackendService.Tests.csproj" />
-  <Project Path="Auxilia.SteeringInstance.Tests\Auxilia.SteeringInstance.Tests.csproj" />
-  <Project Path="Source\Auxilia.BackendService\Auxilia.BackendService.csproj" />
-  <Project Path="Source\Auxilia.Messaging\Auxilia.Messaging.csproj" />
-  <Project Path="Source\Auxilia.SteeringInstance\Auxilia.SteeringInstance.csproj" />
   <Project Path="Auxilia.SystemTestSuite\Auxilia.SystemTestSuite.csproj" Type="Classic C#" />
 </Solution>
