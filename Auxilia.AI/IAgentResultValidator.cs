@@ -1,6 +1,6 @@
 namespace Auxilia.AI;
 
-public class IAgentResultValidator
+public interface IAgentResultValidator<TValidatorResult>
 {
-    
+    Task<TValidatorResult> ValidateAsync(IAgentRequest originalRequest, string agentTextOutput);
 }
