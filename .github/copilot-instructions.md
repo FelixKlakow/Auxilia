@@ -28,6 +28,15 @@ Use `IMessageBusClient` (abstraction in `Auxilia.Messaging`) for all RabbitMQ in
 ## Diagrams
 Always use **Mermaid** for diagrams in markdown documents.
 
+## Rule 0: Always Load Project Instructions FIRST
+
+Each project directory contains an entry-point file named `<ProjectName>.project-instructions.md` (matching the assembly/folder name) co-located with its `.csproj`. These files are the **single entry point** when working on a project. Their purpose is to **reduce tool calls and prevent wrong-entrance mistakes** by giving an at-a-glance view of:
+
+- The project's role and responsibility in the solution.
+- Allowed/forbidden dependencies and layer boundaries.
+- Project-scoped hard rules and architectural constraints.
+- A **file/folder map** that points to where things live (folder → purpose), so Copilot can jump straight to the right file instead of searching.
+
 ## Commit convention
 `<type>: <description>` – allowed types: `feat fix refactor plan docs style merge revert`.
 
