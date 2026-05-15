@@ -13,7 +13,9 @@
     <Project Path="Source\Auxilia.SteeringInstance\Auxilia.SteeringInstance.csproj" />
   </Folder>
   <Folder Name="/04_BackendDomain/">
-    <Project Path="Auxilia.BackendService.Tests\Auxilia.BackendService.Tests.csproj" />
+    <Project Path="Auxilia.Ai.Tests\Auxilia.Ai.Tests.csproj" Type="Classic C#" />
+    <Project Path="Auxilia.AI\Auxilia.AI.csproj" Type="Classic C#" />
+    <Project Path="Auxilia.BackendService.Tests\Auxilia.BackendService.Tests.csproj" Type="Classic C#" />
     <Project Path="Source\Auxilia.BackendService\Auxilia.BackendService.csproj" />
   </Folder>
   <Folder Name="/Hooks/">
