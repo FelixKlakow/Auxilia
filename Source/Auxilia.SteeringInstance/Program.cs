@@ -1,5 +1,7 @@
 ﻿using System.Reflection;
 using Auxilia.Messaging;
+using Auxilia.SteeringInstance.Workflows;
+using Auxilia.SteeringInstance.Workflows.Storage;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -47,6 +49,17 @@ try
             builder.Configuration["RabbitMq:Password"] ?? "guest"
         ).GetAwaiter().GetResult());
 
+    // --- Runner profile ---
+    builder.Services.Configure<RunnerProfile>(builder.Configuration.GetSection("RunnerProfile"));
+
+    // --- Workflow services ---
+    builder.Services.AddSingleton<WorkflowSchemaStore>();
+    builder.Services.AddSingleton<SlotConfigurationStore>();
+    builder.Services.AddSingleton<DirtyConfigurationDetector>();
+    builder.Services.AddSingleton<EnvironmentValidator>();
+    builder.Services.AddSingleton<ConfigurationResolver>();
+    builder.Services.AddSingleton<WorkflowRegistrationHandler>();
+
     // --- OpenTelemetry (tracing + metrics) ---
     var otlpEndpoint = builder.Configuration["Otlp:Endpoint"];
     var serviceVersion = Assembly.GetExecutingAssembly()
@@ -86,6 +99,9 @@ try
         });
 
     var app = builder.Build();
+
+    var handler = app.Services.GetRequiredService<WorkflowRegistrationHandler>();
+    await handler.StartAsync(app.Lifetime.ApplicationStopping);
 
     app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
     app.MapPrometheusScrapingEndpoint(); // GET /metrics
