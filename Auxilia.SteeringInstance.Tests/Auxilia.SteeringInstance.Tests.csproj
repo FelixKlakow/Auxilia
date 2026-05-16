@@ -20,4 +20,8 @@
         <Using Include="NUnit.Framework"/>
     </ItemGroup>
 
+    <ItemGroup>
+        <ProjectReference Include="..\Source\Auxilia.SteeringInstance\Auxilia.SteeringInstance.csproj" />
+    </ItemGroup>
+
 </Project>
