@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Auxilia.Workflows.Tests" />
+    <InternalsVisibleTo Include="Auxilia.Workflows.SlotPackages.Tests" />
   </ItemGroup>
 
 </Project>
