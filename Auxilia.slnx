@@ -31,5 +31,9 @@
     <File Path="TestStrategy.md" />
     <File Path="USE-CASES.md" />
   </Folder>
+  <Folder Name="/05_WorkflowsDomain/">
+    <Project Path="Auxilia.Workflows\Auxilia.Workflows.csproj" />
+    <Project Path="Auxilia.Workflows.Tests\Auxilia.Workflows.Tests.csproj" />
+  </Folder>
   <Project Path="Auxilia.SystemTestSuite\Auxilia.SystemTestSuite.csproj" />
 </Solution>

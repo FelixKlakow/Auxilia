@@ -1,0 +1,79 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using Auxilia.Workflows.Crypto;
+using Auxilia.Workflows.Messaging.Messages;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Auxilia.Workflows.Tests;
+
+[TestFixture]
+public class WorkflowBootstrapperTests
+{
+    private static EncryptedSlotConfiguration EncryptSlot(string providerType, Dictionary<string, string> settings, string publicKeyBase64)
+    {
+        var dto = new { ProviderType = providerType, Settings = settings };
+        var json = JsonSerializer.Serialize(dto);
+
+        var publicKeyBytes = Convert.FromBase64String(publicKeyBase64);
+        using var rsa = RSA.Create();
+        rsa.ImportSubjectPublicKeyInfo(publicKeyBytes, out _);
+
+        var ciphertext = Convert.ToBase64String(
+            rsa.Encrypt(Encoding.UTF8.GetBytes(json), RSAEncryptionPadding.OaepSHA256));
+
+        return new EncryptedSlotConfiguration(providerType, ciphertext);
+    }
+
+    [Test]
+    public void Apply_CallsRegisterOncePerSlot_WithCorrectConfiguration()
+    {
+        var providerType = $"bt-provider-{Guid.NewGuid()}";
+        using var keyPair = new EphemeralKeyPair();
+
+        var slot1 = EncryptSlot(providerType, new Dictionary<string, string> { ["a"] = "1" }, keyPair.PublicKeyBase64);
+        var slot2 = EncryptSlot(providerType, new Dictionary<string, string> { ["b"] = "2" }, keyPair.PublicKeyBase64);
+
+        var slots = new Dictionary<string, EncryptedSlotConfiguration>
+        {
+            ["slot1"] = slot1,
+            ["slot2"] = slot2
+        };
+        var response = new WorkflowConfigurationResponse(Guid.NewGuid(), true, null, slots);
+
+        var spy = new SpySlotHandler();
+        SlotHandlerRegistry.Register(providerType, spy);
+
+        var services = new ServiceCollection();
+        var bootstrapper = new WorkflowBootstrapper(response, keyPair);
+        bootstrapper.Apply(services);
+
+        Assert.That(spy.Calls, Has.Count.EqualTo(2));
+        Assert.That(spy.Calls.All(c => c.ProviderType == providerType), Is.True);
+        Assert.That(spy.Calls.Any(c => c.Settings.ContainsKey("a") && c.Settings["a"] == "1"), Is.True);
+        Assert.That(spy.Calls.Any(c => c.Settings.ContainsKey("b") && c.Settings["b"] == "2"), Is.True);
+    }
+
+    [Test]
+    public void Apply_WithUnknownProviderType_ThrowsKeyNotFoundException()
+    {
+        var unknownType = $"unknown-{Guid.NewGuid()}";
+        using var keyPair = new EphemeralKeyPair();
+
+        var slot = EncryptSlot(unknownType, new Dictionary<string, string>(), keyPair.PublicKeyBase64);
+        var slots = new Dictionary<string, EncryptedSlotConfiguration> { ["s1"] = slot };
+        var response = new WorkflowConfigurationResponse(Guid.NewGuid(), true, null, slots);
+
+        var bootstrapper = new WorkflowBootstrapper(response, keyPair);
+
+        Assert.Throws<KeyNotFoundException>(() => bootstrapper.Apply(new ServiceCollection()));
+    }
+
+    private sealed class SpySlotHandler : ISlotHandler
+    {
+        public List<SlotConfiguration> Calls { get; } = new();
+
+        public void Register(IServiceCollection services, SlotConfiguration configuration)
+            => Calls.Add(configuration);
+    }
+}
