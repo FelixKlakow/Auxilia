@@ -8,19 +8,19 @@ internal sealed class EnvironmentBuilder : IEnvironmentBuilder
 
     internal IReadOnlyList<IEnvironmentRequirement> Requirements => _requirements.AsReadOnly();
 
-    public IEnvironmentBuilder RequireTool(Tool tool)
+    public IEnvironmentBuilder RequiresTool(string toolName, string? minVersion = null)
     {
-        _requirements.Add(new ToolRequirement(tool));
+        _requirements.Add(new ToolRequirement(toolName, minVersion));
         return this;
     }
 
-    public IEnvironmentBuilder RequireOs(OsConstraint os)
+    public IEnvironmentBuilder RequiresOs(OsConstraint os)
     {
         _requirements.Add(new OsRequirement(os));
         return this;
     }
 
-    public IEnvironmentBuilder RequirePort(int port)
+    public IEnvironmentBuilder RequiresPort(int port)
     {
         _requirements.Add(new PortRequirement(port));
         return this;
