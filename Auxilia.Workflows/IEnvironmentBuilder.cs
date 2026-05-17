@@ -4,7 +4,7 @@ namespace Auxilia.Workflows;
 
 public interface IEnvironmentBuilder
 {
-    IEnvironmentBuilder RequireTool(Tool tool);
-    IEnvironmentBuilder RequireOs(OsConstraint os);
-    IEnvironmentBuilder RequirePort(int port);
+    IEnvironmentBuilder RequiresTool(string toolName, string? minVersion = null);
+    IEnvironmentBuilder RequiresOs(OsConstraint os);
+    IEnvironmentBuilder RequiresPort(int port);
 }

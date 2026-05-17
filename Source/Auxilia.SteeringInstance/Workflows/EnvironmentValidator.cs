@@ -19,8 +19,8 @@ public sealed class EnvironmentValidator(
             switch (requirement)
             {
                 case ToolRequirement toolReq:
-                    if (!profile.AvailableTools.Contains(toolReq.Tool))
-                        unsatisfied.Add($"Tool '{toolReq.Tool}' is not available on this runner.");
+                    if (!profile.AvailableTools.Contains(toolReq.ToolName))
+                        unsatisfied.Add($"Tool '{toolReq.ToolName}' is not available on this runner.");
                     break;
 
                 case OsRequirement osReq:
