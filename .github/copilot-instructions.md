@@ -30,12 +30,16 @@ Always use **Mermaid** for diagrams in markdown documents.
 
 ## Rule 0: Always Load Project Instructions FIRST
 
-Each project directory contains an entry-point file named `<ProjectName>.project-instructions.md` (matching the assembly/folder name) co-located with its `.csproj`. These files are the **single entry point** when working on a project. Their purpose is to **reduce tool calls and prevent wrong-entrance mistakes** by giving an at-a-glance view of:
+Each project directory contains `<ProjectName>.project-instructions.md` co-located with its `.csproj`.  
+**Read it before touching any file in that project.**
 
-- The project's role and responsibility in the solution.
-- Allowed/forbidden dependencies and layer boundaries.
-- Project-scoped hard rules and architectural constraints.
-- A **file/folder map** that points to where things live (folder → purpose), so Copilot can jump straight to the right file instead of searching.
+Each file contains:
+- **Purpose** – what the project is for (a few lines max).
+- **Architecture** – key decisions and patterns that are not obvious from reading file names. Mermaid diagrams where they help.
+- **File/folder map** – folder → what lives there. Descriptions of intent, no implementation detail.
+- **Special rules** *(optional)* – only non-obvious invariants specific to this project.
+
+Do **not** include: configuration samples, test category rules, dependency tables, or anything already covered here.
 
 ## Commit convention
 `<type>: <description>` – allowed types: `feat fix refactor plan docs style merge revert`.
