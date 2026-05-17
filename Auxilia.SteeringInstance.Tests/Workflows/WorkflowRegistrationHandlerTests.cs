@@ -20,7 +20,7 @@ public class WorkflowRegistrationHandlerTests
     {
         var profile = new RunnerProfile
         {
-            AvailableTools = new HashSet<Tool>(),
+            AvailableTools = new HashSet<string>(),
             OpenPorts = new HashSet<int>()
         };
         var validator = envValidator ?? new EnvironmentValidator(
@@ -48,10 +48,10 @@ public class WorkflowRegistrationHandlerTests
     [Test]
     public async Task HandleAsync_EnvValidationFails_PublishesFailureResponse()
     {
-        // Manifest requires Git, but empty profile doesn't have it
+        // Manifest requires git, but empty profile doesn't have it
         var manifest = new WorkflowManifest(
             "TestWorkflow", Guid.NewGuid().ToString(), [],
-            [new ToolRequirement(Tool.Git)]);
+            [new ToolRequirement("git")]);
         var request = new WorkflowRegistrationRequest(
             Guid.NewGuid(), manifest, ValidPublicKey(), "reply-topic");
 

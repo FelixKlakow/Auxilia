@@ -1,5 +1,3 @@
-using System.Text;
-using System.Text.Json;
 using Auxilia.Workflows.Capabilities;
 using Auxilia.Workflows.Environment;
 
@@ -28,17 +26,15 @@ public class WorkflowBuilderTests
     }
 
     [Test]
-    public async Task Requires_TwoCalls_ProducesTwoSlots_InSchemaOutput()
+    public void Requires_TwoCalls_ProducesTwoSlots_InSchema()
     {
-        var writer = new StringWriter();
         var builder = WorkflowBuilder.Create("test");
         builder.Requires("slot-a", new NoCapabilities()).Requires("slot-b", new NoCapabilities());
         var wb = (WorkflowBuilder)builder;
 
-        await wb.RunAsync(["schema"], writer, _ => { });
+        var schema = wb.BuildSchema();
 
-        var schema = JsonSerializer.Deserialize<WorkflowSchema>(writer.ToString());
-        Assert.That(schema!.Slots, Has.Count.EqualTo(2));
+        Assert.That(schema.Slots, Has.Count.EqualTo(2));
     }
 
     [Test]
@@ -50,98 +46,81 @@ public class WorkflowBuilderTests
     }
 
     [Test]
-    public async Task RequiresEnvironment_RequiresTool_AppendsToolRequirement()
+    public void RequiresEnvironment_RequiresTool_AppendsToolRequirement()
     {
-        var writer = new StringWriter();
         var builder = WorkflowBuilder.Create("test");
-        builder.RequiresEnvironment(e => e.RequireTool(Tool.Git));
+        builder.RequiresEnvironment(e => e.RequiresTool("git"));
         var wb = (WorkflowBuilder)builder;
 
-        await wb.RunAsync(["schema"], writer, _ => { });
+        var schema = wb.BuildSchema();
 
-        var json = writer.ToString();
-        Assert.That(json, Does.Contain("Git").Or.Contain("git"));
+        Assert.That(schema.EnvironmentRequirements,
+            Has.Some.InstanceOf<ToolRequirement>()
+               .With.Property(nameof(ToolRequirement.ToolName)).EqualTo("git"));
     }
 
     [Test]
-    public async Task RequiresEnvironment_RequiresOs_AppendsOsRequirement()
+    public void RequiresEnvironment_RequiresOs_AppendsOsRequirement()
     {
-        var writer = new StringWriter();
         var builder = WorkflowBuilder.Create("test");
-        builder.RequiresEnvironment(e => e.RequireOs(OsConstraint.Linux));
+        builder.RequiresEnvironment(e => e.RequiresOs(OsConstraint.Linux));
         var wb = (WorkflowBuilder)builder;
 
-        await wb.RunAsync(["schema"], writer, _ => { });
+        var schema = wb.BuildSchema();
 
-        var json = writer.ToString();
-        Assert.That(json, Does.Contain("Linux").Or.Contain("linux"));
+        Assert.That(schema.EnvironmentRequirements,
+            Has.Some.InstanceOf<OsRequirement>()
+               .With.Property(nameof(OsRequirement.Os)).EqualTo(OsConstraint.Linux));
     }
 
     [Test]
-    public async Task RequiresEnvironment_RequiresPort_AppendsPortRequirement()
+    public void RequiresEnvironment_RequiresPort_AppendsPortRequirement()
     {
-        var writer = new StringWriter();
         var builder = WorkflowBuilder.Create("test");
-        builder.RequiresEnvironment(e => e.RequirePort(8080));
+        builder.RequiresEnvironment(e => e.RequiresPort(8080));
         var wb = (WorkflowBuilder)builder;
 
-        await wb.RunAsync(["schema"], writer, _ => { });
+        var schema = wb.BuildSchema();
 
-        var json = writer.ToString();
-        Assert.That(json, Does.Contain("8080"));
+        Assert.That(schema.EnvironmentRequirements,
+            Has.Some.InstanceOf<PortRequirement>()
+               .With.Property(nameof(PortRequirement.Port)).EqualTo(8080));
     }
 
     [Test]
-    public async Task RunAsync_SchemaMode_WritesValidJson_WithSchemaVersion1_0()
+    public void BuildSchema_ReturnsSchema_WithSchemaVersion1_0()
     {
-        var writer = new StringWriter();
         var wb = (WorkflowBuilder)WorkflowBuilder.Create("smoke");
 
-        await wb.RunAsync(["schema"], writer, _ => { });
+        var schema = wb.BuildSchema();
 
-        var schema = JsonSerializer.Deserialize<WorkflowSchema>(writer.ToString());
         Assert.That(schema, Is.Not.Null);
-        Assert.That(schema!.SchemaVersion, Is.EqualTo("1.0"));
+        Assert.That(schema.SchemaVersion, Is.EqualTo("1.0"));
     }
 
     [Test]
-    public async Task RunAsync_SchemaMode_WritesJson_ContainingAllDeclaredSlotNames()
+    public void BuildSchema_ContainsAllDeclaredSlotNames()
     {
-        var writer = new StringWriter();
         var builder = WorkflowBuilder.Create("workflow");
         builder.Requires("alpha", new NoCapabilities()).Requires("beta", new NoCapabilities());
         var wb = (WorkflowBuilder)builder;
 
-        await wb.RunAsync(["schema"], writer, _ => { });
+        var schema = wb.BuildSchema();
 
-        var json = writer.ToString();
-        Assert.That(json, Does.Contain("alpha"));
-        Assert.That(json, Does.Contain("beta"));
+        Assert.That(schema.Slots.Select(s => s.SlotName), Does.Contain("alpha"));
+        Assert.That(schema.Slots.Select(s => s.SlotName), Does.Contain("beta"));
     }
 
     [Test]
-    public async Task RunAsync_SchemaMode_CallsExitAction_WithCode0()
+    public void BuildSchema_TwoCalls_ReturnSchemas_WithSameWorkflowNameAndVersion()
     {
-        var writer = new StringWriter();
-        int capturedCode = -1;
         var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
 
-        await wb.RunAsync(["schema"], writer, code => capturedCode = code);
+        var schema1 = wb.BuildSchema();
+        var schema2 = wb.BuildSchema();
 
-        Assert.That(capturedCode, Is.EqualTo(0));
-    }
-
-    [Test]
-    public async Task RunAsync_EmptyArgs_TreatedAsSchemaMode()
-    {
-        var writer1 = new StringWriter();
-        var writer2 = new StringWriter();
-        var wb1 = (WorkflowBuilder)WorkflowBuilder.Create("test");
-        var wb2 = (WorkflowBuilder)WorkflowBuilder.Create("test");
-
-        await wb1.RunAsync(["schema"], writer1, _ => { });
-        await wb2.RunAsync([], writer2, _ => { });
-
-        Assert.That(writer2.ToString(), Is.EqualTo(writer1.ToString()));
+        Assert.That(schema2.WorkflowName, Is.EqualTo(schema1.WorkflowName));
+        Assert.That(schema2.SchemaVersion, Is.EqualTo(schema1.SchemaVersion));
+        Assert.That(schema2.Slots.Count, Is.EqualTo(schema1.Slots.Count));
     }
 }
