@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Auxilia.Workflows.Tests;
 
 [TestFixture]
+[Category("Unit")]
 public class SlotHandlerRegistryTests
 {
     [Test]

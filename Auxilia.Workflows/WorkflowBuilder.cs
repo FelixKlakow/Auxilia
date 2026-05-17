@@ -1,14 +1,11 @@
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Auxilia.Messaging;
 using Auxilia.Workflows.Capabilities;
+using Auxilia.Workflows.Crypto;
 using Auxilia.Workflows.Environment;
 using Auxilia.Workflows.Internal;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Auxilia.Workflows;
 
@@ -18,6 +15,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     private readonly List<SlotDefinition> _slots = new();
     private readonly List<IEnvironmentRequirement> _environmentRequirements = new();
     private readonly WorkflowMetadata _metadata = new();
+
+    internal TimeSpan _directiveTimeout = TimeSpan.FromSeconds(30);
 
     private WorkflowBuilder(string workflowName)
     {
@@ -53,76 +52,110 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
         return this;
     }
 
-    public Task Run(string[] args)
-        => RunAsync(args, Console.Out, System.Environment.Exit);
-
-    public async Task Run(
-        string[] args,
-        IMessageBusClient messageBus,
-        IServiceCollection services,
-        ILogger? logger = null,
-        IProcessExitService? exitService = null)
+    public async Task Run(string[] args)
     {
-        var log = logger ?? NullLogger.Instance;
-        var exit = exitService ?? new DefaultProcessExitService();
+        await using var context = new DefaultWorkflowRunContext(args);
+        await Run(args, context);
+    }
 
-        var timeoutSeconds = 30;
-        var envTimeout = System.Environment.GetEnvironmentVariable("WORKFLOW_CONFIG_TIMEOUT_SECONDS");
-        if (!string.IsNullOrEmpty(envTimeout) && int.TryParse(envTimeout, out var parsed))
-            timeoutSeconds = parsed;
+    public Task RunAsync(string[] args, IWorkflowRunContext context) => Run(args, context);
 
-        using var keyPair = new Crypto.EphemeralKeyPair();
+    public async Task Run(string[] args, IWorkflowRunContext context)
+    {
+        using var keyPair = new EphemeralKeyPair();
         var instanceId = Guid.NewGuid();
         var responseTopic = $"workflow-response-{instanceId}";
+        const string stateQueueName = "workflow.state";
 
-        await messageBus.DeclareQueueAsync(responseTopic);
+        await context.MessageBus.DeclareQueueAsync(responseTopic);
 
-        var tcs = new TaskCompletionSource<Messaging.Messages.WorkflowConfigurationResponse>();
-        var subscription = await messageBus.SubscribeAsync<Messaging.Messages.WorkflowConfigurationResponse>(
-            responseTopic,
-            (msg, _) => { tcs.TrySetResult(msg); return Task.CompletedTask; });
+        var directiveTcs = new TaskCompletionSource<WorkflowDirective>();
+        var directiveSub = await context.MessageBus.SubscribeAsync<WorkflowDirective>(
+            responseTopic, (msg, _) => { directiveTcs.TrySetResult(msg); return Task.CompletedTask; });
 
-        await messageBus.PublishAsync(
-            "workflow-registration",
-            new WorkflowRegistrationRequest(instanceId, BuildManifest(instanceId), keyPair.PublicKeyBase64, responseTopic));
+        await context.MessageBus.PublishAsync("workflow.announcements",
+            new WorkflowAnnouncementMessage(instanceId, _workflowName, keyPair.PublicKeyBase64, responseTopic));
 
-        var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(timeoutSeconds)));
+        var completed = await Task.WhenAny(directiveTcs.Task, Task.Delay(_directiveTimeout));
+        await directiveSub.DisposeAsync();
 
-        if (completed != tcs.Task || tcs.Task.Result.Success == false)
+        if (completed != directiveTcs.Task)
         {
-            if (completed != tcs.Task)
-                log.LogError("Timed out waiting for workflow configuration response after {Timeout}s.", timeoutSeconds);
-            else
-                log.LogError("Received workflow configuration response with Success=false: {Error}", tcs.Task.Result.ErrorMessage);
-
-            await subscription.DisposeAsync();
-            exit.Exit(1);
+            context.Logger.LogError("Timed out waiting for WorkflowDirective.");
+            context.ExitService.Exit(1);
             return;
         }
 
-        var response = tcs.Task.Result;
-        var bootstrapper = new WorkflowBootstrapper(response, keyPair);
-        bootstrapper.Apply(services);
+        var directive = directiveTcs.Task.Result;
 
-        await subscription.DisposeAsync();
-    }
-
-    internal Task RunAsync(string[] args, TextWriter output, Action<int> exit)
-    {
-        var schema = BuildSchema();
-        var options = new JsonSerializerOptions
+        switch (directive.Directive)
         {
-            WriteIndented = true,
-            Converters = { new JsonStringEnumConverter() }
-        };
-        output.Write(JsonSerializer.Serialize(schema, options));
-        exit(0);
-        return Task.CompletedTask;
+            case WorkflowDirectiveKind.EmitSchema:
+                await context.MessageBus.PublishAsync("workflow.schema",
+                    new WorkflowSchemaMessage(instanceId, BuildSchema()));
+                context.ExitService.Exit(0);
+                return;
+
+            case WorkflowDirectiveKind.Run:
+                var configTcs = new TaskCompletionSource<WorkflowConfigurationResponse>();
+                var configSub = await context.MessageBus.SubscribeAsync<WorkflowConfigurationResponse>(
+                    responseTopic, (msg, _) => { configTcs.TrySetResult(msg); return Task.CompletedTask; });
+
+                await context.MessageBus.PublishAsync("workflow-registration",
+                    new WorkflowRegistrationRequest(instanceId, BuildManifest(instanceId),
+                        keyPair.PublicKeyBase64, responseTopic));
+
+                var configCompleted = await Task.WhenAny(configTcs.Task, Task.Delay(_directiveTimeout));
+                await configSub.DisposeAsync();
+
+                if (configCompleted != configTcs.Task)
+                {
+                    context.Logger.LogError("Timed out waiting for WorkflowConfigurationResponse.");
+                    context.ExitService.Exit(1);
+                    return;
+                }
+
+                var response = configTcs.Task.Result;
+                if (!response.Success)
+                {
+                    context.Logger.LogError("WorkflowConfigurationResponse indicated failure: {Error}", response.ErrorMessage);
+                    context.ExitService.Exit(1);
+                    return;
+                }
+
+                await context.MessageBus.DeclareQueueAsync(stateQueueName);
+
+                try
+                {
+                    var services = new ServiceCollection();
+                    new WorkflowBootstrapper(response, keyPair).Apply(services);
+                    await using (services.BuildServiceProvider())
+                    {
+                    }
+
+                    await context.MessageBus.PublishAsync(stateQueueName,
+                        new WorkflowStateMessage(instanceId, WorkflowState.Success, null));
+                    context.ExitService.Exit(0);
+                }
+                catch (Exception ex)
+                {
+                    context.Logger.LogError(ex, "Workflow run failed: {Message}", ex.Message);
+                    await context.MessageBus.PublishAsync(stateQueueName,
+                        new WorkflowStateMessage(instanceId, WorkflowState.Failed, ex.Message));
+                    context.ExitService.Exit(1);
+                }
+                return;
+
+            default:
+                context.Logger.LogError("Received unrecognised WorkflowDirective: {Directive}", directive.Directive);
+                context.ExitService.Exit(1);
+                return;
+        }
     }
+
+    internal WorkflowSchema BuildSchema()
+        => new(_workflowName, _slots.AsReadOnly(), _environmentRequirements.AsReadOnly());
 
     private WorkflowManifest BuildManifest(Guid instanceId = default)
         => new(_workflowName, instanceId.ToString("D"), _slots.AsReadOnly(), _environmentRequirements.AsReadOnly());
-
-    private WorkflowSchema BuildSchema()
-        => new(_workflowName, _slots.AsReadOnly(), _environmentRequirements.AsReadOnly());
 }

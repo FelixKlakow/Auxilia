@@ -4,6 +4,7 @@ using Auxilia.Workflows.AiAgent;
 namespace Auxilia.Workflows.SlotPackages.Tests.AiAgent;
 
 [TestFixture]
+[Category("Unit")]
 public class AiCapabilitiesTests
 {
     [Test]
