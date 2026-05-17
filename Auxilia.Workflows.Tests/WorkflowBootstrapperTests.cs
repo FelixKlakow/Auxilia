@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Auxilia.Workflows.Tests;
 
 [TestFixture]
+[Category("Unit")]
 public class WorkflowBootstrapperTests
 {
     private static EncryptedSlotConfiguration EncryptSlot(string providerType, Dictionary<string, string> settings, string publicKeyBase64)

@@ -4,6 +4,7 @@ using Auxilia.Workflows.TaskSource;
 namespace Auxilia.Workflows.SlotPackages.Tests.TaskSource;
 
 [TestFixture]
+[Category("Unit")]
 public class TaskSourceCapabilitiesTests
 {
     [Test]

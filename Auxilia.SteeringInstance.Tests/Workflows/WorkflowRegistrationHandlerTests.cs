@@ -65,7 +65,7 @@ public class WorkflowRegistrationHandlerTests
         Assert.That(topic, Is.EqualTo(request.ResponseTopic));
         var response = (WorkflowConfigurationResponse)msg;
         Assert.That(response.Success, Is.False);
-        Assert.That(response.ErrorMessage, Does.Contain("Git"));
+        Assert.That(response.ErrorMessage, Does.Contain("git"));
     }
 
     [Test]

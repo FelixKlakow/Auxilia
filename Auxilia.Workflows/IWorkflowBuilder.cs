@@ -1,7 +1,4 @@
-using Auxilia.Messaging;
 using Auxilia.Workflows.Capabilities;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 
 namespace Auxilia.Workflows;
 
@@ -16,6 +13,7 @@ public interface IWorkflowBuilder
 
     Task Run(string[] args);
 
-    Task Run(string[] args, IMessageBusClient messageBus, IServiceCollection services,
-        ILogger? logger = null, IProcessExitService? exitService = null);
+    Task Run(string[] args, IWorkflowRunContext context);
+
+    Task RunAsync(string[] args, IWorkflowRunContext context);
 }

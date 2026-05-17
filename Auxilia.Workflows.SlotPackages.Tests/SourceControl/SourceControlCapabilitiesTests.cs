@@ -4,6 +4,7 @@ using Auxilia.Workflows.SourceControl;
 namespace Auxilia.Workflows.SlotPackages.Tests.SourceControl;
 
 [TestFixture]
+[Category("Unit")]
 public class SourceControlCapabilitiesTests
 {
     [Test]

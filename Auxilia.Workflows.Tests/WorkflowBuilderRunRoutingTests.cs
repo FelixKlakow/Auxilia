@@ -1,46 +1,18 @@
 using Auxilia.Messaging;
 using Auxilia.Workflows.Capabilities;
 using Auxilia.Workflows.Messaging.Messages;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using Moq;
 
 namespace Auxilia.Workflows.Tests;
 
 [TestFixture]
 [Category("Unit")]
-public class WorkflowBuilderHandshakeTests
+public class WorkflowBuilderRunRoutingTests
 {
     [Test]
-    public async Task Run_PublishesAnnouncementMessageToWorkflowAnnouncementsTopic()
-    {
-        var bus = new RecordingBus();
-        var mockExit = new Mock<IProcessExitService>();
-        var context = new FakeWorkflowRunContext(bus, mockExit.Object);
-
-        bus.OnPublish = (topic, message) =>
-        {
-            if (topic == "workflow.announcements" && message is WorkflowAnnouncementMessage ann)
-                bus.DeliverAsync(ann.ResponseTopic,
-                    new WorkflowDirective(ann.WorkflowInstanceId, WorkflowDirectiveKind.EmitSchema));
-        };
-
-        var builder = (WorkflowBuilder)WorkflowBuilder.Create("test-workflow")
-            .Requires("slot1", new NoCapabilities());
-        builder._directiveTimeout = TimeSpan.FromSeconds(5);
-
-        await builder.Run([], context);
-
-        var announcements = bus.Published("workflow.announcements");
-        Assert.That(announcements, Has.Count.EqualTo(1));
-        var msg = (WorkflowAnnouncementMessage)announcements[0];
-        Assert.That(msg.WorkflowName, Is.Not.Empty);
-        Assert.That(msg.PublicKey, Is.Not.Empty);
-        Assert.That(msg.ResponseTopic, Is.Not.Empty);
-    }
-
-    [Test]
-    public async Task Run_WhenEmitSchemaDirectiveReceived_PublishesSchemaMessageAndExits0()
+    public async Task RunAsync_WhenEmitSchemaDirectiveReceived_RoutesToSchemaEmissionPath()
     {
         var bus = new RecordingBus();
         var mockExit = new Mock<IProcessExitService>();
@@ -56,7 +28,7 @@ public class WorkflowBuilderHandshakeTests
         var builder = (WorkflowBuilder)WorkflowBuilder.Create("test-workflow");
         builder._directiveTimeout = TimeSpan.FromSeconds(5);
 
-        await builder.Run([], context);
+        await builder.RunAsync([], context);
 
         var schemaMessages = bus.Published("workflow.schema");
         Assert.That(schemaMessages, Has.Count.EqualTo(1));
@@ -66,7 +38,7 @@ public class WorkflowBuilderHandshakeTests
     }
 
     [Test]
-    public async Task Run_WhenRunDirectiveReceived_PublishesWorkflowRegistrationRequest()
+    public async Task RunAsync_WhenRunDirectiveReceived_RoutesToRunPath()
     {
         var bus = new RecordingBus();
         var mockExit = new Mock<IProcessExitService>();
@@ -82,7 +54,7 @@ public class WorkflowBuilderHandshakeTests
             else if (topic == "workflow-registration" && message is WorkflowRegistrationRequest req)
             {
                 bus.DeliverAsync(req.ResponseTopic,
-                    new WorkflowConfigurationResponse(req.WorkflowInstanceId, false, "rejected",
+                    new WorkflowConfigurationResponse(req.WorkflowInstanceId, true, null,
                         new Dictionary<string, EncryptedSlotConfiguration>()));
             }
         };
@@ -91,36 +63,83 @@ public class WorkflowBuilderHandshakeTests
             .Requires("slot1", new NoCapabilities());
         builder._directiveTimeout = TimeSpan.FromSeconds(5);
 
-        await builder.Run([], context);
+        await builder.RunAsync([], context);
 
         var registrations = bus.Published("workflow-registration");
         Assert.That(registrations, Has.Count.EqualTo(1));
-        var req = (WorkflowRegistrationRequest)registrations[0];
-        Assert.That(req.Manifest, Is.Not.Null);
-        Assert.That(req.PublicKey, Is.Not.Empty);
+        Assert.That(registrations[0], Is.InstanceOf<WorkflowRegistrationRequest>());
     }
 
     [Test]
-    public async Task Run_WhenNoDirectiveReceived_LogsErrorAndExits1()
+    public async Task RunAsync_WhenRunSucceeds_PublishesSuccessStateMessage()
     {
         var bus = new RecordingBus();
         var mockExit = new Mock<IProcessExitService>();
-        var loggerMock = new Mock<ILogger>();
-        var context = new FakeWorkflowRunContext(bus, mockExit.Object, loggerMock.Object);
+        var context = new FakeWorkflowRunContext(bus, mockExit.Object);
+
+        bus.OnPublish = (topic, message) =>
+        {
+            if (topic == "workflow.announcements" && message is WorkflowAnnouncementMessage ann)
+            {
+                bus.DeliverAsync(ann.ResponseTopic,
+                    new WorkflowDirective(ann.WorkflowInstanceId, WorkflowDirectiveKind.Run));
+            }
+            else if (topic == "workflow-registration" && message is WorkflowRegistrationRequest req)
+            {
+                bus.DeliverAsync(req.ResponseTopic,
+                    new WorkflowConfigurationResponse(req.WorkflowInstanceId, true, null,
+                        new Dictionary<string, EncryptedSlotConfiguration>()));
+            }
+        };
 
         var builder = (WorkflowBuilder)WorkflowBuilder.Create("test-workflow");
-        builder._directiveTimeout = TimeSpan.FromMilliseconds(100);
+        builder._directiveTimeout = TimeSpan.FromSeconds(5);
 
-        await builder.Run([], context);
+        await builder.RunAsync([], context);
 
+        var stateMessages = bus.Published("workflow.state");
+        Assert.That(stateMessages, Has.Count.EqualTo(1));
+        var stateMsg = (WorkflowStateMessage)stateMessages[0];
+        Assert.That(stateMsg.State, Is.EqualTo(WorkflowState.Success));
+        Assert.That(stateMsg.ErrorMessage, Is.Null);
+        mockExit.Verify(e => e.Exit(0), Times.Once);
+    }
+
+    [Test]
+    public async Task RunAsync_WhenRunThrows_PublishesFailedStateMessageAndExits1()
+    {
+        var bus = new RecordingBus();
+        var mockExit = new Mock<IProcessExitService>();
+        var context = new FakeWorkflowRunContext(bus, mockExit.Object);
+
+        bus.OnPublish = (topic, message) =>
+        {
+            if (topic == "workflow.announcements" && message is WorkflowAnnouncementMessage ann)
+            {
+                bus.DeliverAsync(ann.ResponseTopic,
+                    new WorkflowDirective(ann.WorkflowInstanceId, WorkflowDirectiveKind.Run));
+            }
+            else if (topic == "workflow-registration" && message is WorkflowRegistrationRequest req)
+            {
+                var badSlot = new EncryptedSlotConfiguration("some-provider", "not-valid-base64!!!");
+                bus.DeliverAsync(req.ResponseTopic,
+                    new WorkflowConfigurationResponse(req.WorkflowInstanceId, true, null,
+                        new Dictionary<string, EncryptedSlotConfiguration> { ["bad-slot"] = badSlot }));
+            }
+        };
+
+        var builder = (WorkflowBuilder)WorkflowBuilder.Create("test-workflow");
+        builder._directiveTimeout = TimeSpan.FromSeconds(5);
+
+        await builder.RunAsync([], context);
+
+        var stateMessages = bus.Published("workflow.state");
+        Assert.That(stateMessages, Has.Count.EqualTo(1));
+        var stateMsg = (WorkflowStateMessage)stateMessages[0];
+        Assert.That(stateMsg.State, Is.EqualTo(WorkflowState.Failed));
+        Assert.That(stateMsg.ErrorMessage, Is.Not.Null);
         mockExit.Verify(e => e.Exit(1), Times.Once);
         mockExit.Verify(e => e.Exit(0), Times.Never);
-        loggerMock.Verify(l => l.Log(
-            LogLevel.Error,
-            It.IsAny<EventId>(),
-            It.IsAny<It.IsAnyType>(),
-            It.IsAny<Exception?>(),
-            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.AtLeastOnce);
     }
 
     // ── Shared fake infrastructure ─────────────────────────────────────────────

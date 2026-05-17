@@ -4,6 +4,7 @@ using Auxilia.Workflows.Environment;
 namespace Auxilia.Workflows.Tests;
 
 [TestFixture]
+[Category("Unit")]
 public class WorkflowBuilderTests
 {
     [Test]
