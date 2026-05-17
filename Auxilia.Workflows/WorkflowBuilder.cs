@@ -128,7 +128,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 try
                 {
                     var services = new ServiceCollection();
-                    new WorkflowBootstrapper(response, keyPair).Apply(services);
+                    new WorkflowBootstrapper(response, keyPair, new SlotHandlerResolver()).Apply(services);
                     await using (services.BuildServiceProvider())
                     {
                     }

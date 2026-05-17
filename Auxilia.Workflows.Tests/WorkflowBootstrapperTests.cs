@@ -43,16 +43,17 @@ public class WorkflowBootstrapperTests
         var response = new WorkflowConfigurationResponse(Guid.NewGuid(), true, null, slots);
 
         var spy = new SpySlotHandler();
-        SlotHandlerRegistry.Register(providerType, spy);
+        var resolver = new SlotHandlerResolver();
+        resolver.Register(providerType, spy);
 
         var services = new ServiceCollection();
-        var bootstrapper = new WorkflowBootstrapper(response, keyPair);
+        var bootstrapper = new WorkflowBootstrapper(response, keyPair, resolver);
         bootstrapper.Apply(services);
 
         Assert.That(spy.Calls, Has.Count.EqualTo(2));
-        Assert.That(spy.Calls.All(c => c.ProviderType == providerType), Is.True);
-        Assert.That(spy.Calls.Any(c => c.Settings.ContainsKey("a") && c.Settings["a"] == "1"), Is.True);
-        Assert.That(spy.Calls.Any(c => c.Settings.ContainsKey("b") && c.Settings["b"] == "2"), Is.True);
+        Assert.That(spy.Calls.All(c => c.Configuration.ProviderType == providerType), Is.True);
+        Assert.That(spy.Calls.Any(c => c.SlotName == "slot1" && c.Configuration.Settings.ContainsKey("a") && c.Configuration.Settings["a"] == "1"), Is.True);
+        Assert.That(spy.Calls.Any(c => c.SlotName == "slot2" && c.Configuration.Settings.ContainsKey("b") && c.Configuration.Settings["b"] == "2"), Is.True);
     }
 
     [Test]
@@ -65,16 +66,16 @@ public class WorkflowBootstrapperTests
         var slots = new Dictionary<string, EncryptedSlotConfiguration> { ["s1"] = slot };
         var response = new WorkflowConfigurationResponse(Guid.NewGuid(), true, null, slots);
 
-        var bootstrapper = new WorkflowBootstrapper(response, keyPair);
+        var bootstrapper = new WorkflowBootstrapper(response, keyPair, new SlotHandlerResolver());
 
         Assert.Throws<KeyNotFoundException>(() => bootstrapper.Apply(new ServiceCollection()));
     }
 
     private sealed class SpySlotHandler : ISlotHandler
     {
-        public List<SlotConfiguration> Calls { get; } = new();
+        public List<(string SlotName, SlotConfiguration Configuration)> Calls { get; } = new();
 
-        public void Register(IServiceCollection services, SlotConfiguration configuration)
-            => Calls.Add(configuration);
+        public void Register(IServiceCollection services, string slotName, SlotConfiguration configuration)
+            => Calls.Add((slotName, configuration));
     }
 }
