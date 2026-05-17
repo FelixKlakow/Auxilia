@@ -104,7 +104,8 @@ public class WorkflowBuilderHandshakeTests
     {
         var bus = new RecordingBus();
         var mockExit = new Mock<IProcessExitService>();
-        var context = new FakeWorkflowRunContext(bus, mockExit.Object);
+        var loggerMock = new Mock<ILogger>();
+        var context = new FakeWorkflowRunContext(bus, mockExit.Object, loggerMock.Object);
 
         var builder = (WorkflowBuilder)WorkflowBuilder.Create("test-workflow");
         builder._directiveTimeout = TimeSpan.FromMilliseconds(100);
@@ -113,16 +114,25 @@ public class WorkflowBuilderHandshakeTests
 
         mockExit.Verify(e => e.Exit(1), Times.Once);
         mockExit.Verify(e => e.Exit(0), Times.Never);
+        loggerMock.Verify(l => l.Log(
+            LogLevel.Error,
+            It.IsAny<EventId>(),
+            It.IsAny<It.IsAnyType>(),
+            It.IsAny<Exception?>(),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.AtLeastOnce);
     }
 
     // ── Shared fake infrastructure ─────────────────────────────────────────────
 
-    private sealed class FakeWorkflowRunContext(IMessageBusClient bus, IProcessExitService exitService)
+    private sealed class FakeWorkflowRunContext(
+        IMessageBusClient bus,
+        IProcessExitService exitService,
+        ILogger? logger = null)
         : IWorkflowRunContext
     {
         public IMessageBusClient MessageBus { get; } = bus;
         public IProcessExitService ExitService { get; } = exitService;
-        public ILogger Logger { get; } = NullLogger.Instance;
+        public ILogger Logger { get; } = logger ?? NullLogger.Instance;
     }
 
     private sealed class RecordingBus : IMessageBusClient
