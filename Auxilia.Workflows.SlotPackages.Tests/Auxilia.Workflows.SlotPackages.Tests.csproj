@@ -21,5 +21,6 @@
     <ProjectReference Include="..\Source\Auxilia.Workflows.TaskSource\Auxilia.Workflows.TaskSource.csproj" />
     <!-- Phases 2 and 3 add their own project references to this file -->
     <ProjectReference Include="..\Source\Auxilia.Workflows.SourceControl\Auxilia.Workflows.SourceControl.csproj" />
+    <ProjectReference Include="..\Source\Auxilia.Workflows.AiAgent\Auxilia.Workflows.AiAgent.csproj" />
   </ItemGroup>
 </Project>
