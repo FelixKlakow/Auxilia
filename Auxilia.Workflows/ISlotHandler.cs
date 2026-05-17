@@ -4,5 +4,5 @@ namespace Auxilia.Workflows;
 
 public interface ISlotHandler
 {
-    void Register(IServiceCollection services, SlotConfiguration configuration);
+    void Register(IServiceCollection services, string slotName, SlotConfiguration configuration);
 }
