@@ -17,7 +17,7 @@ public class EnvironmentValidatorTests
     {
         var profile = new RunnerProfile
         {
-            AvailableTools = new HashSet<Tool> { Tool.Git, Tool.DotNetSdk },
+            AvailableTools = new HashSet<string> { "git", "dotnet" },
             OperatingSystem = OsConstraint.Linux,
             OpenPorts = new HashSet<int> { 8080, 443 }
         };
@@ -25,7 +25,7 @@ public class EnvironmentValidatorTests
             "TestWorkflow", "instance-1",
             [],
             [
-                new ToolRequirement(Tool.Git),
+                new ToolRequirement("git"),
                 new OsRequirement(OsConstraint.Linux),
                 new PortRequirement(8080)
             ]);
@@ -41,21 +41,20 @@ public class EnvironmentValidatorTests
     {
         var profile = new RunnerProfile
         {
-            AvailableTools = new HashSet<Tool> { Tool.Git },
+            AvailableTools = new HashSet<string> { "git" },
             OperatingSystem = OsConstraint.Linux,
             OpenPorts = new HashSet<int>()
         };
         var manifest = new WorkflowManifest(
             "TestWorkflow", "instance-1",
             [],
-            [new ToolRequirement(Tool.DotNetSdk)]);
+            [new ToolRequirement("dotnet")]);
 
         var result = MakeValidator(profile).Validate(manifest);
 
         Assert.That(result.IsValid, Is.False);
         Assert.That(result.UnsatisfiedRequirements, Has.Count.EqualTo(1));
-        Assert.That(result.UnsatisfiedRequirements[0],
-            Does.Contain(nameof(Tool.DotNetSdk)));
+        Assert.That(result.UnsatisfiedRequirements[0], Does.Contain("dotnet"));
     }
 
     [Test]
@@ -63,7 +62,7 @@ public class EnvironmentValidatorTests
     {
         var profile = new RunnerProfile
         {
-            AvailableTools = new HashSet<Tool>(),
+            AvailableTools = new HashSet<string>(),
             OperatingSystem = OsConstraint.Windows,
             OpenPorts = new HashSet<int>()
         };
@@ -85,7 +84,7 @@ public class EnvironmentValidatorTests
     {
         var profile = new RunnerProfile
         {
-            AvailableTools = new HashSet<Tool>(),
+            AvailableTools = new HashSet<string>(),
             OperatingSystem = OsConstraint.Linux,
             OpenPorts = new HashSet<int> { 443 }
         };
@@ -106,7 +105,7 @@ public class EnvironmentValidatorTests
     {
         var profile = new RunnerProfile
         {
-            AvailableTools = new HashSet<Tool>(),
+            AvailableTools = new HashSet<string>(),
             OperatingSystem = OsConstraint.Linux,
             OpenPorts = new HashSet<int>()
         };
