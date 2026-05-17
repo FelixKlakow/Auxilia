@@ -37,6 +37,7 @@
     <Project Path="Source\Auxilia.Workflows.TaskSource\Auxilia.Workflows.TaskSource.csproj" />
     <Project Path="Source\Auxilia.Workflows.SourceControl\Auxilia.Workflows.SourceControl.csproj" />
     <Project Path="Auxilia.Workflows.SlotPackages.Tests\Auxilia.Workflows.SlotPackages.Tests.csproj" />
+    <Project Path="Source\Auxilia.Workflows.AiAgent\Auxilia.Workflows.AiAgent.csproj" />
   </Folder>
   <Project Path="Auxilia.SystemTestSuite\Auxilia.SystemTestSuite.csproj" />
 </Solution>
