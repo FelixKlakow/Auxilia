@@ -29,6 +29,7 @@ sequenceDiagram
 ```
 Auxilia.AI/
 ├── IAgentSession.cs / IAgentSessionBuilder.cs / IAgentRequest.cs / IAgentResultValidator.cs  # Public contracts
+├── ExampleAiSessionConsumer.cs              # Scratch/example consumer — not part of the public API
 ├── AgenticFramework/Events/AgentEvents.cs   # AgentEvent hierarchy (started, chunk, toolcall, error, complete)
 ├── AgenticFramework/DependencyInjection/    # AddAuxiliaAi() extension
 └── AgenticFramework/Maf/
