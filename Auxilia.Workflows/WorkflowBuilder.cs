@@ -14,7 +14,10 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     private readonly string _workflowName;
     private readonly List<SlotDefinition> _slots = new();
     private readonly List<IEnvironmentRequirement> _environmentRequirements = new();
+    private readonly List<WorkflowOutputDescriptor> _outputs = new();
     private readonly WorkflowMetadata _metadata = new();
+
+    private const string StateQueueName = "workflow.state";
 
     internal TimeSpan _directiveTimeout = TimeSpan.FromSeconds(30);
 
@@ -52,6 +55,12 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
         return this;
     }
 
+    public IWorkflowBuilder DeclaresOutput(string name, string relativePath, string? description = null)
+    {
+        _outputs.Add(new WorkflowOutputDescriptor(name, relativePath, description));
+        return this;
+    }
+
     public async Task Run(string[] args)
     {
         await using var context = new DefaultWorkflowRunContext(args);
@@ -65,7 +74,6 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
         using var keyPair = new EphemeralKeyPair();
         var instanceId = Guid.NewGuid();
         var responseTopic = $"workflow-response-{instanceId}";
-        const string stateQueueName = "workflow.state";
 
         await context.MessageBus.DeclareQueueAsync(responseTopic);
 
@@ -123,7 +131,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                     return;
                 }
 
-                await context.MessageBus.DeclareQueueAsync(stateQueueName);
+                await context.MessageBus.DeclareQueueAsync(StateQueueName);
 
                 try
                 {
@@ -133,14 +141,14 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                     {
                     }
 
-                    await context.MessageBus.PublishAsync(stateQueueName,
+                    await context.MessageBus.PublishAsync(StateQueueName,
                         new WorkflowStateMessage(instanceId, WorkflowState.Success, null));
                     context.ExitService.Exit(0);
                 }
                 catch (Exception ex)
                 {
                     context.Logger.LogError(ex, "Workflow run failed: {Message}", ex.Message);
-                    await context.MessageBus.PublishAsync(stateQueueName,
+                    await context.MessageBus.PublishAsync(StateQueueName,
                         new WorkflowStateMessage(instanceId, WorkflowState.Failed, ex.Message));
                     context.ExitService.Exit(1);
                 }
@@ -154,8 +162,14 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     }
 
     internal WorkflowSchema BuildSchema()
-        => new(_workflowName, _slots.AsReadOnly(), _environmentRequirements.AsReadOnly());
+        => new(_workflowName, _slots.AsReadOnly(), _environmentRequirements.AsReadOnly())
+        {
+            Version = _metadata.Version,
+            Tags = _metadata.Tags.ToList().AsReadOnly(),
+            Outputs = _outputs.AsReadOnly()
+        };
 
-    private WorkflowManifest BuildManifest(Guid instanceId = default)
-        => new(_workflowName, instanceId.ToString("D"), _slots.AsReadOnly(), _environmentRequirements.AsReadOnly());
+    internal WorkflowManifest BuildManifest(Guid instanceId = default)
+        => new(_workflowName, instanceId.ToString("D"), _slots.AsReadOnly(), _environmentRequirements.AsReadOnly(),
+            _metadata.Version, _metadata.Tags.ToList().AsReadOnly(), _outputs.AsReadOnly());
 }

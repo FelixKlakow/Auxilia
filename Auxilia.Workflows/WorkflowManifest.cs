@@ -6,4 +6,7 @@ public sealed record WorkflowManifest(
     string WorkflowName,
     string WorkflowInstanceId,
     IReadOnlyList<SlotDefinition> Slots,
-    IReadOnlyList<IEnvironmentRequirement> EnvironmentRequirements);
+    IReadOnlyList<IEnvironmentRequirement> EnvironmentRequirements,
+    string Version,
+    IReadOnlyList<string> Tags,
+    IReadOnlyList<WorkflowOutputDescriptor> Outputs);

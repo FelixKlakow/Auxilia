@@ -11,6 +11,8 @@ public interface IWorkflowBuilder
 
     IWorkflowBuilder WithMetadata(Action<WorkflowMetadata> configure);
 
+    IWorkflowBuilder DeclaresOutput(string name, string relativePath, string? description = null);
+
     Task Run(string[] args);
 
     Task Run(string[] args, IWorkflowRunContext context);

@@ -28,7 +28,8 @@ public class EnvironmentValidatorTests
                 new ToolRequirement("git"),
                 new OsRequirement(OsConstraint.Linux),
                 new PortRequirement(8080)
-            ]);
+            ],
+            string.Empty, [], []);
 
         var result = MakeValidator(profile).Validate(manifest);
 
@@ -48,7 +49,8 @@ public class EnvironmentValidatorTests
         var manifest = new WorkflowManifest(
             "TestWorkflow", "instance-1",
             [],
-            [new ToolRequirement("dotnet")]);
+            [new ToolRequirement("dotnet")],
+            string.Empty, [], []);
 
         var result = MakeValidator(profile).Validate(manifest);
 
@@ -69,7 +71,8 @@ public class EnvironmentValidatorTests
         var manifest = new WorkflowManifest(
             "TestWorkflow", "instance-1",
             [],
-            [new OsRequirement(OsConstraint.Linux)]);
+            [new OsRequirement(OsConstraint.Linux)],
+            string.Empty, [], []);
 
         var result = MakeValidator(profile).Validate(manifest);
 
@@ -91,7 +94,8 @@ public class EnvironmentValidatorTests
         var manifest = new WorkflowManifest(
             "TestWorkflow", "instance-1",
             [],
-            [new PortRequirement(8080)]);
+            [new PortRequirement(8080)],
+            string.Empty, [], []);
 
         var result = MakeValidator(profile).Validate(manifest);
 
@@ -112,7 +116,8 @@ public class EnvironmentValidatorTests
         var manifest = new WorkflowManifest(
             "TestWorkflow", "instance-1",
             [],
-            [new UnknownRequirement()]);
+            [new UnknownRequirement()],
+            string.Empty, [], []);
 
         var result = MakeValidator(profile).Validate(manifest);
 
