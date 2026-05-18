@@ -19,6 +19,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
 
     private const string StateQueueName = "workflow.state";
 
+    public static IWorkflowRunContext? TestContext { get; set; }
+
     internal TimeSpan _directiveTimeout = TimeSpan.FromSeconds(30);
 
     private WorkflowBuilder(string workflowName)
@@ -63,6 +65,12 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
 
     public async Task Run(string[] args)
     {
+        if (args.Contains("--test-harness") && TestContext is { } testCtx)
+        {
+            await Run(args, testCtx);
+            return;
+        }
+
         await using var context = new DefaultWorkflowRunContext(args);
         await Run(args, context);
     }
@@ -136,7 +144,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 try
                 {
                     var services = new ServiceCollection();
-                    new WorkflowBootstrapper(response, keyPair, new SlotHandlerResolver()).Apply(services);
+                    if (TestContext == null)
+                        new WorkflowBootstrapper(response, keyPair, new SlotHandlerResolver()).Apply(services);
                     await using (services.BuildServiceProvider())
                     {
                     }
