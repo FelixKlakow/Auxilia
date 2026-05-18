@@ -33,10 +33,12 @@
   </Folder>
   <Folder Name="/05_WorkflowsDomain/">
     <Project Path="Auxilia.Workflows\Auxilia.Workflows.csproj" />
+    <Project Path="Auxilia.Workflows.Testing\Auxilia.Workflows.Testing.csproj" />
     <Project Path="Auxilia.Workflows.Tests\Auxilia.Workflows.Tests.csproj" />
     <Project Path="Source\Auxilia.Workflows.TaskSource\Auxilia.Workflows.TaskSource.csproj" />
     <Project Path="Source\Auxilia.Workflows.SourceControl\Auxilia.Workflows.SourceControl.csproj" />
     <Project Path="Auxilia.Workflows.SlotPackages.Tests\Auxilia.Workflows.SlotPackages.Tests.csproj" />
+    <Project Path="Auxilia.Workflows.Testing.Tests\Auxilia.Workflows.Testing.Tests.csproj" />
     <Project Path="Source\Auxilia.Workflows.AiAgent\Auxilia.Workflows.AiAgent.csproj" />
   </Folder>
   <Project Path="Auxilia.SystemTestSuite\Auxilia.SystemTestSuite.csproj" />
