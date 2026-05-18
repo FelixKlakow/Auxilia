@@ -51,7 +51,8 @@ public class WorkflowRegistrationHandlerTests
         // Manifest requires git, but empty profile doesn't have it
         var manifest = new WorkflowManifest(
             "TestWorkflow", Guid.NewGuid().ToString(), [],
-            [new ToolRequirement("git")]);
+            [new ToolRequirement("git")],
+            string.Empty, [], []);
         var request = new WorkflowRegistrationRequest(
             Guid.NewGuid(), manifest, ValidPublicKey(), "reply-topic");
 
@@ -73,7 +74,8 @@ public class WorkflowRegistrationHandlerTests
     {
         var request = new WorkflowRegistrationRequest(
             Guid.NewGuid(),
-            new WorkflowManifest("TestWorkflow", Guid.NewGuid().ToString(), [], []),
+            new WorkflowManifest("TestWorkflow", Guid.NewGuid().ToString(), [], [],
+                string.Empty, [], []),
             ValidPublicKey(),
             "reply-topic");
 
@@ -100,7 +102,8 @@ public class WorkflowRegistrationHandlerTests
 
         var request = new WorkflowRegistrationRequest(
             Guid.NewGuid(),
-            new WorkflowManifest("TestWorkflow", Guid.NewGuid().ToString(), [], []),
+            new WorkflowManifest("TestWorkflow", Guid.NewGuid().ToString(), [], [],
+                string.Empty, [], []),
             ValidPublicKey(),
             "reply-topic");
 
@@ -130,7 +133,8 @@ public class WorkflowRegistrationHandlerTests
 
         var request = new WorkflowRegistrationRequest(
             Guid.NewGuid(),
-            new WorkflowManifest("TestWorkflow", Guid.NewGuid().ToString(), [], []),
+            new WorkflowManifest("TestWorkflow", Guid.NewGuid().ToString(), [], [],
+                string.Empty, [], []),
             publicKey,
             "my-response-topic");
 
@@ -164,7 +168,8 @@ public class WorkflowRegistrationHandlerTests
         var instanceId = Guid.NewGuid();
         var request = new WorkflowRegistrationRequest(
             instanceId,
-            new WorkflowManifest("TestWorkflow", instanceId.ToString(), [], []),
+            new WorkflowManifest("TestWorkflow", instanceId.ToString(), [], [],
+                string.Empty, [], []),
             publicKey,
             "reply");
 

@@ -124,4 +124,127 @@ public class WorkflowBuilderTests
         Assert.That(schema2.SchemaVersion, Is.EqualTo(schema1.SchemaVersion));
         Assert.That(schema2.Slots.Count, Is.EqualTo(schema1.Slots.Count));
     }
+
+    [Test]
+    public void BuildManifest_NoMetadata_HasDefaultVersionAndEmptyTags()
+    {
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+
+        var manifest = wb.BuildManifest();
+
+        Assert.That(manifest.Version, Is.Null.Or.Empty);
+        Assert.That(manifest.Tags, Is.Empty);
+    }
+
+    [Test]
+    public void BuildSchema_NoMetadata_HasDefaultVersionAndEmptyTags()
+    {
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+
+        var schema = wb.BuildSchema();
+
+        Assert.That(schema.Version, Is.Null.Or.Empty);
+        Assert.That(schema.Tags, Is.Empty);
+    }
+
+    [Test]
+    public void BuildManifest_WithMetadata_PropagatesVersionAndTags()
+    {
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+        wb.WithMetadata(m => { m.Version = "2.0"; m.Tags.Add("prod"); });
+
+        var manifest = wb.BuildManifest();
+
+        Assert.That(manifest.Version, Is.EqualTo("2.0"));
+        Assert.That(manifest.Tags, Contains.Item("prod"));
+    }
+
+    [Test]
+    public void BuildSchema_WithMetadata_PropagatesVersionAndTags()
+    {
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+        wb.WithMetadata(m => { m.Version = "2.0"; m.Tags.Add("prod"); });
+
+        var schema = wb.BuildSchema();
+
+        Assert.That(schema.Version, Is.EqualTo("2.0"));
+        Assert.That(schema.Tags, Contains.Item("prod"));
+    }
+
+    [Test]
+    public void DeclaresOutput_NoCall_BothArtifactsHaveEmptyOutputs()
+    {
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+
+        var manifest = wb.BuildManifest();
+        var schema = wb.BuildSchema();
+
+        Assert.That(manifest.Outputs, Is.Empty);
+        Assert.That(schema.Outputs, Is.Empty);
+    }
+
+    [Test]
+    public void DeclaresOutput_OneCallWithoutDescription_PropagatesNameAndRelativePath()
+    {
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+        wb.DeclaresOutput("report", "output/report.html");
+
+        var manifest = wb.BuildManifest();
+        var schema = wb.BuildSchema();
+
+        Assert.That(manifest.Outputs, Has.Count.EqualTo(1));
+        Assert.That(manifest.Outputs[0].Name, Is.EqualTo("report"));
+        Assert.That(manifest.Outputs[0].RelativePath, Is.EqualTo("output/report.html"));
+        Assert.That(manifest.Outputs[0].Description, Is.Null);
+        Assert.That(schema.Outputs, Has.Count.EqualTo(1));
+        Assert.That(schema.Outputs[0].Name, Is.EqualTo("report"));
+        Assert.That(schema.Outputs[0].RelativePath, Is.EqualTo("output/report.html"));
+        Assert.That(schema.Outputs[0].Description, Is.Null);
+    }
+
+    [Test]
+    public void DeclaresOutput_OneCallWithDescription_PropagatesDescription()
+    {
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+        wb.DeclaresOutput("report", "output/report.html", "HTML summary");
+
+        var manifest = wb.BuildManifest();
+        var schema = wb.BuildSchema();
+
+        Assert.That(manifest.Outputs[0].Description, Is.EqualTo("HTML summary"));
+        Assert.That(schema.Outputs[0].Description, Is.EqualTo("HTML summary"));
+    }
+
+    [Test]
+    public void DeclaresOutput_TwoCalls_BothArtifactsHaveTwoDescriptorsInOrder()
+    {
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+        wb.DeclaresOutput("first", "out/first.txt");
+        wb.DeclaresOutput("second", "out/second.txt");
+
+        var manifest = wb.BuildManifest();
+        var schema = wb.BuildSchema();
+
+        Assert.That(manifest.Outputs, Has.Count.EqualTo(2));
+        Assert.That(manifest.Outputs[0].Name, Is.EqualTo("first"));
+        Assert.That(manifest.Outputs[1].Name, Is.EqualTo("second"));
+        Assert.That(schema.Outputs, Has.Count.EqualTo(2));
+        Assert.That(schema.Outputs[0].Name, Is.EqualTo("first"));
+        Assert.That(schema.Outputs[1].Name, Is.EqualTo("second"));
+    }
+
+    [Test]
+    public void DeclaresOutput_FluentChain_AccumulatesCorrectly()
+    {
+        var builder = WorkflowBuilder.Create("test");
+        var result = builder.DeclaresOutput("a", "out/a.txt").DeclaresOutput("b", "out/b.txt");
+        var wb = (WorkflowBuilder)result;
+
+        var manifest = wb.BuildManifest();
+
+        Assert.That(result, Is.SameAs(builder));
+        Assert.That(manifest.Outputs, Has.Count.EqualTo(2));
+        Assert.That(manifest.Outputs[0].Name, Is.EqualTo("a"));
+        Assert.That(manifest.Outputs[1].Name, Is.EqualTo("b"));
+    }
 }

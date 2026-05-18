@@ -8,4 +8,7 @@ public sealed record WorkflowSchema(
     IReadOnlyList<IEnvironmentRequirement> EnvironmentRequirements)
 {
     public string SchemaVersion { get; init; } = "1.0";
+    public string Version { get; init; } = string.Empty;
+    public IReadOnlyList<string> Tags { get; init; } = [];
+    public IReadOnlyList<WorkflowOutputDescriptor> Outputs { get; init; } = [];
 }
