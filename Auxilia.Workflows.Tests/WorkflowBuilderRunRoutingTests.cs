@@ -142,6 +142,87 @@ public class WorkflowBuilderRunRoutingTests
         mockExit.Verify(e => e.Exit(0), Times.Never);
     }
 
+    [TearDown]
+    public void TearDown()
+    {
+        WorkflowBuilder.TestContext = null;
+    }
+
+    [Test]
+    public async Task Run_WithTestHarnessFlag_AndTestContextSet_UsesTestContext()
+    {
+        var bus = new RecordingBus();
+        var mockExit = new Mock<IProcessExitService>();
+        var context = new FakeWorkflowRunContext(bus, mockExit.Object);
+
+        bus.OnPublish = (topic, message) =>
+        {
+            if (topic == "workflow.announcements" && message is WorkflowAnnouncementMessage ann)
+                bus.DeliverAsync(ann.ResponseTopic,
+                    new WorkflowDirective(ann.WorkflowInstanceId, WorkflowDirectiveKind.EmitSchema));
+        };
+
+        var builder = (WorkflowBuilder)WorkflowBuilder.Create("test-workflow");
+        builder._directiveTimeout = TimeSpan.FromSeconds(5);
+        WorkflowBuilder.TestContext = context;
+
+        await builder.Run(["--test-harness"]);
+
+        var schemaMessages = bus.Published("workflow.schema");
+        Assert.That(schemaMessages, Has.Count.EqualTo(1));
+        Assert.That(schemaMessages[0], Is.InstanceOf<WorkflowSchemaMessage>());
+    }
+
+    [Test]
+    public async Task Run_WithTestHarnessFlag_ButTestContextNull_FallsThroughToDefaultPath()
+    {
+        var bus = new RecordingBus();
+        var mockExit = new Mock<IProcessExitService>();
+        var context = new FakeWorkflowRunContext(bus, mockExit.Object);
+
+        WorkflowBuilder.TestContext = null;
+
+        var builder = (WorkflowBuilder)WorkflowBuilder.Create("test-workflow");
+        builder._directiveTimeout = TimeSpan.FromSeconds(5);
+
+        try
+        {
+            await builder.Run(["--test-harness"]);
+        }
+        catch
+        {
+            // Infrastructure exception expected — no RabbitMQ available
+        }
+
+        Assert.That(bus.Published("workflow.schema"), Has.Count.EqualTo(0));
+        Assert.That(bus.Published("workflow.announcements"), Has.Count.EqualTo(0));
+    }
+
+    [Test]
+    public async Task Run_WithoutTestHarnessFlag_DoesNotUseTestContext()
+    {
+        var bus = new RecordingBus();
+        var mockExit = new Mock<IProcessExitService>();
+        var context = new FakeWorkflowRunContext(bus, mockExit.Object);
+
+        WorkflowBuilder.TestContext = context;
+
+        var builder = (WorkflowBuilder)WorkflowBuilder.Create("test-workflow");
+        builder._directiveTimeout = TimeSpan.FromSeconds(5);
+
+        try
+        {
+            await builder.Run([]);
+        }
+        catch
+        {
+            // Infrastructure exception expected — no RabbitMQ available
+        }
+
+        Assert.That(bus.Published("workflow.schema"), Has.Count.EqualTo(0));
+        Assert.That(bus.Published("workflow.announcements"), Has.Count.EqualTo(0));
+    }
+
     // ── Shared fake infrastructure ─────────────────────────────────────────────
 
     private sealed class FakeWorkflowRunContext(
