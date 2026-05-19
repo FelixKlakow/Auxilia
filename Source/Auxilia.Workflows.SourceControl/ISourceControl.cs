@@ -5,4 +5,5 @@ namespace Auxilia.Workflows.SourceControl;
 /// Provider packages implement this interface; method signatures are defined during blueprint planning.
 /// Workflow code depends on this contract, not on any specific source-control SDK.
 /// </summary>
+[Obsolete("Use ISourceControlAccess instead.")]
 public interface ISourceControl { }
