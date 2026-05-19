@@ -1,7 +1,8 @@
 namespace Auxilia.Workflows.AiAgent;
 
 /// <summary>
-/// Marker interface representing the AI-agent DI service type.
-/// Provider packages implement this interface. Workflow code depends on it.
+/// Runtime contract for AI invocation inside a workflow.
+/// Provider packages implement this interface; method signatures are defined during blueprint planning.
+/// Workflow code depends on this contract, not on any specific AI SDK.
 /// </summary>
 public interface IAiAgent { }
