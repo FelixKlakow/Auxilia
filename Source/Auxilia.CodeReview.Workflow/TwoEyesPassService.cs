@@ -1,12 +1,14 @@
 using System.Text.Json;
-using Auxilia.AI;
 using Auxilia.CodeReview.Workflow.Context;
 using Auxilia.CodeReview.Workflow.Findings;
 using Auxilia.Workflows.AiAgent;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Auxilia.CodeReview.Workflow;
 
-public sealed class TwoEyesPassService(IAiInference aiInference, TwoEyesConfiguration config)
+public sealed class TwoEyesPassService(
+    [FromKeyedServices("secondary-reviewer")] IAiAgent secondaryAgent,
+    TwoEyesConfiguration config)
 {
     public async Task<IReadOnlyList<ReviewFinding>> RunAsync(
         IReadOnlyList<StagedFinding> staged,
@@ -31,44 +33,31 @@ public sealed class TwoEyesPassService(IAiInference aiInference, TwoEyesConfigur
                 ? string.Join("\n", file.Hunks.Select(h => h.Content))
                 : string.Empty;
 
-            var session = await aiInference.CreateSessionAsync(config.SecondarySlotName);
-            try
-            {
-                var prompt =
-                    $"Review this finding:\nFile: {finding.FilePath}, Lines {finding.LineStart}-{finding.LineEnd}\n" +
-                    $"Severity: {finding.Severity}, Category: {finding.Category}\nMessage: {finding.Message}\n" +
-                    $"Diff context:\n{hunkContent}\n\n" +
-                    "Respond with JSON: {\"verdict\": \"Approved|Rejected\"}";
+            await using var session = await secondaryAgent.OpenSessionAsync();
+            var prompt =
+                $"Review this finding:\nFile: {finding.FilePath}, Lines {finding.LineStart}-{finding.LineEnd}\n" +
+                $"Severity: {finding.Severity}, Category: {finding.Category}\nMessage: {finding.Message}\n" +
+                $"Diff context:\n{hunkContent}\n\n" +
+                "Respond with JSON: {\"verdict\": \"Approved|Rejected\"}";
 
-                var request = session.PrepareRequest(prompt);
-                var verdict = await request.ExecuteRequestAsync(new VerdictValidator(), CancellationToken.None);
-                results.Add(ReviewFinding.FromStaged(finding, verdict, config.SecondarySlotName));
-            }
-            finally
-            {
-                session.Dispose();
-            }
+            var verdictText = await session.ExecuteAsync(prompt);
+            results.Add(ReviewFinding.FromStaged(finding, ParseVerdict(verdictText), "secondary-reviewer"));
         }
 
         return results.AsReadOnly();
     }
 
-    private sealed class VerdictValidator : IAgentResultValidator<SecondaryVerdict>
+    private static SecondaryVerdict ParseVerdict(string text)
     {
-        public Task<SecondaryVerdict> ValidateAsync(IAgentRequest originalRequest, string agentTextOutput)
+        try
         {
-            try
-            {
-                var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-                using var doc = JsonDocument.Parse(agentTextOutput);
-                var verdictStr = doc.RootElement.GetProperty("verdict").GetString() ?? "Approved";
-                return Task.FromResult(
-                    Enum.TryParse<SecondaryVerdict>(verdictStr, true, out var v) ? v : SecondaryVerdict.Approved);
-            }
-            catch
-            {
-                return Task.FromResult(SecondaryVerdict.Approved);
-            }
+            using var doc = JsonDocument.Parse(text);
+            var verdictStr = doc.RootElement.GetProperty("verdict").GetString() ?? "Approved";
+            return Enum.TryParse<SecondaryVerdict>(verdictStr, true, out var v) ? v : SecondaryVerdict.Approved;
+        }
+        catch
+        {
+            return SecondaryVerdict.Approved;
         }
     }
 }

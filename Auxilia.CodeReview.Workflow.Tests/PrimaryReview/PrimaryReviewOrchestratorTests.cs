@@ -1,4 +1,3 @@
-using Auxilia.AI;
 using Auxilia.CodeReview.Workflow.Findings;
 using Auxilia.CodeReview.Workflow.PrimaryReview;
 using Auxilia.CodeReview.Workflow.Verdicts;
@@ -31,7 +30,7 @@ public sealed class PrimaryReviewOrchestratorTests
         };
 
     private static PrimaryReviewOrchestrator BuildOrchestrator(
-        IAiInference aiInference,
+        IAiAgent aiAgent,
         IStagedFindingsStore? store = null,
         VerdictMap? verdictMap = null,
         ContextCompactionOptions? opts = null)
@@ -39,7 +38,7 @@ public sealed class PrimaryReviewOrchestratorTests
         store ??= new StagedFindingsStore();
         verdictMap ??= new VerdictMap();
         var options = Options.Create(opts ?? new ContextCompactionOptions { TokenLimitThreshold = 1_000_000 });
-        return new PrimaryReviewOrchestrator(aiInference, store, new ContextCompactionService(options), verdictMap);
+        return new PrimaryReviewOrchestrator(aiAgent, store, new ContextCompactionService(options), verdictMap);
     }
 
     [Test]
@@ -47,7 +46,7 @@ public sealed class PrimaryReviewOrchestratorTests
     {
         var verdictMap = new VerdictMap();
         var orchestrator = BuildOrchestrator(
-            new FakeAiInference("Reviewed"),
+            new FakeAiAgent("Reviewed"),
             verdictMap: verdictMap);
 
         var context = BuildContext(MakeFile("a.cs"), MakeFile("b.cs"), MakeFile("c.cs"));
@@ -61,7 +60,7 @@ public sealed class PrimaryReviewOrchestratorTests
     {
         var verdictMap = new VerdictMap();
         var orchestrator = BuildOrchestrator(
-            new FakeAiInference("Skipped"),
+            new FakeAiAgent("Skipped"),
             verdictMap: verdictMap);
 
         var context = BuildContext(MakeFile("critical.cs", FileCriticality.Critical));
@@ -75,7 +74,7 @@ public sealed class PrimaryReviewOrchestratorTests
     {
         var verdictMap = new VerdictMap();
         var orchestrator = BuildOrchestrator(
-            new FakeAiInference("Skipped"),
+            new FakeAiAgent("Skipped"),
             verdictMap: verdictMap);
 
         var context = BuildContext(MakeFile("normal.cs", FileCriticality.Normal));
@@ -89,7 +88,7 @@ public sealed class PrimaryReviewOrchestratorTests
     {
         var store = new StagedFindingsStore();
         var orchestrator = BuildOrchestrator(
-            new FakeAiInference("Reviewed", oneFinding: true),
+            new FakeAiAgent("Reviewed", oneFinding: true),
             store: store);
 
         var context = BuildContext(MakeFile("foo.cs"));
@@ -110,7 +109,7 @@ public sealed class PrimaryReviewOrchestratorTests
             CompactionTriggerFraction = 1.0  // trigger at 100% of limit
         };
         var orchestrator = BuildOrchestrator(
-            new FakeAiInference("Reviewed"),
+            new FakeAiAgent("Reviewed"),
             verdictMap: verdictMap,
             opts: compactionOpts);
 
@@ -123,41 +122,24 @@ public sealed class PrimaryReviewOrchestratorTests
 
     // ---- Fake helpers ----
 
-    private sealed class FakeAiInference(string verdict, bool oneFinding = false) : IAiInference
+    private sealed class FakeAiAgent(string verdict, bool oneFinding = false) : IAiAgent
     {
-        public Task<IAgentSession> CreateSessionAsync(string slotName)
-            => Task.FromResult<IAgentSession>(new FakeSession(verdict, oneFinding));
+        public Task<IAiSession> OpenSessionAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IAiSession>(new FakeAiSession(verdict, oneFinding));
     }
 
-    private sealed class FakeSession(string verdict, bool oneFinding) : IAgentSession
+    private sealed class FakeAiSession(string verdict, bool oneFinding) : IAiSession
     {
-        public Guid Id { get; } = Guid.NewGuid();
-        public Guid? LinkedWorkflowId => null;
-        public string SdkName => "fake";
-        public DateTime CreatedAtUtc { get; } = DateTime.UtcNow;
-        public IObservable<AgentEvent> Events => System.Reactive.Linq.Observable.Empty<AgentEvent>();
-
-        public IAgentRequest PrepareRequest(string prompt)
-            => new FakeRequest(this, prompt, verdict, oneFinding);
-
-        public void Dispose() { }
-    }
-
-    private sealed class FakeRequest(IAgentSession session, string prompt, string verdict, bool oneFinding) : IAgentRequest
-    {
-        public string Prompt => prompt;
-        public IAgentSession Session => session;
-        public IAgentRequest WithNonDefaultModel(string modelName) => this;
-
-        public Task<TValidatorResult> ExecuteRequestAsync<TValidatorResult>(
-            IAgentResultValidator<TValidatorResult> validator, CancellationToken cancellationToken)
+        public Task<string> ExecuteAsync(string prompt, CancellationToken cancellationToken = default)
         {
             string json;
             if (oneFinding)
                 json = $"{{\"verdict\":\"{verdict}\",\"findings\":[{{\"lineStart\":1,\"lineEnd\":2,\"severity\":\"Info\",\"category\":\"Style\",\"message\":\"test\",\"suggestion\":null}}]}}";
             else
                 json = $"{{\"verdict\":\"{verdict}\",\"findings\":[]}}";
-            return validator.ValidateAsync(this, json);
+            return Task.FromResult(json);
         }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

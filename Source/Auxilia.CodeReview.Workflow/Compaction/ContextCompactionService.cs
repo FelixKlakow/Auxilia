@@ -1,4 +1,3 @@
-using Auxilia.AI;
 using Auxilia.Workflows.AiAgent;
 using Microsoft.Extensions.Options;
 
@@ -11,35 +10,20 @@ public sealed class ContextCompactionService(IOptions<ContextCompactionOptions> 
     public bool ShouldCompact(long currentTokenCount)
         => currentTokenCount >= _opts.TokenLimitThreshold * _opts.CompactionTriggerFraction;
 
-    public async Task<IAgentSession> CompactAsync(
-        IAgentSession currentSession,
-        IAiInference inference,
-        string slotName)
+    public async Task<IAiSession> CompactAsync(IAiSession currentSession, IAiAgent agent)
     {
-        var summaryRequest = currentSession.PrepareRequest(
+        var summaryText = await currentSession.ExecuteAsync(
             "Summarize all findings recorded so far in a compact JSON block. " +
             "Include file, line range, severity, category, and message for each finding.");
 
-        var summaryText = await summaryRequest.ExecuteRequestAsync(
-            new TextResponseValidator(), CancellationToken.None);
+        await currentSession.DisposeAsync();
 
-        currentSession.Dispose();
-
-        var newSession = await inference.CreateSessionAsync(slotName);
+        var newSession = await agent.OpenSessionAsync();
 
         if (!string.IsNullOrEmpty(summaryText))
-        {
-            var injectRequest = newSession.PrepareRequest(
+            await newSession.ExecuteAsync(
                 $"Context from prior reviews: {summaryText}. Continue reviewing remaining files.");
-            await injectRequest.ExecuteRequestAsync(new TextResponseValidator(), CancellationToken.None);
-        }
 
         return newSession;
-    }
-
-    private sealed class TextResponseValidator : IAgentResultValidator<string>
-    {
-        public Task<string> ValidateAsync(IAgentRequest originalRequest, string agentTextOutput)
-            => Task.FromResult(agentTextOutput);
     }
 }

@@ -1,15 +1,15 @@
 using System.Text.Json;
-using Auxilia.AI;
 using Auxilia.CodeReview.Workflow.Compaction;
 using Auxilia.CodeReview.Workflow.Context;
 using Auxilia.CodeReview.Workflow.Findings;
 using Auxilia.CodeReview.Workflow.Verdicts;
 using Auxilia.Workflows.AiAgent;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Auxilia.CodeReview.Workflow.PrimaryReview;
 
 public sealed class PrimaryReviewOrchestrator(
-    IAiInference aiInference,
+    [FromKeyedServices("primary-reviewer")] IAiAgent aiAgent,
     IStagedFindingsStore findingsStore,
     ContextCompactionService compactionService,
     VerdictMap verdictMap)
@@ -21,7 +21,7 @@ public sealed class PrimaryReviewOrchestrator(
         if (context.Files.Count == 0)
             return;
 
-        var session = await aiInference.CreateSessionAsync("primary-reviewer");
+        var session = await aiAgent.OpenSessionAsync(cancellationToken);
         try
         {
             foreach (var file in context.Files)
@@ -32,18 +32,18 @@ public sealed class PrimaryReviewOrchestrator(
 
                 if (compactionService.ShouldCompact(_currentTokenCount))
                 {
-                    session = await compactionService.CompactAsync(session, aiInference, "primary-reviewer");
+                    session = await compactionService.CompactAsync(session, aiAgent);
                     _currentTokenCount = 0;
                 }
             }
         }
         finally
         {
-            session.Dispose();
+            await session.DisposeAsync();
         }
     }
 
-    private async Task ReviewFileAsync(IAgentSession session, ReviewableFile file, CancellationToken cancellationToken)
+    private async Task ReviewFileAsync(IAiSession session, ReviewableFile file, CancellationToken cancellationToken)
     {
         var hunkContent = string.Join("\n", file.Hunks.Select(h => h.Content));
         var prompt =
@@ -52,8 +52,8 @@ public sealed class PrimaryReviewOrchestrator(
             "[{\"lineStart\": 1, \"lineEnd\": 1, \"severity\": \"Info\", \"category\": \"string\", " +
             "\"message\": \"string\", \"suggestion\": \"string\"}]}";
 
-        var request = session.PrepareRequest(prompt);
-        var response = await request.ExecuteRequestAsync(new ReviewResponseValidator(), cancellationToken);
+        var responseText = await session.ExecuteAsync(prompt, cancellationToken);
+        var response = ParseReviewResponse(responseText);
         ApplyVerdict(file, response.Verdict, response.Findings);
     }
 
@@ -93,24 +93,21 @@ public sealed class PrimaryReviewOrchestrator(
     private static long EstimateTokens(ReviewableFile file)
         => file.Hunks.Sum(h => (long)h.Content.Length) / 4;
 
+    private static ReviewResponse ParseReviewResponse(string text)
+    {
+        try
+        {
+            var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var result = JsonSerializer.Deserialize<ReviewResponse>(text, opts);
+            return result ?? new ReviewResponse("Reviewed", []);
+        }
+        catch
+        {
+            return new ReviewResponse("Reviewed", []);
+        }
+    }
+
     private record FindingDto(int LineStart, int LineEnd, string Severity, string Category, string Message, string? Suggestion);
 
     private record ReviewResponse(string Verdict, IReadOnlyList<FindingDto> Findings);
-
-    private sealed class ReviewResponseValidator : IAgentResultValidator<ReviewResponse>
-    {
-        public Task<ReviewResponse> ValidateAsync(IAgentRequest originalRequest, string agentTextOutput)
-        {
-            try
-            {
-                var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-                var result = JsonSerializer.Deserialize<ReviewResponse>(agentTextOutput, opts);
-                return Task.FromResult(result ?? new ReviewResponse("Reviewed", []));
-            }
-            catch
-            {
-                return Task.FromResult(new ReviewResponse("Reviewed", []));
-            }
-        }
-    }
 }

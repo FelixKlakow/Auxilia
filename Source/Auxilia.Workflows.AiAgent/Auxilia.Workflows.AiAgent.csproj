@@ -6,6 +6,5 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\Auxilia.Workflows\Auxilia.Workflows.csproj" />
-    <ProjectReference Include="..\..\Auxilia.AI\Auxilia.AI.csproj" />
   </ItemGroup>
 </Project>

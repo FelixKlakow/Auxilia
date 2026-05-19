@@ -1,9 +1,11 @@
 namespace Auxilia.Workflows.AiAgent;
 
 /// <summary>
-/// Runtime contract for AI invocation inside a workflow.
-/// Provider packages implement this interface; method signatures are defined during blueprint planning.
-/// Workflow code depends on this contract, not on any specific AI SDK.
+/// Behavioral contract for AI invocation inside a workflow.
+/// Provider packages implement this interface. Workflow code depends only on this contract,
+/// never on any specific AI SDK.
 /// </summary>
-[Obsolete("Use IAiInference instead.")]
-public interface IAiAgent { }
+public interface IAiAgent
+{
+    Task<IAiSession> OpenSessionAsync(CancellationToken cancellationToken = default);
+}
