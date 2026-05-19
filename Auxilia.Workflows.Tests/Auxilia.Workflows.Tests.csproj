@@ -24,6 +24,8 @@
   <ItemGroup>
     <ProjectReference Include="..\Auxilia.AI\Auxilia.AI.csproj" />
     <ProjectReference Include="..\Auxilia.Workflows\Auxilia.Workflows.csproj" />
+    <ProjectReference Include="..\Source\Auxilia.Workflows.AiAgent\Auxilia.Workflows.AiAgent.csproj" />
+    <ProjectReference Include="..\Source\Auxilia.Workflows.SourceControl\Auxilia.Workflows.SourceControl.csproj" />
   </ItemGroup>
 
 </Project>

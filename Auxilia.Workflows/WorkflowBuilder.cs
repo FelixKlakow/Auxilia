@@ -17,9 +17,13 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     private readonly List<WorkflowOutputDescriptor> _outputs = new();
     private readonly WorkflowMetadata _metadata = new();
 
+    private Action<IServiceCollection>? _configureServices;
+    private Func<IServiceProvider, Task>? _application;
+
     private const string StateQueueName = "workflow.state";
 
     public static IWorkflowRunContext? TestContext { get; set; }
+    public static SlotHandlerResolver? TestSlotHandlerResolver { get; set; }
 
     internal TimeSpan _directiveTimeout = TimeSpan.FromSeconds(30);
 
@@ -60,6 +64,18 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     public IWorkflowBuilder DeclaresOutput(string name, string relativePath, string? description = null)
     {
         _outputs.Add(new WorkflowOutputDescriptor(name, relativePath, description));
+        return this;
+    }
+
+    public IWorkflowBuilder ConfigureServices(Action<IServiceCollection> configure)
+    {
+        _configureServices = configure;
+        return this;
+    }
+
+    public IWorkflowBuilder WithApplication(Func<IServiceProvider, Task> run)
+    {
+        _application = run;
         return this;
     }
 
@@ -146,8 +162,15 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                     var services = new ServiceCollection();
                     if (TestContext == null)
                         new WorkflowBootstrapper(response, keyPair, new SlotHandlerResolver()).Apply(services);
-                    await using (services.BuildServiceProvider())
+                    else if (TestSlotHandlerResolver is { } testResolver)
+                        new WorkflowBootstrapper(response, keyPair, testResolver).Apply(services);
+
+                    _configureServices?.Invoke(services);
+
+                    await using (var provider = services.BuildServiceProvider())
                     {
+                        if (_application != null && (TestContext == null || TestSlotHandlerResolver != null))
+                            await _application(provider);
                     }
 
                     await context.MessageBus.PublishAsync(StateQueueName,
