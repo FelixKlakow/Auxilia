@@ -124,7 +124,7 @@ public sealed class PrimaryReviewOrchestratorTests
 
     private sealed class FakeAiAgent(string verdict, bool oneFinding = false) : IAiAgent
     {
-        public Task<IAiSession> OpenSessionAsync(CancellationToken cancellationToken = default)
+        public Task<IAiSession> OpenSessionAsync(AiSessionOptions? options = null, CancellationToken cancellationToken = default)
             => Task.FromResult<IAiSession>(new FakeAiSession(verdict, oneFinding));
     }
 

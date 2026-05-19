@@ -116,7 +116,7 @@ public sealed class FindingsAggregatorTests
     {
         private int _callIndex;
 
-        public Task<IAiSession> OpenSessionAsync(CancellationToken cancellationToken = default)
+        public Task<IAiSession> OpenSessionAsync(AiSessionOptions? options = null, CancellationToken cancellationToken = default)
         {
             var verdict = verdictSequence.Length == 0 ? "Approved"
                 : verdictSequence[Math.Min(_callIndex++, verdictSequence.Length - 1)];

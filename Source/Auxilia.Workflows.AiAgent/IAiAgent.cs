@@ -7,5 +7,5 @@ namespace Auxilia.Workflows.AiAgent;
 /// </summary>
 public interface IAiAgent
 {
-    Task<IAiSession> OpenSessionAsync(CancellationToken cancellationToken = default);
+    Task<IAiSession> OpenSessionAsync(AiSessionOptions? options = null, CancellationToken cancellationToken = default);
 }

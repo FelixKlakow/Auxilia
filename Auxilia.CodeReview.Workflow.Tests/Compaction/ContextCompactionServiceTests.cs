@@ -51,7 +51,7 @@ public sealed class ContextCompactionServiceTests
 
     private sealed class FakeAiAgent : IAiAgent
     {
-        public Task<IAiSession> OpenSessionAsync(CancellationToken cancellationToken = default)
+        public Task<IAiSession> OpenSessionAsync(AiSessionOptions? options = null, CancellationToken cancellationToken = default)
             => Task.FromResult<IAiSession>(new FakeAiSession());
     }
 

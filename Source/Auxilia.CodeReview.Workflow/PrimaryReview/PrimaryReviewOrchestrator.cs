@@ -21,7 +21,7 @@ public sealed class PrimaryReviewOrchestrator(
         if (context.Files.Count == 0)
             return;
 
-        var session = await aiAgent.OpenSessionAsync(cancellationToken);
+        var session = await aiAgent.OpenSessionAsync(cancellationToken: cancellationToken);
         try
         {
             foreach (var file in context.Files)
