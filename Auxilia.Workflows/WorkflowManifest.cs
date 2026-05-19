@@ -9,4 +9,7 @@ public sealed record WorkflowManifest(
     IReadOnlyList<IEnvironmentRequirement> EnvironmentRequirements,
     string Version,
     IReadOnlyList<string> Tags,
-    IReadOnlyList<WorkflowOutputDescriptor> Outputs);
+    IReadOnlyList<WorkflowOutputDescriptor> Outputs)
+{
+    public IReadOnlyList<SignalDescriptor> Signals { get; init; } = [];
+}

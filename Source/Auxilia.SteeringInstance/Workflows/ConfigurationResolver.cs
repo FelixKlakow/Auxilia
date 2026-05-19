@@ -8,6 +8,7 @@ namespace Auxilia.SteeringInstance.Workflows;
 
 public sealed class ConfigurationResolver(
     SlotConfigurationStore store,
+    SignalHandlerStore signalHandlerStore,
     ILogger<ConfigurationResolver> logger)
 {
     public ResolverResult Resolve(string workflowTypeName, string publicKeyBase64)
@@ -65,6 +66,11 @@ public sealed class ConfigurationResolver(
                 Convert.ToBase64String(cipherBytes));
         }
 
-        return ResolverResult.Ok(encrypted);
+        var signalHandlers = signalHandlerStore.GetHandlers(workflowTypeName);
+        var handlerMap = new Dictionary<string, ISignalHandlerDescriptor>(signalHandlers.Count);
+        foreach (var handler in signalHandlers)
+            handlerMap[handler.SignalName] = handler.HandlerDescriptor;
+
+        return ResolverResult.Ok(encrypted, handlerMap);
     }
 }

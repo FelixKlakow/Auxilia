@@ -16,7 +16,7 @@ public class ConfigurationResolverTests
     public void SetUp()
     {
         _store = new SlotConfigurationStore();
-        _resolver = new ConfigurationResolver(_store, NullLogger<ConfigurationResolver>.Instance);
+        _resolver = new ConfigurationResolver(_store, new SignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance);
     }
 
     [Test]

@@ -55,10 +55,13 @@ try
     // --- Workflow services ---
     builder.Services.AddSingleton<WorkflowSchemaStore>();
     builder.Services.AddSingleton<SlotConfigurationStore>();
+    builder.Services.AddSingleton<SignalHandlerStore>();
+    builder.Services.AddSingleton<WorkflowInstanceRegistry>();
     builder.Services.AddSingleton<DirtyConfigurationDetector>();
     builder.Services.AddSingleton<EnvironmentValidator>();
     builder.Services.AddSingleton<ConfigurationResolver>();
     builder.Services.AddSingleton<WorkflowRegistrationHandler>();
+    builder.Services.AddSingleton<SignalDispatcher>();
 
     // --- OpenTelemetry (tracing + metrics) ---
     var otlpEndpoint = builder.Configuration["Otlp:Endpoint"];
@@ -102,6 +105,9 @@ try
 
     var handler = app.Services.GetRequiredService<WorkflowRegistrationHandler>();
     await handler.StartAsync(app.Lifetime.ApplicationStopping);
+
+    var signalDispatcher = app.Services.GetRequiredService<SignalDispatcher>();
+    await signalDispatcher.StartAsync(app.Lifetime.ApplicationStopping);
 
     app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
     app.MapPrometheusScrapingEndpoint(); // GET /metrics

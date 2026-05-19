@@ -9,6 +9,7 @@ public sealed class WorkflowRegistrationHandler(
     IMessageBusClient messageBus,
     EnvironmentValidator environmentValidator,
     ConfigurationResolver configResolver,
+    WorkflowInstanceRegistry instanceRegistry,
     ILogger<WorkflowRegistrationHandler> logger)
 {
     private readonly ConcurrentDictionary<Guid, byte> _registeredInstances = new();
@@ -67,9 +68,11 @@ public sealed class WorkflowRegistrationHandler(
             request.WorkflowInstanceId,
             true,
             null,
-            resolverResult.Slots),
+            resolverResult.Slots,
+            resolverResult.SignalHandlers),
             cancellationToken);
 
         _registeredInstances.TryAdd(request.WorkflowInstanceId, 0);
+        instanceRegistry.Register(request.WorkflowInstanceId, request.Manifest.WorkflowName);
     }
 }

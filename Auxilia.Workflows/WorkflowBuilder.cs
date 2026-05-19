@@ -6,6 +6,8 @@ using Auxilia.Workflows.Internal;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
+using System.Text.Json.Schema;
 
 namespace Auxilia.Workflows;
 
@@ -15,6 +17,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     private readonly List<SlotDefinition> _slots = new();
     private readonly List<IEnvironmentRequirement> _environmentRequirements = new();
     private readonly List<WorkflowOutputDescriptor> _outputs = new();
+    private readonly List<SignalDescriptor> _signals = new();
     private readonly WorkflowMetadata _metadata = new();
 
     private Action<IServiceCollection>? _configureServices;
@@ -64,6 +67,15 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     public IWorkflowBuilder DeclaresOutput(string name, string relativePath, string? description = null)
     {
         _outputs.Add(new WorkflowOutputDescriptor(name, relativePath, description));
+        return this;
+    }
+
+    public IWorkflowBuilder DeclaresSignal<TPayload>(string name, string? description = null)
+    {
+        if (_signals.Any(s => s.Name == name))
+            throw new InvalidOperationException($"A signal with name '{name}' has already been declared.");
+        var schema = JsonSchemaExporter.GetJsonSchemaAsNode(JsonSerializerOptions.Default, typeof(TPayload));
+        _signals.Add(new SignalDescriptor(name, typeof(TPayload).FullName ?? typeof(TPayload).Name, schema.ToJsonString(), description));
         return this;
     }
 
@@ -156,14 +168,15 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 }
 
                 await context.MessageBus.DeclareQueueAsync(StateQueueName);
+                await context.MessageBus.DeclareQueueAsync("workflow.signals");
 
                 try
                 {
                     var services = new ServiceCollection();
                     if (TestContext == null)
-                        new WorkflowBootstrapper(response, keyPair, new SlotHandlerResolver()).Apply(services);
+                        new WorkflowBootstrapper(response, keyPair, new SlotHandlerResolver(), instanceId).Apply(services);
                     else if (TestSlotHandlerResolver is { } testResolver)
-                        new WorkflowBootstrapper(response, keyPair, testResolver).Apply(services);
+                        new WorkflowBootstrapper(response, keyPair, testResolver, instanceId).Apply(services);
 
                     _configureServices?.Invoke(services);
 
@@ -198,10 +211,14 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
         {
             Version = _metadata.Version,
             Tags = _metadata.Tags.ToList().AsReadOnly(),
-            Outputs = _outputs.AsReadOnly()
+            Outputs = _outputs.AsReadOnly(),
+            Signals = _signals.AsReadOnly()
         };
 
     internal WorkflowManifest BuildManifest(Guid instanceId = default)
         => new(_workflowName, instanceId.ToString("D"), _slots.AsReadOnly(), _environmentRequirements.AsReadOnly(),
-            _metadata.Version, _metadata.Tags.ToList().AsReadOnly(), _outputs.AsReadOnly());
+            _metadata.Version, _metadata.Tags.ToList().AsReadOnly(), _outputs.AsReadOnly())
+        {
+            Signals = _signals.AsReadOnly()
+        };
 }

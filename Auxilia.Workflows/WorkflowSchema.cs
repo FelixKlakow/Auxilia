@@ -11,4 +11,5 @@ public sealed record WorkflowSchema(
     public string Version { get; init; } = string.Empty;
     public IReadOnlyList<string> Tags { get; init; } = [];
     public IReadOnlyList<WorkflowOutputDescriptor> Outputs { get; init; } = [];
+    public IReadOnlyList<SignalDescriptor> Signals { get; init; } = [];
 }
