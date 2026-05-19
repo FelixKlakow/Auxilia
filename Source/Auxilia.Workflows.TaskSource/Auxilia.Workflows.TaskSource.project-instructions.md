@@ -5,8 +5,7 @@ Slot-package that adds task/issue-tracker vocabulary to the workflow SDK. Declar
 ## File / Folder Map
 ```
 Source/Auxilia.Workflows.TaskSource/
-├── ITaskSource.cs                           # Runtime interface — GetWorkItemAsync, GetWorkItemsAsync
-├── WorkItem.cs                              # record(Id, Title, Description?, Type) — returned by ITaskSource
+├── ITaskSource.cs                           # Runtime interface for reading/writing work items
 ├── TaskSourceCapabilities.cs                # ICapability: SupportedItemTypes[]
 ├── ItemType.cs                              # Enum of work-item types (Bug, Feature, Task, Epic…)
 └── TaskSourceWorkflowBuilderExtensions.cs   # RequiresTaskSource() — thin wrapper over builder.Requires<T>
