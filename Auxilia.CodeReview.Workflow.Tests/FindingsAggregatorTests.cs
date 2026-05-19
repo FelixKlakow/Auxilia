@@ -1,4 +1,3 @@
-using Auxilia.AI;
 using Auxilia.CodeReview.Workflow.Context;
 using Auxilia.CodeReview.Workflow.Findings;
 using Auxilia.Workflows.AiAgent;
@@ -31,7 +30,7 @@ public sealed class FindingsAggregatorTests
     public async Task PrIdentifier_DerivedFromContextPullRequest()
     {
         var svc = new TwoEyesPassService(
-            new FakeAiInference("Approved"),
+            new FakeAiAgent("Approved"),
             new TwoEyesConfiguration { Enabled = false });
         var agg = new FindingsAggregator(svc);
 
@@ -44,7 +43,7 @@ public sealed class FindingsAggregatorTests
     public async Task AggregateAsync_DisabledTwoEyes_AllFindingsSurvive()
     {
         var svc = new TwoEyesPassService(
-            new FakeAiInference(),
+            new FakeAiAgent(),
             new TwoEyesConfiguration { Enabled = false });
         var agg = new FindingsAggregator(svc);
 
@@ -58,8 +57,8 @@ public sealed class FindingsAggregatorTests
     public async Task AggregateAsync_SomeRejected_OnlyApprovedAndNotReviewedSurvive()
     {
         var svc = new TwoEyesPassService(
-            new FakeAiInference("Approved", "Rejected", "Approved"),
-            new TwoEyesConfiguration { Enabled = true, SecondarySlotName = "secondary-reviewer" });
+            new FakeAiAgent("Approved", "Rejected", "Approved"),
+            new TwoEyesConfiguration { Enabled = true });
         var agg = new FindingsAggregator(svc);
 
         var store = MakeStore(MakeFinding("a.cs"), MakeFinding("b.cs"), MakeFinding("c.cs"));
@@ -73,7 +72,7 @@ public sealed class FindingsAggregatorTests
     public async Task PrimaryAttribution_PopulatedFromStagedFinding()
     {
         var svc = new TwoEyesPassService(
-            new FakeAiInference(),
+            new FakeAiAgent(),
             new TwoEyesConfiguration { Enabled = false });
         var agg = new FindingsAggregator(svc);
 
@@ -87,8 +86,8 @@ public sealed class FindingsAggregatorTests
     public async Task SecondaryAttribution_PopulatedWhenTwoEyesEnabled()
     {
         var svc = new TwoEyesPassService(
-            new FakeAiInference("Approved"),
-            new TwoEyesConfiguration { Enabled = true, SecondarySlotName = "secondary-reviewer" });
+            new FakeAiAgent("Approved"),
+            new TwoEyesConfiguration { Enabled = true });
         var agg = new FindingsAggregator(svc);
 
         var store = MakeStore(MakeFinding());
@@ -101,7 +100,7 @@ public sealed class FindingsAggregatorTests
     public async Task SecondaryAttribution_NullWhenTwoEyesDisabled()
     {
         var svc = new TwoEyesPassService(
-            new FakeAiInference(),
+            new FakeAiAgent(),
             new TwoEyesConfiguration { Enabled = false });
         var agg = new FindingsAggregator(svc);
 
@@ -113,37 +112,23 @@ public sealed class FindingsAggregatorTests
 
     // ---- Fake helpers ----
 
-    private sealed class FakeAiInference(params string[] verdictSequence) : IAiInference
+    private sealed class FakeAiAgent(params string[] verdictSequence) : IAiAgent
     {
         private int _callIndex;
 
-        public Task<IAgentSession> CreateSessionAsync(string slotName)
+        public Task<IAiSession> OpenSessionAsync(CancellationToken cancellationToken = default)
         {
             var verdict = verdictSequence.Length == 0 ? "Approved"
                 : verdictSequence[Math.Min(_callIndex++, verdictSequence.Length - 1)];
-            return Task.FromResult<IAgentSession>(new FakeSession(verdict));
+            return Task.FromResult<IAiSession>(new FakeAiSession(verdict));
         }
     }
 
-    private sealed class FakeSession(string verdict) : IAgentSession
+    private sealed class FakeAiSession(string verdict) : IAiSession
     {
-        public Guid Id { get; } = Guid.NewGuid();
-        public Guid? LinkedWorkflowId => null;
-        public string SdkName => "fake";
-        public DateTime CreatedAtUtc { get; } = DateTime.UtcNow;
-        public IObservable<AgentEvent> Events => System.Reactive.Linq.Observable.Empty<AgentEvent>();
-        public IAgentRequest PrepareRequest(string prompt) => new FakeRequest(this, prompt, verdict);
-        public void Dispose() { }
-    }
+        public Task<string> ExecuteAsync(string prompt, CancellationToken cancellationToken = default)
+            => Task.FromResult($"{{\"verdict\":\"{verdict}\"}}");
 
-    private sealed class FakeRequest(IAgentSession session, string prompt, string verdict) : IAgentRequest
-    {
-        public string Prompt => prompt;
-        public IAgentSession Session => session;
-        public IAgentRequest WithNonDefaultModel(string modelName) => this;
-
-        public Task<TValidatorResult> ExecuteRequestAsync<TValidatorResult>(
-            IAgentResultValidator<TValidatorResult> validator, CancellationToken cancellationToken)
-            => validator.ValidateAsync(this, $"{{\"verdict\":\"{verdict}\"}}");
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

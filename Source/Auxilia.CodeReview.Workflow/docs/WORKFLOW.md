@@ -27,7 +27,6 @@ Use this workflow when you want a consistent, configurable code-review process d
 | Property | Type | Default | Effect |
 |---|---|---|---|
 | `Enabled` | `bool` | `false` | When `true`, each staged finding is independently reviewed by the `secondary-reviewer` slot before inclusion in the result. When `false`, all staged findings are included with `SecondaryVerdict.NotReviewed`. |
-| `SecondarySlotName` | `string` | `"secondary-reviewer"` | The slot name passed to `IAiInference.CreateSessionAsync` for the secondary pass. Override to route to a different named AI slot. |
 
 ### `WriteBackConfiguration`
 
@@ -74,7 +73,7 @@ Phase 2 — Context Assembly (ContextAssembler)
         │
         ▼
 Phase 3 — Primary Review Pass (PrimaryReviewOrchestrator)
-  Opens a single IAgentSession for "primary-reviewer".
+  Opens a single IAiSession for "primary-reviewer".
   Iterates every ReviewableFile; sends hunk content to the session.
   Records FileVerdict in VerdictMap; stages findings in IStagedFindingsStore.
   Enforces: Skipped verdict on Critical file → FileVerdict.Failed.
@@ -86,7 +85,7 @@ Phase 4 — Two-Eyes Pass and Aggregation (TwoEyesPassService + FindingsAggregat
   When TwoEyesConfiguration.Enabled = false:
     All staged findings are wrapped as ReviewFinding with SecondaryVerdict.NotReviewed.
   When enabled:
-    Opens one IAgentSession per finding for "secondary-reviewer".
+    Opens one IAiSession per finding for "secondary-reviewer".
     Records SecondaryVerdict.Approved or SecondaryVerdict.Rejected.
   FindingsAggregator filters to Approved + NotReviewed and builds CodeReviewResult.
         │

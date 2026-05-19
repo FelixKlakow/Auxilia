@@ -1,4 +1,3 @@
-using Auxilia.AI;
 using Auxilia.CodeReview.Workflow.Compaction;
 using Auxilia.Workflows.AiAgent;
 using Microsoft.Extensions.Options;
@@ -40,43 +39,27 @@ public sealed class ContextCompactionServiceTests
     public async Task CompactAsync_ReturnsNewSession()
     {
         var svc = Build();
-        var inference = new FakeAiInference();
-        var original = await inference.CreateSessionAsync("primary-reviewer");
+        var fakeAgent = new FakeAiAgent();
+        var original = await fakeAgent.OpenSessionAsync();
 
-        var replacement = await svc.CompactAsync(original, inference, "primary-reviewer");
+        var replacement = await svc.CompactAsync(original, fakeAgent);
 
         Assert.That(replacement, Is.Not.SameAs(original));
-        original.Dispose();
-        replacement.Dispose();
     }
 
     // ---- Fake helpers ----
 
-    private sealed class FakeAiInference : IAiInference
+    private sealed class FakeAiAgent : IAiAgent
     {
-        public Task<IAgentSession> CreateSessionAsync(string slotName)
-            => Task.FromResult<IAgentSession>(new FakeSession());
+        public Task<IAiSession> OpenSessionAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IAiSession>(new FakeAiSession());
     }
 
-    private sealed class FakeSession : IAgentSession
+    private sealed class FakeAiSession : IAiSession
     {
-        public Guid Id { get; } = Guid.NewGuid();
-        public Guid? LinkedWorkflowId => null;
-        public string SdkName => "fake";
-        public DateTime CreatedAtUtc { get; } = DateTime.UtcNow;
-        public IObservable<AgentEvent> Events => System.Reactive.Linq.Observable.Empty<AgentEvent>();
-        public IAgentRequest PrepareRequest(string prompt) => new FakeRequest(this, prompt);
-        public void Dispose() { }
-    }
+        public Task<string> ExecuteAsync(string prompt, CancellationToken cancellationToken = default)
+            => Task.FromResult("summary of findings");
 
-    private sealed class FakeRequest(IAgentSession session, string prompt) : IAgentRequest
-    {
-        public string Prompt => prompt;
-        public IAgentSession Session => session;
-        public IAgentRequest WithNonDefaultModel(string modelName) => this;
-
-        public Task<TValidatorResult> ExecuteRequestAsync<TValidatorResult>(
-            IAgentResultValidator<TValidatorResult> validator, CancellationToken cancellationToken)
-            => validator.ValidateAsync(this, "summary of findings");
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }
