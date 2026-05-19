@@ -6,7 +6,7 @@ using Auxilia.Workflows.TaskSource;
 
 namespace Auxilia.CodeReview.Workflow.Tests.Scenarios;
 
-[TestFixture, Category("Scenario")]
+[TestFixture, Category("Component")]
 public sealed class WorkItemSummaryTests : ScenarioTestBase
 {
     [Test]

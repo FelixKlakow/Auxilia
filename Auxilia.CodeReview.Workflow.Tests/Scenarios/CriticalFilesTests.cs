@@ -5,13 +5,13 @@ using Auxilia.Workflows.PullRequestAccess;
 
 namespace Auxilia.CodeReview.Workflow.Tests.Scenarios;
 
-[TestFixture, Category("Scenario")]
+[TestFixture, Category("Component")]
 public sealed class CriticalFilesTests : ScenarioTestBase
 {
     private const string CriticalPattern = "**/*.critical.cs";
 
     [Test]
-    public async Task CriticalFile_PrimarySkips_WorkflowSucceeds_NoFindingsPosted()
+    public async Task CriticalFile_PrimarySkips_WorkflowFails_NoFindingsPosted()
     {
         var pullRequest = new FakePullRequestAccess(
             changedFiles: [File("src/Auth.critical.cs")],
@@ -34,7 +34,8 @@ public sealed class CriticalFilesTests : ScenarioTestBase
 
         var result = await RunScenarioAsync(registry);
 
-        Assert.That(result.State, Is.EqualTo(WorkflowState.Success));
+        Assert.That(result.State, Is.EqualTo(WorkflowState.Failed),
+            "Workflow fails when a critical file receives a Skipped verdict");
         Assert.That(pullRequest.PostedComments.Count, Is.EqualTo(0),
             "Skipped critical file produces no surviving findings");
     }
