@@ -1,7 +1,8 @@
 namespace Auxilia.Workflows.SourceControl;
 
 /// <summary>
-/// Marker interface representing the source-control DI service type.
-/// Provider packages implement this interface. Workflow code depends on it.
+/// Runtime contract for source-control access inside a workflow.
+/// Provider packages implement this interface; method signatures are defined during blueprint planning.
+/// Workflow code depends on this contract, not on any specific source-control SDK.
 /// </summary>
 public interface ISourceControl { }
