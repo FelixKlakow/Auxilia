@@ -54,5 +54,9 @@ public static class PullRequestReviewWorkflow
 
         var publisher = sp.GetRequiredService<TerminalStatePublisher>();
         await publisher.PublishAsync(result, metrics);
+
+        if (metrics.FailedFileCount > 0)
+            throw new InvalidOperationException(
+                $"{metrics.FailedFileCount} critical file(s) received a Failed verdict and could not be reviewed. Workflow aborted.");
     }
 }

@@ -21,7 +21,7 @@ public sealed class PrimaryReviewOrchestrator(
         if (context.Files.Count == 0)
             return;
 
-        var session = await aiAgent.OpenSessionAsync(cancellationToken: cancellationToken);
+        var session = await OpenSessionWithRetryAsync(cancellationToken);
         try
         {
             foreach (var file in context.Files)
@@ -41,6 +41,24 @@ public sealed class PrimaryReviewOrchestrator(
         {
             await session.DisposeAsync();
         }
+    }
+
+    private async Task<IAiSession> OpenSessionWithRetryAsync(CancellationToken cancellationToken)
+    {
+        const int MaxAttempts = 2;
+        Exception? last = null;
+        for (int attempt = 1; attempt <= MaxAttempts; attempt++)
+        {
+            try
+            {
+                return await aiAgent.OpenSessionAsync(cancellationToken: cancellationToken);
+            }
+            catch (Exception ex) when (attempt < MaxAttempts)
+            {
+                last = ex;
+            }
+        }
+        throw last!;
     }
 
     private async Task ReviewFileAsync(IAiSession session, ReviewableFile file, CancellationToken cancellationToken)

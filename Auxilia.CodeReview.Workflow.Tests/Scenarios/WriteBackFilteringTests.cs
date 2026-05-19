@@ -10,7 +10,7 @@ namespace Auxilia.CodeReview.Workflow.Tests.Scenarios;
 /// WriteBackService posts findings where <c>f.Severity &lt;= config.MinimumSeverity</c>
 /// (lower ordinal = more critical). So MinimumSeverity=High posts Critical and High only.
 /// </summary>
-[TestFixture, Category("Scenario")]
+[TestFixture, Category("Component")]
 public sealed class WriteBackFilteringTests : ScenarioTestBase
 {
     // The ReviewedTurn produces a Medium-severity finding.

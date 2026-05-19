@@ -68,6 +68,9 @@ public sealed class CriticalFileCoverageTests : ScenarioTestBase
 
         var result = await RunScenarioAsync(registry);
 
+        Assert.That(result.State, Is.EqualTo(WorkflowState.Failed),
+            "Workflow must fail when a critical file is skipped");
+
         var metricsJson = await System.IO.File.ReadAllTextAsync(Path.Combine(OutputDir, "coverage-metrics.json"));
         var metrics = JsonSerializer.Deserialize<CoverageMetrics>(metricsJson,
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;

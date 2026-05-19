@@ -8,20 +8,10 @@ namespace Auxilia.CodeReview.Workflow.Tests.Scenarios;
 public sealed class AiProviderFailureTests : ScenarioTestBase
 {
     [Test]
-    [Ignore("PrimaryReviewOrchestrator has no retry logic; transient failure cannot be recovered")]
     public async Task TransientFailure_Retries_Succeeds()
     {
-        // This test is not implementable against the current production code because
-        // PrimaryReviewOrchestrator calls OpenSessionAsync once with no retry loop.
-        // If a retry mechanism is added, remove the [Ignore] and script a primary FakeAiAgent
-        // whose first OpenSessionAsync call throws and whose second succeeds.
-        await Task.CompletedTask;
-    }
-
-    [Test]
-    public async Task PermanentFailure_ExhaustsRetries_Fails()
-    {
-        // Empty transcript queue → OpenSessionAsync throws InvalidOperationException on first call.
+        // Primary AI fails on the first OpenSessionAsync call, then succeeds on the second.
+        // PrimaryReviewOrchestrator retries once, so the workflow should complete successfully.
         var pullRequest = new FakePullRequestAccess(
             changedFiles: [File("src/Foo.cs")],
             diffHunks: new Dictionary<string, IReadOnlyList<DiffHunk>>
@@ -29,7 +19,38 @@ public sealed class AiProviderFailureTests : ScenarioTestBase
                 ["src/Foo.cs"] = [Hunk("src/Foo.cs")],
             });
 
-        var primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>()); // exhausted queue
+        // initialFailCount=1 causes the first call to throw; the retry succeeds from the queue
+        var primaryAi = new FakeAiAgent(
+            new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn()]]),
+            initialFailCount: 1);
+
+        var registry = new CodeReviewFakeRegistry(
+            new FakeSourceControlAccess(),
+            pullRequest,
+            new FakeWorkItemAccess(),
+            primaryAi,
+            new FakeAiAgent(new Queue<ScriptedTurn>()),
+            OutputDir);
+
+        var result = await RunScenarioAsync(registry);
+
+        Assert.That(result.State, Is.EqualTo(WorkflowState.Success),
+            "One transient failure should be recovered by the retry logic");
+    }
+
+    [Test]
+    public async Task PermanentFailure_ExhaustsRetries_Fails()
+    {
+        // All OpenSessionAsync calls throw — both the initial attempt and the retry fail.
+        var pullRequest = new FakePullRequestAccess(
+            changedFiles: [File("src/Foo.cs")],
+            diffHunks: new Dictionary<string, IReadOnlyList<DiffHunk>>
+            {
+                ["src/Foo.cs"] = [Hunk("src/Foo.cs")],
+            });
+
+        // Empty queue → every OpenSessionAsync call throws "Transcript is exhausted..."
+        var primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>());
 
         var registry = new CodeReviewFakeRegistry(
             new FakeSourceControlAccess(),
@@ -43,5 +64,7 @@ public sealed class AiProviderFailureTests : ScenarioTestBase
 
         Assert.That(result.State, Is.EqualTo(WorkflowState.Failed),
             "Workflow must fail when the primary AI provider is permanently unavailable");
+        Assert.That(result.ErrorMessage, Does.Contain("session").Or.Contain("Transcript").Or.Contain("provider"),
+            "Error message should reference the AI session or provider failure");
     }
 }
