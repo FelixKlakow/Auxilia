@@ -4,20 +4,26 @@ namespace Auxilia.CodeReview.Workflow.Tests.Fakes;
 
 public sealed class FakeAiSession : IAiSession
 {
-    private readonly ScriptedTurn _turn;
+    private readonly IReadOnlyList<ScriptedTurn> _turns;
 
-    public FakeAiSession(ScriptedTurn turn)
+    public FakeAiSession(ScriptedTurn turn) : this(new[] { turn }) { }
+
+    public FakeAiSession(IReadOnlyList<ScriptedTurn> turns)
     {
-        _turn = turn;
+        _turns = turns;
     }
 
     public Task<string> ExecuteAsync(string prompt, CancellationToken cancellationToken = default)
     {
-        if (!prompt.Contains(_turn.ExpectedPromptSubstring))
-            throw new InvalidOperationException(
-                $"Prompt mismatch. Expected substring: '{_turn.ExpectedPromptSubstring}'. Actual prompt: '{prompt}'");
+        foreach (var turn in _turns)
+        {
+            if (turn.ExpectedPromptSubstring == "" || prompt.Contains(turn.ExpectedPromptSubstring))
+                return Task.FromResult(turn.Response);
+        }
 
-        return Task.FromResult(_turn.Response);
+        var available = string.Join(", ", _turns.Select(t => $"'{t.ExpectedPromptSubstring}'"));
+        throw new InvalidOperationException(
+            $"No scripted turn matched prompt. Available substrings: [{available}]. Prompt: '{prompt}'");
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

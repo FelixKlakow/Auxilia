@@ -51,7 +51,7 @@ public class PluginManifestVerifierTests
     }
 
     [Test]
-    public void Verify_TamperedAssemblyBytes_ReturnsFalse()
+    public void Verify_TamperedBytes_ReturnsFalse()
     {
         var tampered = (byte[])_assemblyBytes.Clone();
         tampered[0] ^= 0xFF;
@@ -64,7 +64,7 @@ public class PluginManifestVerifierTests
     }
 
     [Test]
-    public void Verify_CorrectHashButInvalidSignature_ReturnsFalse()
+    public void Verify_ValidHashInvalidSignature_ReturnsFalse()
     {
         using var otherKey = RSA.Create(2048);
         var hash = SHA256.HashData(_assemblyBytes);
@@ -80,7 +80,7 @@ public class PluginManifestVerifierTests
     }
 
     [Test]
-    public void Verify_DeveloperModeActive_ReturnsTrueAndLogsWarning()
+    public void Verify_DeveloperModeActive_ReturnsTrueWithWarningLog()
     {
         var invalidManifest = new PluginManifest("dev-provider", "aA==", "cw==", "cA==");
         var loggerMock = new Mock<ILogger<PluginManifestVerifier>>();

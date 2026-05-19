@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Auxilia.Workflows.Testing\Auxilia.Workflows.Testing.csproj" />
+    <ProjectReference Include="..\Source\Auxilia.Workflows.AiAgent\Auxilia.Workflows.AiAgent.csproj" />
   </ItemGroup>
 
 </Project>

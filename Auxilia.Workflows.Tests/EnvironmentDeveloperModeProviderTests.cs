@@ -16,7 +16,7 @@ public class EnvironmentDeveloperModeProviderTests
             EnvironmentVariableTarget.Process);
 
     [Test]
-    public void IsActive_WhenVariableIs1_ReturnsTrue()
+    public void IsActive_EnvVar1_ReturnsTrue()
     {
         global::System.Environment.SetEnvironmentVariable("AUXILIA_DEVELOPER_MODE", "1",
             EnvironmentVariableTarget.Process);
@@ -27,7 +27,7 @@ public class EnvironmentDeveloperModeProviderTests
     }
 
     [Test]
-    public void IsActive_WhenVariableIsTrue_ReturnsTrue()
+    public void IsActive_EnvVarTrue_ReturnsTrue()
     {
         global::System.Environment.SetEnvironmentVariable("AUXILIA_DEVELOPER_MODE", "true",
             EnvironmentVariableTarget.Process);
@@ -38,7 +38,7 @@ public class EnvironmentDeveloperModeProviderTests
     }
 
     [Test]
-    public void IsActive_WhenVariableIsYes_ReturnsTrue()
+    public void IsActive_EnvVarYes_ReturnsTrue()
     {
         global::System.Environment.SetEnvironmentVariable("AUXILIA_DEVELOPER_MODE", "YES",
             EnvironmentVariableTarget.Process);
@@ -49,9 +49,20 @@ public class EnvironmentDeveloperModeProviderTests
     }
 
     [Test]
-    public void IsActive_WhenVariableNotSet_ReturnsFalse()
+    public void IsActive_NotSet_ReturnsFalse()
     {
         global::System.Environment.SetEnvironmentVariable("AUXILIA_DEVELOPER_MODE", null,
+            EnvironmentVariableTarget.Process);
+
+        var sut = new EnvironmentDeveloperModeProvider();
+
+        Assert.That(sut.IsActive, Is.False);
+    }
+
+    [Test]
+    public void IsActive_EmptyString_ReturnsFalse()
+    {
+        global::System.Environment.SetEnvironmentVariable("AUXILIA_DEVELOPER_MODE", "",
             EnvironmentVariableTarget.Process);
 
         var sut = new EnvironmentDeveloperModeProvider();

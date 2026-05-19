@@ -67,7 +67,7 @@ public class PluginLoaderTests
         => new(providerType, path, new PluginManifest(providerType, "aA==", "cw==", "cA=="));
 
     [Test]
-    public void Load_RegistersHandler_WhenVerificationSucceeds()
+    public void Load_ValidAssemblyVerifierTrue_RegistersHandler()
     {
         var dllPath = CreateTempDllFile();
         var inMemoryAssembly = BuildSingleHandlerAssembly();
@@ -85,7 +85,7 @@ public class PluginLoaderTests
     }
 
     [Test]
-    public void Load_ThrowsPluginVerificationException_WhenVerifierReturnsFalse()
+    public void Load_VerifierReturnsFalse_ThrowsPluginVerificationException()
     {
         var dllPath = CreateTempDllFile();
         var assemblyLoaderCalled = false;
@@ -109,7 +109,7 @@ public class PluginLoaderTests
     }
 
     [Test]
-    public void Load_ThrowsInvalidOperationException_WhenAssemblyHasNoSlotHandler()
+    public void Load_AssemblyWithNoHandlerType_ThrowsInvalidOperationException()
     {
         var dllPath = CreateTempDllFile();
         var emptyAssembly = BuildNoHandlerAssembly();
@@ -125,7 +125,7 @@ public class PluginLoaderTests
     }
 
     [Test]
-    public void Load_RegistersBothHandlers_ForTwoPluginsWithDifferentProviderTypes()
+    public void Load_TwoValidPlugins_BothRegistered()
     {
         var dllA = CreateTempDllFile();
         var dllB = CreateTempDllFile();

@@ -1,4 +1,5 @@
 using Auxilia.Workflows.Capabilities;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Auxilia.Workflows;
 
@@ -12,6 +13,10 @@ public interface IWorkflowBuilder
     IWorkflowBuilder WithMetadata(Action<WorkflowMetadata> configure);
 
     IWorkflowBuilder DeclaresOutput(string name, string relativePath, string? description = null);
+
+    IWorkflowBuilder ConfigureServices(Action<IServiceCollection> configure);
+
+    IWorkflowBuilder WithApplication(Func<IServiceProvider, Task> run);
 
     Task Run(string[] args);
 

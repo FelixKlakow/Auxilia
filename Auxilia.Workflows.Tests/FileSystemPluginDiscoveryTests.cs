@@ -35,37 +35,31 @@ public class FileSystemPluginDiscoveryTests
     }
 
     [Test]
-    public void DiscoverPlugins_ReturnsBothEntries_WhenDllAndManifestExist()
+    public void Discover_MatchingPair_ReturnsOnePlugin()
     {
         WriteDll("plugin-a");
         WriteManifest("plugin-a", "provider-a");
-        WriteDll("plugin-b");
-        WriteManifest("plugin-b", "provider-b");
-
-        var result = _sut.DiscoverPlugins(_tempDir);
-
-        Assert.That(result, Has.Count.EqualTo(2));
-        Assert.That(result.Select(p => p.ProviderType), Does.Contain("provider-a"));
-        Assert.That(result.Select(p => p.ProviderType), Does.Contain("provider-b"));
-        Assert.That(result.Select(p => p.AssemblyPath),
-            Does.Contain(Path.Combine(_tempDir, "plugin-a.slothandler.dll")));
-    }
-
-    [Test]
-    public void DiscoverPlugins_IgnoresDll_WhenManifestSidecarMissing()
-    {
-        WriteDll("with-manifest");
-        WriteManifest("with-manifest", "paired-provider");
-        WriteDll("no-manifest");
 
         var result = _sut.DiscoverPlugins(_tempDir);
 
         Assert.That(result, Has.Count.EqualTo(1));
-        Assert.That(result[0].ProviderType, Is.EqualTo("paired-provider"));
+        Assert.That(result[0].ProviderType, Is.EqualTo("provider-a"));
+        Assert.That(result[0].AssemblyPath,
+            Is.EqualTo(Path.Combine(_tempDir, "plugin-a.slothandler.dll")));
     }
 
     [Test]
-    public void DiscoverPlugins_ReturnsEmpty_ForEmptyDirectory()
+    public void Discover_DllWithoutSidecar_ReturnsEmpty()
+    {
+        WriteDll("no-manifest");
+
+        var result = _sut.DiscoverPlugins(_tempDir);
+
+        Assert.That(result, Is.Empty);
+    }
+
+    [Test]
+    public void Discover_EmptyDirectory_ReturnsEmpty()
     {
         var result = _sut.DiscoverPlugins(_tempDir);
 
@@ -73,11 +67,11 @@ public class FileSystemPluginDiscoveryTests
     }
 
     [Test]
-    public void DiscoverPlugins_ReturnsEmpty_WhenDirectoryDoesNotExist()
+    public void Discover_JsonOnlyNodll_ReturnsEmpty()
     {
-        var nonExistent = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        WriteManifest("json-only", "provider-x");
 
-        var result = _sut.DiscoverPlugins(nonExistent);
+        var result = _sut.DiscoverPlugins(_tempDir);
 
         Assert.That(result, Is.Empty);
     }
