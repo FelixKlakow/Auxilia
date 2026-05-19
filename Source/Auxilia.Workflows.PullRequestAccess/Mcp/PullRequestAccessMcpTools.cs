@@ -15,12 +15,15 @@ public sealed class PullRequestAccessMcpTools : CapabilityMcpToolsBase
         string slotName,
         IPullRequestAccess access,
         ILoggerFactory? loggerFactory = null)
-        : base(slotName, BuildOptions(slotName, access), loggerFactory)
+        : base(slotName, BuildOptions(slotName, access, loggerFactory), loggerFactory)
     {
     }
 
-    private static McpServerOptions BuildOptions(string slotName, IPullRequestAccess access)
+    private static McpServerOptions BuildOptions(string slotName, IPullRequestAccess access, ILoggerFactory? loggerFactory)
     {
+        var logger = loggerFactory?.CreateLogger<PullRequestAccessMcpTools>();
+        var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
         var options = new McpServerOptions
         {
             ToolCollection = new McpServerPrimitiveCollection<McpServerTool>(),
@@ -34,9 +37,18 @@ public sealed class PullRequestAccessMcpTools : CapabilityMcpToolsBase
         options.ToolCollection.Add(McpServerTool.Create(
             async (CancellationToken ct) =>
             {
-                var files = await access.GetChangedFilesAsync(ct);
-                return JsonSerializer.Serialize(
-                    files.Select(f => new { filePath = f.RelativePath, kind = f.Kind.ToString() }));
+                try
+                {
+                    var files = await access.GetChangedFilesAsync(ct);
+                    return JsonSerializer.Serialize(
+                        files.Select(f => new { filePath = f.RelativePath, kind = f.Kind.ToString() }),
+                        jsonOptions);
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogError(ex, "Error in get_changed_files");
+                    return $"Error: {ex.Message}";
+                }
             },
             new McpServerToolCreateOptions
             {
@@ -47,16 +59,24 @@ public sealed class PullRequestAccessMcpTools : CapabilityMcpToolsBase
         options.ToolCollection.Add(McpServerTool.Create(
             async (string filePath, CancellationToken ct) =>
             {
-                var hunks = await access.GetDiffHunksAsync(filePath, ct);
-                return JsonSerializer.Serialize(hunks.Select(h => new
+                try
                 {
-                    filePath = h.FilePath,
-                    oldStart = h.OldStart,
-                    oldCount = h.OldCount,
-                    newStart = h.NewStart,
-                    newCount = h.NewCount,
-                    content = h.Content
-                }));
+                    var hunks = await access.GetDiffHunksAsync(filePath, ct);
+                    return JsonSerializer.Serialize(hunks.Select(h => new
+                    {
+                        filePath = h.FilePath,
+                        oldStart = h.OldStart,
+                        oldCount = h.OldCount,
+                        newStart = h.NewStart,
+                        newCount = h.NewCount,
+                        content = h.Content
+                    }), jsonOptions);
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogError(ex, "Error in get_diff_hunks");
+                    return $"Error: {ex.Message}";
+                }
             },
             new McpServerToolCreateOptions
             {
@@ -67,16 +87,24 @@ public sealed class PullRequestAccessMcpTools : CapabilityMcpToolsBase
         options.ToolCollection.Add(McpServerTool.Create(
             async (CancellationToken ct) =>
             {
-                var comments = await access.GetCommentsAsync(ct);
-                return JsonSerializer.Serialize(comments.Select(c => new
+                try
                 {
-                    id = c.Id,
-                    body = c.Body,
-                    author = c.Author,
-                    filePath = c.FilePath,
-                    lineNumber = c.LineNumber,
-                    createdAt = c.CreatedAt
-                }));
+                    var comments = await access.GetCommentsAsync(ct);
+                    return JsonSerializer.Serialize(comments.Select(c => new
+                    {
+                        id = c.Id,
+                        body = c.Body,
+                        author = c.Author,
+                        filePath = c.FilePath,
+                        lineNumber = c.LineNumber,
+                        createdAt = c.CreatedAt
+                    }), jsonOptions);
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogError(ex, "Error in get_comments");
+                    return $"Error: {ex.Message}";
+                }
             },
             new McpServerToolCreateOptions
             {
@@ -87,13 +115,21 @@ public sealed class PullRequestAccessMcpTools : CapabilityMcpToolsBase
         options.ToolCollection.Add(McpServerTool.Create(
             async (CancellationToken ct) =>
             {
-                var items = await access.GetLinkedWorkItemsAsync(ct);
-                return JsonSerializer.Serialize(items.Select(i => new
+                try
                 {
-                    id = i.Id,
-                    title = i.Title,
-                    url = i.Url
-                }));
+                    var items = await access.GetLinkedWorkItemsAsync(ct);
+                    return JsonSerializer.Serialize(items.Select(i => new
+                    {
+                        id = i.Id,
+                        title = i.Title,
+                        url = i.Url
+                    }), jsonOptions);
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogError(ex, "Error in get_linked_work_items");
+                    return $"Error: {ex.Message}";
+                }
             },
             new McpServerToolCreateOptions
             {
@@ -104,8 +140,16 @@ public sealed class PullRequestAccessMcpTools : CapabilityMcpToolsBase
         options.ToolCollection.Add(McpServerTool.Create(
             async (string body, string? filePath, int? lineNumber, CancellationToken ct) =>
             {
-                await access.PostCommentAsync(body, filePath, lineNumber, ct);
-                return "Comment posted.";
+                try
+                {
+                    await access.PostCommentAsync(body, filePath, lineNumber, ct);
+                    return "Comment posted.";
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogError(ex, "Error in post_comment");
+                    return $"Error: {ex.Message}";
+                }
             },
             new McpServerToolCreateOptions
             {
