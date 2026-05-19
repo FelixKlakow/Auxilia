@@ -1,3 +1,4 @@
+using System;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
@@ -15,15 +16,18 @@ public sealed class SourceControlAccessMcpTools : CapabilityMcpToolsBase
         string slotName,
         ISourceControlAccess access,
         ILoggerFactory? loggerFactory = null)
-        : base(slotName, BuildOptions(slotName, access), loggerFactory)
+        : base(slotName, BuildOptions(slotName, access, loggerFactory), loggerFactory)
     {
     }
 
-    private static McpServerOptions BuildOptions(string slotName, ISourceControlAccess access)
+    private static McpServerOptions BuildOptions(string slotName, ISourceControlAccess access, ILoggerFactory? loggerFactory)
     {
+        var logger = loggerFactory?.CreateLogger<SourceControlAccessMcpTools>();
+
         var options = new McpServerOptions
         {
             ToolCollection = new McpServerPrimitiveCollection<McpServerTool>(),
+            ResourceCollection = new McpServerResourceCollection(),
             ServerInfo = new ModelContextProtocol.Protocol.Implementation
             {
                 Name = slotName,
@@ -33,7 +37,17 @@ public sealed class SourceControlAccessMcpTools : CapabilityMcpToolsBase
 
         options.ToolCollection.Add(McpServerTool.Create(
             async (string? relativePath, CancellationToken ct) =>
-                string.Join("\n", await access.ListFilesAsync(relativePath, ct)),
+            {
+                try
+                {
+                    return string.Join(global::System.Environment.NewLine, await access.ListFilesAsync(relativePath, ct));
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogError(ex, "Error in list_files");
+                    return $"Error: {ex.Message}";
+                }
+            },
             new McpServerToolCreateOptions
             {
                 Name = SlotMcpPrefix.Format(slotName, "list_files"),
@@ -42,7 +56,17 @@ public sealed class SourceControlAccessMcpTools : CapabilityMcpToolsBase
 
         options.ToolCollection.Add(McpServerTool.Create(
             async (string relativePath, CancellationToken ct) =>
-                await access.ReadFileContentAsync(relativePath, ct),
+            {
+                try
+                {
+                    return await access.ReadFileContentAsync(relativePath, ct);
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogError(ex, "Error in read_file");
+                    return $"Error: {ex.Message}";
+                }
+            },
             new McpServerToolCreateOptions
             {
                 Name = SlotMcpPrefix.Format(slotName, "read_file"),
@@ -52,14 +76,33 @@ public sealed class SourceControlAccessMcpTools : CapabilityMcpToolsBase
         options.ToolCollection.Add(McpServerTool.Create(
             async (string baseRef, string headRef, CancellationToken ct) =>
             {
-                var files = await access.GetChangedFilesAsync(baseRef, headRef, ct);
-                return JsonSerializer.Serialize(
-                    files.Select(f => new { filePath = f.RelativePath, kind = f.Kind.ToString() }));
+                try
+                {
+                    var files = await access.GetChangedFilesAsync(baseRef, headRef, ct);
+                    return JsonSerializer.Serialize(
+                        files.Select(f => new { relativePath = f.RelativePath, kind = f.Kind.ToString() }),
+                        new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogError(ex, "Error in get_changed_files");
+                    return $"Error: {ex.Message}";
+                }
             },
             new McpServerToolCreateOptions
             {
                 Name = SlotMcpPrefix.Format(slotName, "get_changed_files"),
                 Description = "Returns a JSON array of files changed between two refs."
+            }));
+
+        options.ResourceCollection.Add(McpServerResource.Create(
+            () => access.WorkingPath,
+            new McpServerResourceCreateOptions
+            {
+                UriTemplate = "scm://working-path",
+                Name = "working-path",
+                Description = "The working path of the source control repository.",
+                MimeType = "text/plain"
             }));
 
         return options;

@@ -14,12 +14,14 @@ public sealed class AiInferenceMcpTools : CapabilityMcpToolsBase
         string slotName,
         IAiAgent agent,
         ILoggerFactory? loggerFactory = null)
-        : base(slotName, BuildOptions(slotName, agent), loggerFactory)
+        : base(slotName, BuildOptions(slotName, agent, loggerFactory), loggerFactory)
     {
     }
 
-    private static McpServerOptions BuildOptions(string slotName, IAiAgent agent)
+    private static McpServerOptions BuildOptions(string slotName, IAiAgent agent, ILoggerFactory? loggerFactory)
     {
+        var logger = loggerFactory?.CreateLogger<AiInferenceMcpTools>();
+
         var options = new McpServerOptions
         {
             ToolCollection = new McpServerPrimitiveCollection<McpServerTool>(),
@@ -33,10 +35,18 @@ public sealed class AiInferenceMcpTools : CapabilityMcpToolsBase
         options.ToolCollection.Add(McpServerTool.Create(
             async (string prompt, CancellationToken ct) =>
             {
-                var session = await agent.OpenSessionAsync(null, ct);
-                await using (session)
+                try
                 {
-                    return await session.ExecuteAsync(prompt, ct);
+                    var session = await agent.OpenSessionAsync(null, ct);
+                    await using (session)
+                    {
+                        return await session.ExecuteAsync(prompt, ct);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogError(ex, "Error in run_inference");
+                    return $"Error: {ex.Message}";
                 }
             },
             new McpServerToolCreateOptions
