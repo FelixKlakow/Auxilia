@@ -7,7 +7,8 @@ Note: `IAiAgent` (slot contract) is intentionally independent of `Auxilia.AI` (t
 ## File / Folder Map
 ```
 Source/Auxilia.Workflows.AiAgent/
-├── IAiAgent.cs                            # Runtime interface for AI invocation inside a workflow
+├── IAiAgent.cs                            # Runtime interface — CreateSession(systemPrompt?) → IAiAgentSession
+├── IAiAgentSession.cs                     # Session contract — WithMcpServerTools, ExecuteAsync
 ├── AiCapabilities.cs                      # ICapability: MinContextWindow, SupportedModalities[], MaxOutputTokens?
 ├── Modality.cs                            # Enum: Text, Vision, Audio…
 └── AiAgentWorkflowBuilderExtensions.cs    # RequiresAiAgent() — thin wrapper over builder.Requires<T>
