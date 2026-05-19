@@ -7,17 +7,17 @@ namespace Auxilia.Workflows.Tests.Mcp;
 public class SlotMcpPrefixTests
 {
     [Test]
-    public void Format_ValidInputs_ReturnsSlashSeparatedName()
+    public void Format_ValidInputs_ReturnsDotSeparatedName()
     {
         var result = SlotMcpPrefix.Format("primary-scm", "list_files");
-        Assert.That(result, Is.EqualTo("primary-scm/list_files"));
+        Assert.That(result, Is.EqualTo("primary-scm.list_files"));
     }
 
     [Test]
     public void Format_ValidInputs_ReturnsPrefixedName()
     {
         var result = SlotMcpPrefix.Format("primary-scm", "list_files");
-        Assert.That(result, Is.EqualTo("primary-scm/list_files"));
+        Assert.That(result, Is.EqualTo("primary-scm.list_files"));
     }
 
     [Test]
@@ -57,9 +57,9 @@ public class SlotMcpPrefixTests
     }
 
     [Test]
-    public void Format_ToolNameContainsSlash_ThrowsArgumentException()
+    public void Format_ToolNameContainsDot_ThrowsArgumentException()
     {
-        Assert.Throws<ArgumentException>(() => SlotMcpPrefix.Format("slot", "a/b"));
+        Assert.Throws<ArgumentException>(() => SlotMcpPrefix.Format("slot", "a.b"));
     }
 
     [Test]

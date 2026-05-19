@@ -85,4 +85,35 @@ public class McpTransportConfigTests
 
         Assert.That(url, Is.EqualTo("http://localhost:8080"));
     }
+
+    [Test]
+    public void NamedPipeMcpTransportConfig_IsPatternMatchableAsMcpTransportConfig()
+    {
+        McpTransportConfig config = new NamedPipeMcpTransportConfig("test-pipe", "pipe-server");
+
+        var pipeName = config switch
+        {
+            NamedPipeMcpTransportConfig pipe => pipe.PipeName,
+            _ => null
+        };
+
+        Assert.That(pipeName, Is.EqualTo("test-pipe"));
+    }
+
+    [Test]
+    public void NamedPipeMcpTransportConfig_RecordEquality_HoldsForSameValues()
+    {
+        var a = new NamedPipeMcpTransportConfig("my-pipe", "srv");
+        var b = new NamedPipeMcpTransportConfig("my-pipe", "srv");
+
+        Assert.That(a, Is.EqualTo(b));
+    }
+
+    [Test]
+    public void NamedPipeMcpTransportConfig_McpServerName_IsAccessible()
+    {
+        McpTransportConfig config = new NamedPipeMcpTransportConfig("some-pipe", "pipe-srv");
+
+        Assert.That(config.McpServerName, Is.EqualTo("pipe-srv"));
+    }
 }
