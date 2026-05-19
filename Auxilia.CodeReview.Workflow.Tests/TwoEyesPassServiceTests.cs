@@ -97,7 +97,7 @@ public sealed class TwoEyesPassServiceTests
         private int _callIndex;
         public int SessionsCreated { get; private set; }
 
-        public Task<IAiSession> OpenSessionAsync(CancellationToken cancellationToken = default)
+        public Task<IAiSession> OpenSessionAsync(AiSessionOptions? options = null, CancellationToken cancellationToken = default)
         {
             SessionsCreated++;
             var verdict = verdictSequence.Length == 0 ? "Approved"
