@@ -16,7 +16,8 @@ public class WorkflowRegistrationHandlerTests
     private static WorkflowRegistrationHandler MakeHandler(
         CapturingFakeMessageBusClient messageBus,
         EnvironmentValidator? envValidator = null,
-        ConfigurationResolver? configResolver = null)
+        ConfigurationResolver? configResolver = null,
+        WorkflowInstanceRegistry? instanceRegistry = null)
     {
         var profile = new RunnerProfile
         {
@@ -28,14 +29,17 @@ public class WorkflowRegistrationHandlerTests
             NullLogger<EnvironmentValidator>.Instance);
 
         var store = new SlotConfigurationStore();
+        var signalStore = new SignalHandlerStore();
         var resolver = configResolver ?? new ConfigurationResolver(
             store,
+            signalStore,
             NullLogger<ConfigurationResolver>.Instance);
 
         return new WorkflowRegistrationHandler(
             messageBus,
             validator,
             resolver,
+            instanceRegistry ?? new WorkflowInstanceRegistry(),
             NullLogger<WorkflowRegistrationHandler>.Instance);
     }
 
@@ -98,7 +102,7 @@ public class WorkflowRegistrationHandlerTests
             new StoredSlotConfiguration("slotA", "ProviderX",
                 new Dictionary<string, string> { ["key"] = "val" },
                 ConfigurationStatus.Dirty));
-        var resolver = new ConfigurationResolver(store, NullLogger<ConfigurationResolver>.Instance);
+        var resolver = new ConfigurationResolver(store, new SignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance);
 
         var request = new WorkflowRegistrationRequest(
             Guid.NewGuid(),
@@ -129,7 +133,7 @@ public class WorkflowRegistrationHandlerTests
             new StoredSlotConfiguration("slotA", "ProviderX",
                 new Dictionary<string, string> { ["key"] = "val" },
                 ConfigurationStatus.Valid));
-        var resolver = new ConfigurationResolver(store, NullLogger<ConfigurationResolver>.Instance);
+        var resolver = new ConfigurationResolver(store, new SignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance);
 
         var request = new WorkflowRegistrationRequest(
             Guid.NewGuid(),
@@ -163,7 +167,7 @@ public class WorkflowRegistrationHandlerTests
             new StoredSlotConfiguration("slotA", "ProviderX",
                 new Dictionary<string, string> { ["key"] = "val" },
                 ConfigurationStatus.Valid));
-        var resolver = new ConfigurationResolver(store, NullLogger<ConfigurationResolver>.Instance);
+        var resolver = new ConfigurationResolver(store, new SignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance);
 
         var instanceId = Guid.NewGuid();
         var request = new WorkflowRegistrationRequest(

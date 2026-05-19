@@ -14,6 +14,8 @@ public interface IWorkflowBuilder
 
     IWorkflowBuilder DeclaresOutput(string name, string relativePath, string? description = null);
 
+    IWorkflowBuilder DeclaresSignal<TPayload>(string name, string? description = null);
+
     IWorkflowBuilder ConfigureServices(Action<IServiceCollection> configure);
 
     IWorkflowBuilder WithApplication(Func<IServiceProvider, Task> run);
