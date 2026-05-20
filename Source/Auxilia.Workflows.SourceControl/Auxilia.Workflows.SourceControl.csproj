@@ -10,4 +10,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\Auxilia.Workflows\Auxilia.Workflows.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Auxilia.Workflows.Tests" />
+    <InternalsVisibleTo Include="Auxilia.Workflows.SlotPackages.Tests" />
+  </ItemGroup>
 </Project>

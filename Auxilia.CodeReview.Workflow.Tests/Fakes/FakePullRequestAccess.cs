@@ -49,4 +49,7 @@ public sealed class FakePullRequestAccess : IPullRequestAccess
         PostedComments.Add((body, filePath, lineNumber));
         return Task.CompletedTask;
     }
+
+    public Task<string> OpenPullRequestAsync(PullRequestOptions options, CancellationToken cancellationToken = default)
+        => Task.FromResult("https://example.com/pr/1");
 }

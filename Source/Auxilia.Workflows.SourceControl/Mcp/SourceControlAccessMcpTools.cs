@@ -10,7 +10,7 @@ namespace Auxilia.Workflows.SourceControl.Mcp;
 /// MCP tool server for <see cref="ISourceControlAccess"/>.
 /// Exposes source-control operations as prefixed MCP tools under the given slot name.
 /// </summary>
-public sealed class SourceControlAccessMcpTools : CapabilityMcpToolsBase
+public class SourceControlAccessMcpTools : CapabilityMcpToolsBase
 {
     public SourceControlAccessMcpTools(
         string slotName,
@@ -20,7 +20,16 @@ public sealed class SourceControlAccessMcpTools : CapabilityMcpToolsBase
     {
     }
 
-    private static McpServerOptions BuildOptions(string slotName, ISourceControlAccess access, ILoggerFactory? loggerFactory)
+    protected SourceControlAccessMcpTools(
+        string slotName,
+        ISourceControlAccess access,
+        McpServerOptions options,
+        ILoggerFactory? loggerFactory)
+        : base(slotName, options, loggerFactory)
+    {
+    }
+
+    internal static McpServerOptions BuildOptions(string slotName, ISourceControlAccess access, ILoggerFactory? loggerFactory)
     {
         var logger = loggerFactory?.CreateLogger<SourceControlAccessMcpTools>();
 

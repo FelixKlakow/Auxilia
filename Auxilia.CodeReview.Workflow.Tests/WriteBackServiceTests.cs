@@ -111,6 +111,9 @@ public sealed class WriteBackServiceTests
             PostCommentCount++;
             return Task.CompletedTask;
         }
+
+        public Task<string> OpenPullRequestAsync(PullRequestOptions options, CancellationToken cancellationToken = default)
+            => Task.FromResult("https://example.com/pr/1");
     }
 
     private sealed class FakeWorkItemAccess : IWorkItemAccess
