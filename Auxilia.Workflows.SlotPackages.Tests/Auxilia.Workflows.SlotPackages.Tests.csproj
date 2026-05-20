@@ -24,5 +24,6 @@
     <ProjectReference Include="..\Source\Auxilia.Workflows.PullRequestAccess\Auxilia.Workflows.PullRequestAccess.csproj" />
     <ProjectReference Include="..\Source\Auxilia.Workflows.SourceControl\Auxilia.Workflows.SourceControl.csproj" />
     <ProjectReference Include="..\Source\Auxilia.Workflows.AiAgent\Auxilia.Workflows.AiAgent.csproj" />
+    <ProjectReference Include="..\Source\Auxilia.Workflows.TestRunner\Auxilia.Workflows.TestRunner.csproj" />
   </ItemGroup>
 </Project>

@@ -41,6 +41,7 @@
     <Project Path="Auxilia.Workflows.Testing.Tests\Auxilia.Workflows.Testing.Tests.csproj" />
     <Project Path="Source\Auxilia.Workflows.AiAgent\Auxilia.Workflows.AiAgent.csproj" />
     <Project Path="Source\Auxilia.Workflows.PullRequestAccess\Auxilia.Workflows.PullRequestAccess.csproj" />
+    <Project Path="Source\Auxilia.Workflows.TestRunner\Auxilia.Workflows.TestRunner.csproj" />
   </Folder>
   <Folder Name="/06_WorkflowImplementations/">
     <Project Path="Source\Auxilia.CodeReview.Workflow\Auxilia.CodeReview.Workflow.csproj" />

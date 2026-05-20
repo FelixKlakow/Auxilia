@@ -27,4 +27,7 @@ public sealed class StubPullRequestAccess : IPullRequestAccess
 
     public Task PostCommentAsync(string body, string? filePath = null, int? lineNumber = null, CancellationToken cancellationToken = default)
         => Task.CompletedTask;
+
+    public Task<string> OpenPullRequestAsync(PullRequestOptions options, CancellationToken cancellationToken = default)
+        => Task.FromResult("https://example.com/pr/1");
 }

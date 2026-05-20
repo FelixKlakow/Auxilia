@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using Auxilia.Workflows.Mcp;
+using Auxilia.Workflows.Policy;
 
 namespace Auxilia.Workflows.PullRequestAccess.Mcp;
 
@@ -19,7 +20,7 @@ public sealed class PullRequestAccessMcpTools : CapabilityMcpToolsBase
     {
     }
 
-    private static McpServerOptions BuildOptions(string slotName, IPullRequestAccess access, ILoggerFactory? loggerFactory)
+    internal static McpServerOptions BuildOptions(string slotName, IPullRequestAccess access, ILoggerFactory? loggerFactory)
     {
         var logger = loggerFactory?.CreateLogger<PullRequestAccessMcpTools>();
         var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
@@ -155,6 +156,32 @@ public sealed class PullRequestAccessMcpTools : CapabilityMcpToolsBase
             {
                 Name = SlotMcpPrefix.Format(slotName, "post_comment"),
                 Description = "Posts a review comment on this pull request."
+            }));
+
+        options.ToolCollection.Add(McpServerTool.Create(
+            async (string optionsJson, CancellationToken ct) =>
+            {
+                try
+                {
+                    var prOptions = JsonSerializer.Deserialize<PullRequestOptions>(optionsJson, jsonOptions)
+                        ?? throw new ArgumentException("Failed to deserialize PullRequestOptions.");
+                    var url = await access.OpenPullRequestAsync(prOptions, ct);
+                    return $"Pull request opened: {url}";
+                }
+                catch (ToolPolicyDeniedException ex)
+                {
+                    return $"Operation denied by tool policy: {ex.Key}";
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogError(ex, "Error in open_pull_request");
+                    return $"Error: {ex.Message}";
+                }
+            },
+            new McpServerToolCreateOptions
+            {
+                Name = SlotMcpPrefix.Format(slotName, "open_pull_request"),
+                Description = "Opens a new pull request. Accepts a JSON object with title, sourceBranch, targetBranch, and optional description and linkedWorkItemIds."
             }));
 
         return options;

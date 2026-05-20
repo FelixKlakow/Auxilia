@@ -12,4 +12,6 @@ public interface IPullRequestAccess
     Task<IReadOnlyList<WorkItemReference>> GetLinkedWorkItemsAsync(CancellationToken cancellationToken = default);
 
     Task PostCommentAsync(string body, string? filePath = null, int? lineNumber = null, CancellationToken cancellationToken = default);
+
+    Task<string> OpenPullRequestAsync(PullRequestOptions options, CancellationToken cancellationToken = default);
 }
