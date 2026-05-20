@@ -46,6 +46,8 @@
   <Folder Name="/06_WorkflowImplementations/">
     <Project Path="Source\Auxilia.CodeReview.Workflow\Auxilia.CodeReview.Workflow.csproj" />
     <Project Path="Auxilia.CodeReview.Workflow.Tests\Auxilia.CodeReview.Workflow.Tests.csproj" />
+    <Project Path="Source\Auxilia.ImplementationWorkflow\Auxilia.ImplementationWorkflow.csproj" />
+    <Project Path="Auxilia.ImplementationWorkflow.Tests\Auxilia.ImplementationWorkflow.Tests.csproj" />
   </Folder>
   <Project Path="Auxilia.SystemTestSuite\Auxilia.SystemTestSuite.csproj" />
 </Solution>

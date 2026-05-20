@@ -1,6 +1,7 @@
 using Auxilia.Workflows.Crypto;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Auxilia.Workflows;
 
@@ -21,6 +22,6 @@ public sealed class WorkflowBootstrapper(
 
         var contextId = instanceId == default ? Guid.NewGuid() : instanceId;
         services.AddSingleton(new WorkflowInstanceContext(contextId));
-        services.AddSingleton<ISignalEmitter, DefaultSignalEmitter>();
+        services.TryAddSingleton<ISignalEmitter, DefaultSignalEmitter>();
     }
 }

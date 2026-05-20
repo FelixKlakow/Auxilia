@@ -1,3 +1,5 @@
+using Auxilia.Workflows.Mcp;
+
 namespace Auxilia.Workflows.AiAgent;
 
 /// <summary>
@@ -10,4 +12,10 @@ public sealed record AiSessionOptions
     /// When <c>null</c>, the provider uses the slot's configured system prompt.
     /// </summary>
     public string? SystemPrompt { get; init; }
+
+    /// <summary>
+    /// Already-started MCP tool servers to register with the AI agent session.
+    /// When <c>null</c>, no MCP tools are registered.
+    /// </summary>
+    public IReadOnlyList<ICapabilityMcpTools>? CapabilityTools { get; init; }
 }

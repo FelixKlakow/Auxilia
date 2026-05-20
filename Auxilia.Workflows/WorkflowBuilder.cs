@@ -173,6 +173,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 try
                 {
                     var services = new ServiceCollection();
+                    services.AddSingleton(context.MessageBus);
                     if (TestContext == null)
                         new WorkflowBootstrapper(response, keyPair, new SlotHandlerResolver(), instanceId).Apply(services);
                     else if (TestSlotHandlerResolver is { } testResolver)
