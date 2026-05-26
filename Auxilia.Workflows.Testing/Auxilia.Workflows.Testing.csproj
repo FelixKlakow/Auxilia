@@ -10,4 +10,8 @@
     <ProjectReference Include="..\Auxilia.Workflows\Auxilia.Workflows.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="DummyWorkflows\" />
+  </ItemGroup>
+
 </Project>
