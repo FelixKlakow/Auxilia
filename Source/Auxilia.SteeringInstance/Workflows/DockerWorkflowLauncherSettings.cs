@@ -25,5 +25,12 @@ public sealed class DockerWorkflowLauncherSettings
     public string RabbitMqUserName { get; set; } = "guest";
 
     public string RabbitMqPassword { get; set; } = "guest";
+
+    /// <summary>
+    /// URI of the Docker daemon socket used to launch workflow containers.
+    /// Defaults to the standard Unix socket. Override in config or env for remote daemons.
+    /// </summary>
+    public string DockerSocketPath { get; set; } = "unix:///var/run/docker.sock";
 }
+
 

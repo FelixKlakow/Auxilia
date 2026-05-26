@@ -3,115 +3,106 @@ using Auxilia.SteeringInstance.Workflows;
 namespace Auxilia.SteeringInstance.Tests.Workflows;
 
 /// <summary>
-/// Tests for <see cref="DockerWorkflowLauncher.BuildDockerArgs"/> — the pure argument-building
-/// logic — without requiring Docker to be present or running.
+/// Tests for <see cref="DockerWorkflowLauncher.BuildCreateContainerParameters"/> — the pure
+/// parameter-building logic — without requiring a live Docker daemon.
 /// </summary>
 [TestFixture]
 [Category("Unit")]
-public class DockerWorkflowLauncherArgTests
+public class DockerWorkflowLauncherParamTests
 {
     private static WorkflowLaunchRequest SimpleRequest(
         string image = "my-image:latest",
         Dictionary<string, string>? env = null)
-        => new(image, (env ?? new Dictionary<string, string>()).AsReadOnly());
+        => new(image, (IReadOnlyDictionary<string, string>)(env ?? new Dictionary<string, string>()));
 
-    // ------------------------------------------------------------------ network flag
+    // ------------------------------------------------------------------ image
 
     [Test]
-    public void WhenNetworkNameConfigured_NetworkFlagPresentInArgs()
+    public void ImageIsSetOnParameters()
     {
-        var settings = new DockerWorkflowLauncherSettings { NetworkName = "auxilia-net" };
-        var args = DockerWorkflowLauncher.BuildDockerArgs(SimpleRequest(), settings);
+        var settings = new DockerWorkflowLauncherSettings();
+        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(
+            SimpleRequest("my-workflow:v2"), settings);
 
-        var list = args.ToList();
-        Assert.That(list, Does.Contain("--network"));
-        var networkIdx = list.IndexOf("--network");
-        Assert.That(list[networkIdx + 1], Is.EqualTo("auxilia-net"));
+        Assert.That(p.Image, Is.EqualTo("my-workflow:v2"));
     }
 
-    [Test]
-    public void WhenNetworkNameNull_NetworkFlagAbsentFromArgs()
-    {
-        var settings = new DockerWorkflowLauncherSettings { NetworkName = null };
-        var args = DockerWorkflowLauncher.BuildDockerArgs(SimpleRequest(), settings);
-
-        Assert.That(args, Does.Not.Contain("--network"));
-    }
+    // ------------------------------------------------------------------ env vars
 
     [Test]
-    public void WhenNetworkNameEmptyString_NetworkFlagAbsentFromArgs()
-    {
-        var settings = new DockerWorkflowLauncherSettings { NetworkName = "  " };
-        var args = DockerWorkflowLauncher.BuildDockerArgs(SimpleRequest(), settings);
-
-        Assert.That(args, Does.Not.Contain("--network"));
-    }
-
-    // ------------------------------------------------------------------ image placement
-
-    [Test]
-    public void ImageIsAlwaysLastArgument()
-    {
-        var settings = new DockerWorkflowLauncherSettings { NetworkName = "net" };
-        var args = DockerWorkflowLauncher.BuildDockerArgs(
-            SimpleRequest("my-image:tag", new Dictionary<string, string> { ["K"] = "V" }),
-            settings);
-
-        Assert.That(args[^1], Is.EqualTo("my-image:tag"));
-    }
-
-    // ------------------------------------------------------------------ env var injection
-
-    [Test]
-    public void WhenEnvVarsProvided_EachHasADashEFlag()
+    public void WhenEnvVarsProvided_AllAppearAsKeyEqualsValueStrings()
     {
         var env = new Dictionary<string, string>
         {
             ["KEY_A"] = "value_a",
             ["KEY_B"] = "value_b"
         };
-        var settings = new DockerWorkflowLauncherSettings { NetworkName = null };
-        var args = DockerWorkflowLauncher.BuildDockerArgs(SimpleRequest(env: env), settings).ToList();
+        var settings = new DockerWorkflowLauncherSettings();
+        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(SimpleRequest(env: env), settings);
 
-        // Two -e flags expected
-        Assert.That(args.Count(a => a == "-e"), Is.EqualTo(2));
+        Assert.That(p.Env, Does.Contain("KEY_A=value_a"));
+        Assert.That(p.Env, Does.Contain("KEY_B=value_b"));
     }
 
     [Test]
-    public void WhenEnvVarContainsEquals_PassedAsSingleArgument()
+    public void WhenEnvVarValueContainsEquals_SerializedAsSingleEntry()
     {
-        // Value with an equals sign must not be split into separate args
         var env = new Dictionary<string, string> { ["URL"] = "http://host/path?a=1&b=2" };
-        var settings = new DockerWorkflowLauncherSettings { NetworkName = null };
-        var args = DockerWorkflowLauncher.BuildDockerArgs(SimpleRequest(env: env), settings).ToList();
+        var settings = new DockerWorkflowLauncherSettings();
+        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(SimpleRequest(env: env), settings);
 
-        var eIdx = args.IndexOf("-e");
-        Assert.That(eIdx, Is.GreaterThanOrEqualTo(0));
-        // The value following -e must be a single string containing the full key=value
-        Assert.That(args[eIdx + 1], Is.EqualTo("URL=http://host/path?a=1&b=2"));
+        Assert.That(p.Env, Does.Contain("URL=http://host/path?a=1&b=2"));
+        // Must be one entry, not split on '='
+        Assert.That(p.Env!.Count(e => e.StartsWith("URL=")), Is.EqualTo(1));
     }
 
     [Test]
-    public void WhenEnvVarValueContainsSpace_PassedAsSingleArgument()
+    public void WhenNoEnvVars_EnvListIsEmpty()
     {
-        var env = new Dictionary<string, string> { ["MSG"] = "hello world" };
-        var settings = new DockerWorkflowLauncherSettings { NetworkName = null };
-        var args = DockerWorkflowLauncher.BuildDockerArgs(SimpleRequest(env: env), settings).ToList();
+        var settings = new DockerWorkflowLauncherSettings();
+        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(SimpleRequest(), settings);
 
-        var eIdx = args.IndexOf("-e");
-        Assert.That(args[eIdx + 1], Is.EqualTo("MSG=hello world"));
+        Assert.That(p.Env, Is.Empty);
     }
 
-    // ------------------------------------------------------------------ structure
+    // ------------------------------------------------------------------ network
 
     [Test]
-    public void ArgsAlwaysStartWithRunAndDetachedFlag()
+    public void WhenNetworkNameConfigured_NetworkingConfigContainsIt()
+    {
+        var settings = new DockerWorkflowLauncherSettings { NetworkName = "auxilia-net" };
+        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(SimpleRequest(), settings);
+
+        Assert.That(p.NetworkingConfig, Is.Not.Null);
+        Assert.That(p.NetworkingConfig!.EndpointsConfig.ContainsKey("auxilia-net"), Is.True);
+    }
+
+    [Test]
+    public void WhenNetworkNameNull_NetworkingConfigIsNull()
     {
         var settings = new DockerWorkflowLauncherSettings { NetworkName = null };
-        var args = DockerWorkflowLauncher.BuildDockerArgs(SimpleRequest(), settings);
+        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(SimpleRequest(), settings);
 
-        Assert.That(args[0], Is.EqualTo("run"));
-        Assert.That(args[1], Is.EqualTo("-d"));
+        Assert.That(p.NetworkingConfig, Is.Null);
+    }
+
+    [Test]
+    public void WhenNetworkNameWhitespace_NetworkingConfigIsNull()
+    {
+        var settings = new DockerWorkflowLauncherSettings { NetworkName = "   " };
+        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(SimpleRequest(), settings);
+
+        Assert.That(p.NetworkingConfig, Is.Null);
+    }
+
+    // ------------------------------------------------------------------ host config
+
+    [Test]
+    public void AutoRemoveIsAlwaysTrue()
+    {
+        var settings = new DockerWorkflowLauncherSettings();
+        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(SimpleRequest(), settings);
+
+        Assert.That(p.HostConfig.AutoRemove, Is.True);
     }
 }
-
