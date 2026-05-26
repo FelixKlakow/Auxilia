@@ -1,12 +1,13 @@
-using System.Diagnostics;
+using Docker.DotNet;
+using Docker.DotNet.Models;
 using Microsoft.Extensions.Options;
 
 namespace Auxilia.SteeringInstance.Workflows;
 
 /// <summary>
-/// Launches workflow containers using the local Docker CLI.
-/// Environment variables for RabbitMQ connection and workflow context are injected at launch time.
-/// The container is started detached (<c>docker run -d</c>); the launcher does not wait for it to finish.
+/// Launches workflow containers via the Docker API over the local (or configured) Docker socket.
+/// No Docker CLI is required inside the SteeringInstance container — only socket access.
+/// The container is started with <c>AutoRemove = true</c> so it is cleaned up on exit.
 /// </summary>
 public sealed class DockerWorkflowLauncher(
     IOptions<DockerWorkflowLauncherSettings> settingsOptions,
@@ -14,69 +15,55 @@ public sealed class DockerWorkflowLauncher(
 {
     public async Task LaunchAsync(WorkflowLaunchRequest request, CancellationToken ct = default)
     {
-        var args = BuildDockerArgs(request, settingsOptions.Value);
+        var settings = settingsOptions.Value;
+        var createParams = BuildCreateContainerParameters(request, settings);
 
-        var psi = new ProcessStartInfo("docker")
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
-        };
-
-        foreach (var arg in args)
-            psi.ArgumentList.Add(arg);
+        using var client = new DockerClientConfiguration(new Uri(settings.DockerSocketPath))
+            .CreateClient();
 
         logger.LogInformation(
-            "Launching workflow container. Image={Image} Network={Network}",
-            request.Image,
-            settingsOptions.Value.NetworkName ?? "<default>");
+            "Creating workflow container. Image={Image} Network={Network}",
+            request.Image, settings.NetworkName ?? "<default>");
 
-        using var process = Process.Start(psi)
-                            ?? throw new InvalidOperationException("Failed to start docker process.");
+        var created = await client.Containers.CreateContainerAsync(createParams, ct);
+        await client.Containers.StartContainerAsync(created.ID, new ContainerStartParameters(), ct);
 
-        var stdout = await process.StandardOutput.ReadToEndAsync(ct);
-        var stderr = await process.StandardError.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
-
-        if (process.ExitCode != 0)
-        {
-            logger.LogError(
-                "docker run failed (exit {Code}) for image {Image}: {Stderr}",
-                process.ExitCode, request.Image, stderr);
-            throw new InvalidOperationException(
-                $"docker run failed for image '{request.Image}' (exit {process.ExitCode}): {stderr}");
-        }
-
-        var containerId = stdout.Trim();
         logger.LogInformation(
             "Workflow container started. Image={Image} ContainerId={ContainerId}",
-            request.Image, containerId);
+            request.Image, created.ID[..Math.Min(12, created.ID.Length)]);
     }
 
     /// <summary>
-    /// Builds the ordered argument list passed to <c>docker run</c>.
-    /// Extracted as an <c>internal</c> static method so unit tests can verify argument
-    /// construction without invoking Docker.
+    /// Builds the Docker <see cref="CreateContainerParameters"/> for the given request and settings.
+    /// Extracted as <c>internal static</c> so unit tests can verify parameter construction
+    /// without requiring a live Docker daemon.
     /// </summary>
-    internal static IReadOnlyList<string> BuildDockerArgs(
+    internal static CreateContainerParameters BuildCreateContainerParameters(
         WorkflowLaunchRequest request,
         DockerWorkflowLauncherSettings settings)
     {
-        var args = new List<string> { "run", "-d" };
+        var env = request.EnvironmentVariables
+            .Select(kv => $"{kv.Key}={kv.Value}")
+            .ToList();
+
+        var parameters = new CreateContainerParameters
+        {
+            Image = request.Image,
+            Env = env,
+            HostConfig = new HostConfig { AutoRemove = true }
+        };
 
         if (!string.IsNullOrWhiteSpace(settings.NetworkName))
         {
-            args.Add("--network");
-            args.Add(settings.NetworkName);
+            parameters.NetworkingConfig = new NetworkingConfig
+            {
+                EndpointsConfig = new Dictionary<string, EndpointSettings>
+                {
+                    [settings.NetworkName] = new EndpointSettings()
+                }
+            };
         }
 
-        foreach (var (key, value) in request.EnvironmentVariables)
-        {
-            args.Add("-e");
-            args.Add($"{key}={value}");
-        }
-
-        args.Add(request.Image);
-        return args.AsReadOnly();
+        return parameters;
     }
 }
