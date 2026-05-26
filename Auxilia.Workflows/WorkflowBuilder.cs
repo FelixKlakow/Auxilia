@@ -16,6 +16,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     private readonly List<IEnvironmentRequirement> _environmentRequirements = new();
     private readonly List<WorkflowOutputDescriptor> _outputs = new();
     private readonly WorkflowMetadata _metadata = new();
+    private Func<IServiceProvider, CancellationToken, Task>? _runBody;
 
     private const string StateQueueName = "workflow.state";
 
@@ -60,6 +61,12 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     public IWorkflowBuilder DeclaresOutput(string name, string relativePath, string? description = null)
     {
         _outputs.Add(new WorkflowOutputDescriptor(name, relativePath, description));
+        return this;
+    }
+
+    public IWorkflowBuilder WithRunBody(Func<IServiceProvider, CancellationToken, Task> body)
+    {
+        _runBody = body;
         return this;
     }
 
@@ -146,8 +153,10 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                     var services = new ServiceCollection();
                     if (TestContext == null)
                         new WorkflowBootstrapper(response, keyPair, new SlotHandlerResolver()).Apply(services);
-                    await using (services.BuildServiceProvider())
+                    await using (var sp = services.BuildServiceProvider())
                     {
+                        if (_runBody is not null)
+                            await _runBody(sp, CancellationToken.None);
                     }
 
                     await context.MessageBus.PublishAsync(StateQueueName,

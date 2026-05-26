@@ -13,6 +13,17 @@ public interface IWorkflowBuilder
 
     IWorkflowBuilder DeclaresOutput(string name, string relativePath, string? description = null);
 
+    /// <summary>
+    /// Registers the business-logic body of the workflow.
+    /// The delegate is executed after the Steering Instance handshake completes and the
+    /// DI container is fully configured with resolved slot providers.
+    /// </summary>
+    /// <param name="body">
+    /// Receives the fully-configured <see cref="IServiceProvider"/> (slot handlers wired in)
+    /// and a <see cref="CancellationToken"/> tied to the host lifetime.
+    /// </param>
+    IWorkflowBuilder WithRunBody(Func<IServiceProvider, CancellationToken, Task> body);
+
     Task Run(string[] args);
 
     Task Run(string[] args, IWorkflowRunContext context);

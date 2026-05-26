@@ -25,4 +25,10 @@
         <ProjectReference Include="..\..\Auxilia.Workflows\Auxilia.Workflows.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+        <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+            <_Parameter1>Auxilia.SteeringInstance.Tests</_Parameter1>
+        </AssemblyAttribute>
+    </ItemGroup>
+
 </Project>
