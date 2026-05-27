@@ -94,13 +94,6 @@ public class WorkflowDispatchEnvironment
             .WithEnvironment("WorkflowLauncher__RabbitMqUserName", "guest")
             .WithEnvironment("WorkflowLauncher__RabbitMqPassword", "guest")
             // DockerSocketPath default (unix:///var/run/docker.sock) is correct on Linux.
-            // SlotConfigurations — pre-seed for SimpleGitCommitWorkflow.
-            .WithEnvironment(
-                "SlotConfigurations__Workflows__simple-git-commit-workflow__0__SlotName",
-                "source-control")
-            .WithEnvironment(
-                "SlotConfigurations__Workflows__simple-git-commit-workflow__0__ProviderType",
-                "LocalGit")
             .WithWaitStrategy(
                 Wait.ForUnixContainer().UntilMessageIsLogged("WorkflowDispatcher started"))
             .Build();
@@ -142,6 +135,7 @@ public class WorkflowDispatchEnvironment
                 $"docker build failed for {tag} (exit {process.ExitCode}):\n{stdout}\n{stderr}");
     }
 }
+
 
 
 
