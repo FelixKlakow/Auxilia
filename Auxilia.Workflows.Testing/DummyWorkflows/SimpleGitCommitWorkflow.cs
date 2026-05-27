@@ -1,15 +1,15 @@
 using System.Diagnostics;
-using Auxilia.Workflows.SourceControl;
 
 namespace Auxilia.Workflows.Testing.DummyWorkflows;
 
 /// <summary>
 /// Minimal dummy workflow used by the WorkflowDispatch system tests.
-/// Declares one source-control slot (exercises the full registration / config-resolution path),
-/// then clones nothing — it creates a fresh local git repo, writes <c>test.txt</c>, and commits.
+/// Declares no slots so the SteeringInstance's no-slot short-circuit is exercised
+/// (no external configuration store required).
 ///
-/// The repo path is read from the <c>WORKFLOW_CONTEXT__REPO_PATH</c> env var.  When the var is
-/// absent the workflow creates its own temp directory so it can still run in standalone tests.
+/// The workflow creates a fresh local git repo, writes <c>test.txt</c>, and commits.
+/// The repo path is read from <c>WORKFLOW_CONTEXT__REPO_PATH</c>; when absent a temp
+/// directory is used so the workflow is self-contained.
 /// </summary>
 public static class SimpleGitCommitWorkflow
 {
@@ -21,10 +21,8 @@ public static class SimpleGitCommitWorkflow
     public static Task RunAsync(string[] args) =>
         WorkflowBuilder
             .Create(WorkflowName)
-            .RequiresSourceControl(
-                "source-control",
-                new SourceControlCapabilities { RequiredPermissions = [Permission.Write] },
-                description: "Target repository for the smoke-test commit.")
+            // No slots — keeps the system test simple and independent of the slot
+            // configuration pipeline.  A separate test can exercise slot resolution.
             .WithRunBody(ExecuteAsync)
             .Run(args);
 
@@ -78,6 +76,7 @@ public static class SimpleGitCommitWorkflow
         }
     }
 }
+
 
 
 
