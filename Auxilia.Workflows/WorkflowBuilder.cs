@@ -16,6 +16,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     private readonly List<IEnvironmentRequirement> _environmentRequirements = new();
     private readonly List<WorkflowOutputDescriptor> _outputs = new();
     private readonly WorkflowMetadata _metadata = new();
+    private Func<IServiceProvider, CancellationToken, Task>? _runBody;
 
     private Action<IServiceCollection>? _configureServices;
     private Func<IServiceProvider, Task>? _application;
@@ -76,6 +77,12 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     public IWorkflowBuilder WithApplication(Func<IServiceProvider, Task> run)
     {
         _application = run;
+        return this;
+    }
+
+    public IWorkflowBuilder WithRunBody(Func<IServiceProvider, CancellationToken, Task> body)
+    {
+        _runBody = body;
         return this;
     }
 
@@ -172,6 +179,15 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                         if (_application != null && (TestContext == null || TestSlotHandlerResolver != null))
                             await _application(provider);
                     }
+
+                    /*
+                     *                     await using (var sp = services.BuildServiceProvider())
+                    {
+                        if (_runBody is not null)
+                            await _runBody(sp, CancellationToken.None);
+                    }
+                     */
+
 
                     await context.MessageBus.PublishAsync(StateQueueName,
                         new WorkflowStateMessage(instanceId, WorkflowState.Success, null));
