@@ -43,6 +43,20 @@ public sealed class WorkflowRegistrationHandler(
             return;
         }
 
+        // Workflows that declare no slots need no configuration resolution.
+        if (request.Manifest.Slots.Count == 0)
+        {
+            logger.LogInformation(
+                "Workflow {WorkflowInstanceId} declares no slots — responding with empty configuration.",
+                request.WorkflowInstanceId);
+            await messageBus.PublishAsync(request.ResponseTopic, new WorkflowConfigurationResponse(
+                request.WorkflowInstanceId, true, null,
+                new Dictionary<string, EncryptedSlotConfiguration>()),
+                cancellationToken);
+            _registeredInstances.TryAdd(request.WorkflowInstanceId, 0);
+            return;
+        }
+
         var resolverResult = configResolver.Resolve(request.Manifest.WorkflowName, request.PublicKey);
         if (!resolverResult.IsSuccess)
         {

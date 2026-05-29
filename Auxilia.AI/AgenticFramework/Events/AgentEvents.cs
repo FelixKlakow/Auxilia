@@ -26,4 +26,3 @@ public record AgentToolResultEvent(Guid SessionId, DateTime TimestampUtc, string
 /// <summary>Fired when an error occurs during an agent run.</summary>
 public record AgentErrorEvent(Guid SessionId, DateTime TimestampUtc, Exception Exception)
     : AgentEvent(SessionId, TimestampUtc);
-
