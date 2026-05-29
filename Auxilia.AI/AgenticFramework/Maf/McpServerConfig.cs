@@ -8,4 +8,3 @@ internal sealed record McpServerConfig(
     string McpName,
     IReadOnlyList<string>? Whitelist = null,
     IReadOnlyList<string>? Blacklist = null);
-

@@ -28,4 +28,8 @@
     <ProjectReference Include="..\Source\Auxilia.Workflows.SourceControl\Auxilia.Workflows.SourceControl.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Misc\" />
+  </ItemGroup>
+
 </Project>

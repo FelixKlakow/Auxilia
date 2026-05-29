@@ -2,6 +2,7 @@
 using Auxilia.Messaging;
 using Auxilia.SteeringInstance.Workflows;
 using Auxilia.SteeringInstance.Workflows.Storage;
+using Microsoft.Extensions.Options;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -59,6 +60,17 @@ try
     builder.Services.AddSingleton<EnvironmentValidator>();
     builder.Services.AddSingleton<ConfigurationResolver>();
     builder.Services.AddSingleton<WorkflowRegistrationHandler>();
+    builder.Services.AddSingleton<WorkflowAnnouncementHandler>();
+    builder.Services.AddSingleton<WorkflowDispatcher>();
+    builder.Services.AddSingleton<IWorkflowLauncher, DockerWorkflowLauncher>();
+
+    // --- Workflow launcher settings ---
+    builder.Services.Configure<DockerWorkflowLauncherSettings>(
+        builder.Configuration.GetSection("WorkflowLauncher"));
+
+    // --- Slot configuration seeding ---
+    builder.Services.Configure<SlotConfigurationsSettings>(
+        builder.Configuration.GetSection("SlotConfigurations"));
 
     // --- OpenTelemetry (tracing + metrics) ---
     var otlpEndpoint = builder.Configuration["Otlp:Endpoint"];
@@ -100,8 +112,27 @@ try
 
     var app = builder.Build();
 
+    // --- Seed slot configurations from config ---
+    var slotConfigSettings = app.Services
+        .GetRequiredService<IOptions<SlotConfigurationsSettings>>().Value;
+    var slotStore = app.Services.GetRequiredService<SlotConfigurationStore>();
+    foreach (var (workflowType, entries) in slotConfigSettings.Workflows)
+        foreach (var entry in entries)
+            slotStore.UpsertConfiguration(workflowType,
+                new StoredSlotConfiguration(
+                    entry.SlotName,
+                    entry.ProviderType,
+                    entry.Settings,
+                    ConfigurationStatus.Valid));
+
     var handler = app.Services.GetRequiredService<WorkflowRegistrationHandler>();
     await handler.StartAsync(app.Lifetime.ApplicationStopping);
+
+    var announcementHandler = app.Services.GetRequiredService<WorkflowAnnouncementHandler>();
+    await announcementHandler.StartAsync(app.Lifetime.ApplicationStopping);
+
+    var dispatcher = app.Services.GetRequiredService<WorkflowDispatcher>();
+    await dispatcher.StartAsync(app.Lifetime.ApplicationStopping);
 
     app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
     app.MapPrometheusScrapingEndpoint(); // GET /metrics

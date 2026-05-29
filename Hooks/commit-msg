@@ -17,14 +17,14 @@ fi
 
 # ── Validate Conventional Commits format ──────────────────────────────────────
 SUBJECT=$(head -1 "$COMMIT_MSG_FILE")
-ALLOWED_TYPES="feat|fix|chore|refactor|plan|docs|style|merge|revert"
+ALLOWED_TYPES="feat|fix|chore|refactor|test|plan|docs|style|merge|revert"
 
 if ! printf '%s' "$SUBJECT" | grep -qE "^($ALLOWED_TYPES)(\([^)]+\))?(!)?: .+"; then
     printf '\n'
     printf '❌  Commit message rejected: does not follow Conventional Commits.\n'
     printf '\n'
     printf '    Format : <type>(optional scope): <description>\n'
-    printf '    Allowed types: feat, fix, chore, refactor, plan, docs, style, merge, revert\n'
+    printf '    Allowed types: feat, fix, chore, refactor, test, plan, docs, style, merge, revert\n'
     printf '\n'
     printf '    Examples:\n'
     printf '      feat: add queue initializer\n'
