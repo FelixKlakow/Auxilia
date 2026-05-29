@@ -13,9 +13,9 @@
     <Project Path="Source\Auxilia.SteeringInstance\Auxilia.SteeringInstance.csproj" />
   </Folder>
   <Folder Name="/04_BackendDomain/">
-    <Project Path="Auxilia.Ai.Tests\Auxilia.Ai.Tests.csproj" Type="Classic C#" />
-    <Project Path="Auxilia.AI\Auxilia.AI.csproj" Type="Classic C#" />
-    <Project Path="Auxilia.BackendService.Tests\Auxilia.BackendService.Tests.csproj" Type="Classic C#" />
+    <Project Path="Auxilia.Ai.Tests\Auxilia.Ai.Tests.csproj" />
+    <Project Path="Auxilia.AI\Auxilia.AI.csproj" />
+    <Project Path="Auxilia.BackendService.Tests\Auxilia.BackendService.Tests.csproj" />
     <Project Path="Source\Auxilia.BackendService\Auxilia.BackendService.csproj" />
   </Folder>
   <Folder Name="/Hooks/">
@@ -32,22 +32,28 @@
     <File Path="USE-CASES.md" />
   </Folder>
   <Folder Name="/05_WorkflowsDomain/">
-    <Project Path="Auxilia.Workflows\Auxilia.Workflows.csproj" />
-    <Project Path="Auxilia.Workflows.Testing\Auxilia.Workflows.Testing.csproj" />
-    <Project Path="Auxilia.Workflows.Tests\Auxilia.Workflows.Tests.csproj" />
-    <Project Path="Source\Auxilia.Workflows.TaskSource\Auxilia.Workflows.TaskSource.csproj" />
-    <Project Path="Source\Auxilia.Workflows.SourceControl\Auxilia.Workflows.SourceControl.csproj" />
     <Project Path="Auxilia.Workflows.SlotPackages.Tests\Auxilia.Workflows.SlotPackages.Tests.csproj" />
     <Project Path="Auxilia.Workflows.Testing.Tests\Auxilia.Workflows.Testing.Tests.csproj" />
+    <Project Path="Auxilia.Workflows.Testing\Auxilia.Workflows.Testing.csproj" />
+    <Project Path="Auxilia.Workflows.Tests\Auxilia.Workflows.Tests.csproj" />
+    <Project Path="Auxilia.Workflows\Auxilia.Workflows.csproj" />
+    <Project Path="Source/Auxilia.Workflows.TestRunner/Auxilia.Workflows.TestRunner.csproj">
+      <Build Solution="Debug|*" Project="false" />
+    </Project>
     <Project Path="Source\Auxilia.Workflows.AiAgent\Auxilia.Workflows.AiAgent.csproj" />
     <Project Path="Source\Auxilia.Workflows.PullRequestAccess\Auxilia.Workflows.PullRequestAccess.csproj" />
-    <Project Path="Source\Auxilia.Workflows.TestRunner\Auxilia.Workflows.TestRunner.csproj" />
+    <Project Path="Source\Auxilia.Workflows.SourceControl\Auxilia.Workflows.SourceControl.csproj" />
+    <Project Path="Source\Auxilia.Workflows.TaskSource\Auxilia.Workflows.TaskSource.csproj" />
   </Folder>
   <Folder Name="/06_WorkflowImplementations/">
-    <Project Path="Source\Auxilia.CodeReview.Workflow\Auxilia.CodeReview.Workflow.csproj" />
     <Project Path="Auxilia.CodeReview.Workflow.Tests\Auxilia.CodeReview.Workflow.Tests.csproj" />
-    <Project Path="Source\Auxilia.ImplementationWorkflow\Auxilia.ImplementationWorkflow.csproj" />
-    <Project Path="Auxilia.ImplementationWorkflow.Tests\Auxilia.ImplementationWorkflow.Tests.csproj" />
+    <Project Path="Auxilia.ImplementationWorkflow.Tests/Auxilia.ImplementationWorkflow.Tests.csproj">
+      <Build Solution="Debug|*" Project="false" />
+    </Project>
+    <Project Path="Source/Auxilia.ImplementationWorkflow/Auxilia.ImplementationWorkflow.csproj">
+      <Build Solution="Debug|*" Project="false" />
+    </Project>
+    <Project Path="Source\Auxilia.CodeReview.Workflow\Auxilia.CodeReview.Workflow.csproj" />
   </Folder>
   <Project Path="Auxilia.SystemTestSuite\Auxilia.SystemTestSuite.csproj" />
 </Solution>

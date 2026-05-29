@@ -11,6 +11,7 @@ using Microsoft.Extensions.Options;
 namespace Auxilia.SteeringInstance.Tests.Workflows;
 
 [TestFixture]
+[Category("Unit")]
 public class WorkflowRegistrationHandlerTests
 {
     private static WorkflowRegistrationHandler MakeHandler(
@@ -76,12 +77,13 @@ public class WorkflowRegistrationHandlerTests
     [Test]
     public async Task HandleAsync_ConfigNotFound_PublishesFailureResponse()
     {
+        // Manifest declares a slot so the config resolver is reached — but the store is empty.
+        var manifest = new WorkflowManifest(
+            "TestWorkflow", Guid.NewGuid().ToString(),
+            [new SlotDefinition("slotA", null)], // non-empty slots → resolver is consulted
+            [], string.Empty, [], []);
         var request = new WorkflowRegistrationRequest(
-            Guid.NewGuid(),
-            new WorkflowManifest("TestWorkflow", Guid.NewGuid().ToString(), [], [],
-                string.Empty, [], []),
-            ValidPublicKey(),
-            "reply-topic");
+            Guid.NewGuid(), manifest, ValidPublicKey(), "reply-topic");
 
         var bus = new CapturingFakeMessageBusClient();
         var handler = MakeHandler(bus); // empty store → no config found
@@ -104,12 +106,13 @@ public class WorkflowRegistrationHandlerTests
                 ConfigurationStatus.Dirty));
         var resolver = new ConfigurationResolver(store, new SignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance);
 
+        // Manifest must declare the slot so the resolver is reached.
+        var manifest = new WorkflowManifest(
+            "TestWorkflow", Guid.NewGuid().ToString(),
+            [new SlotDefinition("slotA", null)],
+            [], string.Empty, [], []);
         var request = new WorkflowRegistrationRequest(
-            Guid.NewGuid(),
-            new WorkflowManifest("TestWorkflow", Guid.NewGuid().ToString(), [], [],
-                string.Empty, [], []),
-            ValidPublicKey(),
-            "reply-topic");
+            Guid.NewGuid(), manifest, ValidPublicKey(), "reply-topic");
 
         var bus = new CapturingFakeMessageBusClient();
         var handler = MakeHandler(bus, configResolver: resolver);
@@ -135,12 +138,13 @@ public class WorkflowRegistrationHandlerTests
                 ConfigurationStatus.Valid));
         var resolver = new ConfigurationResolver(store, new SignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance);
 
+        // Manifest must declare the slot so the config is resolved.
+        var manifest = new WorkflowManifest(
+            "TestWorkflow", Guid.NewGuid().ToString(),
+            [new SlotDefinition("slotA", null)],
+            [], string.Empty, [], []);
         var request = new WorkflowRegistrationRequest(
-            Guid.NewGuid(),
-            new WorkflowManifest("TestWorkflow", Guid.NewGuid().ToString(), [], [],
-                string.Empty, [], []),
-            publicKey,
-            "my-response-topic");
+            Guid.NewGuid(), manifest, publicKey, "my-response-topic");
 
         var bus = new CapturingFakeMessageBusClient();
         var handler = MakeHandler(bus, configResolver: resolver);
@@ -154,6 +158,48 @@ public class WorkflowRegistrationHandlerTests
         Assert.That(response.Success, Is.True);
         Assert.That(response.Slots, Has.Count.EqualTo(1));
         Assert.That(response.Slots.ContainsKey("slotA"), Is.True);
+    }
+
+    [Test]
+    public async Task HandleAsync_NoSlots_PublishesSuccessWithEmptySlots()
+    {
+        // A workflow with no declared slots must succeed immediately without consulting the store.
+        var request = new WorkflowRegistrationRequest(
+            Guid.NewGuid(),
+            new WorkflowManifest("SlotlessWorkflow", Guid.NewGuid().ToString(),
+                [], // no slots
+                [], string.Empty, [], []),
+            ValidPublicKey(),
+            "reply-topic");
+
+        var bus = new CapturingFakeMessageBusClient();
+        var handler = MakeHandler(bus); // empty store — must NOT be consulted
+        await handler.StartAsync(CancellationToken.None);
+        await bus.InvokeAsync(request, CancellationToken.None);
+
+        Assert.That(bus.Published, Has.Count.EqualTo(1));
+        var response = (WorkflowConfigurationResponse)bus.Published[0].Message;
+        Assert.That(response.Success, Is.True);
+        Assert.That(response.Slots, Is.Empty);
+        Assert.That(response.ErrorMessage, Is.Null);
+    }
+
+    [Test]
+    public async Task HandleAsync_NoSlots_TracksInstanceId()
+    {
+        var instanceId = Guid.NewGuid();
+        var request = new WorkflowRegistrationRequest(
+            instanceId,
+            new WorkflowManifest("SlotlessWorkflow", instanceId.ToString(),
+                [], [], string.Empty, [], []),
+            ValidPublicKey(), "reply");
+
+        var bus = new CapturingFakeMessageBusClient();
+        var handler = MakeHandler(bus);
+        await handler.StartAsync(CancellationToken.None);
+        await bus.InvokeAsync(request, CancellationToken.None);
+
+        Assert.That(handler.RegisteredCount, Is.EqualTo(1));
     }
 
     [Test]
@@ -172,8 +218,9 @@ public class WorkflowRegistrationHandlerTests
         var instanceId = Guid.NewGuid();
         var request = new WorkflowRegistrationRequest(
             instanceId,
-            new WorkflowManifest("TestWorkflow", instanceId.ToString(), [], [],
-                string.Empty, [], []),
+            new WorkflowManifest("TestWorkflow", instanceId.ToString(),
+                [new SlotDefinition("slotA", null)], // must have a slot so resolver is reached
+                [], string.Empty, [], []),
             publicKey,
             "reply");
 

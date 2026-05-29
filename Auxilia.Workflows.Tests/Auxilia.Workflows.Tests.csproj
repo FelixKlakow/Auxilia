@@ -32,4 +32,8 @@
     <ProjectReference Include="..\Source\Auxilia.Workflows.TestRunner\Auxilia.Workflows.TestRunner.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Misc\" />
+  </ItemGroup>
+
 </Project>
