@@ -211,7 +211,7 @@ public class WorkflowDispatchPipelineComponentTests
         var request = new WorkflowRegistrationRequest(
             instanceId,
             new WorkflowManifest("seeded-workflow", instanceId.ToString(),
-                [new SlotDefinition("source-control", null)], // declares the slot
+                [new SlotDefinition("source-control", null) { ServiceType = typeof(object) }], // declares the slot
                 [], string.Empty, [], []),
             publicKey,
             responseTopic);
@@ -240,7 +240,7 @@ public class WorkflowDispatchPipelineComponentTests
         var request = new WorkflowRegistrationRequest(
             instanceId,
             new WorkflowManifest("unconfigured-workflow", instanceId.ToString(),
-                [new SlotDefinition("source-control", null)], // declares a slot
+                [new SlotDefinition("source-control", null) { ServiceType = typeof(object) }], // declares a slot
                 [], string.Empty, [], []),
             AnyPublicKey(),
             responseTopic);

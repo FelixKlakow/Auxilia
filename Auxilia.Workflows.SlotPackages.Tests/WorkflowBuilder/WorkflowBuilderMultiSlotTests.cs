@@ -34,6 +34,8 @@ public class WorkflowBuilderMultiSlotTests
         Assert.That(schema.Slots.Select(s => s.SlotName), Does.Contain("secondary-reviewer"));
         Assert.That(schema.Slots.Select(s => s.Capabilities),
             Has.All.InstanceOf<AiCapabilities>());
+        Assert.That(schema.Slots[0].ServiceType, Is.EqualTo(typeof(IAiAgent)));
+        Assert.That(schema.Slots[1].ServiceType, Is.EqualTo(typeof(IAiAgent)));
     }
 
     [Test]
@@ -54,5 +56,17 @@ public class WorkflowBuilderMultiSlotTests
 
         Assert.Throws<InvalidOperationException>(() =>
             builder.RequiresSourceControl("repo", DefaultScCapabilities));
+    }
+
+    [Test]
+    public void RequiresSourceControl_AddsSlot_WithCorrectServiceType()
+    {
+        var builder = global::Auxilia.Workflows.WorkflowBuilder.Create("sc-type-test");
+        builder.RequiresSourceControl("repo", DefaultScCapabilities);
+
+        var schema = ((global::Auxilia.Workflows.WorkflowBuilder)builder).BuildSchema();
+
+        Assert.That(schema.Slots, Has.Count.EqualTo(1));
+        Assert.That(schema.Slots[0].ServiceType, Is.EqualTo(typeof(ISourceControlAccess)));
     }
 }

@@ -5,8 +5,7 @@ namespace Auxilia.Workflows;
 
 public interface IWorkflowBuilder
 {
-    IWorkflowBuilder Requires<T>(string name, T capabilities, string? description = null)
-        where T : ICapability;
+    IWorkflowBuilder Requires<TService>(string name, ICapability capabilities, string? description = null);
 
     IWorkflowBuilder RequiresEnvironment(Action<IEnvironmentBuilder> configure);
 

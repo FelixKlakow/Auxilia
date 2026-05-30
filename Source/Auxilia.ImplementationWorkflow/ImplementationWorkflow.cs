@@ -27,7 +27,7 @@ public static class ImplementationWorkflow
             .RequiresTestRunner("test-runner", new TestRunnerCapabilities())
             .RequiresPullRequestAccess("pull-request",
                 new PullRequestAccessCapabilities { RequiredPermissions = [PullRequestPermission.Read, PullRequestPermission.Write] })
-            .Requires("workflow-config", new NoCapabilities())
+            .Requires<object>("workflow-config", new NoCapabilities())
             .DeclaresOutput("implementation-summary", "output/implementation-summary.json", "Implementation run summary with branch, PR URL, and review notes")
             .DeclaresSignal<CompletedSignalPayload>("Completed", "Emitted when the workflow completes successfully")
             .DeclaresSignal<ReviewNotesFlaggedSignalPayload>("ReviewNotesFlagged", "Emitted when the reviewer flags issues")

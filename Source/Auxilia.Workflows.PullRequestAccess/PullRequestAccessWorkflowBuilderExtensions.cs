@@ -9,5 +9,5 @@ public static class PullRequestAccessWorkflowBuilderExtensions
         string name,
         PullRequestAccessCapabilities capabilities,
         string? description = null)
-        => builder.Requires(name, capabilities, description);
+        => builder.Requires<IPullRequestAccess>(name, capabilities, description);
 }

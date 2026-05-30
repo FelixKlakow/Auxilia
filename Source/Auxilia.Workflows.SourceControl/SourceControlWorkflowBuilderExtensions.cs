@@ -9,5 +9,5 @@ public static class SourceControlWorkflowBuilderExtensions
         string name,
         SourceControlCapabilities capabilities,
         string? description = null)
-        => builder.Requires(name, capabilities, description); // T inferred as SourceControlCapabilities
+        => builder.Requires<ISourceControlAccess>(name, capabilities, description);
 }

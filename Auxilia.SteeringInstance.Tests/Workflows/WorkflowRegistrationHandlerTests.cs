@@ -80,7 +80,7 @@ public class WorkflowRegistrationHandlerTests
         // Manifest declares a slot so the config resolver is reached — but the store is empty.
         var manifest = new WorkflowManifest(
             "TestWorkflow", Guid.NewGuid().ToString(),
-            [new SlotDefinition("slotA", null)], // non-empty slots → resolver is consulted
+            [new SlotDefinition("slotA", null) { ServiceType = typeof(object) }], // non-empty slots → resolver is consulted
             [], string.Empty, [], []);
         var request = new WorkflowRegistrationRequest(
             Guid.NewGuid(), manifest, ValidPublicKey(), "reply-topic");
@@ -109,7 +109,7 @@ public class WorkflowRegistrationHandlerTests
         // Manifest must declare the slot so the resolver is reached.
         var manifest = new WorkflowManifest(
             "TestWorkflow", Guid.NewGuid().ToString(),
-            [new SlotDefinition("slotA", null)],
+            [new SlotDefinition("slotA", null) { ServiceType = typeof(object) }],
             [], string.Empty, [], []);
         var request = new WorkflowRegistrationRequest(
             Guid.NewGuid(), manifest, ValidPublicKey(), "reply-topic");
@@ -141,7 +141,7 @@ public class WorkflowRegistrationHandlerTests
         // Manifest must declare the slot so the config is resolved.
         var manifest = new WorkflowManifest(
             "TestWorkflow", Guid.NewGuid().ToString(),
-            [new SlotDefinition("slotA", null)],
+            [new SlotDefinition("slotA", null) { ServiceType = typeof(object) }],
             [], string.Empty, [], []);
         var request = new WorkflowRegistrationRequest(
             Guid.NewGuid(), manifest, publicKey, "my-response-topic");
@@ -219,7 +219,7 @@ public class WorkflowRegistrationHandlerTests
         var request = new WorkflowRegistrationRequest(
             instanceId,
             new WorkflowManifest("TestWorkflow", instanceId.ToString(),
-                [new SlotDefinition("slotA", null)], // must have a slot so resolver is reached
+                [new SlotDefinition("slotA", null) { ServiceType = typeof(object) }], // must have a slot so resolver is reached
                 [], string.Empty, [], []),
             publicKey,
             "reply");

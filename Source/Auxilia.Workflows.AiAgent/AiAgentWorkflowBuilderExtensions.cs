@@ -9,5 +9,5 @@ public static class AiAgentWorkflowBuilderExtensions
         string name,
         AiCapabilities capabilities,
         string? description = null)
-        => builder.Requires(name, capabilities, description);
+        => builder.Requires<IAiAgent>(name, capabilities, description);
 }

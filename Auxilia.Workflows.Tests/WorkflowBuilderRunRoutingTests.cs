@@ -11,6 +11,7 @@ namespace Auxilia.Workflows.Tests;
 [Category("Unit")]
 public class WorkflowBuilderRunRoutingTests
 {
+    private interface IStubService { }
     [Test]
     public async Task RunAsync_WhenEmitSchemaDirectiveReceived_RoutesToSchemaEmissionPath()
     {
@@ -60,7 +61,7 @@ public class WorkflowBuilderRunRoutingTests
         };
 
         var builder = (WorkflowBuilder)WorkflowBuilder.Create("test-workflow")
-            .Requires("slot1", new NoCapabilities());
+            .Requires<IStubService>("slot1", new NoCapabilities());
         builder._directiveTimeout = TimeSpan.FromSeconds(5);
 
         await builder.RunAsync([], context);

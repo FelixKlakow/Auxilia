@@ -39,7 +39,7 @@ public class WorkflowSchemaStoreTests
         var schemaV1 = new WorkflowSchema("TestWorkflow", [], []);
         var schemaV2 = new WorkflowSchema(
             "TestWorkflow",
-            [new SlotDefinition("slot1", null)],
+            [new SlotDefinition("slot1", null) { ServiceType = typeof(object) }],
             []);
 
         _store.SetSchema("TestWorkflow", schemaV1);
