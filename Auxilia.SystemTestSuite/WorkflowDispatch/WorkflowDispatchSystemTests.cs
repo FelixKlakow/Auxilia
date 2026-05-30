@@ -32,6 +32,8 @@ public class WorkflowDispatchSystemTests
 
         var stateTcs = new TaskCompletionSource<WorkflowStateMessage>(
             TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var _ = cancellationToken.Register(
+            () => stateTcs.TrySetCanceled(cancellationToken));
 
         await using var subscription = await Bus.SubscribeAsync<WorkflowStateMessage>(
             stateQueue,
@@ -59,7 +61,7 @@ public class WorkflowDispatchSystemTests
         // Give the workflow up to 90 s to start, run, and report state.
         var completed = await Task.WhenAny(
             stateTcs.Task,
-            Task.Delay(TimeSpan.FromSeconds(90), cancellationToken));
+            Task.Delay(TimeSpan.FromSeconds(90), CancellationToken.None));
 
         Assert.That(completed, Is.EqualTo(stateTcs.Task),
             "No WorkflowStateMessage received within 90 seconds. " +
