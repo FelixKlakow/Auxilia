@@ -257,6 +257,9 @@ public class WorkflowBuilderRunRoutingTests
         public Task DeclareQueueAsync(string queueName, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
+        public Task DeclareExchangeAsync(string exchangeName, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
         public Task<IAsyncDisposable> SubscribeAsync<T>(
             string queueName,
             Func<T, CancellationToken, Task> handler,
@@ -266,6 +269,12 @@ public class WorkflowBuilderRunRoutingTests
             return Task.FromResult<IAsyncDisposable>(NoopDisposable.Instance);
         }
 
+        public Task<IAsyncDisposable> SubscribeToExchangeAsync<T>(
+            string exchangeName,
+            Func<T, CancellationToken, Task> handler,
+            CancellationToken cancellationToken = default)
+            => SubscribeAsync(exchangeName, handler, cancellationToken);
+
         public Task PublishAsync<T>(string topic, T message, CancellationToken cancellationToken = default)
         {
             if (!_published.ContainsKey(topic))
@@ -274,6 +283,9 @@ public class WorkflowBuilderRunRoutingTests
             OnPublish?.Invoke(topic, message!);
             return Task.CompletedTask;
         }
+
+        public Task PublishToExchangeAsync<T>(string exchangeName, T message, CancellationToken cancellationToken = default)
+            => PublishAsync(exchangeName, message, cancellationToken);
     }
 
     private sealed class NoopDisposable : IAsyncDisposable

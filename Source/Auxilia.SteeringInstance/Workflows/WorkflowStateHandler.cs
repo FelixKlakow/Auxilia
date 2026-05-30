@@ -11,8 +11,8 @@ public sealed class WorkflowStateHandler(
 
     public async Task StartAsync(CancellationToken ct = default)
     {
-        await messageBus.DeclareQueueAsync("workflow.state", ct);
-        _subscription = await messageBus.SubscribeAsync<WorkflowStateMessage>(
+        await messageBus.DeclareExchangeAsync("workflow.state", ct);
+        _subscription = await messageBus.SubscribeToExchangeAsync<WorkflowStateMessage>(
             "workflow.state", HandleAsync, ct);
 
         logger.LogInformation("WorkflowStateHandler started — listening on workflow.state.");

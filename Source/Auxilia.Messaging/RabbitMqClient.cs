@@ -41,6 +41,17 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
             cancellationToken: cancellationToken);
     }
 
+    public async Task DeclareExchangeAsync(string exchangeName, CancellationToken cancellationToken = default)
+    {
+        await _publishChannel.ExchangeDeclareAsync(
+            exchangeName,
+            "fanout",
+            durable: true,
+            autoDelete: false,
+            arguments: null,
+            cancellationToken: cancellationToken);
+    }
+
     public async Task PublishAsync<T>(string topic, T message, CancellationToken cancellationToken = default)
     {
         using var activity = MessagingTelemetry.ActivitySource.StartActivity(
@@ -75,6 +86,86 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
             cancellationToken);
 
         MessagingTelemetry.PublishCounter.Add(1, new TagList { { "messaging.topic", topic } });
+    }
+
+    public async Task PublishToExchangeAsync<T>(string exchangeName, T message, CancellationToken cancellationToken = default)
+    {
+        using var activity = MessagingTelemetry.ActivitySource.StartActivity(
+            "rabbitmq.publish", ActivityKind.Producer);
+        activity?.SetTag("messaging.system", "rabbitmq");
+        activity?.SetTag("messaging.destination", exchangeName);
+        activity?.SetTag("messaging.operation", "publish");
+
+        var headers = new Dictionary<string, object?>();
+        Propagators.DefaultTextMapPropagator.Inject(
+            new PropagationContext(
+                activity?.Context ?? Activity.Current?.Context ?? default,
+                Baggage.Current),
+            headers,
+            static (carrier, key, value) => carrier[key] = value);
+
+        var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(message));
+        var props = new BasicProperties
+        {
+            Persistent = true,
+            ContentType = "application/json",
+            Headers = headers
+        };
+
+        await _publishChannel.BasicPublishAsync(
+            exchangeName,
+            string.Empty,
+            false,
+            props,
+            body,
+            cancellationToken);
+
+        MessagingTelemetry.PublishCounter.Add(1, new TagList { { "messaging.topic", exchangeName } });
+    }
+
+    public async Task<IAsyncDisposable> SubscribeToExchangeAsync<T>(
+        string exchangeName,
+        Func<T, CancellationToken, Task> handler,
+        CancellationToken cancellationToken = default)
+    {
+        var channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken);
+        var queueDeclareResult = await channel.QueueDeclareAsync(
+            string.Empty, false, true, true, null, cancellationToken: cancellationToken);
+        var queueName = queueDeclareResult.QueueName;
+        await channel.QueueBindAsync(queueName, exchangeName, string.Empty, null, cancellationToken: cancellationToken);
+
+        var consumer = new AsyncEventingBasicConsumer(channel);
+        consumer.ReceivedAsync += async (_, ea) =>
+        {
+            var parentContext = Propagators.DefaultTextMapPropagator.Extract(
+                default,
+                ea.BasicProperties.Headers,
+                static (headers, key) =>
+                {
+                    if (headers == null || !headers.TryGetValue(key, out var val))
+                        return [];
+                    var str = val is byte[] bytes ? Encoding.UTF8.GetString(bytes) : val?.ToString();
+                    return str is null ? [] : [str];
+                });
+
+            using var activity = MessagingTelemetry.ActivitySource.StartActivity(
+                "rabbitmq.consume",
+                ActivityKind.Consumer,
+                parentContext.ActivityContext);
+            activity?.SetTag("messaging.system", "rabbitmq");
+            activity?.SetTag("messaging.destination", exchangeName);
+            activity?.SetTag("messaging.operation", "receive");
+
+            MessagingTelemetry.ReceiveCounter.Add(1, new TagList { { "messaging.queue", queueName } });
+
+            var body = Encoding.UTF8.GetString(ea.Body.ToArray());
+            var msg = JsonSerializer.Deserialize<T>(body);
+            if (msg is not null)
+                await handler(msg, CancellationToken.None);
+            await channel.BasicAckAsync(ea.DeliveryTag, false);
+        };
+        var consumerTag = await channel.BasicConsumeAsync(queueName, false, consumer, cancellationToken);
+        return new SubscriptionHandle(channel, consumerTag);
     }
 
     public async Task<IAsyncDisposable> SubscribeAsync<T>(
