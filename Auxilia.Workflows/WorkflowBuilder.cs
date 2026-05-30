@@ -6,6 +6,7 @@ using Auxilia.Workflows.Internal;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Text.Json;
 using System.Text.Json.Schema;
 
@@ -181,9 +182,19 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                     var services = new ServiceCollection();
                     services.AddSingleton(context.MessageBus);
                     if (TestContext == null)
-                        new WorkflowBootstrapper(response, keyPair, new SlotHandlerResolver(), instanceId).Apply(services);
+                    {
+                        var resolver = new SlotHandlerResolver();
+                        var devMode = new EnvironmentDeveloperModeProvider();
+                        var logger = NullLoggerFactory.Instance.CreateLogger<PluginManifestVerifier>();
+                        var verifier = new PluginManifestVerifier(devMode, logger);
+                        var discovery = new FileSystemPluginDiscovery();
+                        var plugins = discovery.DiscoverPlugins(AppContext.BaseDirectory);
+                        var loader = new PluginLoader(resolver, verifier);
+                        loader.Load(plugins);
+                        new WorkflowBootstrapper(response, keyPair, resolver, _slots.AsReadOnly(), instanceId).Apply(services);
+                    }
                     else if (TestSlotHandlerResolver is { } testResolver)
-                        new WorkflowBootstrapper(response, keyPair, testResolver, instanceId).Apply(services);
+                        new WorkflowBootstrapper(response, keyPair, testResolver, _slots.AsReadOnly(), instanceId).Apply(services);
 
                     _configureServices?.Invoke(services);
 

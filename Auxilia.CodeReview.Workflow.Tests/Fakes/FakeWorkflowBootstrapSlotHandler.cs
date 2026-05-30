@@ -32,7 +32,7 @@ public sealed class FakeWorkflowBootstrapSlotHandler : ISlotHandler
         _compactionOptions = compactionOptions;
     }
 
-    public void Register(IServiceCollection services, string slotName, SlotConfiguration configuration)
+    public void Register(IServiceCollection services, string slotName, Type serviceType, SlotConfiguration configuration)
     {
         // Pre-register test-specific overrides BEFORE AddCodeReviewWorkflow (which uses TryAdd)
         if (_twoEyes != null)

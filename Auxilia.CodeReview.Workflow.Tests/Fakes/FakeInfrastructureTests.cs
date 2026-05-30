@@ -89,7 +89,7 @@ public sealed class FakeInfrastructureTests
         var services = new ServiceCollection();
         var config = new SlotConfiguration("fake-ai-agent", new Dictionary<string, string>());
 
-        handler.Register(services, "primary-reviewer", config);
+        handler.Register(services, "primary-reviewer", typeof(IAiAgent), config);
 
         var provider = services.BuildServiceProvider();
         var resolved = provider.GetRequiredKeyedService<IAiAgent>("primary-reviewer");
@@ -105,7 +105,7 @@ public sealed class FakeInfrastructureTests
         var services = new ServiceCollection();
         var config = new SlotConfiguration("fake-source-control", new Dictionary<string, string>());
 
-        handler.Register(services, "repository", config);
+        handler.Register(services, "repository", typeof(ISourceControlAccess), config);
 
         var provider = services.BuildServiceProvider();
         var resolved = provider.GetRequiredService<ISourceControlAccess>();

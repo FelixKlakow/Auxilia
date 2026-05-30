@@ -39,6 +39,6 @@ public class SlotHandlerResolverTests
 
     private sealed class NoOpSlotHandler : ISlotHandler
     {
-        public void Register(IServiceCollection services, string slotName, SlotConfiguration configuration) { }
+        public void Register(IServiceCollection services, string slotName, Type serviceType, SlotConfiguration configuration) { }
     }
 }

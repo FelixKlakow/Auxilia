@@ -13,6 +13,6 @@ public sealed class FakeSourceControlAccessSlotHandler : ISlotHandler
         _instance = instance;
     }
 
-    public void Register(IServiceCollection services, string slotName, SlotConfiguration configuration)
+    public void Register(IServiceCollection services, string slotName, Type serviceType, SlotConfiguration configuration)
         => services.AddSingleton<ISourceControlAccess>(_instance);
 }

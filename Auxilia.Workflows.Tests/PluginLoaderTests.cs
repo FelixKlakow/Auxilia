@@ -47,7 +47,7 @@ public class PluginLoaderTests
             "Register",
             MethodAttributes.Public | MethodAttributes.Virtual | MethodAttributes.Final,
             returnType: null,
-            parameterTypes: [typeof(IServiceCollection), typeof(string), typeof(SlotConfiguration)]);
+            parameterTypes: [typeof(IServiceCollection), typeof(string), typeof(Type), typeof(SlotConfiguration)]);
         registerMethod.GetILGenerator().Emit(OpCodes.Ret);
         typeBuilder.DefineMethodOverride(registerMethod, typeof(ISlotHandler).GetMethod("Register")!);
 

@@ -6,6 +6,6 @@ namespace Auxilia.ImplementationWorkflow.Tests.Fakes;
 
 public sealed class FakeTestRunnerSlotHandler(FakeTestRunner instance) : ISlotHandler
 {
-    public void Register(IServiceCollection services, string slotName, SlotConfiguration configuration)
+    public void Register(IServiceCollection services, string slotName, Type serviceType, SlotConfiguration configuration)
         => services.AddKeyedSingleton<ITestRunner>(slotName, instance);
 }

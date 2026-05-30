@@ -13,8 +13,7 @@ public class WorkflowBootstrapperTests
 {
     private static EncryptedSlotConfiguration EncryptSlot(string providerType, Dictionary<string, string> settings, string publicKeyBase64)
     {
-        var dto = new { ProviderType = providerType, Settings = settings };
-        var json = JsonSerializer.Serialize(dto);
+        var json = JsonSerializer.Serialize(settings);
 
         var publicKeyBytes = Convert.FromBase64String(publicKeyBase64);
         using var rsa = RSA.Create();
@@ -46,12 +45,19 @@ public class WorkflowBootstrapperTests
         var resolver = new SlotHandlerResolver();
         resolver.Register(providerType, spy);
 
+        var slotDefinitions = new List<SlotDefinition>
+        {
+            new("slot1", null) { ServiceType = typeof(object) },
+            new("slot2", null) { ServiceType = typeof(object) }
+        };
+
         var services = new ServiceCollection();
-        var bootstrapper = new WorkflowBootstrapper(response, keyPair, resolver);
+        var bootstrapper = new WorkflowBootstrapper(response, keyPair, resolver, slotDefinitions);
         bootstrapper.Apply(services);
 
         Assert.That(spy.Calls, Has.Count.EqualTo(2));
         Assert.That(spy.Calls.All(c => c.Configuration.ProviderType == providerType), Is.True);
+        Assert.That(spy.Calls.All(c => c.ServiceType == typeof(object)), Is.True);
         Assert.That(spy.Calls.Any(c => c.SlotName == "slot1" && c.Configuration.Settings.ContainsKey("a") && c.Configuration.Settings["a"] == "1"), Is.True);
         Assert.That(spy.Calls.Any(c => c.SlotName == "slot2" && c.Configuration.Settings.ContainsKey("b") && c.Configuration.Settings["b"] == "2"), Is.True);
     }
@@ -66,16 +72,37 @@ public class WorkflowBootstrapperTests
         var slots = new Dictionary<string, EncryptedSlotConfiguration> { ["s1"] = slot };
         var response = new WorkflowConfigurationResponse(Guid.NewGuid(), true, null, slots);
 
-        var bootstrapper = new WorkflowBootstrapper(response, keyPair, new SlotHandlerResolver());
+        var slotDefinitions = new List<SlotDefinition>
+        {
+            new("s1", null) { ServiceType = typeof(object) }
+        };
+
+        var bootstrapper = new WorkflowBootstrapper(response, keyPair, new SlotHandlerResolver(), slotDefinitions);
 
         Assert.Throws<KeyNotFoundException>(() => bootstrapper.Apply(new ServiceCollection()));
     }
 
+    [Test]
+    public void Apply_WithMissingSlotDefinition_ThrowsInvalidOperationException()
+    {
+        var providerType = $"bt-provider-{Guid.NewGuid()}";
+        using var keyPair = new EphemeralKeyPair();
+
+        var slot = EncryptSlot(providerType, new Dictionary<string, string>(), keyPair.PublicKeyBase64);
+        var slots = new Dictionary<string, EncryptedSlotConfiguration> { ["missing"] = slot };
+        var response = new WorkflowConfigurationResponse(Guid.NewGuid(), true, null, slots);
+
+        var bootstrapper = new WorkflowBootstrapper(response, keyPair, new SlotHandlerResolver(), []);
+
+        var ex = Assert.Throws<InvalidOperationException>(() => bootstrapper.Apply(new ServiceCollection()));
+        Assert.That(ex!.Message, Is.EqualTo("No SlotDefinition found for slot 'missing'."));
+    }
+
     private sealed class SpySlotHandler : ISlotHandler
     {
-        public List<(string SlotName, SlotConfiguration Configuration)> Calls { get; } = new();
+        public List<(string SlotName, Type ServiceType, SlotConfiguration Configuration)> Calls { get; } = new();
 
-        public void Register(IServiceCollection services, string slotName, SlotConfiguration configuration)
-            => Calls.Add((slotName, configuration));
+        public void Register(IServiceCollection services, string slotName, Type serviceType, SlotConfiguration configuration)
+            => Calls.Add((slotName, serviceType, configuration));
     }
 }
