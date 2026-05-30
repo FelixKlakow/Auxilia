@@ -41,6 +41,13 @@ Each file contains:
 
 Do **not** include: configuration samples, test category rules, dependency tables, or anything already covered here.
 
+## AI Session Retry and Resilience
+Retry logic and resilience for `IAiAgent.OpenSessionAsync` and `IAiSession.ExecuteAsync` must be
+handled at the `IAiAgent` layer — either inside the provider implementation or via a decorator such
+as `ResilientAiAgent` from `Auxilia.Workflows.AiAgent`.  
+**Never** implement per-workflow retry loops in orchestrators or workflow classes.  
+Use `AiAgentServiceCollectionExtensions.WrapAiAgentWithResilience` to opt in to the decorator.
+
 ## Commit convention
 `<type>: <description>` – allowed types: `feat fix refactor plan docs style merge revert`.
 
