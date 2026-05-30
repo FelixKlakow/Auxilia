@@ -15,8 +15,8 @@ public class SlotConfigurationCryptoTests
     {
         using var keyPair = new EphemeralKeyPair();
 
-        var dto = new { ProviderType = "test", Settings = new Dictionary<string, string> { ["key"] = "value" } };
-        var json = JsonSerializer.Serialize(dto);
+        var settings = new Dictionary<string, string> { ["key"] = "value" };
+        var json = JsonSerializer.Serialize(settings);
 
         var publicKeyBytes = Convert.FromBase64String(keyPair.PublicKeyBase64);
         using var rsa = RSA.Create();

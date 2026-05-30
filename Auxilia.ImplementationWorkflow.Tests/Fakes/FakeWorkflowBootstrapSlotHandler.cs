@@ -10,7 +10,7 @@ public sealed class FakeWorkflowBootstrapSlotHandler(
     string workItemId,
     ImplementationWorkflowConfiguration configuration) : ISlotHandler
 {
-    public void Register(IServiceCollection services, string slotName, SlotConfiguration slotConfiguration)
+    public void Register(IServiceCollection services, string slotName, Type serviceType, SlotConfiguration slotConfiguration)
     {
         // Pre-register fake signal emitter before AddImplementationWorkflow (which uses TryAdd)
         services.AddSingleton<ISignalEmitter>(signalEmitter);

@@ -71,7 +71,7 @@ public class DefaultSignalEmitterTests
         var services = new ServiceCollection();
         services.AddSingleton<IMessageBusClient>(new CapturingBus());
 
-        var bootstrapper = new WorkflowBootstrapper(response, keyPair, new SlotHandlerResolver(), Guid.NewGuid());
+        var bootstrapper = new WorkflowBootstrapper(response, keyPair, new SlotHandlerResolver(), [], Guid.NewGuid());
         bootstrapper.Apply(services);
 
         var provider = services.BuildServiceProvider();
@@ -93,7 +93,7 @@ public class DefaultSignalEmitterTests
         var services = new ServiceCollection();
         services.AddSingleton<IMessageBusClient>(new CapturingBus());
 
-        var bootstrapper = new WorkflowBootstrapper(response, keyPair, new SlotHandlerResolver(), instanceId);
+        var bootstrapper = new WorkflowBootstrapper(response, keyPair, new SlotHandlerResolver(), [], instanceId);
         bootstrapper.Apply(services);
 
         var provider = services.BuildServiceProvider();
