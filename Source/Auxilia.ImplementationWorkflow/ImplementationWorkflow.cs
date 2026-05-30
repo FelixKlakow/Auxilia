@@ -37,7 +37,7 @@ public static class ImplementationWorkflow
 
     public static Task RunAsync() => Main(["--test-harness"]);
 
-    private static async Task ExecuteAsync(IServiceProvider provider)
+    private static async Task ExecuteAsync(IServiceProvider provider, CancellationToken _)
     {
         var contextAssembler = provider.GetRequiredService<ContextAssembler>();
         var branchSetup = provider.GetRequiredService<BranchSetupService>();
