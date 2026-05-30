@@ -11,6 +11,9 @@ public sealed class InProcessMessageBus : IMessageBusClient
     public Task DeclareQueueAsync(string queueName, CancellationToken cancellationToken = default)
         => Task.CompletedTask;
 
+    public Task DeclareExchangeAsync(string exchangeName, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
     public async Task PublishAsync<T>(string topic, T message, CancellationToken cancellationToken = default)
     {
         List<Subscription> snapshot;
@@ -27,6 +30,9 @@ public sealed class InProcessMessageBus : IMessageBusClient
                 await typed(message, cancellationToken);
         }
     }
+
+    public Task PublishToExchangeAsync<T>(string exchangeName, T message, CancellationToken cancellationToken = default)
+        => PublishAsync(exchangeName, message, cancellationToken);
 
     public Task<IAsyncDisposable> SubscribeAsync<T>(
         string queueName,
@@ -52,6 +58,12 @@ public sealed class InProcessMessageBus : IMessageBusClient
 
         return Task.FromResult(disposable);
     }
+
+    public Task<IAsyncDisposable> SubscribeToExchangeAsync<T>(
+        string exchangeName,
+        Func<T, CancellationToken, Task> handler,
+        CancellationToken cancellationToken = default)
+        => SubscribeAsync(exchangeName, handler, cancellationToken);
 
     private sealed class Subscription(Delegate handler)
     {

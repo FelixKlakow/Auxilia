@@ -241,9 +241,18 @@ public class WorkflowRegistrationHandlerTests
         public Task DeclareQueueAsync(string queueName, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
+        public Task DeclareExchangeAsync(string exchangeName, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
         public Task PublishAsync<T>(string topic, T message, CancellationToken cancellationToken = default)
         {
             Published.Add((topic, message!));
+            return Task.CompletedTask;
+        }
+
+        public Task PublishToExchangeAsync<T>(string exchangeName, T message, CancellationToken cancellationToken = default)
+        {
+            Published.Add((exchangeName, message!));
             return Task.CompletedTask;
         }
 
@@ -256,6 +265,12 @@ public class WorkflowRegistrationHandlerTests
                 _handler = typedHandler;
             return Task.FromResult<IAsyncDisposable>(new NullDisposable());
         }
+
+        public Task<IAsyncDisposable> SubscribeToExchangeAsync<T>(
+            string exchangeName,
+            Func<T, CancellationToken, Task> handler,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IAsyncDisposable>(new NullDisposable());
 
         public Task InvokeAsync(WorkflowRegistrationRequest request, CancellationToken cancellationToken)
             => _handler!(request, cancellationToken);

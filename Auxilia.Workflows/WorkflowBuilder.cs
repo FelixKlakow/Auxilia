@@ -24,6 +24,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     private Func<IServiceProvider, CancellationToken, Task>? _application;
 
     private const string StateQueueName = "workflow.state";
+    private const string StateExchangeName = "workflow.state";
 
     public static IWorkflowRunContext? TestContext { get; set; }
     public static SlotHandlerResolver? TestSlotHandlerResolver { get; set; }
@@ -167,7 +168,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                     return;
                 }
 
-                await context.MessageBus.DeclareQueueAsync(StateQueueName);
+                await context.MessageBus.DeclareExchangeAsync(StateExchangeName);
                 await context.MessageBus.DeclareQueueAsync("workflow.signals");
 
                 var cancelQueueName = $"workflow-cancel-{instanceId}";
@@ -203,13 +204,13 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                             await _application(provider, cts.Token);
                     }
 
-                    await context.MessageBus.PublishAsync(StateQueueName,
+                    await context.MessageBus.PublishToExchangeAsync(StateExchangeName,
                         new WorkflowStateMessage(instanceId, WorkflowState.Success, null));
                     context.ExitService.Exit(0);
                 }
                 catch (OperationCanceledException)
                 {
-                    await context.MessageBus.PublishAsync(StateQueueName,
+                    await context.MessageBus.PublishToExchangeAsync(StateExchangeName,
                         new WorkflowStateMessage(instanceId, WorkflowState.Cancelled, null));
                     context.ExitService.Exit(0);
                     return;
@@ -217,7 +218,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 catch (Exception ex)
                 {
                     context.Logger.LogError(ex, "Workflow run failed: {Message}", ex.Message);
-                    await context.MessageBus.PublishAsync(StateQueueName,
+                    await context.MessageBus.PublishToExchangeAsync(StateExchangeName,
                         new WorkflowStateMessage(instanceId, WorkflowState.Failed, ex.Message));
                     context.ExitService.Exit(1);
                 }

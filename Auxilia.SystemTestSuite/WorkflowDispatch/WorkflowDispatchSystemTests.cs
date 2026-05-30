@@ -27,16 +27,16 @@ public class WorkflowDispatchSystemTests
         CancellationToken cancellationToken)
     {
         // ── Arrange ─────────────────────────────────────────────────────────
-        const string stateQueue = "workflow.state";
-        await Bus.DeclareQueueAsync(stateQueue, cancellationToken);
+        const string stateExchange = "workflow.state";
+        await Bus.DeclareExchangeAsync(stateExchange, cancellationToken);
 
         var stateTcs = new TaskCompletionSource<WorkflowStateMessage>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         await using var _ = cancellationToken.Register(
             () => stateTcs.TrySetCanceled(cancellationToken));
 
-        await using var subscription = await Bus.SubscribeAsync<WorkflowStateMessage>(
-            stateQueue,
+        await using var subscription = await Bus.SubscribeToExchangeAsync<WorkflowStateMessage>(
+            stateExchange,
             (msg, _) =>
             {
                 stateTcs.TrySetResult(msg);

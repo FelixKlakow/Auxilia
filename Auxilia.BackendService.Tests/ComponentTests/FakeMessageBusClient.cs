@@ -30,6 +30,9 @@ public sealed class FakeMessageBusClient : IMessageBusClient
         }
     }
 
+    public Task DeclareExchangeAsync(string exchangeName, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
     public async Task PublishAsync<T>(string topic, T message, CancellationToken cancellationToken = default)
     {
         await _lock.WaitAsync(cancellationToken);
@@ -41,6 +44,25 @@ public sealed class FakeMessageBusClient : IMessageBusClient
         {
             _lock.Release();
         }
+    }
+
+    public async Task PublishToExchangeAsync<T>(string exchangeName, T message, CancellationToken cancellationToken = default)
+    {
+        await _lock.WaitAsync(cancellationToken);
+        List<Func<object, CancellationToken, Task>> handlers;
+        try
+        {
+            _publishedMessages.Add((exchangeName, message!));
+            _subscribers.TryGetValue(exchangeName, out var list);
+            handlers = list?.ToList() ?? new List<Func<object, CancellationToken, Task>>();
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        foreach (var h in handlers)
+            await h(message!, cancellationToken);
     }
 
     public async Task<IAsyncDisposable> SubscribeAsync<T>(
@@ -66,6 +88,12 @@ public sealed class FakeMessageBusClient : IMessageBusClient
 
         return new NoOpDisposable();
     }
+
+    public async Task<IAsyncDisposable> SubscribeToExchangeAsync<T>(
+        string exchangeName,
+        Func<T, CancellationToken, Task> handler,
+        CancellationToken cancellationToken = default)
+        => await SubscribeAsync(exchangeName, handler, cancellationToken);
 
     /// <summary>Feeds a message as if it arrived from the broker.</summary>
     public async Task SimulateReceivedAsync<T>(string queueName, T message,

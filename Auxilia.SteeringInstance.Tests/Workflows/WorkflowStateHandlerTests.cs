@@ -23,11 +23,11 @@ public class WorkflowStateHandlerTests
         disposable.Setup(d => d.DisposeAsync()).Returns(ValueTask.CompletedTask);
 
         _mockBus
-            .Setup(b => b.DeclareQueueAsync("workflow.state", It.IsAny<CancellationToken>()))
+            .Setup(b => b.DeclareExchangeAsync("workflow.state", It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         _mockBus
-            .Setup(b => b.SubscribeAsync<WorkflowStateMessage>(
+            .Setup(b => b.SubscribeToExchangeAsync<WorkflowStateMessage>(
                 "workflow.state",
                 It.IsAny<Func<WorkflowStateMessage, CancellationToken, Task>>(),
                 It.IsAny<CancellationToken>()))
@@ -49,7 +49,7 @@ public class WorkflowStateHandlerTests
     public void WhenStartCalled_DeclaresWorkflowStateQueue()
     {
         _mockBus.Verify(
-            b => b.DeclareQueueAsync("workflow.state", It.IsAny<CancellationToken>()),
+            b => b.DeclareExchangeAsync("workflow.state", It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -57,7 +57,7 @@ public class WorkflowStateHandlerTests
     public void WhenStartCalled_SubscribesToWorkflowStateQueue()
     {
         _mockBus.Verify(
-            b => b.SubscribeAsync<WorkflowStateMessage>(
+            b => b.SubscribeToExchangeAsync<WorkflowStateMessage>(
                 "workflow.state",
                 It.IsAny<Func<WorkflowStateMessage, CancellationToken, Task>>(),
                 It.IsAny<CancellationToken>()),

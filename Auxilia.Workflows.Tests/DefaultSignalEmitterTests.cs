@@ -137,13 +137,27 @@ public class DefaultSignalEmitterTests
         public Task DeclareQueueAsync(string queueName, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
+        public Task DeclareExchangeAsync(string exchangeName, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
         public Task PublishAsync<T>(string topic, T message, CancellationToken cancellationToken = default)
         {
             Published.Add((topic, message!));
             return Task.CompletedTask;
         }
 
+        public Task PublishToExchangeAsync<T>(string exchangeName, T message, CancellationToken cancellationToken = default)
+        {
+            Published.Add((exchangeName, message!));
+            return Task.CompletedTask;
+        }
+
         public Task<IAsyncDisposable> SubscribeAsync<T>(string queueName,
+            Func<T, CancellationToken, Task> handler,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IAsyncDisposable>(NoopDisposable.Instance);
+
+        public Task<IAsyncDisposable> SubscribeToExchangeAsync<T>(string exchangeName,
             Func<T, CancellationToken, Task> handler,
             CancellationToken cancellationToken = default)
             => Task.FromResult<IAsyncDisposable>(NoopDisposable.Instance);
@@ -172,6 +186,9 @@ public class DefaultSignalEmitterTests
             return Task.CompletedTask;
         }
 
+        public Task DeclareExchangeAsync(string exchangeName, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
         public Task<IAsyncDisposable> SubscribeAsync<T>(string queueName,
             Func<T, CancellationToken, Task> handler,
             CancellationToken cancellationToken = default)
@@ -179,6 +196,12 @@ public class DefaultSignalEmitterTests
             _handlers[queueName] = (msg, ct) => handler((T)msg, ct);
             return Task.FromResult<IAsyncDisposable>(NoopDisposable.Instance);
         }
+
+        public Task<IAsyncDisposable> SubscribeToExchangeAsync<T>(
+            string exchangeName,
+            Func<T, CancellationToken, Task> handler,
+            CancellationToken cancellationToken = default)
+            => SubscribeAsync(exchangeName, handler, cancellationToken);
 
         public Task PublishAsync<T>(string topic, T message, CancellationToken cancellationToken = default)
         {
@@ -188,6 +211,9 @@ public class DefaultSignalEmitterTests
             OnPublish?.Invoke(topic, message!);
             return Task.CompletedTask;
         }
+
+        public Task PublishToExchangeAsync<T>(string exchangeName, T message, CancellationToken cancellationToken = default)
+            => PublishAsync(exchangeName, message, cancellationToken);
     }
 
     private sealed class FakeWorkflowRunContext(IMessageBusClient bus, IProcessExitService exitService)
