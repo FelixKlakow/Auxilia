@@ -31,16 +31,16 @@ public static class PullRequestReviewWorkflow
 
     public static Task RunAsync() => Main(["--test-harness"]);
 
-    private static async Task ExecuteWorkflowAsync(IServiceProvider provider, CancellationToken _)
+    private static async Task ExecuteWorkflowAsync(IServiceProvider provider, CancellationToken cancellationToken)
     {
         await using var scope = provider.CreateAsyncScope();
         var sp = scope.ServiceProvider;
 
         var assembler = sp.GetRequiredService<ContextAssembler>();
-        var context = await assembler.AssembleAsync(new PullRequestReference("pr", "main", "head"));
+        var context = await assembler.AssembleAsync(new PullRequestReference("pr", "main", "head"), cancellationToken);
 
         var primaryOrchestrator = sp.GetRequiredService<PrimaryReviewOrchestrator>();
-        await primaryOrchestrator.RunAsync(context);
+        await primaryOrchestrator.RunAsync(context, cancellationToken);
 
         var store = sp.GetRequiredService<IStagedFindingsStore>();
         var aggregator = sp.GetRequiredService<FindingsAggregator>();

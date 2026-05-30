@@ -37,7 +37,7 @@ public static class ImplementationWorkflow
 
     public static Task RunAsync() => Main(["--test-harness"]);
 
-    private static async Task ExecuteAsync(IServiceProvider provider, CancellationToken _)
+    private static async Task ExecuteAsync(IServiceProvider provider, CancellationToken cancellationToken)
     {
         var contextAssembler = provider.GetRequiredService<ContextAssembler>();
         var branchSetup = provider.GetRequiredService<BranchSetupService>();
@@ -48,14 +48,14 @@ public static class ImplementationWorkflow
         var summaryWriter = provider.GetRequiredService<ImplementationSummaryWriter>();
         var completionSignalEmitter = provider.GetRequiredService<CompletionSignalEmitter>();
 
-        var context = await contextAssembler.AssembleAsync();
-        await branchSetup.SetupAsync(context.BranchName);
+        var context = await contextAssembler.AssembleAsync(cancellationToken);
+        await branchSetup.SetupAsync(context.BranchName, cancellationToken);
 
-        var agentResult = await agentOrchestrator.RunAsync(context);
-        var reviewNotes = await reviewerOrchestrator.RunAsync(agentResult, context);
-        var prUrl = await pullRequestService.OpenAsync(agentResult, context);
+        var agentResult = await agentOrchestrator.RunAsync(context, cancellationToken);
+        var reviewNotes = await reviewerOrchestrator.RunAsync(agentResult, context, cancellationToken);
+        var prUrl = await pullRequestService.OpenAsync(agentResult, context, cancellationToken);
 
-        await writeBackService.WriteAsync(context, prUrl);
+        await writeBackService.WriteAsync(context, prUrl, cancellationToken);
 
         var summary = new ImplementationSummary
         {
@@ -64,8 +64,8 @@ public static class ImplementationWorkflow
             PrUrl = prUrl,
             ReviewNotes = reviewNotes
         };
-        await summaryWriter.WriteAsync(summary);
+        await summaryWriter.WriteAsync(summary, cancellationToken);
 
-        await completionSignalEmitter.EmitAsync(agentResult, prUrl, reviewNotes);
+        await completionSignalEmitter.EmitAsync(agentResult, prUrl, reviewNotes, cancellationToken);
     }
 }
