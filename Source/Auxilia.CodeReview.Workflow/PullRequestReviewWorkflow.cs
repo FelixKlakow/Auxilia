@@ -17,7 +17,7 @@ public static class PullRequestReviewWorkflow
             .RequiresSourceControl("repository",
                 new SourceControlCapabilities { RequiredPermissions = [Permission.Read] })
             .RequiresPullRequestAccess("pull-request",
-                new PullRequestAccessCapabilities { RequiredPermissions = ["ReadWrite"] })
+                new PullRequestAccessCapabilities { RequiredPermissions = [PullRequestPermission.Read, PullRequestPermission.Write] })
             .RequiresTaskSource("work-items",
                 new TaskSourceCapabilities { SupportedItemTypes = [ItemType.UserStory, ItemType.Bug, ItemType.Feature, ItemType.Epic] })
             .RequiresAiAgent("primary-reviewer",

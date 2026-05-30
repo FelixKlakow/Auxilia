@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Auxilia.Workflows;
 using Auxilia.Workflows.SourceControl;
 
 namespace Auxilia.Workflows.SlotPackages.Tests.SourceControl;
@@ -13,7 +14,7 @@ public class SourceControlCapabilitiesTests
         var original = new SourceControlCapabilities
         {
             RequiredPermissions = [Permission.Read, Permission.Write],
-            SupportedHostTypes = ["github", "gitlab"]
+            SupportedHostTypes = [SourceHostType.GitHub, SourceHostType.GitLab]
         };
 
         var json = JsonSerializer.Serialize(original);
@@ -62,5 +63,12 @@ public class SourceControlCapabilitiesTests
     {
         Assert.That(JsonSerializer.Serialize(Permission.Read), Is.EqualTo(@"""Read"""));
         Assert.That(JsonSerializer.Serialize(Permission.Write), Is.EqualTo(@"""Write"""));
+    }
+
+    [Test]
+    public void SourceHostType_EnumValues_SerializeAsStrings()
+    {
+        Assert.That(JsonSerializer.Serialize(SourceHostType.GitHub), Is.EqualTo(@"""GitHub"""));
+        Assert.That(JsonSerializer.Serialize(SourceHostType.GitLab), Is.EqualTo(@"""GitLab"""));
     }
 }
