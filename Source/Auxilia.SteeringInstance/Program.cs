@@ -65,6 +65,8 @@ try
     builder.Services.AddSingleton<SignalDispatcher>();
     builder.Services.AddSingleton<WorkflowAnnouncementHandler>();
     builder.Services.AddSingleton<WorkflowDispatcher>();
+    builder.Services.AddSingleton<WorkflowCancelDispatcher>();
+    builder.Services.AddSingleton<WorkflowStateHandler>();
     builder.Services.AddSingleton<IWorkflowLauncher, DockerWorkflowLauncher>();
 
     // --- Workflow launcher settings ---
@@ -139,6 +141,12 @@ try
 
     var dispatcher = app.Services.GetRequiredService<WorkflowDispatcher>();
     await dispatcher.StartAsync(app.Lifetime.ApplicationStopping);
+
+    var cancelDispatcher = app.Services.GetRequiredService<WorkflowCancelDispatcher>();
+    await cancelDispatcher.StartAsync(app.Lifetime.ApplicationStopping);
+
+    var stateHandler = app.Services.GetRequiredService<WorkflowStateHandler>();
+    await stateHandler.StartAsync(app.Lifetime.ApplicationStopping);
 
     app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
     app.MapPrometheusScrapingEndpoint(); // GET /metrics
