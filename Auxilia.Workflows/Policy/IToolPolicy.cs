@@ -13,4 +13,11 @@ public interface IToolPolicy
     /// e.g. <c>source_control.commit</c> or <c>test_runner.run_tests</c>.
     /// </param>
     bool IsAllowed(string capabilityOperation);
+
+    /// <summary>
+    /// Returns <c>true</c> if the given typed capability operation is allowed; <c>false</c> if it is denied.
+    /// The key is derived by stripping the <c>Operation</c> suffix from the enum type name and converting
+    /// both the capability name and the operation name to <c>snake_case</c>.
+    /// </summary>
+    bool IsAllowed<TOperation>(TOperation op) where TOperation : struct, Enum;
 }

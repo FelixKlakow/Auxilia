@@ -21,43 +21,43 @@ public sealed class PolicyGuardedPullRequestAccess : IPullRequestAccess
 
     public Task<IReadOnlyList<ChangedFile>> GetChangedFilesAsync(CancellationToken cancellationToken = default)
     {
-        if (!_policy.IsAllowed("pull_request.get_changed_files"))
-            throw new ToolPolicyDeniedException("pull_request.get_changed_files", _slotName);
+        if (!_policy.IsAllowed(PullRequestOperation.GetChangedFiles))
+            throw new ToolPolicyDeniedException(PullRequestOperation.GetChangedFiles, _slotName);
         return _inner.GetChangedFilesAsync(cancellationToken);
     }
 
     public Task<IReadOnlyList<DiffHunk>> GetDiffHunksAsync(string filePath, CancellationToken cancellationToken = default)
     {
-        if (!_policy.IsAllowed("pull_request.get_diff_hunks"))
-            throw new ToolPolicyDeniedException("pull_request.get_diff_hunks", _slotName);
+        if (!_policy.IsAllowed(PullRequestOperation.GetDiffHunks))
+            throw new ToolPolicyDeniedException(PullRequestOperation.GetDiffHunks, _slotName);
         return _inner.GetDiffHunksAsync(filePath, cancellationToken);
     }
 
     public Task<IReadOnlyList<ReviewComment>> GetCommentsAsync(CancellationToken cancellationToken = default)
     {
-        if (!_policy.IsAllowed("pull_request.get_comments"))
-            throw new ToolPolicyDeniedException("pull_request.get_comments", _slotName);
+        if (!_policy.IsAllowed(PullRequestOperation.GetComments))
+            throw new ToolPolicyDeniedException(PullRequestOperation.GetComments, _slotName);
         return _inner.GetCommentsAsync(cancellationToken);
     }
 
     public Task<IReadOnlyList<WorkItemReference>> GetLinkedWorkItemsAsync(CancellationToken cancellationToken = default)
     {
-        if (!_policy.IsAllowed("pull_request.get_linked_work_items"))
-            throw new ToolPolicyDeniedException("pull_request.get_linked_work_items", _slotName);
+        if (!_policy.IsAllowed(PullRequestOperation.GetLinkedWorkItems))
+            throw new ToolPolicyDeniedException(PullRequestOperation.GetLinkedWorkItems, _slotName);
         return _inner.GetLinkedWorkItemsAsync(cancellationToken);
     }
 
     public Task PostCommentAsync(string body, string? filePath = null, int? lineNumber = null, CancellationToken cancellationToken = default)
     {
-        if (!_policy.IsAllowed("pull_request.post_comment"))
-            throw new ToolPolicyDeniedException("pull_request.post_comment", _slotName);
+        if (!_policy.IsAllowed(PullRequestOperation.PostComment))
+            throw new ToolPolicyDeniedException(PullRequestOperation.PostComment, _slotName);
         return _inner.PostCommentAsync(body, filePath, lineNumber, cancellationToken);
     }
 
     public Task<string> OpenPullRequestAsync(PullRequestOptions options, CancellationToken cancellationToken = default)
     {
-        if (!_policy.IsAllowed("pull_request.open_pull_request"))
-            throw new ToolPolicyDeniedException("pull_request.open_pull_request", _slotName);
+        if (!_policy.IsAllowed(PullRequestOperation.OpenPullRequest))
+            throw new ToolPolicyDeniedException(PullRequestOperation.OpenPullRequest, _slotName);
         return _inner.OpenPullRequestAsync(options, cancellationToken);
     }
 }

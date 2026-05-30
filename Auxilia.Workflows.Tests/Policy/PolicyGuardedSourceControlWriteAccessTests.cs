@@ -23,6 +23,6 @@ public class PolicyGuardedSourceControlWriteAccessTests
         var result = sut.WorkingPath;
 
         Assert.That(result, Is.EqualTo(WorkingPathValue));
-        policyMock.Verify(p => p.IsAllowed(It.IsAny<string>()), Times.Never);
+        policyMock.Verify(p => p.IsAllowed(It.IsAny<SourceControlOperation>()), Times.Never);
     }
 }

@@ -21,8 +21,8 @@ public sealed class PolicyGuardedTestRunner : ITestRunner
 
     public Task<TestRunResult> RunTestsAsync(TestRunRequest request, CancellationToken cancellationToken = default)
     {
-        if (!_policy.IsAllowed("test_runner.run_tests"))
-            throw new ToolPolicyDeniedException("test_runner.run_tests", _slotName);
+        if (!_policy.IsAllowed(TestRunnerOperation.RunTests))
+            throw new ToolPolicyDeniedException(TestRunnerOperation.RunTests, _slotName);
         return _inner.RunTestsAsync(request, cancellationToken);
     }
 }

@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Auxilia.Workflows.Policy;
 
 /// <summary>
@@ -44,5 +46,17 @@ public static class ToolPolicySettings
 
         public bool IsAllowed(string capabilityOperation)
             => _settings.TryGetValue(capabilityOperation, out var value) && value == PolicyDecision.Allow;
+
+        public bool IsAllowed<TOperation>(TOperation op) where TOperation : struct, Enum
+        {
+            var typeName = typeof(TOperation).Name;
+            if (typeName.EndsWith("Operation", StringComparison.Ordinal))
+                typeName = typeName[..^"Operation".Length];
+            var key = $"{ToSnakeCase(typeName)}.{ToSnakeCase(op.ToString()!)}";
+            return IsAllowed(key);
+        }
+
+        private static string ToSnakeCase(string pascalCase)
+            => Regex.Replace(pascalCase, "([a-z])([A-Z])", "$1_$2").ToLowerInvariant();
     }
 }

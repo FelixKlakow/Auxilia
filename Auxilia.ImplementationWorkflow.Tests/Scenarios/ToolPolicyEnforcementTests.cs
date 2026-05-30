@@ -1,5 +1,6 @@
 using Auxilia.ImplementationWorkflow.Tests.Fakes;
 using Auxilia.Workflows.Messaging.Messages;
+using Auxilia.Workflows.SourceControl;
 
 namespace Auxilia.ImplementationWorkflow.Tests.Scenarios;
 
@@ -11,7 +12,7 @@ public sealed class ToolPolicyEnforcementTests : ScenarioTestBase
     public async Task CommitDenied_CommitNotRecorded_WorkflowStateIsFailedAndFailedSignalEmitted()
     {
         var repository = new FakeSourceControlWriteAccess();
-        repository.PolicyDenyList.Add("source_control.commit");
+        repository.PolicyDenyList.Add(SourceControlOperation.Commit);
 
         var implementerAgent = new FakeAiAgent(
             new Queue<IReadOnlyList<ScriptedTurn>>([
