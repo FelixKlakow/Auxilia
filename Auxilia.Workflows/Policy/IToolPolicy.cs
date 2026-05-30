@@ -12,6 +12,7 @@ public interface IToolPolicy
     /// Operation key in <c>{snake_case_capability}.{snake_case_operation}</c> format,
     /// e.g. <c>source_control.commit</c> or <c>test_runner.run_tests</c>.
     /// </param>
+    [Obsolete("Use IsAllowed<TOperation>(TOperation) instead. Will be removed in a subsequent phase.")]
     bool IsAllowed(string capabilityOperation);
 
     /// <summary>
