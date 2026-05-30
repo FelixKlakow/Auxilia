@@ -9,7 +9,6 @@ namespace Auxilia.Workflows.Tests.Policy;
 public class PolicyGuardedTestRunnerTests
 {
     private const string SlotName = "test-slot";
-    private const string PolicyKey = "test_runner.run_tests";
 
     private static readonly TestRunRequest SampleRequest = new("dotnet test");
 
@@ -21,7 +20,7 @@ public class PolicyGuardedTestRunnerTests
         innerMock.Setup(r => r.RunTestsAsync(SampleRequest, It.IsAny<CancellationToken>()))
                  .ReturnsAsync(expected);
         var policy = new Mock<IToolPolicy>();
-        policy.Setup(p => p.IsAllowed(PolicyKey)).Returns(true);
+        policy.Setup(p => p.IsAllowed(TestRunnerOperation.RunTests)).Returns(true);
 
         var sut = new PolicyGuardedTestRunner(innerMock.Object, policy.Object, SlotName);
         var result = await sut.RunTestsAsync(SampleRequest);
@@ -35,7 +34,7 @@ public class PolicyGuardedTestRunnerTests
     {
         var innerMock = new Mock<ITestRunner>();
         var policy = new Mock<IToolPolicy>();
-        policy.Setup(p => p.IsAllowed(PolicyKey)).Returns(false);
+        policy.Setup(p => p.IsAllowed(TestRunnerOperation.RunTests)).Returns(false);
 
         var sut = new PolicyGuardedTestRunner(innerMock.Object, policy.Object, SlotName);
 
@@ -47,7 +46,7 @@ public class PolicyGuardedTestRunnerTests
     {
         var innerMock = new Mock<ITestRunner>();
         var policy = new Mock<IToolPolicy>();
-        policy.Setup(p => p.IsAllowed(PolicyKey)).Returns(false);
+        policy.Setup(p => p.IsAllowed(TestRunnerOperation.RunTests)).Returns(false);
 
         var sut = new PolicyGuardedTestRunner(innerMock.Object, policy.Object, SlotName);
 
@@ -61,13 +60,13 @@ public class PolicyGuardedTestRunnerTests
     {
         var innerMock = new Mock<ITestRunner>();
         var policy = new Mock<IToolPolicy>();
-        policy.Setup(p => p.IsAllowed(PolicyKey)).Returns(false);
+        policy.Setup(p => p.IsAllowed(TestRunnerOperation.RunTests)).Returns(false);
 
         var sut = new PolicyGuardedTestRunner(innerMock.Object, policy.Object, SlotName);
 
         var ex = Assert.ThrowsAsync<ToolPolicyDeniedException>(() => sut.RunTestsAsync(SampleRequest));
 
-        Assert.That(ex!.CapabilityOperation, Is.EqualTo(PolicyKey));
+        Assert.That(ex!.Operation, Is.EqualTo(TestRunnerOperation.RunTests));
         Assert.That(ex.SlotName, Is.EqualTo(SlotName));
     }
 }

@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Auxilia.Workflows.Policy;
 
 /// <summary>
@@ -11,6 +13,9 @@ public sealed class ToolPolicyDeniedException : Exception
     /// <summary>Alias for <see cref="CapabilityOperation"/>.</summary>
     public string Key => CapabilityOperation;
 
+    /// <summary>The typed operation value that was denied, if constructed via the typed overload.</summary>
+    public object? Operation { get; }
+
     /// <summary>The slot name for which the operation was denied.</summary>
     public string SlotName { get; }
 
@@ -21,10 +26,30 @@ public sealed class ToolPolicyDeniedException : Exception
         SlotName = slotName;
     }
 
+    public ToolPolicyDeniedException(object operation, string slotName)
+        : base($"Tool policy denied operation '{ToOperationKey(operation)}' for slot '{slotName}'.")
+    {
+        Operation = operation;
+        CapabilityOperation = ToOperationKey(operation);
+        SlotName = slotName;
+    }
+
     public ToolPolicyDeniedException(string capabilityOperation, string slotName, string message)
         : base(message)
     {
         CapabilityOperation = capabilityOperation;
         SlotName = slotName;
     }
+
+    private static string ToOperationKey(object operation)
+    {
+        if (operation is string s) return s;
+        var typeName = operation.GetType().Name;
+        if (typeName.EndsWith("Operation", StringComparison.Ordinal))
+            typeName = typeName[..^"Operation".Length];
+        return $"{ToSnakeCase(typeName)}.{ToSnakeCase(operation.ToString()!)}";
+    }
+
+    private static string ToSnakeCase(string pascalCase)
+        => Regex.Replace(pascalCase, "([a-z])([A-Z])", "$1_$2").ToLowerInvariant();
 }

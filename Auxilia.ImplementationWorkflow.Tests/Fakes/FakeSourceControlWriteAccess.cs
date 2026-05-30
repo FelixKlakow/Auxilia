@@ -10,32 +10,32 @@ public sealed class FakeSourceControlWriteAccess : ISourceControlWriteAccess
     public List<(string RelativePath, string Content)> WrittenFiles { get; } = new();
     public List<string> CommittedMessages { get; } = new();
     public int PushCallCount { get; private set; }
-    public ISet<string> PolicyDenyList { get; } = new HashSet<string>();
+    public ISet<SourceControlOperation> PolicyDenyList { get; } = new HashSet<SourceControlOperation>();
 
     public Task CreateBranchAsync(string branchName, string? fromRef = null, CancellationToken cancellationToken = default)
     {
-        ThrowIfDenied("source_control.create_branch");
+        ThrowIfDenied(SourceControlOperation.CreateBranch);
         CreatedBranches.Add(branchName);
         return Task.CompletedTask;
     }
 
     public Task WriteFileAsync(string relativePath, string content, CancellationToken cancellationToken = default)
     {
-        ThrowIfDenied("source_control.write_file");
+        ThrowIfDenied(SourceControlOperation.WriteFile);
         WrittenFiles.Add((relativePath, content));
         return Task.CompletedTask;
     }
 
     public Task CommitAsync(string message, CancellationToken cancellationToken = default)
     {
-        ThrowIfDenied("source_control.commit");
+        ThrowIfDenied(SourceControlOperation.Commit);
         CommittedMessages.Add(message);
         return Task.CompletedTask;
     }
 
     public Task PushAsync(CancellationToken cancellationToken = default)
     {
-        ThrowIfDenied("source_control.push");
+        ThrowIfDenied(SourceControlOperation.Push);
         PushCallCount++;
         return Task.CompletedTask;
     }
@@ -60,9 +60,9 @@ public sealed class FakeSourceControlWriteAccess : ISourceControlWriteAccess
         return Task.FromResult(result);
     }
 
-    private void ThrowIfDenied(string operationKey)
+    private void ThrowIfDenied(SourceControlOperation op)
     {
-        if (PolicyDenyList.Contains(operationKey))
-            throw new Auxilia.Workflows.Policy.ToolPolicyDeniedException(operationKey, "repository");
+        if (PolicyDenyList.Contains(op))
+            throw new Auxilia.Workflows.Policy.ToolPolicyDeniedException(op, "repository");
     }
 }

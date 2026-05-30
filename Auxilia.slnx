@@ -37,9 +37,7 @@
     <Project Path="Auxilia.Workflows.Testing\Auxilia.Workflows.Testing.csproj" />
     <Project Path="Auxilia.Workflows.Tests\Auxilia.Workflows.Tests.csproj" />
     <Project Path="Auxilia.Workflows\Auxilia.Workflows.csproj" />
-    <Project Path="Source/Auxilia.Workflows.TestRunner/Auxilia.Workflows.TestRunner.csproj">
-      <Build Solution="Debug|*" Project="false" />
-    </Project>
+    <Project Path="Source/Auxilia.Workflows.TestRunner/Auxilia.Workflows.TestRunner.csproj" />
     <Project Path="Source\Auxilia.Workflows.AiAgent\Auxilia.Workflows.AiAgent.csproj" />
     <Project Path="Source\Auxilia.Workflows.PullRequestAccess\Auxilia.Workflows.PullRequestAccess.csproj" />
     <Project Path="Source\Auxilia.Workflows.SourceControl\Auxilia.Workflows.SourceControl.csproj" />
