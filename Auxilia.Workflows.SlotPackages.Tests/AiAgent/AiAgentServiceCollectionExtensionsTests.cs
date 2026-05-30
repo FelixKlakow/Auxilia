@@ -49,6 +49,19 @@ public class AiAgentServiceCollectionExtensionsTests
     }
 
     [Test]
+    public void WrapAiAgentWithResilience_TypeRegistration_ReplacesWithResilientDecorator()
+    {
+        var services = new ServiceCollection();
+        services.AddKeyedSingleton<IAiAgent, FakeAiAgent>("my-agent");
+
+        services.WrapAiAgentWithResilience("my-agent");
+
+        using var provider = services.BuildServiceProvider();
+        var resolved = provider.GetRequiredKeyedService<IAiAgent>("my-agent");
+        Assert.That(resolved, Is.InstanceOf<ResilientAiAgent>());
+    }
+
+    [Test]
     public void WrapAiAgentWithResilience_OnlyOneDescriptorRemains_OriginalRemoved()
     {
         var services = new ServiceCollection();
