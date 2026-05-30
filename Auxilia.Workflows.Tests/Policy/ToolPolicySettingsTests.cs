@@ -1,4 +1,6 @@
 using Auxilia.Workflows.Policy;
+using Auxilia.Workflows.SourceControl;
+using Auxilia.Workflows.TestRunner;
 
 namespace Auxilia.Workflows.Tests.Policy;
 
@@ -16,7 +18,7 @@ public class ToolPolicySettingsTests
 
         var policy = ToolPolicySettings.Build(settings);
 
-        Assert.That(policy.IsAllowed("source_control.commit"), Is.True);
+        Assert.That(policy.IsAllowed(SourceControlOperation.Commit), Is.True);
     }
 
     [Test]
@@ -29,7 +31,7 @@ public class ToolPolicySettingsTests
 
         var policy = ToolPolicySettings.Build(settings);
 
-        Assert.That(policy.IsAllowed("source_control.commit"), Is.False);
+        Assert.That(policy.IsAllowed(SourceControlOperation.Commit), Is.False);
     }
 
     [Test]
@@ -37,8 +39,8 @@ public class ToolPolicySettingsTests
     {
         var policy = ToolPolicySettings.Build(new Dictionary<string, string>());
 
-        Assert.That(policy.IsAllowed("source_control.commit"), Is.False);
-        Assert.That(policy.IsAllowed("test_runner.run_tests"), Is.False);
+        Assert.That(policy.IsAllowed(SourceControlOperation.Commit), Is.False);
+        Assert.That(policy.IsAllowed(TestRunnerOperation.RunTests), Is.False);
     }
 
     [Test]
