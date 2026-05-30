@@ -74,14 +74,15 @@ await WorkflowBuilder.Create("code-review-workflow")
 Each slot interface declares its typed extension method alongside its capability type, in its own package (e.g. `Auxilia.Workflows.TaskSource`). All extension methods share the same signature shape:
 
 ```csharp
-// Defined in Auxilia.Workflows.TaskSource
-public static class TaskSourceWorkflowBuilderExtensions
+// Defined in Auxilia.Workflows.AiAgent
+public static class AiAgentWorkflowBuilderExtensions
 {
-    public static IWorkflowBuilder RequiresTaskSource(
+    public static IWorkflowBuilder RequiresAiAgent(
         this IWorkflowBuilder builder,
         string name,
-        TaskSourceCapabilities capabilities,
-        string? description = null) => builder.Requires<ITaskSource>(name, capabilities, description);
+        AiCapabilities capabilities,
+        string? description = null)
+        => builder.Requires<IAiAgent>(name, capabilities, description);
 }
 ```
 
@@ -90,6 +91,16 @@ public static class TaskSourceWorkflowBuilderExtensions
 | `name` | ✓ | Unique slot key within this workflow; used as the identifier in messages and emitted schema. |
 | `capabilities` | ✓ | Typed capability record describing what the provider must satisfy. |
 | `description` | — | Human-readable hint shown in the frontend configuration UI. |
+
+All five shipped slot packages follow the same pattern:
+
+| Package | Extension method | Capabilities type | Service type |
+|---------|-----------------|-------------------|-------------|
+| `Auxilia.Workflows.AiAgent` | `RequiresAiAgent` | `AiCapabilities` | `IAiAgent` |
+| `Auxilia.Workflows.TaskSource` | `RequiresTaskSource` | `TaskSourceCapabilities` | `ITaskSourceAccess` |
+| `Auxilia.Workflows.SourceControl` | `RequiresSourceControl` | `SourceControlCapabilities` | `ISourceControlAccess` |
+| `Auxilia.Workflows.PullRequestAccess` | `RequiresPullRequestAccess` | `PullRequestAccessCapabilities` | `IPullRequestAccess` |
+| `Auxilia.Workflows.TestRunner` | `RequiresTestRunner` | `TestRunnerCapabilities` | `ITestRunner` |
 
 ---
 
@@ -244,6 +255,58 @@ internal record SlotConfiguration(
     IReadOnlyDictionary<string, string> Settings);
 ```
 
+### 7.1 End-to-end slot → implementation loading flow
+
+The sequence below shows a full run from builder call-site through plugin discovery, slot decryption, and DI registration, ending with the workflow receiving a ready `IServiceProvider`.
+
+```mermaid
+sequenceDiagram
+    participant App as Workflow Program.cs
+    participant Builder as WorkflowBuilder
+    participant Bus as RabbitMQ
+    participant SI as Steering Instance
+    participant Boot as WorkflowBootstrapper
+    participant PL as PluginLoader
+    participant Handler as ISlotHandler (plugin)
+    participant DI as IServiceCollection
+
+    App->>Builder: Create(name)<br/>.RequiresAiAgent("ai-agent", caps)<br/>.RequiresSourceControl("sc", caps)
+    Note over Builder: SlotDefinition list built<br/>each entry stores ServiceType=typeof(TService)
+
+    App->>Builder: Run(args)
+    Builder->>Bus: Publish WorkflowAnnouncementMessage<br/>(instanceId, workflowName, publicKey, responseTopic)
+    Bus->>Builder: WorkflowDirective (Run)
+
+    Builder->>Bus: Publish WorkflowRegistrationRequest<br/>(instanceId, manifest, publicKey, responseTopic)
+    Note over SI: Validate environment requirements<br/>Resolve provider for each slot<br/>Encrypt SlotConfiguration with workflow's public key
+    SI->>Bus: WorkflowConfigurationResponse<br/>(encryptedSlots per slot name)
+    Bus->>Builder: WorkflowConfigurationResponse
+
+    Builder->>PL: Load(DiscoverPlugins(AppContext.BaseDirectory))
+    Note over PL: Verify manifest signature<br/>Load assembly, reflect ISlotHandler<br/>Register handler in ISlotHandlerResolver by providerType
+
+    Builder->>Boot: new WorkflowBootstrapper(response, keyPair, resolver)
+    Boot->>Boot: Apply(services)
+    loop for each slot in response.Slots
+        Boot->>Boot: Decrypt EncryptedSlotConfiguration → SlotConfiguration
+        Boot->>Handler: Register(services, slotName, configuration)
+        Handler->>DI: services.AddKeyedSingleton<TService>(slotName, implementation)
+    end
+
+    Builder->>DI: BuildServiceProvider()
+    Builder->>App: Run workflow body with resolved IServiceProvider
+    Note over App: Workflow executes → exits<br/>Private key discarded
+```
+
+**Stage-by-stage description:**
+
+1. **Builder call-site** – The workflow's `Program.cs` calls typed extension methods (e.g. `RequiresAiAgent`), each of which calls `builder.Requires<TService>(name, capabilities, description)`. The builder accumulates a `SlotDefinition` list where each entry captures the service interface type.
+2. **Announcement / directive** – On `Run(args)`, the builder publishes a `WorkflowAnnouncementMessage`; the Steering Instance responds with a `WorkflowDirective` confirming it should proceed.
+3. **Registration request** – The builder sends a `WorkflowRegistrationRequest` carrying the manifest and an ephemeral public key. The Steering Instance validates environment requirements, resolves the appropriate provider for each slot, and returns a `WorkflowConfigurationResponse` with each slot's settings encrypted under the workflow's public key.
+4. **Plugin loading** – `PluginLoader` discovers `*.slothandler.dll` files under `AppContext.BaseDirectory` via `FileSystemPluginDiscovery`, verifies each manifest signature, loads the assembly, locates the single `ISlotHandler` implementation by reflection, and registers it in `ISlotHandlerResolver` keyed by `providerType` string.
+5. **Bootstrapping** – `WorkflowBootstrapper.Apply` iterates over the response slots, decrypts each `EncryptedSlotConfiguration` with the private key, resolves the matching `ISlotHandler`, and calls `Register(services, slotName, configuration)`. Each handler registers keyed DI services using `slotName` as the key so multiple slots of the same interface type can coexist.
+6. **Execution** – The `IServiceProvider` is built and the workflow body runs. On exit the private key is discarded.
+
 ---
 
 ## 8. WorkflowBootstrapper (sketch)
@@ -251,21 +314,28 @@ internal record SlotConfiguration(
 After decrypting the response, the bootstrapper translates each `SlotConfiguration` into real DI registrations:
 
 ```csharp
-public sealed class WorkflowBootstrapper(WorkflowConfigurationResponse config, string privateKey)
+// Constructor
+public sealed class WorkflowBootstrapper(
+    WorkflowConfigurationResponse response,
+    EphemeralKeyPair keyPair,
+    ISlotHandlerResolver resolver,
+    Guid instanceId = default)
 {
     public void Apply(IServiceCollection services)
     {
-        foreach (var (slotName, encryptedSlot) in config.Slots)
+        foreach (var (slotName, encryptedSlot) in response.Slots)
         {
-            var settings = Decrypt(encryptedSlot.EncryptedSettings, privateKey);
-            var handler = SlotHandlerRegistry.Resolve(slotName);
-            handler.Register(services, settings);
+            var config = SlotConfigurationCrypto.Decrypt(encryptedSlot, keyPair);
+            var handler = resolver.Resolve(config.ProviderType);
+            handler.Register(services, slotName, config);
         }
+
+        services.AddSingleton(new WorkflowInstanceContext(...));
     }
 }
 ```
 
-Each slot type ships its own `ISlotHandler` (in its own project/package) that interprets `Settings` and registers the right implementation. The core workflow SDK stays free of concrete provider dependencies.
+Each `ISlotHandler` implementation already knows its target service interface and registers keyed services using the `slotName` as the key, allowing multiple slots of the same interface type to be resolved independently by name.
 
 ---
 
