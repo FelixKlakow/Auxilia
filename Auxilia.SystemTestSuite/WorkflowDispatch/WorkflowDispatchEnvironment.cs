@@ -126,9 +126,11 @@ public class WorkflowDispatchEnvironment
         using var process = Process.Start(psi)
                             ?? throw new InvalidOperationException("Failed to start docker build.");
 
-        var stdout = await process.StandardOutput.ReadToEndAsync();
-        var stderr = await process.StandardError.ReadToEndAsync();
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
 
         if (process.ExitCode != 0)
             throw new InvalidOperationException(
