@@ -28,17 +28,21 @@ public static class ToolPolicySettings
                     $"Invalid tool policy value '{value}' for key '{key}'. Expected 'allow' or 'deny'.");
         }
 
-        return new DictionaryToolPolicy(settings);
+        var decisions = settings.ToDictionary(
+            kvp => kvp.Key,
+            kvp => kvp.Value == "allow" ? PolicyDecision.Allow : PolicyDecision.Deny);
+
+        return new DictionaryToolPolicy(decisions);
     }
 
     private sealed class DictionaryToolPolicy : IToolPolicy
     {
-        private readonly IReadOnlyDictionary<string, string> _settings;
+        private readonly IReadOnlyDictionary<string, PolicyDecision> _settings;
 
-        public DictionaryToolPolicy(IReadOnlyDictionary<string, string> settings)
+        public DictionaryToolPolicy(IReadOnlyDictionary<string, PolicyDecision> settings)
             => _settings = settings;
 
         public bool IsAllowed(string capabilityOperation)
-            => _settings.TryGetValue(capabilityOperation, out var value) && value == "allow";
+            => _settings.TryGetValue(capabilityOperation, out var value) && value == PolicyDecision.Allow;
     }
 }
