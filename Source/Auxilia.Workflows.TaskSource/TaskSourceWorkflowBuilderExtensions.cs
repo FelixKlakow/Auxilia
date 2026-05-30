@@ -9,6 +9,5 @@ public static class TaskSourceWorkflowBuilderExtensions
         string name,
         TaskSourceCapabilities capabilities,
         string? description = null)
-        => builder.Requires(name, capabilities, description);
-        // ITaskSource is reserved for DI registration by future provider packages (slot handlers); it is not referenced here
+        => builder.Requires<ITaskSourceAccess>(name, capabilities, description);
 }

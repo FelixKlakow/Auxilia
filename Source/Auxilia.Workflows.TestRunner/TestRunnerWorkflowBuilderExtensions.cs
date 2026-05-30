@@ -9,5 +9,5 @@ public static class TestRunnerWorkflowBuilderExtensions
         string name,
         TestRunnerCapabilities capabilities,
         string? description = null)
-        => builder.Requires(name, capabilities, description);
+        => builder.Requires<ITestRunner>(name, capabilities, description);
 }

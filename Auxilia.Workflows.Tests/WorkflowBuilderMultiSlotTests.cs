@@ -33,6 +33,8 @@ public class WorkflowBuilderMultiSlotTests
         Assert.That(schema.Slots.Select(s => s.SlotName), Does.Contain("secondary-reviewer"));
         Assert.That(schema.Slots.Select(s => s.Capabilities),
             Has.All.InstanceOf<AiCapabilities>());
+        Assert.That(schema.Slots[0].ServiceType, Is.EqualTo(typeof(IAiAgent)));
+        Assert.That(schema.Slots[1].ServiceType, Is.EqualTo(typeof(IAiAgent)));
     }
 
     [Test]

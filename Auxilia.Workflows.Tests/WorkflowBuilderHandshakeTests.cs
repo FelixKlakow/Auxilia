@@ -11,6 +11,8 @@ namespace Auxilia.Workflows.Tests;
 [Category("Unit")]
 public class WorkflowBuilderHandshakeTests
 {
+    private interface IStubService { }
+
     [Test]
     public async Task Run_PublishesAnnouncementMessageToWorkflowAnnouncementsTopic()
     {
@@ -26,7 +28,7 @@ public class WorkflowBuilderHandshakeTests
         };
 
         var builder = (WorkflowBuilder)WorkflowBuilder.Create("test-workflow")
-            .Requires("slot1", new NoCapabilities());
+            .Requires<IStubService>("slot1", new NoCapabilities());
         builder._directiveTimeout = TimeSpan.FromSeconds(5);
 
         await builder.Run([], context);
@@ -88,7 +90,7 @@ public class WorkflowBuilderHandshakeTests
         };
 
         var builder = (WorkflowBuilder)WorkflowBuilder.Create("test-workflow")
-            .Requires("slot1", new NoCapabilities());
+            .Requires<IStubService>("slot1", new NoCapabilities());
         builder._directiveTimeout = TimeSpan.FromSeconds(5);
 
         await builder.Run([], context);

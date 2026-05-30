@@ -42,12 +42,11 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
         return new WorkflowBuilder(name);
     }
 
-    public IWorkflowBuilder Requires<T>(string name, T capabilities, string? description = null)
-        where T : ICapability
+    public IWorkflowBuilder Requires<TService>(string name, ICapability capabilities, string? description = null)
     {
         if (_slots.Any(s => s.SlotName == name))
             throw new InvalidOperationException($"A slot with name '{name}' has already been declared.");
-        _slots.Add(new SlotDefinition(name, capabilities, description));
+        _slots.Add(new SlotDefinition(name, capabilities, description) { ServiceType = typeof(TService) });
         return this;
     }
 

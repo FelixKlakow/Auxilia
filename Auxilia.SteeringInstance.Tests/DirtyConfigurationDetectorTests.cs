@@ -88,7 +88,7 @@ public class DirtyConfigurationDetectorTests
     // ---- helpers ----
 
     private static WorkflowSchema MakeSchema<T>(string slotName, T caps)
-        => new("TestWorkflow", [new SlotDefinition(slotName, caps)], []);
+        => new("TestWorkflow", [new SlotDefinition(slotName, caps) { ServiceType = typeof(object) }], []);
 
     private sealed record Caps(int ExistingProp);
     private sealed record CapsWithOptional(int ExistingProp, string? OptionalProp);

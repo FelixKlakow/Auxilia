@@ -29,6 +29,7 @@ public class RequiresSourceControlTests
         Assert.That(schema, Is.Not.Null);
         Assert.That(schema!.Slots, Has.Count.EqualTo(1));
         Assert.That(schema.Slots[0].SlotName, Is.EqualTo("sc-reader"));
+        Assert.That(schema.Slots[0].ServiceType, Is.EqualTo(typeof(ISourceControlAccess)));
     }
 
     [Test]

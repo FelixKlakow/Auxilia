@@ -7,6 +7,8 @@ namespace Auxilia.Workflows.Tests;
 [Category("Unit")]
 public class WorkflowBuilderTests
 {
+    private interface IStubService { }
+
     [Test]
     public void Create_ReturnsNonNull_IWorkflowBuilder()
     {
@@ -18,7 +20,7 @@ public class WorkflowBuilderTests
     public void FluentChaining_ReturnsSameBuilderInstance_ForEachMethod()
     {
         var builder = WorkflowBuilder.Create("test");
-        var b1 = builder.Requires("slot1", new NoCapabilities());
+        var b1 = builder.Requires<IStubService>("slot1", new NoCapabilities());
         var b2 = b1.RequiresEnvironment(_ => { });
         var b3 = b2.WithMetadata(_ => { });
         Assert.That(b1, Is.SameAs(builder));
@@ -30,7 +32,7 @@ public class WorkflowBuilderTests
     public void Requires_TwoCalls_ProducesTwoSlots_InSchema()
     {
         var builder = WorkflowBuilder.Create("test");
-        builder.Requires("slot-a", new NoCapabilities()).Requires("slot-b", new NoCapabilities());
+        builder.Requires<IStubService>("slot-a", new NoCapabilities()).Requires<IStubService>("slot-b", new NoCapabilities());
         var wb = (WorkflowBuilder)builder;
 
         var schema = wb.BuildSchema();
@@ -42,8 +44,33 @@ public class WorkflowBuilderTests
     public void Requires_DuplicateSlotName_ThrowsInvalidOperationException()
     {
         var builder = WorkflowBuilder.Create("test");
-        builder.Requires("slot-a", new NoCapabilities());
-        Assert.Throws<InvalidOperationException>(() => builder.Requires("slot-a", new NoCapabilities()));
+        builder.Requires<IStubService>("slot-a", new NoCapabilities());
+        Assert.Throws<InvalidOperationException>(() => builder.Requires<IStubService>("slot-a", new NoCapabilities()));
+    }
+
+    [Test]
+    public void Requires_ServiceType_EqualsTServiceType()
+    {
+        var builder = WorkflowBuilder.Create("test");
+        builder.Requires<IStubService>("s", new NoCapabilities());
+        var wb = (WorkflowBuilder)builder;
+
+        var schema = wb.BuildSchema();
+
+        Assert.That(schema.Slots[0].ServiceType, Is.EqualTo(typeof(IStubService)));
+    }
+
+    [Test]
+    public void Requires_Capabilities_EqualsPassedObject()
+    {
+        var builder = WorkflowBuilder.Create("test");
+        var caps = new NoCapabilities();
+        builder.Requires<IStubService>("s", caps);
+        var wb = (WorkflowBuilder)builder;
+
+        var schema = wb.BuildSchema();
+
+        Assert.That(schema.Slots[0].Capabilities, Is.SameAs(caps));
     }
 
     [Test]
@@ -103,7 +130,7 @@ public class WorkflowBuilderTests
     public void BuildSchema_ContainsAllDeclaredSlotNames()
     {
         var builder = WorkflowBuilder.Create("workflow");
-        builder.Requires("alpha", new NoCapabilities()).Requires("beta", new NoCapabilities());
+        builder.Requires<IStubService>("alpha", new NoCapabilities()).Requires<IStubService>("beta", new NoCapabilities());
         var wb = (WorkflowBuilder)builder;
 
         var schema = wb.BuildSchema();
