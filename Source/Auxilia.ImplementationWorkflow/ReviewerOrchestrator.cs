@@ -51,8 +51,9 @@ public sealed class ReviewerOrchestrator(
         }
         finally
         {
-            await scmTools.StopAsync(CancellationToken.None);
-            await prTools.StopAsync(CancellationToken.None);
+            using var stopCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await scmTools.StopAsync(stopCts.Token);
+            await prTools.StopAsync(stopCts.Token);
         }
     }
 
