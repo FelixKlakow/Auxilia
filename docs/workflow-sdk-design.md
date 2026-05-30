@@ -285,11 +285,11 @@ sequenceDiagram
     Builder->>PL: Load(DiscoverPlugins(AppContext.BaseDirectory))
     Note over PL: Verify manifest signature<br/>Load assembly, reflect ISlotHandler<br/>Register handler in ISlotHandlerResolver by providerType
 
-    Builder->>Boot: new WorkflowBootstrapper(response, keyPair, resolver)
+    Builder->>Boot: new WorkflowBootstrapper(response, keyPair, resolver, slotDefinitions)
     Boot->>Boot: Apply(services)
     loop for each slot in response.Slots
         Boot->>Boot: Decrypt EncryptedSlotConfiguration → SlotConfiguration
-        Boot->>Handler: Register(services, slotName, configuration)
+        Boot->>Handler: Register(services, slotName, serviceType, configuration)
         Handler->>DI: services.AddKeyedSingleton<TService>(slotName, implementation)
     end
 
@@ -304,7 +304,7 @@ sequenceDiagram
 2. **Announcement / directive** – On `Run(args)`, the builder publishes a `WorkflowAnnouncementMessage`; the Steering Instance responds with a `WorkflowDirective` confirming it should proceed.
 3. **Registration request** – The builder sends a `WorkflowRegistrationRequest` carrying the manifest and an ephemeral public key. The Steering Instance validates environment requirements, resolves the appropriate provider for each slot, and returns a `WorkflowConfigurationResponse` with each slot's settings encrypted under the workflow's public key.
 4. **Plugin loading** – `PluginLoader` discovers `*.slothandler.dll` files under `AppContext.BaseDirectory` via `FileSystemPluginDiscovery`, verifies each manifest signature, loads the assembly, locates the single `ISlotHandler` implementation by reflection, and registers it in `ISlotHandlerResolver` keyed by `providerType` string.
-5. **Bootstrapping** – `WorkflowBootstrapper.Apply` iterates over the response slots, decrypts each `EncryptedSlotConfiguration` with the private key, resolves the matching `ISlotHandler`, and calls `Register(services, slotName, configuration)`. Each handler registers keyed DI services using `slotName` as the key so multiple slots of the same interface type can coexist.
+5. **Bootstrapping** – `WorkflowBootstrapper.Apply` iterates over the response slots, decrypts each `EncryptedSlotConfiguration` with the private key, resolves the matching `ISlotHandler`, and calls `Register(services, slotName, serviceType, configuration)`. Each handler registers keyed DI services using `slotName` as the key so multiple slots of the same interface type can coexist.
 6. **Execution** – The `IServiceProvider` is built and the workflow body runs. On exit the private key is discarded.
 
 ---
@@ -319,15 +319,18 @@ public sealed class WorkflowBootstrapper(
     WorkflowConfigurationResponse response,
     EphemeralKeyPair keyPair,
     ISlotHandlerResolver resolver,
+    IReadOnlyList<SlotDefinition> slotDefinitions,
     Guid instanceId = default)
 {
     public void Apply(IServiceCollection services)
     {
         foreach (var (slotName, encryptedSlot) in response.Slots)
         {
+            var definition = slotDefinitions.FirstOrDefault(d => d.SlotName == slotName)
+                ?? throw new InvalidOperationException($"No SlotDefinition found for slot '{slotName}'.");
             var config = SlotConfigurationCrypto.Decrypt(encryptedSlot, keyPair);
             var handler = resolver.Resolve(config.ProviderType);
-            handler.Register(services, slotName, config);
+            handler.Register(services, slotName, definition.ServiceType, config);
         }
 
         services.AddSingleton(new WorkflowInstanceContext(...));
