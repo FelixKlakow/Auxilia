@@ -20,10 +20,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     private readonly List<WorkflowOutputDescriptor> _outputs = new();
     private readonly List<SignalDescriptor> _signals = new();
     private readonly WorkflowMetadata _metadata = new();
-    private Func<IServiceProvider, CancellationToken, Task>? _runBody;
-
     private Action<IServiceCollection>? _configureServices;
-    private Func<IServiceProvider, Task>? _application;
+    private Func<IServiceProvider, CancellationToken, Task>? _application;
 
     private const string StateQueueName = "workflow.state";
 
@@ -86,15 +84,9 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
         return this;
     }
 
-    public IWorkflowBuilder WithApplication(Func<IServiceProvider, Task> run)
+    public IWorkflowBuilder WithApplication(Func<IServiceProvider, CancellationToken, Task> run)
     {
         _application = run;
-        return this;
-    }
-
-    public IWorkflowBuilder WithRunBody(Func<IServiceProvider, CancellationToken, Task> body)
-    {
-        _runBody = body;
         return this;
     }
 
@@ -148,6 +140,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 return;
 
             case WorkflowDirectiveKind.Run:
+            {
                 var configTcs = new TaskCompletionSource<WorkflowConfigurationResponse>();
                 var configSub = await context.MessageBus.SubscribeAsync<WorkflowConfigurationResponse>(
                     responseTopic, (msg, _) => { configTcs.TrySetResult(msg); return Task.CompletedTask; });
@@ -177,6 +170,12 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 await context.MessageBus.DeclareQueueAsync(StateQueueName);
                 await context.MessageBus.DeclareQueueAsync("workflow.signals");
 
+                var cancelQueueName = $"workflow-cancel-{instanceId}";
+                await context.MessageBus.DeclareQueueAsync(cancelQueueName);
+                using var cts = new CancellationTokenSource();
+                var cancelSub = await context.MessageBus.SubscribeAsync<CancelWorkflowCommand>(
+                    cancelQueueName, (_, _) => { cts.Cancel(); return Task.CompletedTask; });
+
                 try
                 {
                     var services = new ServiceCollection();
@@ -201,21 +200,19 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                     await using (var provider = services.BuildServiceProvider())
                     {
                         if (_application != null && (TestContext == null || TestSlotHandlerResolver != null))
-                            await _application(provider);
+                            await _application(provider, cts.Token);
                     }
-
-                    /*
-                     *                     await using (var sp = services.BuildServiceProvider())
-                    {
-                        if (_runBody is not null)
-                            await _runBody(sp, CancellationToken.None);
-                    }
-                     */
-
 
                     await context.MessageBus.PublishAsync(StateQueueName,
                         new WorkflowStateMessage(instanceId, WorkflowState.Success, null));
                     context.ExitService.Exit(0);
+                }
+                catch (OperationCanceledException)
+                {
+                    await context.MessageBus.PublishAsync(StateQueueName,
+                        new WorkflowStateMessage(instanceId, WorkflowState.Cancelled, null));
+                    context.ExitService.Exit(0);
+                    return;
                 }
                 catch (Exception ex)
                 {
@@ -224,7 +221,12 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                         new WorkflowStateMessage(instanceId, WorkflowState.Failed, ex.Message));
                     context.ExitService.Exit(1);
                 }
+                finally
+                {
+                    await cancelSub.DisposeAsync();
+                }
                 return;
+            }
 
             default:
                 context.Logger.LogError("Received unrecognised WorkflowDirective: {Directive}", directive.Directive);

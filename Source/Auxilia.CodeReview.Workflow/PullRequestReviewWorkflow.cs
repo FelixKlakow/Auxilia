@@ -31,7 +31,7 @@ public static class PullRequestReviewWorkflow
 
     public static Task RunAsync() => Main(["--test-harness"]);
 
-    private static async Task ExecuteWorkflowAsync(IServiceProvider provider)
+    private static async Task ExecuteWorkflowAsync(IServiceProvider provider, CancellationToken _)
     {
         await using var scope = provider.CreateAsyncScope();
         var sp = scope.ServiceProvider;

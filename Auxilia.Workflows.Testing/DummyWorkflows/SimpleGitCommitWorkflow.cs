@@ -23,7 +23,7 @@ public static class SimpleGitCommitWorkflow
             .Create(WorkflowName)
             // No slots — keeps the system test simple and independent of the slot
             // configuration pipeline.  A separate test can exercise slot resolution.
-            .WithRunBody(ExecuteAsync)
+            .WithApplication(ExecuteAsync)
             .Run(args);
 
     private static async Task ExecuteAsync(IServiceProvider _, CancellationToken ct)
