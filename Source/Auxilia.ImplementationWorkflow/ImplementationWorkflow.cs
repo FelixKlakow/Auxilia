@@ -26,7 +26,7 @@ public static class ImplementationWorkflow
                 new AiCapabilities { MinContextWindow = 128_000, SupportedModalities = [Modality.Text] })
             .RequiresTestRunner("test-runner", new TestRunnerCapabilities())
             .RequiresPullRequestAccess("pull-request",
-                new PullRequestAccessCapabilities { RequiredPermissions = ["ReadWrite"] })
+                new PullRequestAccessCapabilities { RequiredPermissions = [PullRequestPermission.Read, PullRequestPermission.Write] })
             .Requires("workflow-config", new NoCapabilities())
             .DeclaresOutput("implementation-summary", "output/implementation-summary.json", "Implementation run summary with branch, PR URL, and review notes")
             .DeclaresSignal<CompletedSignalPayload>("Completed", "Emitted when the workflow completes successfully")
