@@ -271,7 +271,7 @@ sequenceDiagram
     participant DI as IServiceCollection
 
     App->>Builder: Create(name)<br/>.RequiresAiAgent("ai-agent", caps)<br/>.RequiresSourceControl("sc", caps)
-    Note over Builder: SlotDefinition list built<br/>each entry stores ServiceType=typeof(TService)
+    Note over Builder: SlotDefinition list built
 
     App->>Builder: Run(args)
     Builder->>Bus: Publish WorkflowAnnouncementMessage<br/>(instanceId, workflowName, publicKey, responseTopic)
@@ -285,11 +285,11 @@ sequenceDiagram
     Builder->>PL: Load(DiscoverPlugins(AppContext.BaseDirectory))
     Note over PL: Verify manifest signature<br/>Load assembly, reflect ISlotHandler<br/>Register handler in ISlotHandlerResolver by providerType
 
-    Builder->>Boot: new WorkflowBootstrapper(response, keyPair, resolver, slotDefinitions)
+    Builder->>Boot: new WorkflowBootstrapper(response, keyPair, resolver)
     Boot->>Boot: Apply(services)
     loop for each slot in response.Slots
         Boot->>Boot: Decrypt EncryptedSlotConfiguration → SlotConfiguration
-        Boot->>Handler: Register(services, slotName, serviceType, configuration)
+        Boot->>Handler: Register(services, slotName, configuration)
         Handler->>DI: services.AddKeyedSingleton<TService>(slotName, implementation)
     end
 
@@ -300,11 +300,11 @@ sequenceDiagram
 
 **Stage-by-stage description:**
 
-1. **Builder call-site** – The workflow's `Program.cs` calls typed extension methods (e.g. `RequiresAiAgent`), each of which calls `builder.Requires<TService>(name, capabilities, description)`. The builder accumulates a `SlotDefinition` list where each entry captures the service interface type.
+1. **Builder call-site** – The workflow's `Program.cs` calls typed extension methods (e.g. `RequiresAiAgent`), each of which calls `builder.Requires<TService>(name, capabilities, description)`. The builder accumulates a `SlotDefinition` list.
 2. **Announcement / directive** – On `Run(args)`, the builder publishes a `WorkflowAnnouncementMessage`; the Steering Instance responds with a `WorkflowDirective` confirming it should proceed.
 3. **Registration request** – The builder sends a `WorkflowRegistrationRequest` carrying the manifest and an ephemeral public key. The Steering Instance validates environment requirements, resolves the appropriate provider for each slot, and returns a `WorkflowConfigurationResponse` with each slot's settings encrypted under the workflow's public key.
 4. **Plugin loading** – `PluginLoader` discovers `*.slothandler.dll` files under `AppContext.BaseDirectory` via `FileSystemPluginDiscovery`, verifies each manifest signature, loads the assembly, locates the single `ISlotHandler` implementation by reflection, and registers it in `ISlotHandlerResolver` keyed by `providerType` string.
-5. **Bootstrapping** – `WorkflowBootstrapper.Apply` iterates over the response slots, decrypts each `EncryptedSlotConfiguration` with the private key, resolves the matching `ISlotHandler`, and calls `Register(services, slotName, serviceType, configuration)`. Each handler registers keyed DI services using `slotName` as the key so multiple slots of the same interface type can coexist.
+5. **Bootstrapping** – `WorkflowBootstrapper.Apply` iterates over the response slots, decrypts each `EncryptedSlotConfiguration` with the private key, resolves the matching `ISlotHandler`, and calls `Register(services, slotName, configuration)`. Each handler registers keyed DI services using `slotName` as the key so multiple slots of the same interface type can coexist.
 6. **Execution** – The `IServiceProvider` is built and the workflow body runs. On exit the private key is discarded.
 
 ---
@@ -319,7 +319,6 @@ public sealed class WorkflowBootstrapper(
     WorkflowConfigurationResponse response,
     EphemeralKeyPair keyPair,
     ISlotHandlerResolver resolver,
-    IReadOnlyList<SlotDefinition> slotDefinitions,
     Guid instanceId = default)
 {
     public void Apply(IServiceCollection services)
@@ -328,7 +327,7 @@ public sealed class WorkflowBootstrapper(
         {
             var config = SlotConfigurationCrypto.Decrypt(encryptedSlot, keyPair);
             var handler = resolver.Resolve(config.ProviderType);
-            handler.Register(services, slotName, definition.ServiceType, config);
+            handler.Register(services, slotName, config);
         }
 
         services.AddSingleton(new WorkflowInstanceContext(...));
