@@ -15,6 +15,7 @@ public sealed class FakeAiAgent : IAiAgent
 
     public int OpenSessionCallCount { get; private set; }
     public int InitialFailCount { get; set; }
+    public AiSessionOptions? LastSessionOptions { get; private set; }
 
     public Task<IAiSession> OpenSessionAsync(AiSessionOptions? options = null, CancellationToken cancellationToken = default)
     {
@@ -27,6 +28,7 @@ public sealed class FakeAiAgent : IAiAgent
         if (_sessionTurns.Count == 0)
             throw new InvalidOperationException("Transcript is exhausted. No more scripted turns available.");
 
+        LastSessionOptions = options;
         OpenSessionCallCount++;
         return Task.FromResult<IAiSession>(new FakeAiSession(_sessionTurns.Dequeue()));
     }

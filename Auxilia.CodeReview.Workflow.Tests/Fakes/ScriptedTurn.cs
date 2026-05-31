@@ -1,3 +1,6 @@
 namespace Auxilia.CodeReview.Workflow.Tests.Fakes;
 
-public sealed record ScriptedTurn(string ExpectedPromptSubstring, string Response);
+public sealed record ScriptedTurn(
+    string ExpectedPromptSubstring,
+    string Response,
+    Func<Task>? ToolCall = null);
