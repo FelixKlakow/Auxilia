@@ -24,4 +24,6 @@ public interface IWorkflowBuilder
     Task Run(string[] args, IWorkflowRunContext context);
 
     Task RunAsync(string[] args, IWorkflowRunContext context);
+
+    WorkflowSchema BuildSchema();
 }

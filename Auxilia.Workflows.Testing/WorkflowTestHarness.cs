@@ -37,32 +37,17 @@ public sealed class WorkflowTestHarness
             "workflow.announcements",
             (msg, _) => { announcementTcs.TrySetResult(msg); return Task.CompletedTask; });
 
-        TaskCompletionSource<WorkflowSchemaMessage>? schemaTcs = null;
-        TaskCompletionSource<WorkflowRegistrationRequest>? registrationTcs = null;
-        TaskCompletionSource<WorkflowStateMessage>? stateTcs = null;
+        var registrationTcs = new TaskCompletionSource<WorkflowRegistrationRequest>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        await bus.SubscribeAsync<WorkflowRegistrationRequest>(
+            "workflow-registration",
+            (msg, _) => { registrationTcs.TrySetResult(msg); return Task.CompletedTask; });
 
-        if (_directive == WorkflowDirectiveKind.EmitSchema)
-        {
-            schemaTcs = new TaskCompletionSource<WorkflowSchemaMessage>(
-                TaskCreationOptions.RunContinuationsAsynchronously);
-            await bus.SubscribeAsync<WorkflowSchemaMessage>(
-                "workflow.schema",
-                (msg, _) => { schemaTcs.TrySetResult(msg); return Task.CompletedTask; });
-        }
-        else
-        {
-            registrationTcs = new TaskCompletionSource<WorkflowRegistrationRequest>(
-                TaskCreationOptions.RunContinuationsAsynchronously);
-            await bus.SubscribeAsync<WorkflowRegistrationRequest>(
-                "workflow-registration",
-                (msg, _) => { registrationTcs.TrySetResult(msg); return Task.CompletedTask; });
-
-            stateTcs = new TaskCompletionSource<WorkflowStateMessage>(
-                TaskCreationOptions.RunContinuationsAsynchronously);
-            await bus.SubscribeAsync<WorkflowStateMessage>(
-                "workflow.state",
-                (msg, _) => { stateTcs.TrySetResult(msg); return Task.CompletedTask; });
-        }
+        var stateTcs = new TaskCompletionSource<WorkflowStateMessage>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        await bus.SubscribeAsync<WorkflowStateMessage>(
+            "workflow.state",
+            (msg, _) => { stateTcs.TrySetResult(msg); return Task.CompletedTask; });
 
         WorkflowBuilder.TestContext = harnessContext;
         _ = Task.Run(() => _entryPoint());
@@ -77,56 +62,48 @@ public sealed class WorkflowTestHarness
             await bus.PublishAsync(responseTopic,
                 new WorkflowDirective(announcementMsg.WorkflowInstanceId, _directive));
 
-            if (_directive == WorkflowDirectiveKind.EmitSchema)
+            var registrationMsg = await registrationTcs.Task.WaitAsync(timeoutCts.Token);
+
+            var missingSlots = registrationMsg.Manifest.Slots
+                .Where(s => !_slots.Any(ps => ps.Name == s.SlotName))
+                .Select(s => s.SlotName)
+                .ToList();
+
+            if (missingSlots.Count > 0)
             {
-                var schemaMsg = await schemaTcs!.Task.WaitAsync(timeoutCts.Token);
-                return new HarnessResult(null, null, schemaMsg.Schema);
-            }
-            else
-            {
-                var registrationMsg = await registrationTcs!.Task.WaitAsync(timeoutCts.Token);
-
-                var missingSlots = registrationMsg.Manifest.Slots
-                    .Where(s => !_slots.Any(ps => ps.Name == s.SlotName))
-                    .Select(s => s.SlotName)
-                    .ToList();
-
-                if (missingSlots.Count > 0)
-                {
-                    var errorMsg = $"Required slots not configured: {string.Join(", ", missingSlots)}";
-                    await bus.PublishAsync(registrationMsg.ResponseTopic,
-                        new WorkflowConfigurationResponse(
-                            registrationMsg.WorkflowInstanceId,
-                            false,
-                            errorMsg,
-                            new Dictionary<string, EncryptedSlotConfiguration>()));
-                    return new HarnessResult(WorkflowState.Failed, errorMsg, null);
-                }
-
-                var encryptedSlots = new Dictionary<string, EncryptedSlotConfiguration>();
-                using var rsa = RSA.Create();
-                rsa.ImportSubjectPublicKeyInfo(Convert.FromBase64String(publicKey), out _);
-
-                foreach (var (name, slot) in _slots)
-                {
-                    var json = JsonSerializer.Serialize(slot.Settings);
-                    var plainBytes = Encoding.UTF8.GetBytes(json);
-                    var encryptedBytes = rsa.Encrypt(plainBytes, RSAEncryptionPadding.OaepSHA256);
-                    encryptedSlots[name] = new EncryptedSlotConfiguration(
-                        slot.ProviderType,
-                        Convert.ToBase64String(encryptedBytes));
-                }
-
+                var errorMsg = $"Required slots not configured: {string.Join(", ", missingSlots)}";
                 await bus.PublishAsync(registrationMsg.ResponseTopic,
                     new WorkflowConfigurationResponse(
                         registrationMsg.WorkflowInstanceId,
-                        true,
-                        null,
-                        encryptedSlots));
-
-                var stateMsg = await stateTcs!.Task.WaitAsync(timeoutCts.Token);
-                return new HarnessResult(stateMsg.State, stateMsg.ErrorMessage, null);
+                        false,
+                        errorMsg,
+                        new Dictionary<string, EncryptedSlotConfiguration>()));
+                return new HarnessResult(WorkflowState.Failed, errorMsg, null);
             }
+
+            var encryptedSlots = new Dictionary<string, EncryptedSlotConfiguration>();
+            using var rsa = RSA.Create();
+            rsa.ImportSubjectPublicKeyInfo(Convert.FromBase64String(publicKey), out _);
+
+            foreach (var (name, slot) in _slots)
+            {
+                var json = JsonSerializer.Serialize(slot.Settings);
+                var plainBytes = Encoding.UTF8.GetBytes(json);
+                var encryptedBytes = rsa.Encrypt(plainBytes, RSAEncryptionPadding.OaepSHA256);
+                encryptedSlots[name] = new EncryptedSlotConfiguration(
+                    slot.ProviderType,
+                    Convert.ToBase64String(encryptedBytes));
+            }
+
+            await bus.PublishAsync(registrationMsg.ResponseTopic,
+                new WorkflowConfigurationResponse(
+                    registrationMsg.WorkflowInstanceId,
+                    true,
+                    null,
+                    encryptedSlots));
+
+            var stateMsg = await stateTcs.Task.WaitAsync(timeoutCts.Token);
+            return new HarnessResult(stateMsg.State, stateMsg.ErrorMessage, null);
         }
         catch (OperationCanceledException)
         {

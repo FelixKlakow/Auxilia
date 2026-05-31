@@ -13,7 +13,7 @@ public class WorkflowBuilderRunRoutingTests
 {
     private interface IStubService { }
     [Test]
-    public async Task RunAsync_WhenEmitSchemaDirectiveReceived_RoutesToSchemaEmissionPath()
+    public async Task RunAsync_WhenUnrecognisedDirectiveReceived_RoutesToDefaultPath()
     {
         var bus = new RecordingBus();
         var mockExit = new Mock<IProcessExitService>();
@@ -23,7 +23,7 @@ public class WorkflowBuilderRunRoutingTests
         {
             if (topic == "workflow.announcements" && message is WorkflowAnnouncementMessage ann)
                 bus.DeliverAsync(ann.ResponseTopic,
-                    new WorkflowDirective(ann.WorkflowInstanceId, WorkflowDirectiveKind.EmitSchema));
+                    new WorkflowDirective(ann.WorkflowInstanceId, (WorkflowDirectiveKind)99));
         };
 
         var builder = (WorkflowBuilder)WorkflowBuilder.Create("test-workflow");
@@ -31,11 +31,9 @@ public class WorkflowBuilderRunRoutingTests
 
         await builder.RunAsync([], context);
 
-        var schemaMessages = bus.Published("workflow.schema");
-        Assert.That(schemaMessages, Has.Count.EqualTo(1));
-        Assert.That(schemaMessages[0], Is.InstanceOf<WorkflowSchemaMessage>());
-        mockExit.Verify(e => e.Exit(0), Times.Once);
-        mockExit.Verify(e => e.Exit(1), Times.Never);
+        mockExit.Verify(e => e.Exit(1), Times.Once);
+        mockExit.Verify(e => e.Exit(0), Times.Never);
+        Assert.That(bus.Published("workflow.schema"), Is.Empty);
     }
 
     [Test]
@@ -161,7 +159,11 @@ public class WorkflowBuilderRunRoutingTests
         {
             if (topic == "workflow.announcements" && message is WorkflowAnnouncementMessage ann)
                 bus.DeliverAsync(ann.ResponseTopic,
-                    new WorkflowDirective(ann.WorkflowInstanceId, WorkflowDirectiveKind.EmitSchema));
+                    new WorkflowDirective(ann.WorkflowInstanceId, WorkflowDirectiveKind.Run));
+            else if (topic == "workflow-registration" && message is WorkflowRegistrationRequest req)
+                bus.DeliverAsync(req.ResponseTopic,
+                    new WorkflowConfigurationResponse(req.WorkflowInstanceId, true, null,
+                        new Dictionary<string, EncryptedSlotConfiguration>()));
         };
 
         var builder = (WorkflowBuilder)WorkflowBuilder.Create("test-workflow");
@@ -170,9 +172,7 @@ public class WorkflowBuilderRunRoutingTests
 
         await builder.Run(["--test-harness"]);
 
-        var schemaMessages = bus.Published("workflow.schema");
-        Assert.That(schemaMessages, Has.Count.EqualTo(1));
-        Assert.That(schemaMessages[0], Is.InstanceOf<WorkflowSchemaMessage>());
+        Assert.That(bus.Published("workflow.announcements"), Has.Count.EqualTo(1));
     }
 
     [Test]

@@ -4,6 +4,7 @@ namespace Auxilia.SteeringInstance.Workflows;
 /// All information the launcher needs to start one workflow container.
 /// </summary>
 public sealed record WorkflowLaunchRequest(
-    string Image,
+    /// <summary>Path to the directory containing the extracted workflow package contents.</summary>
+    string ExtractedContentDirectory,
     IReadOnlyDictionary<string, string> EnvironmentVariables);
 

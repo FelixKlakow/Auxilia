@@ -9,8 +9,8 @@ public sealed record RunWorkflowCommand(
     Guid CommandId,
     /// <summary>Workflow type name — must match a name recognised by the workflow image.</summary>
     string WorkflowType,
-    /// <summary>Docker image to run (e.g. "auxilia-simple-git-workflow:latest").</summary>
-    string WorkflowImage,
+    /// <summary>URI of the signed workflow package (e.g. "https://packages.example.com/my-workflow.workflow.zip").</summary>
+    string WorkflowPackageUri,
     /// <summary>
     /// Arbitrary key/value context forwarded to the workflow container as
     /// <c>WORKFLOW_CONTEXT__&lt;KEY&gt;</c> environment variables.

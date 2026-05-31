@@ -1,4 +1,6 @@
 using Auxilia.SteeringInstance.Workflows;
+using Auxilia.SteeringInstance.Workflows.Storage;
+using System.Text.Json;
 
 namespace Auxilia.SteeringInstance.Tests.Workflows;
 
@@ -10,21 +12,76 @@ namespace Auxilia.SteeringInstance.Tests.Workflows;
 [Category("Unit")]
 public class DockerWorkflowLauncherParamTests
 {
-    private static WorkflowLaunchRequest SimpleRequest(
-        string image = "my-image:latest",
+    private string _tempDir = null!;
+
+    [SetUp]
+    public void SetUp()
+    {
+        _tempDir = Path.Combine(Path.GetTempPath(), $"auxilia-test-{Guid.NewGuid()}");
+        Directory.CreateDirectory(_tempDir);
+        WriteManifest(_tempDir, "my-workflow", "bin/my-workflow");
+    }
+
+    [TearDown]
+    public void TearDown()
+    {
+        if (Directory.Exists(_tempDir))
+            Directory.Delete(_tempDir, recursive: true);
+    }
+
+    private static void WriteManifest(string dir, string workflowType, string executableRelativePath)
+    {
+        var manifest = new WorkflowPackageManifest(
+            WorkflowType: workflowType,
+            ExecutableRelativePath: executableRelativePath,
+            ContentHashBase64: "aGFzaA==",
+            SignatureBase64: "c2ln",
+            PublicKeyBase64: "a2V5");
+        var json = JsonSerializer.Serialize(manifest, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        File.WriteAllText(Path.Combine(dir, "manifest.json"), json);
+    }
+
+    private WorkflowLaunchRequest SimpleRequest(
+        string? extractedDir = null,
         Dictionary<string, string>? env = null)
-        => new(image, (IReadOnlyDictionary<string, string>)(env ?? new Dictionary<string, string>()));
+        => new(
+            extractedDir ?? _tempDir,
+            (IReadOnlyDictionary<string, string>)(env ?? new Dictionary<string, string>()));
 
     // ------------------------------------------------------------------ image
 
     [Test]
-    public void ImageIsSetOnParameters()
+    public void RuntimeImageIsUsedForContainerImage()
+    {
+        var settings = new DockerWorkflowLauncherSettings { RuntimeImage = "mcr.microsoft.com/dotnet/runtime:8.0" };
+        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(SimpleRequest(), settings);
+
+        Assert.That(p.Image, Is.EqualTo("mcr.microsoft.com/dotnet/runtime:8.0"));
+    }
+
+    // ------------------------------------------------------------------ bind mount
+
+    [Test]
+    public void HostConfigBindsContainsExtractedDirectory()
     {
         var settings = new DockerWorkflowLauncherSettings();
-        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(
-            SimpleRequest("my-workflow:v2"), settings);
+        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(SimpleRequest(), settings);
 
-        Assert.That(p.Image, Is.EqualTo("my-workflow:v2"));
+        Assert.That(p.HostConfig.Binds, Is.Not.Null);
+        Assert.That(p.HostConfig.Binds, Has.Some.Contains(_tempDir));
+        Assert.That(p.HostConfig.Binds, Has.Some.EndsWith(":/workflow:ro"));
+    }
+
+    // ------------------------------------------------------------------ cmd
+
+    [Test]
+    public void CmdIsSetToManifestExecutablePath()
+    {
+        var settings = new DockerWorkflowLauncherSettings();
+        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(SimpleRequest(), settings);
+
+        Assert.That(p.Cmd, Is.Not.Null);
+        Assert.That(p.Cmd, Is.EqualTo(new[] { "/workflow/bin/my-workflow" }));
     }
 
     // ------------------------------------------------------------------ env vars
@@ -52,7 +109,6 @@ public class DockerWorkflowLauncherParamTests
         var p = DockerWorkflowLauncher.BuildCreateContainerParameters(SimpleRequest(env: env), settings);
 
         Assert.That(p.Env, Does.Contain("URL=http://host/path?a=1&b=2"));
-        // Must be one entry, not split on '='
         Assert.That(p.Env!.Count(e => e.StartsWith("URL=")), Is.EqualTo(1));
     }
 

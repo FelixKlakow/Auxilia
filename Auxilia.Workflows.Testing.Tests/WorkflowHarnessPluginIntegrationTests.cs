@@ -1,3 +1,4 @@
+using Auxilia.Workflows;
 using Auxilia.Workflows.AiAgent;
 using Auxilia.Workflows.Messaging.Messages;
 using Auxilia.Workflows.Testing;
@@ -8,49 +9,44 @@ namespace Auxilia.Workflows.Testing.Tests;
 [Category("Component")]
 public class WorkflowHarnessPluginIntegrationTests
 {
-    private static async Task TwoAiSlotWorkflow()
+    [Test]
+    public void TwoNamedAiSlots_SchemaContainsBothSlots()
     {
         var capabilities = new AiCapabilities
         {
             MinContextWindow = 8192,
             SupportedModalities = [Modality.Text]
         };
-        await WorkflowBuilder.Create("dual-slot-workflow")
+        var builder = (WorkflowBuilder)WorkflowBuilder.Create("dual-slot-workflow")
             .RequiresAiAgent("primary-reviewer", capabilities)
-            .RequiresAiAgent("secondary-reviewer", capabilities)
-            .Run(["--test-harness"]);
-    }
+            .RequiresAiAgent("secondary-reviewer", capabilities);
 
-    [Test]
-    public async Task EmitSchema_TwoNamedAiSlots_SchemaContainsBothSlots()
-    {
-        var harness = WorkflowTestHarness
-            .For(TwoAiSlotWorkflow)
-            .WithDirective(WorkflowDirectiveKind.EmitSchema)
-            .Build();
+        var schema = builder.BuildSchema();
 
-        var result = await harness.RunAsync();
-
-        Assert.That(result.Schema, Is.Not.Null);
-        Assert.That(result.Schema!.Slots, Has.Count.EqualTo(2));
-        Assert.That(result.Schema.Slots.Select(s => s.SlotName), Does.Contain("primary-reviewer"));
-        Assert.That(result.Schema.Slots.Select(s => s.SlotName), Does.Contain("secondary-reviewer"));
-        Assert.That(result.Schema.Slots.Select(s => s.Capabilities),
+        Assert.That(schema, Is.Not.Null);
+        Assert.That(schema.Slots, Has.Count.EqualTo(2));
+        Assert.That(schema.Slots.Select(s => s.SlotName), Does.Contain("primary-reviewer"));
+        Assert.That(schema.Slots.Select(s => s.SlotName), Does.Contain("secondary-reviewer"));
+        Assert.That(schema.Slots.Select(s => s.Capabilities),
             Has.All.InstanceOf<AiCapabilities>());
     }
 
     [Test]
-    public async Task EmitSchema_SlotNames_SurviveHarnessRoundTrip()
+    public void SlotNames_SurviveSchemaRoundTrip()
     {
-        var harness = WorkflowTestHarness
-            .For(TwoAiSlotWorkflow)
-            .WithDirective(WorkflowDirectiveKind.EmitSchema)
-            .Build();
+        var capabilities = new AiCapabilities
+        {
+            MinContextWindow = 8192,
+            SupportedModalities = [Modality.Text]
+        };
+        var builder = (WorkflowBuilder)WorkflowBuilder.Create("dual-slot-workflow")
+            .RequiresAiAgent("primary-reviewer", capabilities)
+            .RequiresAiAgent("secondary-reviewer", capabilities);
 
-        var result = await harness.RunAsync();
+        var schema = builder.BuildSchema();
 
-        Assert.That(result.Schema, Is.Not.Null);
-        var slotNames = result.Schema!.Slots.Select(s => s.SlotName).ToList();
+        Assert.That(schema, Is.Not.Null);
+        var slotNames = schema.Slots.Select(s => s.SlotName).ToList();
         Assert.That(slotNames, Does.Contain("primary-reviewer"));
         Assert.That(slotNames, Does.Contain("secondary-reviewer"));
         Assert.That(slotNames, Has.Count.EqualTo(2));

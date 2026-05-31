@@ -2,6 +2,7 @@
 using Auxilia.Messaging;
 using Auxilia.SteeringInstance.Workflows;
 using Auxilia.SteeringInstance.Workflows.Storage;
+using Auxilia.Workflows;
 using Microsoft.Extensions.Options;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
@@ -69,6 +70,9 @@ try
     builder.Services.AddSingleton<WorkflowCancelDispatcher>();
     builder.Services.AddSingleton<WorkflowStateHandler>();
     builder.Services.AddSingleton<IWorkflowLauncher, DockerWorkflowLauncher>();
+    builder.Services.AddSingleton<IDeveloperModeProvider, EnvironmentDeveloperModeProvider>();
+    builder.Services.AddSingleton<WorkflowPackageVerifier>();
+    builder.Services.AddHttpClient("workflow-packages");
 
     // --- Workflow launcher settings ---
     builder.Services.Configure<DockerWorkflowLauncherSettings>(
