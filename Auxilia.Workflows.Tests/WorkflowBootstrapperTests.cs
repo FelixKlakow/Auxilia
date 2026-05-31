@@ -83,8 +83,10 @@ public class WorkflowBootstrapperTests
     }
 
     [Test]
-    public void Apply_WithMissingSlotDefinition_ThrowsInvalidOperationException()
+    public void Apply_WithMissingSlotDefinition_UsesObjectTypeAndThrowsKeyNotFoundForUnregisteredProvider()
     {
+        // When a slot has no SlotDefinition, serviceType defaults to typeof(object)
+        // and the resolver is consulted; if the provider type is unregistered it throws KeyNotFoundException.
         var providerType = $"bt-provider-{Guid.NewGuid()}";
         using var keyPair = new EphemeralKeyPair();
 
@@ -94,8 +96,7 @@ public class WorkflowBootstrapperTests
 
         var bootstrapper = new WorkflowBootstrapper(response, keyPair, new SlotHandlerResolver(), []);
 
-        var ex = Assert.Throws<InvalidOperationException>(() => bootstrapper.Apply(new ServiceCollection()));
-        Assert.That(ex!.Message, Is.EqualTo("No SlotDefinition found for slot 'missing'."));
+        Assert.Throws<KeyNotFoundException>(() => bootstrapper.Apply(new ServiceCollection()));
     }
 
     private sealed class SpySlotHandler : ISlotHandler
