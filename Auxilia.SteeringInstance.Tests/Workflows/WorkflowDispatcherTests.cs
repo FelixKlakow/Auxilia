@@ -4,6 +4,7 @@ using System.Text.Json;
 using Auxilia.Messaging;
 using Auxilia.SteeringInstance.Workflows;
 using Auxilia.SteeringInstance.Workflows.Storage;
+using Auxilia.Workflows.Crypto;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -17,7 +18,7 @@ public class WorkflowDispatcherTests
 {
     private Mock<IMessageBusClient> _mockBus = null!;
     private Mock<IWorkflowLauncher> _mockLauncher = null!;
-    private Mock<WorkflowPackageVerifier> _mockVerifier = null!;
+    private Mock<IWorkflowPackageVerifier> _mockVerifier = null!;
     private Mock<PendingWorkflowPackageStore> _mockPendingPackages = null!;
     private Func<RunWorkflowCommand, CancellationToken, Task>? _capturedHandler;
     private WorkflowDispatcher _sut = null!;
@@ -37,15 +38,14 @@ public class WorkflowDispatcherTests
         using var ms = new MemoryStream();
         using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
         {
-            var entry = zip.CreateEntry("manifest.json");
+            var entry = zip.CreateEntry("package-manifest.json");
             using var writer = new StreamWriter(entry.Open());
             writer.Write(JsonSerializer.Serialize(new
             {
-                workflowType,
-                executableRelativePath = "bin/my-workflow",
-                contentHashBase64 = "aGFzaA==",
+                files = Array.Empty<object>(),
                 signatureBase64 = "c2ln",
-                publicKeyBase64 = "a2V5"
+                publicKeyBase64 = "a2V5",
+                executableRelativePath = "bin/my-workflow"
             }));
         }
         return ms.ToArray();
@@ -77,12 +77,10 @@ public class WorkflowDispatcherTests
 
         _mockBus = new Mock<IMessageBusClient>(MockBehavior.Strict);
         _mockLauncher = new Mock<IWorkflowLauncher>(MockBehavior.Strict);
-        _mockVerifier = new Mock<WorkflowPackageVerifier>(
-            new Mock<Auxilia.Workflows.IDeveloperModeProvider>().Object,
-            NullLogger<WorkflowPackageVerifier>.Instance);
+        _mockVerifier = new Mock<IWorkflowPackageVerifier>();
         _mockPendingPackages = new Mock<PendingWorkflowPackageStore>();
 
-        _mockVerifier.Setup(v => v.Verify(It.IsAny<ZipArchive>())).Returns(true);
+        _mockVerifier.Setup(v => v.Verify(It.IsAny<Stream>())).Returns(true);
         _mockPendingPackages.Setup(p => p.Store(It.IsAny<string>(), It.IsAny<string>()));
 
         var disposable = new Mock<IAsyncDisposable>();
@@ -264,7 +262,7 @@ public class WorkflowDispatcherTests
     [Test]
     public async Task WhenPackageVerificationFails_DoesNotLaunch()
     {
-        _mockVerifier.Setup(v => v.Verify(It.IsAny<ZipArchive>())).Returns(false);
+        _mockVerifier.Setup(v => v.Verify(It.IsAny<Stream>())).Returns(false);
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",

@@ -23,6 +23,8 @@ public sealed class WorkflowPacker
         var executable = FindExecutable(inputDirectory);
 
         var schemaJson = EmitSchema(executable);
+        var schemaBytes = System.Text.Encoding.UTF8.GetBytes(schemaJson);
+        var schemaHashBase64 = Convert.ToBase64String(SHA256.HashData(schemaBytes));
 
         var filesToPack = DiscoverFiles(inputDirectory, executable);
 
@@ -36,10 +38,13 @@ public sealed class WorkflowPacker
             })
             .ToList();
 
+        fileEntries.Add(new WorkflowPackageFileEntry("workflow-schema.json", schemaHashBase64));
+
         var unsignedManifest = new WorkflowPackageManifest(
             Files: fileEntries,
             SignatureBase64: string.Empty,
-            PublicKeyBase64: _signer.PublicKeyBase64);
+            PublicKeyBase64: _signer.PublicKeyBase64,
+            ExecutableRelativePath: Path.GetRelativePath(inputDirectory, executable).Replace('\\', '/'));
 
         var unsignedBytes = JsonSerializer.SerializeToUtf8Bytes(unsignedManifest, WorkflowPackageJsonOptions.SerializeOptions);
         var signatureBytes = _signer.Sign(unsignedBytes);
@@ -60,9 +65,8 @@ public sealed class WorkflowPacker
 
         var schemaEntry = zip.CreateEntry("workflow-schema.json");
         using (var schemaStream = schemaEntry.Open())
-        using (var writer = new StreamWriter(schemaStream, System.Text.Encoding.UTF8))
         {
-            writer.Write(schemaJson);
+            schemaStream.Write(schemaBytes);
         }
 
         var manifestEntry = zip.CreateEntry("package-manifest.json");

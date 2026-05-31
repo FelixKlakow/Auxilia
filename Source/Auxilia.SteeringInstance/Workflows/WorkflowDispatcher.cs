@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using Auxilia.Messaging;
 using Auxilia.SteeringInstance.Workflows.Storage;
+using Auxilia.Workflows.Crypto;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.Options;
 
@@ -11,7 +12,7 @@ namespace Auxilia.SteeringInstance.Workflows;
 /// <see cref="RunWorkflowCommand"/> it:
 /// <list type="number">
 /// <item>Downloads the workflow ZIP from <see cref="RunWorkflowCommand.WorkflowPackageUri"/>.</item>
-/// <item>Verifies the package signature via <see cref="WorkflowPackageVerifier"/>.</item>
+/// <item>Verifies the package signature via <see cref="IWorkflowPackageVerifier"/>.</item>
 /// <item>Extracts the ZIP to a temporary directory.</item>
 /// <item>Registers the extracted path in <see cref="PendingWorkflowPackageStore"/> for the
 ///     announcement handler to consume.</item>
@@ -23,7 +24,7 @@ public sealed class WorkflowDispatcher(
     IWorkflowLauncher launcher,
     IOptions<DockerWorkflowLauncherSettings> launcherSettings,
     IHttpClientFactory httpClientFactory,
-    WorkflowPackageVerifier packageVerifier,
+    IWorkflowPackageVerifier packageVerifier,
     PendingWorkflowPackageStore pendingPackages,
     ILogger<WorkflowDispatcher> logger)
 {
@@ -59,8 +60,7 @@ public sealed class WorkflowDispatcher(
         }
 
         // 2. Verify the package
-        using var archive = new ZipArchive(new MemoryStream(packageBytes), ZipArchiveMode.Read);
-        if (!packageVerifier.Verify(archive))
+        if (!packageVerifier.Verify(new MemoryStream(packageBytes)))
         {
             logger.LogError(
                 "Workflow package verification failed for {WorkflowType}. Aborting launch.",
@@ -71,6 +71,7 @@ public sealed class WorkflowDispatcher(
         // 3. Extract to a temp directory
         var extractedPath = Path.Combine(Path.GetTempPath(), $"auxilia-wf-{Guid.NewGuid()}");
         Directory.CreateDirectory(extractedPath);
+        using var archive = new ZipArchive(new MemoryStream(packageBytes), ZipArchiveMode.Read);
         archive.ExtractToDirectory(extractedPath);
 
         logger.LogInformation(

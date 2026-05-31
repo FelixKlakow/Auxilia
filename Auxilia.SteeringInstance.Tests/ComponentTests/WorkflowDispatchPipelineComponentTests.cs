@@ -6,6 +6,7 @@ using Auxilia.Messaging;
 using Auxilia.SteeringInstance.Workflows;
 using Auxilia.SteeringInstance.Workflows.Storage;
 using Auxilia.Workflows;
+using Auxilia.Workflows.Crypto;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -37,15 +38,14 @@ public class WorkflowDispatchPipelineComponentTests
         using var ms = new MemoryStream();
         using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
         {
-            var entry = zip.CreateEntry("manifest.json");
+            var entry = zip.CreateEntry("package-manifest.json");
             using var writer = new StreamWriter(entry.Open());
             writer.Write(JsonSerializer.Serialize(new
             {
-                workflowType,
-                executableRelativePath = "bin/my-workflow",
-                contentHashBase64 = "aGFzaA==",
+                files = Array.Empty<object>(),
                 signatureBase64 = "c2ln",
-                publicKeyBase64 = "a2V5"
+                publicKeyBase64 = "a2V5",
+                executableRelativePath = "bin/my-workflow"
             }));
         }
         return ms.ToArray();
@@ -83,7 +83,7 @@ public class WorkflowDispatchPipelineComponentTests
                 services.AddSingleton<IWorkflowLauncher>(_launcher);
                 services.AddSingleton(httpClientFactory.Object);
                 services.AddSingleton(developerMode.Object);
-                services.AddSingleton<WorkflowPackageVerifier>();
+                services.AddSingleton<IWorkflowPackageVerifier, WorkflowPackageVerifier>();
 
                 // Launcher settings — internal network alias
                 services.Configure<DockerWorkflowLauncherSettings>(s =>

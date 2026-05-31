@@ -31,7 +31,8 @@ public class WorkflowPackageVerifierTests
         var unsignedManifest = new WorkflowPackageManifest(
             Files: [fileEntry],
             SignatureBase64: string.Empty,
-            PublicKeyBase64: publicKeyBase64);
+            PublicKeyBase64: publicKeyBase64,
+            ExecutableRelativePath: "workflow.dll");
 
         var unsignedBytes = JsonSerializer.SerializeToUtf8Bytes(unsignedManifest, WorkflowPackageJsonOptions.SerializeOptions);
         var manifestHash = SHA256.HashData(unsignedBytes);
@@ -98,7 +99,8 @@ public class WorkflowPackageVerifierTests
         var unsignedManifest = new WorkflowPackageManifest(
             Files: [fileEntry],
             SignatureBase64: string.Empty,
-            PublicKeyBase64: publicKeyBase64);
+            PublicKeyBase64: publicKeyBase64,
+            ExecutableRelativePath: "workflow.dll");
 
         var unsignedBytes = JsonSerializer.SerializeToUtf8Bytes(unsignedManifest, WorkflowPackageJsonOptions.SerializeOptions);
         var manifestHash = SHA256.HashData(unsignedBytes);
