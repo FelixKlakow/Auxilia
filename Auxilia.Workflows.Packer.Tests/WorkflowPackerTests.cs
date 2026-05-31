@@ -145,6 +145,73 @@ public sealed class WorkflowPackerTests : IDisposable
         }
     }
 
+    [Test]
+    public void EmitSchema_WhenDllNotFound_ThrowsInvalidOperationException()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"packer-nodll-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        var exeName = OperatingSystem.IsWindows() ? "workflow.exe" : "workflow";
+        File.WriteAllBytes(Path.Combine(dir, exeName), [0x00]);
+
+        var expectedDll = OperatingSystem.IsWindows()
+            ? Path.Combine(dir, "workflow.dll")
+            : Path.Combine(dir, "workflow.dll");
+
+        var packer = new WorkflowPacker(_signer);
+        var outputPath = Path.Combine(Path.GetTempPath(), $"output-nodll-{Guid.NewGuid():N}.workflow.zip");
+
+        try
+        {
+            var ex = Assert.Throws<InvalidOperationException>(() => packer.Pack(dir, outputPath));
+            Assert.That(ex!.Message, Does.Contain(expectedDll));
+        }
+        finally
+        {
+            if (File.Exists(outputPath)) File.Delete(outputPath);
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Test]
+    public void EmitSchema_WhenNoProviderInAssembly_ThrowsInvalidOperationException()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"packer-noprovider-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+
+        var exeName = OperatingSystem.IsWindows() ? "workflow.exe" : "workflow";
+        File.WriteAllBytes(Path.Combine(dir, exeName), [0x00]);
+
+        // Build an in-memory assembly with no IWorkflowSchemaProvider implementation
+        var ab = System.Reflection.Emit.AssemblyBuilder.DefineDynamicAssembly(
+            new System.Reflection.AssemblyName("NoProviderAssembly"),
+            System.Reflection.Emit.AssemblyBuilderAccess.Run);
+        var mb = ab.DefineDynamicModule("NoProviderModule");
+        mb.DefineType("SomeOtherClass", System.Reflection.TypeAttributes.Public | System.Reflection.TypeAttributes.Class).CreateType();
+
+        var dllPath = Path.Combine(dir, "workflow.dll");
+        // Write a valid PE image — use a minimal real assembly by compiling via Roslyn
+        // Fall back: write this project's own test assembly DLL as a stand-in with no provider
+        // Simplest approach: copy a real DLL that has no IWorkflowSchemaProvider
+        var sourceDll = typeof(WorkflowPackerTests).Assembly.Location;
+        File.Copy(sourceDll, dllPath);
+
+        var packer = new WorkflowPacker(_signer);
+        var outputPath = Path.Combine(Path.GetTempPath(), $"output-noprovider-{Guid.NewGuid():N}.workflow.zip");
+
+        try
+        {
+            Assert.Throws<InvalidOperationException>(() => packer.Pack(dir, outputPath));
+        }
+        finally
+        {
+            if (File.Exists(outputPath)) File.Delete(outputPath);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     private static WorkflowPackageManifest ReadManifest(string zipPath)
     {
         using var zip = ZipFile.OpenRead(zipPath);
