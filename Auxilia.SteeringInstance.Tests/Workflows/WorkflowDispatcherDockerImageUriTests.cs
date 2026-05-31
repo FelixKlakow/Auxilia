@@ -36,6 +36,7 @@ public class WorkflowDispatcherDockerImageUriTests
     private WorkflowDispatcher BuildDispatcher(
         DockerWorkflowLauncherSettings? launcherSettings = null,
         SlotConfigurationStore? slotStore = null,
+        SlotProviderRegistry? providerRegistry = null,
         IHttpClientFactory? httpFactory = null)
     {
         var disposable = new Mock<IAsyncDisposable>();
@@ -62,6 +63,7 @@ public class WorkflowDispatcherDockerImageUriTests
             _mockVerifier.Object,
             _mockPendingPackages.Object,
             slotStore ?? new SlotConfigurationStore(),
+            providerRegistry ?? new SlotProviderRegistry(),
             NullLogger<WorkflowDispatcher>.Instance);
     }
 
@@ -120,11 +122,11 @@ public class WorkflowDispatcherDockerImageUriTests
             new StoredSlotConfiguration("slot1", "MyProvider",
                 new Dictionary<string, string>(), ConfigurationStatus.Valid));
 
-        var launcherSettings = DefaultLauncherSettings();
-        launcherSettings.SlotPackages["MyProvider"] = "/plugins/my-provider.slothandler.dll";
+        var providerRegistry = new SlotProviderRegistry();
+        providerRegistry.Upsert("MyProvider", "/plugins/my-provider.slothandler.dll");
 
         await _sut.StopAsync();
-        _sut = BuildDispatcher(launcherSettings, slotStore);
+        _sut = BuildDispatcher(slotStore: slotStore, providerRegistry: providerRegistry);
         await _sut.StartAsync(CancellationToken.None);
 
         WorkflowLaunchRequest? captured = null;

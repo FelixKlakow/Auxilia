@@ -112,6 +112,7 @@ public class WorkflowDispatcherTests
             _mockVerifier.Object,
             _mockPendingPackages.Object,
             new SlotConfigurationStore(),
+            new SlotProviderRegistry(),
             NullLogger<WorkflowDispatcher>.Instance);
 
         await _sut.StartAsync(CancellationToken.None);
@@ -301,8 +302,8 @@ public class WorkflowDispatcherTests
             new StoredSlotConfiguration("slot1", "MyProvider",
                 new Dictionary<string, string>(), ConfigurationStatus.Valid));
 
-        var settings = DefaultSettings();
-        settings.SlotPackages["MyProvider"] = "/plugins/my-provider.slothandler.dll";
+        var providerRegistry = new SlotProviderRegistry();
+        providerRegistry.Upsert("MyProvider", "/plugins/my-provider.slothandler.dll");
 
         WorkflowLaunchRequest? captured = null;
         _mockLauncher
@@ -314,12 +315,13 @@ public class WorkflowDispatcherTests
         _sut = new WorkflowDispatcher(
             _mockBus.Object,
             _mockLauncher.Object,
-            Options.Create(settings),
+            Options.Create(DefaultSettings()),
             Options.Create(new WorkflowDispatcherSettings()),
             CreateHttpClientFactory(_validPackageZip),
             _mockVerifier.Object,
             _mockPendingPackages.Object,
             slotStore,
+            providerRegistry,
             NullLogger<WorkflowDispatcher>.Instance);
         await _sut.StartAsync(CancellationToken.None);
 
@@ -375,6 +377,7 @@ public class WorkflowDispatcherTests
             _mockVerifier.Object,
             _mockPendingPackages.Object,
             slotStore,
+            new SlotProviderRegistry(),
             NullLogger<WorkflowDispatcher>.Instance);
         await _sut.StartAsync(CancellationToken.None);
 
@@ -399,7 +402,8 @@ public class WorkflowDispatcherTests
                 new Dictionary<string, string>(), ConfigurationStatus.Valid));
 
         var settings = DefaultSettings();
-        settings.SlotPackages["MyProvider"] = "/plugins/my-provider.slothandler.dll";
+        var providerRegistry = new SlotProviderRegistry();
+        providerRegistry.Upsert("MyProvider", "/plugins/my-provider.slothandler.dll");
 
         WorkflowLaunchRequest? captured = null;
         _mockLauncher
@@ -417,6 +421,7 @@ public class WorkflowDispatcherTests
             _mockVerifier.Object,
             _mockPendingPackages.Object,
             slotStore,
+            providerRegistry,
             NullLogger<WorkflowDispatcher>.Instance);
         await _sut.StartAsync(CancellationToken.None);
 

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Auxilia.Messaging;
 using Auxilia.SystemTestSuite.WorkflowDispatch;
+using Auxilia.Workflows.Messaging.Messages;
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
 using DotNet.Testcontainers.Networks;
@@ -90,21 +91,9 @@ public class ImplementationWorkflowEnvironment
             .WithEnvironment("WorkflowDispatcher__CommandQueueName",      HappyCommandQueue)
             .WithEnvironment("WorkflowDispatcher__RegistrationQueueName", "workflow-registration-impl-happy")
             .WithEnvironment("WorkflowLauncher__ExtraEnvironmentVariables__AUXILIA_DEVELOPER_MODE", "1")
-            .WithEnvironment("WorkflowLauncher__SlotPackages__fake-implementation-happy",
-                $"{ContainerPluginsDir}/Auxilia.FakeSlots.Implementation.Happy.slothandler.dll")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__0__SlotName",    "repository")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__0__ProviderType","fake-implementation-happy")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__1__SlotName",    "task-source")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__1__ProviderType","fake-implementation-happy")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__2__SlotName",    "implementation-agent")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__2__ProviderType","fake-implementation-happy")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__3__SlotName",    "reviewer-agent")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__3__ProviderType","fake-implementation-happy")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__4__SlotName",    "test-runner")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__4__ProviderType","fake-implementation-happy")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__5__SlotName",    "pull-request")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__5__ProviderType","fake-implementation-happy")
-            .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("WorkflowDispatcher started"))
+            .WithWaitStrategy(Wait.ForUnixContainer()
+                .UntilMessageIsLogged("WorkflowDispatcher started")
+                .UntilMessageIsLogged("SlotConfigurationSeedHandler started"))
             .Build();
 
         _edgeSteeringInstance = new ContainerBuilder(WorkflowDispatchEnvironment.SteeringImageName)
@@ -123,21 +112,9 @@ public class ImplementationWorkflowEnvironment
             .WithEnvironment("WorkflowDispatcher__CommandQueueName",      EdgeCommandQueue)
             .WithEnvironment("WorkflowDispatcher__RegistrationQueueName", "workflow-registration-impl-edge")
             .WithEnvironment("WorkflowLauncher__ExtraEnvironmentVariables__AUXILIA_DEVELOPER_MODE", "1")
-            .WithEnvironment("WorkflowLauncher__SlotPackages__fake-implementation-agent-failure",
-                $"{ContainerPluginsDir}/Auxilia.FakeSlots.Implementation.AgentFailure.slothandler.dll")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__0__SlotName",    "repository")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__0__ProviderType","fake-implementation-agent-failure")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__1__SlotName",    "task-source")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__1__ProviderType","fake-implementation-agent-failure")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__2__SlotName",    "implementation-agent")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__2__ProviderType","fake-implementation-agent-failure")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__3__SlotName",    "reviewer-agent")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__3__ProviderType","fake-implementation-agent-failure")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__4__SlotName",    "test-runner")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__4__ProviderType","fake-implementation-agent-failure")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__5__SlotName",    "pull-request")
-            .WithEnvironment("SlotConfigurations__Workflows__implementation-workflow__5__ProviderType","fake-implementation-agent-failure")
-            .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("WorkflowDispatcher started"))
+            .WithWaitStrategy(Wait.ForUnixContainer()
+                .UntilMessageIsLogged("WorkflowDispatcher started")
+                .UntilMessageIsLogged("SlotConfigurationSeedHandler started"))
             .Build();
 
         await Task.WhenAll(
@@ -145,6 +122,41 @@ public class ImplementationWorkflowEnvironment
             _edgeSteeringInstance.StartAsync());
 
         MessageBusClient = await RabbitMqClient.CreateAsync(RabbitMqHost, RabbitMqPort);
+
+        // Seed queues are per-instance: CommandQueueName + "-slot-seed".
+        // Using PublishAsync (direct delivery) instead of PublishToExchangeAsync (fanout broadcast)
+        // ensures each container receives only its own provider and slot configurations.
+        // Both containers use the same workflow-type name "implementation-workflow",
+        // so fanout broadcast would cause last-write-wins collisions on shared (workflowType, slotName) keys.
+        const string happySeedQueue = HappyCommandQueue + "-slot-seed";
+        const string edgeSeedQueue  = EdgeCommandQueue  + "-slot-seed";
+
+        // Happy container: register provider + seed all six slots
+        await MessageBusClient.PublishAsync(happySeedQueue,
+            new RegisterSlotProviderCommand(
+                "fake-implementation-happy",
+                $"{ContainerPluginsDir}/Auxilia.FakeSlots.Implementation.Happy.slothandler.dll"));
+        foreach (var slotName in new[] { "repository", "task-source", "implementation-agent",
+                                          "reviewer-agent", "test-runner", "pull-request" })
+            await MessageBusClient.PublishAsync(happySeedQueue,
+                new UpsertSlotConfigurationCommand(
+                    "implementation-workflow", slotName, "fake-implementation-happy",
+                    new Dictionary<string, string>()));
+
+        // Edge container: register provider + seed all six slots
+        await MessageBusClient.PublishAsync(edgeSeedQueue,
+            new RegisterSlotProviderCommand(
+                "fake-implementation-agent-failure",
+                $"{ContainerPluginsDir}/Auxilia.FakeSlots.Implementation.AgentFailure.slothandler.dll"));
+        foreach (var slotName in new[] { "repository", "task-source", "implementation-agent",
+                                          "reviewer-agent", "test-runner", "pull-request" })
+            await MessageBusClient.PublishAsync(edgeSeedQueue,
+                new UpsertSlotConfigurationCommand(
+                    "implementation-workflow", slotName, "fake-implementation-agent-failure",
+                    new Dictionary<string, string>()));
+
+        // Allow propagation window: seed queue messages are processed asynchronously over the network
+        await Task.Delay(TimeSpan.FromMilliseconds(500));
     }
 
     [OneTimeTearDown]

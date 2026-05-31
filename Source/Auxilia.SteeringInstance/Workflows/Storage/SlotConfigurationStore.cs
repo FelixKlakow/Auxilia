@@ -32,6 +32,21 @@ public sealed class SlotConfigurationStore
             });
     }
 
+    public void RemoveConfiguration(string workflowTypeName, string slotName)
+    {
+        _store.AddOrUpdate(
+            workflowTypeName,
+            _ => [],
+            (_, existing) =>
+            {
+                lock (existing)
+                {
+                    existing.RemoveAll(c => c.SlotName == slotName);
+                    return existing;
+                }
+            });
+    }
+
     public void MarkDirty(string workflowTypeName)
     {
         _store.AddOrUpdate(

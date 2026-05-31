@@ -61,7 +61,7 @@ public sealed class FakeMessageBusClient : IMessageBusClient
         {
             if (!_subscribers.TryGetValue(queueName, out var list))
                 _subscribers[queueName] = list = [];
-            list.Add((msg, ct) => handler((T)msg, ct));
+            list.Add((msg, ct) => msg is T typedMsg ? handler(typedMsg, ct) : Task.CompletedTask);
         }
         finally { _lock.Release(); }
 
