@@ -109,36 +109,64 @@ public sealed class PrimaryReviewOrchestratorTests
             TokenLimitThreshold = 10,   // 10 tokens
             CompactionTriggerFraction = 1.0  // trigger at 100% of limit
         };
-        var orchestrator = BuildOrchestrator(
-            new FakeAiAgent(FileVerdict.Reviewed),
-            verdictMap: verdictMap,
-            opts: compactionOpts);
+        var agent = new FakeAiAgent(FileVerdict.Reviewed);
+        var orchestrator = BuildOrchestrator(agent, verdictMap: verdictMap, opts: compactionOpts);
 
         var context = BuildContext(
             MakeFile("a.cs"), MakeFile("b.cs"), MakeFile("c.cs"), MakeFile("d.cs"), MakeFile("e.cs"));
         await orchestrator.RunAsync(context);
 
         Assert.That(verdictMap.AsReadOnly().Count, Is.EqualTo(5));
+        Assert.That(agent.OpenSessionCallCount, Is.EqualTo(1),
+            "Blueprint/37 in-session model: only one session is opened per RunAsync call");
+    }
+
+    [Test]
+    public async Task RunAsync_NoToolCall_DefaultsToReviewedWithNoFindings()
+    {
+        var store = new StagedFindingsStore();
+        var verdictMap = new VerdictMap();
+        var orchestrator = BuildOrchestrator(
+            new FakeAiAgent(FileVerdict.Reviewed, skipSink: true),
+            store: store,
+            verdictMap: verdictMap);
+
+        var context = BuildContext(MakeFile("a.cs"), MakeFile("b.cs"));
+        await orchestrator.RunAsync(context);
+
+        Assert.That(verdictMap.AsReadOnly().Count, Is.EqualTo(2));
+        Assert.That(verdictMap.AsReadOnly().Values.All(v => v.Verdict == FileVerdict.Reviewed), Is.True,
+            "Absent tool calls default to FileVerdict.Reviewed");
+        Assert.That(store.Snapshot(), Is.Empty,
+            "No findings should be staged when tool call is absent");
     }
 
     // ---- Fake helpers ----
 
-    private sealed class FakeAiAgent(FileVerdict verdict, bool oneFinding = false) : IAiAgent
+    private sealed class FakeAiAgent(FileVerdict verdict, bool oneFinding = false, bool skipSink = false) : IAiAgent
     {
+        public int OpenSessionCallCount { get; private set; }
+
         public Task<IAiSession> OpenSessionAsync(AiSessionOptions? options = null, CancellationToken cancellationToken = default)
-            => Task.FromResult<IAiSession>(new FakeAiSession(verdict, oneFinding, options));
+        {
+            OpenSessionCallCount++;
+            return Task.FromResult<IAiSession>(new FakeAiSession(verdict, oneFinding, options, skipSink));
+        }
     }
 
-    private sealed class FakeAiSession(FileVerdict verdict, bool oneFinding, AiSessionOptions? options) : IAiSession
+    private sealed class FakeAiSession(FileVerdict verdict, bool oneFinding, AiSessionOptions? options, bool skipSink = false) : IAiSession
     {
         public Task<string> ExecuteAsync(string prompt, CancellationToken cancellationToken = default)
         {
-            var sink = options?.CapabilityTools?.OfType<CodeReviewResultSinkMcpTools>().FirstOrDefault();
-            if (sink is not null)
+            if (!skipSink)
             {
-                if (oneFinding)
-                    sink.RecordFinding("finding.cs", 1, 2, FindingSeverity.Info, "Style", "test", null);
-                sink.RecordFileVerdict(verdict);
+                var sink = options?.CapabilityTools?.OfType<CodeReviewResultSinkMcpTools>().FirstOrDefault();
+                if (sink is not null)
+                {
+                    if (oneFinding)
+                        sink.RecordFinding("finding.cs", 1, 2, FindingSeverity.Info, "Style", "test", null);
+                    sink.RecordFileVerdict(verdict);
+                }
             }
             return Task.FromResult(string.Empty);
         }

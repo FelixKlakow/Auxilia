@@ -91,6 +91,21 @@ public sealed class TwoEyesPassServiceTests
         Assert.That(fakeAgent.SessionsCreated, Is.EqualTo(0));
     }
 
+    [Test]
+    public async Task Enabled_NoToolCall_DefaultsToApproved()
+    {
+        var svc = new TwoEyesPassService(
+            new NoSinkFakeAiAgent(),
+            new TwoEyesConfiguration { Enabled = true });
+
+        var staged = new[] { MakeFinding("a.cs"), MakeFinding("b.cs") };
+        var result = await svc.RunAsync(staged, MakeContext());
+
+        Assert.That(result, Has.Count.EqualTo(2));
+        Assert.That(result, Has.All.Matches<ReviewFinding>(f => f.TwoEyesVerdict == SecondaryVerdict.Approved),
+            "Absent tool calls should fall back to Approved (documented conservative default)");
+    }
+
     // ---- Fake helpers ----
 
     private sealed class FakeAiAgent(params SecondaryVerdict[] verdictSequence) : IAiAgent
@@ -115,6 +130,24 @@ public sealed class TwoEyesPassServiceTests
             sink?.RecordSecondaryVerdict(verdict);
             return Task.FromResult(string.Empty);
         }
+
+        public Task CompactAsync(string focusDescription, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    /// <summary>Simulates a model that makes no tool call (no sink recording).</summary>
+    private sealed class NoSinkFakeAiAgent : IAiAgent
+    {
+        public Task<IAiSession> OpenSessionAsync(AiSessionOptions? options = null, CancellationToken cancellationToken = default)
+            => Task.FromResult<IAiSession>(new NoSinkFakeAiSession());
+    }
+
+    private sealed class NoSinkFakeAiSession : IAiSession
+    {
+        public Task<string> ExecuteAsync(string prompt, CancellationToken cancellationToken = default)
+            => Task.FromResult(string.Empty);
 
         public Task CompactAsync(string focusDescription, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
