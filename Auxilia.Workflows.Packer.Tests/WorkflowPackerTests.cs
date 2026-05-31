@@ -68,6 +68,29 @@ public sealed class WorkflowPackerTests : IDisposable
     }
 
     [Test]
+    public void Pack_ManifestExecutableRelativePathMatchesExecutableName()
+    {
+        _packer.Pack(_inputDir, _outputPath);
+
+        var manifest = ReadManifest(_outputPath);
+        Assert.That(manifest.ExecutableRelativePath, Is.EqualTo(_executableName));
+    }
+
+    [Test]
+    public void Pack_ManifestFilesContainsSchemaWithCorrectHash()
+    {
+        var schema = new WorkflowSchema("test-workflow", [], []);
+        var schemaJson = JsonSerializer.Serialize(schema, WorkflowPackageJsonOptions.SerializeOptions);
+        var expectedHash = Convert.ToBase64String(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(schemaJson)));
+
+        _packer.Pack(_inputDir, _outputPath);
+
+        var manifest = ReadManifest(_outputPath);
+        var schemaEntry = manifest.Files.Single(f => f.FileName == "workflow-schema.json");
+        Assert.That(schemaEntry.HashBase64, Is.EqualTo(expectedHash));
+    }
+
+    [Test]
     public void Pack_ManifestFilesExcludesPackageManifestJson()
     {
         _packer.Pack(_inputDir, _outputPath);

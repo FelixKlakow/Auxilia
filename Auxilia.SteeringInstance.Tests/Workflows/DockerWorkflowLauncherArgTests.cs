@@ -1,5 +1,5 @@
 using Auxilia.SteeringInstance.Workflows;
-using Auxilia.SteeringInstance.Workflows.Storage;
+using Auxilia.Workflows.Crypto;
 using System.Text.Json;
 
 namespace Auxilia.SteeringInstance.Tests.Workflows;
@@ -32,13 +32,12 @@ public class DockerWorkflowLauncherParamTests
     private static void WriteManifest(string dir, string workflowType, string executableRelativePath)
     {
         var manifest = new WorkflowPackageManifest(
-            WorkflowType: workflowType,
-            ExecutableRelativePath: executableRelativePath,
-            ContentHashBase64: "aGFzaA==",
+            Files: [],
             SignatureBase64: "c2ln",
-            PublicKeyBase64: "a2V5");
-        var json = JsonSerializer.Serialize(manifest, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-        File.WriteAllText(Path.Combine(dir, "manifest.json"), json);
+            PublicKeyBase64: "a2V5",
+            ExecutableRelativePath: executableRelativePath);
+        var json = JsonSerializer.Serialize(manifest, WorkflowPackageJsonOptions.SerializeOptions);
+        File.WriteAllText(Path.Combine(dir, "package-manifest.json"), json);
     }
 
     private WorkflowLaunchRequest SimpleRequest(

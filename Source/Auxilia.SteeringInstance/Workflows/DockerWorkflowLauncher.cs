@@ -1,5 +1,5 @@
 using System.Text.Json;
-using Auxilia.SteeringInstance.Workflows.Storage;
+using Auxilia.Workflows.Crypto;
 using Docker.DotNet;
 using Docker.DotNet.Models;
 using Microsoft.Extensions.Options;
@@ -16,10 +16,6 @@ public sealed class DockerWorkflowLauncher(
     IOptions<DockerWorkflowLauncherSettings> settingsOptions,
     ILogger<DockerWorkflowLauncher> logger) : IWorkflowLauncher
 {
-    private static readonly JsonSerializerOptions ManifestReadOptions = new()
-    {
-        PropertyNameCaseInsensitive = true
-    };
 
     public async Task LaunchAsync(WorkflowLaunchRequest request, CancellationToken ct = default)
     {
@@ -50,9 +46,10 @@ public sealed class DockerWorkflowLauncher(
         WorkflowLaunchRequest request,
         DockerWorkflowLauncherSettings settings)
     {
-        var manifestPath = Path.Combine(request.ExtractedContentDirectory, "manifest.json");
+        var manifestPath = Path.Combine(request.ExtractedContentDirectory, "package-manifest.json");
         var manifestJson = File.ReadAllText(manifestPath);
-        var manifest = JsonSerializer.Deserialize<WorkflowPackageManifest>(manifestJson, ManifestReadOptions)!;
+        var manifest = JsonSerializer.Deserialize<WorkflowPackageManifest>(
+            manifestJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
         var executablePath = $"/workflow/{manifest.ExecutableRelativePath}";
 
         var env = request.EnvironmentVariables
