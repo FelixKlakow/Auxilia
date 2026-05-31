@@ -1,3 +1,4 @@
+using Auxilia.ImplementationWorkflow.Context;
 using Auxilia.Workflows;
 using Auxilia.Workflows.AiAgent;
 using Auxilia.Workflows.PullRequestAccess;
@@ -23,6 +24,7 @@ public sealed class ImplementationHappySlotHandler : ISlotHandler
                 break;
 
             case "task-source":
+                services.AddSingleton(new WorkItemTrigger("WI-1"));
                 services.AddKeyedScoped<ITaskSourceAccess>(slotName, (_, _) => new FakeTaskSourceAccess());
                 break;
 

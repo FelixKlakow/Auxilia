@@ -43,6 +43,12 @@ public sealed class DockerWorkflowLauncherSettings
     /// The matching *.slothandler.manifest.json is always co-located with the DLL.
     /// </summary>
     public Dictionary<string, string> SlotPackages { get; set; } = new();
+
+    /// <summary>
+    /// Additional environment variables injected into every workflow container launch.
+    /// For example: <c>{"AUXILIA_DEVELOPER_MODE": "1"}</c>.
+    /// </summary>
+    public Dictionary<string, string>? ExtraEnvironmentVariables { get; set; }
 }
 
 

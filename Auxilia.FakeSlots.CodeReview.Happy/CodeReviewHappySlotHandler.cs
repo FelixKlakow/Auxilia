@@ -20,15 +20,15 @@ public sealed class CodeReviewHappySlotHandler : ISlotHandler
         switch (slotName)
         {
             case "repository":
-                services.AddKeyedScoped<ISourceControlAccess>(slotName, (_, _) => new FakeSourceControlAccess());
+                services.AddScoped<ISourceControlAccess>(_ => new FakeSourceControlAccess());
                 break;
 
             case "pull-request":
-                services.AddKeyedScoped<IPullRequestAccess>(slotName, (_, _) => new FakePullRequestAccess());
+                services.AddScoped<IPullRequestAccess>(_ => new FakePullRequestAccess());
                 break;
 
             case "work-items":
-                services.AddKeyedScoped<ITaskSourceAccess>(slotName, (_, _) => new FakeTaskSourceAccess());
+                services.AddScoped<IWorkItemAccess>(_ => new FakeTaskSourceAccess());
                 break;
 
             case "primary-reviewer":
@@ -91,7 +91,7 @@ public sealed class CodeReviewHappySlotHandler : ISlotHandler
             => Task.FromResult("fake-pr-1");
     }
 
-    private sealed class FakeTaskSourceAccess : ITaskSourceAccess
+    private sealed class FakeTaskSourceAccess : IWorkItemAccess
     {
         public Task<WorkItem?> GetWorkItemAsync(string id, CancellationToken cancellationToken = default)
             => Task.FromResult<WorkItem?>(null);
@@ -100,9 +100,6 @@ public sealed class CodeReviewHappySlotHandler : ISlotHandler
             => Task.FromResult<IReadOnlyList<WorkItem>>([]);
 
         public Task PostCommentAsync(string id, string comment, CancellationToken cancellationToken = default)
-            => Task.CompletedTask;
-
-        public Task UpdateStatusAsync(string id, string newStatus, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
     }
 

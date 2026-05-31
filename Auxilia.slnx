@@ -52,15 +52,8 @@
     <Project Path="Auxilia.FakeSlots.Implementation.AgentFailure\Auxilia.FakeSlots.Implementation.AgentFailure.csproj" />
     <Project Path="Auxilia.FakeSlots.Implementation.Happy\Auxilia.FakeSlots.Implementation.Happy.csproj" />
     <Project Path="Auxilia.FakeSlots.Tests\Auxilia.FakeSlots.Tests.csproj" />
-    <Project Path="Auxilia.ImplementationWorkflow.Tests/Auxilia.ImplementationWorkflow.Tests.csproj">
-      <Build Solution="Debug|*" Project="false" />
-    </Project>
-    <Project Path="Auxilia.Workflows.RealWorkflowHarness\Auxilia.Workflows.RealWorkflowHarness.csproj">
-      <Build Solution="Debug|*" Project="false" />
-    </Project>
-    <Project Path="Source/Auxilia.ImplementationWorkflow/Auxilia.ImplementationWorkflow.csproj">
-      <Build Solution="Debug|*" Project="false" />
-    </Project>
+    <Project Path="Auxilia.ImplementationWorkflow.Tests/Auxilia.ImplementationWorkflow.Tests.csproj" />
+    <Project Path="Source/Auxilia.ImplementationWorkflow/Auxilia.ImplementationWorkflow.csproj" />
     <Project Path="Source\Auxilia.CodeReview.Workflow\Auxilia.CodeReview.Workflow.csproj" />
   </Folder>
   <Project Path="Auxilia.SystemTestSuite\Auxilia.SystemTestSuite.csproj" />

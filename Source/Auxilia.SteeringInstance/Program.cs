@@ -80,6 +80,10 @@ try
     builder.Services.Configure<DockerWorkflowLauncherSettings>(
         builder.Configuration.GetSection("WorkflowLauncher"));
 
+    // --- Workflow dispatcher settings ---
+    builder.Services.Configure<WorkflowDispatcherSettings>(
+        builder.Configuration.GetSection("WorkflowDispatcher"));
+
     // --- Slot configuration seeding ---
     builder.Services.Configure<SlotConfigurationsSettings>(
         builder.Configuration.GetSection("SlotConfigurations"));
