@@ -1,5 +1,5 @@
-using System.Diagnostics;
 using System.IO.Compression;
+using System.Runtime.Loader;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Auxilia.Workflows;
@@ -110,25 +110,47 @@ public sealed class WorkflowPacker
             return JsonSerializer.Serialize(schema, WorkflowPackageJsonOptions.SerializeOptions);
         }
 
-        var psi = new ProcessStartInfo(executablePath)
+        var dllPath = executablePath.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+            ? Path.ChangeExtension(executablePath, ".dll")
+            : executablePath + ".dll";
+
+        if (!File.Exists(dllPath))
+            throw new InvalidOperationException($"Workflow DLL not found at '{dllPath}'.");
+
+        var context = new WorkflowAssemblyLoadContext();
+        try
         {
-            RedirectStandardOutput = true,
-            UseShellExecute = false,
-            Environment = { ["AUXILIA_DIRECTIVE"] = "EmitSchema" }
-        };
+            var assembly = context.LoadFromAssemblyPath(dllPath);
 
-        using var process = Process.Start(psi)
-            ?? throw new InvalidOperationException($"Failed to start process '{executablePath}'.");
+            var providerType = assembly.GetExportedTypes()
+                .FirstOrDefault(t => !t.IsAbstract && t.IsClass &&
+                    t.GetInterfaces().Any(i => i.FullName == "Auxilia.Workflows.IWorkflowSchemaProvider"))
+                ?? throw new InvalidOperationException(
+                    $"No IWorkflowSchemaProvider implementation found in '{dllPath}'.");
 
-        var output = process.StandardOutput.ReadToEnd();
-        process.WaitForExit();
+            var instance = Activator.CreateInstance(providerType)
+                ?? throw new InvalidOperationException(
+                    $"Failed to instantiate '{providerType.FullName}'.");
 
-        if (process.ExitCode != 0)
-            throw new InvalidOperationException($"Schema emission process exited with code {process.ExitCode}.");
-        if (string.IsNullOrWhiteSpace(output))
-            throw new InvalidOperationException("Schema emission process produced no output.");
+            var method = providerType.GetMethod("GetSchema")!;
+            var schemaObject = method.Invoke(instance, null)
+                ?? throw new InvalidOperationException(
+                    $"GetSchema() returned null for '{providerType.FullName}'.");
 
-        return output;
+            return JsonSerializer.Serialize(schemaObject, WorkflowPackageJsonOptions.SerializeOptions);
+        }
+        finally
+        {
+            context.Unload();
+        }
+    }
+
+    private sealed class WorkflowAssemblyLoadContext : AssemblyLoadContext
+    {
+        public WorkflowAssemblyLoadContext() : base(isCollectible: true) { }
+
+        protected override System.Reflection.Assembly? Load(System.Reflection.AssemblyName assemblyName)
+            => null;
     }
 
     private static List<string> DiscoverFiles(string inputDirectory, string executablePath)
