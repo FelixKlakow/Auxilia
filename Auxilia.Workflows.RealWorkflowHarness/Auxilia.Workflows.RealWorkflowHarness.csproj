@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Source\Auxilia.CodeReview.Workflow\Auxilia.CodeReview.Workflow.csproj" />
+    <ProjectReference Include="..\Source\Auxilia.ImplementationWorkflow\Auxilia.ImplementationWorkflow.csproj" />
+    <ProjectReference Include="..\Auxilia.CodeReview.Workflow.Tests\Auxilia.CodeReview.Workflow.Tests.csproj" />
+    <ProjectReference Include="..\Auxilia.ImplementationWorkflow.Tests\Auxilia.ImplementationWorkflow.Tests.csproj" />
+  </ItemGroup>
+
+</Project>

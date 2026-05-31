@@ -48,6 +48,9 @@
     <Project Path="Auxilia.ImplementationWorkflow.Tests/Auxilia.ImplementationWorkflow.Tests.csproj">
       <Build Solution="Debug|*" Project="false" />
     </Project>
+    <Project Path="Auxilia.Workflows.RealWorkflowHarness\Auxilia.Workflows.RealWorkflowHarness.csproj">
+      <Build Solution="Debug|*" Project="false" />
+    </Project>
     <Project Path="Source/Auxilia.ImplementationWorkflow/Auxilia.ImplementationWorkflow.csproj">
       <Build Solution="Debug|*" Project="false" />
     </Project>

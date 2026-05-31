@@ -1,5 +1,5 @@
-using Auxilia.Workflows.Messaging.Messages;
-using Auxilia.Workflows.Testing;
+using Auxilia.Workflows;
+using Auxilia.Workflows.Capabilities;
 
 namespace Auxilia.Workflows.Testing.Tests;
 
@@ -7,18 +7,18 @@ namespace Auxilia.Workflows.Testing.Tests;
 [Category("Component")]
 public class EmitSchemaTests
 {
+    private interface IStubService { }
+
     [Test]
-    public async Task EmitSchema_RunAsync_ReturnsResult_WithCorrectSchema()
+    public void EmitSchema_RunAsync_ReturnsResult_WithCorrectSchema()
     {
-        var harness = WorkflowTestHarness
-            .For(TestWorkflow.RunAsync)
-            .WithDirective(WorkflowDirectiveKind.EmitSchema)
-            .Build();
+        var builder = (WorkflowBuilder)WorkflowBuilder.Create("test-workflow")
+            .Requires<IStubService>("db", new NoCapabilities());
 
-        var result = await harness.RunAsync();
+        var schema = builder.BuildSchema();
 
-        Assert.That(result.Schema, Is.Not.Null);
-        Assert.That(result.Schema!.WorkflowName, Is.EqualTo("test-workflow"));
-        Assert.That(result.Schema.Slots, Has.Exactly(1).Matches<SlotDefinition>(s => s.SlotName == "db"));
+        Assert.That(schema, Is.Not.Null);
+        Assert.That(schema.WorkflowName, Is.EqualTo("test-workflow"));
+        Assert.That(schema.Slots, Has.Exactly(1).Matches<SlotDefinition>(s => s.SlotName == "db"));
     }
 }

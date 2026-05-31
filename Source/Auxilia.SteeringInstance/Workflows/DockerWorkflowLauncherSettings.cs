@@ -31,6 +31,12 @@ public sealed class DockerWorkflowLauncherSettings
     /// Defaults to the standard Unix socket. Override in config or env for remote daemons.
     /// </summary>
     public string DockerSocketPath { get; set; } = "unix:///var/run/docker.sock";
+
+    /// <summary>
+    /// Base container image used to run workflow assemblies.
+    /// The extracted package is bind-mounted over the container filesystem.
+    /// </summary>
+    public string RuntimeImage { get; set; } = "mcr.microsoft.com/dotnet/runtime:8.0";
 }
 
 

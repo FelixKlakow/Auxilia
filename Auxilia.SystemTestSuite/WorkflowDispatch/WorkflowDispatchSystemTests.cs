@@ -48,7 +48,7 @@ public class WorkflowDispatchSystemTests
         var command = new RunWorkflowCommand(
             CommandId:     Guid.NewGuid(),
             WorkflowType:  SimpleGitCommitWorkflow.WorkflowName,
-            WorkflowImage: SimpleGitCommitWorkflow.ImageName,
+            WorkflowPackageUri: SimpleGitCommitWorkflow.ImageName,
             Context: new Dictionary<string, string>
             {
                 // Tells Program.cs which dummy workflow to run.

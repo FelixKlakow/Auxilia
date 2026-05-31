@@ -134,12 +134,6 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
 
         switch (directive.Directive)
         {
-            case WorkflowDirectiveKind.EmitSchema:
-                await context.MessageBus.PublishAsync("workflow.schema",
-                    new WorkflowSchemaMessage(instanceId, BuildSchema()));
-                context.ExitService.Exit(0);
-                return;
-
             case WorkflowDirectiveKind.Run:
             {
                 var configTcs = new TaskCompletionSource<WorkflowConfigurationResponse>();
@@ -236,7 +230,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
         }
     }
 
-    internal WorkflowSchema BuildSchema()
+    public WorkflowSchema BuildSchema()
         => new(_workflowName, _slots.AsReadOnly(), _environmentRequirements.AsReadOnly())
         {
             Version = _metadata.Version,
