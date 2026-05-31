@@ -1,6 +1,7 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Auxilia.Messaging;
 using Auxilia.SystemTestSuite.WorkflowDispatch;
+using Auxilia.Workflows.Messaging.Messages;
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
 using DotNet.Testcontainers.Networks;
@@ -90,21 +91,9 @@ public class CodeReviewWorkflowEnvironment
             .WithEnvironment("WorkflowDispatcher__CommandQueueName",      HappyCommandQueue)
             .WithEnvironment("WorkflowDispatcher__RegistrationQueueName", "workflow-registration-crw-happy")
             .WithEnvironment("WorkflowLauncher__ExtraEnvironmentVariables__AUXILIA_DEVELOPER_MODE", "1")
-            .WithEnvironment("WorkflowLauncher__SlotPackages__fake-code-review-happy",
-                $"{ContainerPluginsDir}/Auxilia.FakeSlots.CodeReview.Happy.slothandler.dll")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__0__SlotName",    "repository")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__0__ProviderType","fake-code-review-happy")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__1__SlotName",    "pull-request")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__1__ProviderType","fake-code-review-happy")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__2__SlotName",    "work-items")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__2__ProviderType","fake-code-review-happy")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__3__SlotName",    "primary-reviewer")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__3__ProviderType","fake-code-review-happy")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__4__SlotName",    "secondary-reviewer")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__4__ProviderType","fake-code-review-happy")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__5__SlotName",    "workflow-bootstrap")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__5__ProviderType","fake-code-review-happy")
-            .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("WorkflowDispatcher started"))
+            .WithWaitStrategy(Wait.ForUnixContainer()
+                .UntilMessageIsLogged("WorkflowDispatcher started")
+                .UntilMessageIsLogged("SlotConfigurationSeedHandler started"))
             .Build();
 
         _edgeSteeringInstance = new ContainerBuilder(WorkflowDispatchEnvironment.SteeringImageName)
@@ -123,21 +112,9 @@ public class CodeReviewWorkflowEnvironment
             .WithEnvironment("WorkflowDispatcher__CommandQueueName",      EdgeCommandQueue)
             .WithEnvironment("WorkflowDispatcher__RegistrationQueueName", "workflow-registration-crw-edge")
             .WithEnvironment("WorkflowLauncher__ExtraEnvironmentVariables__AUXILIA_DEVELOPER_MODE", "1")
-            .WithEnvironment("WorkflowLauncher__SlotPackages__fake-code-review-write-back-failure",
-                $"{ContainerPluginsDir}/Auxilia.FakeSlots.CodeReview.WriteBackFailure.slothandler.dll")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__0__SlotName",    "repository")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__0__ProviderType","fake-code-review-write-back-failure")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__1__SlotName",    "pull-request")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__1__ProviderType","fake-code-review-write-back-failure")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__2__SlotName",    "work-items")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__2__ProviderType","fake-code-review-write-back-failure")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__3__SlotName",    "primary-reviewer")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__3__ProviderType","fake-code-review-write-back-failure")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__4__SlotName",    "secondary-reviewer")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__4__ProviderType","fake-code-review-write-back-failure")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__5__SlotName",    "workflow-bootstrap")
-            .WithEnvironment("SlotConfigurations__Workflows__pull-request-code-review__5__ProviderType","fake-code-review-write-back-failure")
-            .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("WorkflowDispatcher started"))
+            .WithWaitStrategy(Wait.ForUnixContainer()
+                .UntilMessageIsLogged("WorkflowDispatcher started")
+                .UntilMessageIsLogged("SlotConfigurationSeedHandler started"))
             .Build();
 
         await Task.WhenAll(
@@ -145,6 +122,35 @@ public class CodeReviewWorkflowEnvironment
             _edgeSteeringInstance.StartAsync());
 
         MessageBusClient = await RabbitMqClient.CreateAsync(RabbitMqHost, RabbitMqPort);
+
+        const string happySeedQueue = HappyCommandQueue + "-slot-seed";
+        const string edgeSeedQueue  = EdgeCommandQueue  + "-slot-seed";
+
+        // Happy container: register provider + seed all six slots
+        await MessageBusClient.PublishAsync(happySeedQueue,
+            new RegisterSlotProviderCommand(
+                "fake-code-review-happy",
+                $"{ContainerPluginsDir}/Auxilia.FakeSlots.CodeReview.Happy.slothandler.dll"));
+        foreach (var slotName in new[] { "repository", "pull-request", "work-items",
+                                          "primary-reviewer", "secondary-reviewer", "workflow-bootstrap" })
+            await MessageBusClient.PublishAsync(happySeedQueue,
+                new UpsertSlotConfigurationCommand(
+                    "pull-request-code-review", slotName, "fake-code-review-happy",
+                    new Dictionary<string, string>()));
+
+        // Edge container: register provider + seed all six slots
+        await MessageBusClient.PublishAsync(edgeSeedQueue,
+            new RegisterSlotProviderCommand(
+                "fake-code-review-write-back-failure",
+                $"{ContainerPluginsDir}/Auxilia.FakeSlots.CodeReview.WriteBackFailure.slothandler.dll"));
+        foreach (var slotName in new[] { "repository", "pull-request", "work-items",
+                                          "primary-reviewer", "secondary-reviewer", "workflow-bootstrap" })
+            await MessageBusClient.PublishAsync(edgeSeedQueue,
+                new UpsertSlotConfigurationCommand(
+                    "pull-request-code-review", slotName, "fake-code-review-write-back-failure",
+                    new Dictionary<string, string>()));
+
+        await Task.Delay(TimeSpan.FromMilliseconds(500)); // propagation window
     }
 
     [OneTimeTearDown]
@@ -184,4 +190,3 @@ public class CodeReviewWorkflowEnvironment
                 $"dotnet publish failed for {projectRelativePath} (exit {process.ExitCode}):\n{stdout}\n{stderr}");
     }
 }
-

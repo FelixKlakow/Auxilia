@@ -32,6 +32,7 @@ public class WorkflowDispatchPipelineComponentTests
     private FakeMessageBusClient _bus = null!;
     private FakeWorkflowLauncher _launcher = null!;
     private SlotConfigurationStore _slotStore = null!;
+    private SlotProviderRegistry _providerRegistry = null!;
 
     private static byte[] CreateMinimalPackageZip(string workflowType = "my-workflow")
     {
@@ -103,6 +104,7 @@ public class WorkflowDispatchPipelineComponentTests
                 });
 
                 services.AddSingleton<SlotConfigurationStore>();
+                services.AddSingleton<SlotProviderRegistry>();
                 services.AddSingleton<SignalHandlerStore>();
                 services.AddSingleton<WorkflowSchemaStore>();
                 services.AddSingleton<PendingWorkflowPackageStore>();
@@ -117,6 +119,7 @@ public class WorkflowDispatchPipelineComponentTests
             .Build();
 
         _slotStore = _host.Services.GetRequiredService<SlotConfigurationStore>();
+        _providerRegistry = _host.Services.GetRequiredService<SlotProviderRegistry>();
 
         // Start all handlers (mirrors what Program.cs does)
         var regHandler   = _host.Services.GetRequiredService<WorkflowRegistrationHandler>();
@@ -323,79 +326,7 @@ public class WorkflowDispatchPipelineComponentTests
         _slotStore.UpsertConfiguration("my-workflow",
             new StoredSlotConfiguration("slot1", "MyProvider",
                 new Dictionary<string, string>(), ConfigurationStatus.Valid));
-
-        // Re-configure the host's DockerWorkflowLauncherSettings with SlotPackages
-        var settingsMonitor = _host.Services
-            .GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<DockerWorkflowLauncherSettings>>();
-
-        // We need to seed SlotPackages into the settings — restart dispatcher with patched options
-        // Since the host is already built, use a patched options approach via a new host
-        await _host.StopAsync();
-        _host.Dispose();
-
-        var packageZip = CreateMinimalPackageZip();
-        var httpClientFactory = new Mock<IHttpClientFactory>();
-        httpClientFactory
-            .Setup(f => f.CreateClient("workflow-packages"))
-            .Returns(new HttpClient(new StubHttpMessageHandler(packageZip)));
-
-        var developerMode = new Mock<IDeveloperModeProvider>();
-        developerMode.Setup(d => d.IsActive).Returns(true);
-
-        _launcher = new FakeWorkflowLauncher();
-        _bus = new FakeMessageBusClient();
-
-        _host = Host.CreateDefaultBuilder()
-            .ConfigureServices(services =>
-            {
-                services.AddSingleton<IMessageBusClient>(_bus);
-                services.AddSingleton<IWorkflowLauncher>(_launcher);
-                services.AddSingleton(httpClientFactory.Object);
-                services.AddSingleton(developerMode.Object);
-                services.AddSingleton<IWorkflowPackageVerifier, WorkflowPackageVerifier>();
-
-                services.Configure<DockerWorkflowLauncherSettings>(s =>
-                {
-                    s.NetworkName    = "test-net";
-                    s.RabbitMqHost   = "rabbitmq";
-                    s.RabbitMqPort   = 5672;
-                    s.RabbitMqUserName = "guest";
-                    s.RabbitMqPassword = "guest";
-                    s.SlotPackages["MyProvider"] = "/fake/path.slothandler.dll";
-                });
-
-                services.Configure<RunnerProfile>(p =>
-                {
-                    p.AvailableTools = new HashSet<string> { "git" };
-                    p.OpenPorts = new HashSet<int>();
-                });
-
-                services.AddSingleton<SlotConfigurationStore>();
-                services.AddSingleton<SignalHandlerStore>();
-                services.AddSingleton<WorkflowSchemaStore>();
-                services.AddSingleton<PendingWorkflowPackageStore>();
-                services.AddSingleton<WorkflowInstanceRegistry>();
-                services.AddSingleton<DirtyConfigurationDetector>();
-                services.AddSingleton<EnvironmentValidator>();
-                services.AddSingleton<ConfigurationResolver>();
-                services.AddSingleton<WorkflowRegistrationHandler>();
-                services.AddSingleton<WorkflowAnnouncementHandler>();
-                services.AddSingleton<WorkflowDispatcher>();
-            })
-            .Build();
-
-        _slotStore = _host.Services.GetRequiredService<SlotConfigurationStore>();
-        _slotStore.UpsertConfiguration("my-workflow",
-            new StoredSlotConfiguration("slot1", "MyProvider",
-                new Dictionary<string, string>(), ConfigurationStatus.Valid));
-
-        var regHandler  = _host.Services.GetRequiredService<WorkflowRegistrationHandler>();
-        var annoHandler = _host.Services.GetRequiredService<WorkflowAnnouncementHandler>();
-        var dispatcher  = _host.Services.GetRequiredService<WorkflowDispatcher>();
-
-        await regHandler.StartAsync(CancellationToken.None);
-        await annoHandler.StartAsync(CancellationToken.None);
-        await dispatcher.StartAsync(CancellationToken.None);
+        _providerRegistry.Upsert("MyProvider", "/fake/path.slothandler.dll");
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "my-workflow", "https://example.com/my-workflow.zip",

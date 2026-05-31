@@ -4,7 +4,6 @@ using Auxilia.SteeringInstance.Workflows;
 using Auxilia.SteeringInstance.Workflows.Storage;
 using Auxilia.Workflows;
 using Auxilia.Workflows.Crypto;
-using Microsoft.Extensions.Options;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -85,10 +84,10 @@ try
         builder.Configuration.GetSection("WorkflowDispatcher"));
 
     // --- Slot configuration seeding ---
-    builder.Services.Configure<SlotConfigurationsSettings>(
-        builder.Configuration.GetSection("SlotConfigurations"));
+    builder.Services.AddSingleton<SlotProviderRegistry>();
+    builder.Services.AddSingleton<SlotConfigurationSeedHandler>();
 
-    // --- OpenTelemetry (tracing + metrics) ---
+    // --- OpenTelemetry(tracing + metrics) ---
     var otlpEndpoint = builder.Configuration["Otlp:Endpoint"];
     var serviceVersion = Assembly.GetExecutingAssembly()
         .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
@@ -128,18 +127,8 @@ try
 
     var app = builder.Build();
 
-    // --- Seed slot configurations from config ---
-    var slotConfigSettings = app.Services
-        .GetRequiredService<IOptions<SlotConfigurationsSettings>>().Value;
-    var slotStore = app.Services.GetRequiredService<SlotConfigurationStore>();
-    foreach (var (workflowType, entries) in slotConfigSettings.Workflows)
-        foreach (var entry in entries)
-            slotStore.UpsertConfiguration(workflowType,
-                new StoredSlotConfiguration(
-                    entry.SlotName,
-                    entry.ProviderType,
-                    entry.Settings,
-                    ConfigurationStatus.Valid));
+    var configSeedHandler = app.Services.GetRequiredService<SlotConfigurationSeedHandler>();
+    await configSeedHandler.StartAsync(app.Lifetime.ApplicationStopping);
 
     var handler = app.Services.GetRequiredService<WorkflowRegistrationHandler>();
     await handler.StartAsync(app.Lifetime.ApplicationStopping);

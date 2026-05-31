@@ -28,6 +28,7 @@ public sealed class WorkflowDispatcher(
     IWorkflowPackageVerifier packageVerifier,
     PendingWorkflowPackageStore pendingPackages,
     SlotConfigurationStore slotStore,
+    SlotProviderRegistry providerRegistry,
     ILogger<WorkflowDispatcher> logger)
 {
     private IAsyncDisposable? _subscription;
@@ -76,7 +77,7 @@ public sealed class WorkflowDispatcher(
 
         foreach (var providerType in providerTypes)
         {
-            if (!settings.SlotPackages.TryGetValue(providerType, out var dllPath))
+            if (!providerRegistry.TryGet(providerType, out var dllPath))
             {
                 logger.LogWarning(
                     "No SlotPackages entry for ProviderType={ProviderType} (WorkflowType={WorkflowType}). Skipping.",
