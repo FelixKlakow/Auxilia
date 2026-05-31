@@ -4,6 +4,10 @@ namespace Auxilia.Workflows.SlotPackages.Tests.TestDoubles;
 
 public sealed class StubPullRequestAccess : IPullRequestAccess
 {
+    public string PrIdentifier => "PR-1";
+    public string BaseRef => "main";
+    public string HeadRef => "feature/stub";
+
     public Task<IReadOnlyList<ChangedFile>> GetChangedFilesAsync(CancellationToken cancellationToken = default)
         => Task.FromResult<IReadOnlyList<ChangedFile>>([
             new ChangedFile("src/Program.cs", ChangeKind.Modified),

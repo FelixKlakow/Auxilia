@@ -10,7 +10,7 @@ public interface IStagedFindingsStore
 
     /// <summary>
     /// Returns the approximate byte size of the current in-memory store.
-    /// If this exceeds MemoryThresholdBytes, the implementation MAY spill to a local temp file.
+    /// Intended for monitoring and diagnostic purposes only.
     /// </summary>
     long ApproximateSizeBytes { get; }
 }
