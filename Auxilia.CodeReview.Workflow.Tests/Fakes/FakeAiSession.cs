@@ -13,12 +13,17 @@ public sealed class FakeAiSession : IAiSession
         _turns = turns;
     }
 
-    public Task<string> ExecuteAsync(string prompt, CancellationToken cancellationToken = default)
+    public async Task<string> ExecuteAsync(string prompt, CancellationToken cancellationToken = default)
     {
         foreach (var turn in _turns)
         {
             if (turn.ExpectedPromptSubstring == "" || prompt.Contains(turn.ExpectedPromptSubstring))
-                return Task.FromResult(turn.Response);
+            {
+                if (turn.ToolCall is not null)
+                    await turn.ToolCall();
+
+                return turn.Response;
+            }
         }
 
         var available = string.Join(", ", _turns.Select(t => $"'{t.ExpectedPromptSubstring}'"));
