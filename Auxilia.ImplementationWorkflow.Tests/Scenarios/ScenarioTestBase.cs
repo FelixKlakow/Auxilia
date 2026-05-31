@@ -1,3 +1,5 @@
+using Auxilia.ImplementationWorkflow;
+using Auxilia.ImplementationWorkflow.Mcp;
 using Auxilia.ImplementationWorkflow.Tests.Fakes;
 using Auxilia.Workflows;
 using Auxilia.Workflows.Messaging.Messages;
@@ -32,10 +34,25 @@ public abstract class ScenarioTestBase
             [new ScriptedTurn("", implResponse)]
         ]));
 
-    protected static FakeAiAgent DefaultReviewerAgent(string reviewResponse = "[]") =>
-        new(new Queue<IReadOnlyList<ScriptedTurn>>([
-            [new ScriptedTurn("", reviewResponse)]
-        ]));
+    protected static FakeAiAgent DefaultReviewerAgent(IReadOnlyList<ReviewNote>? notes = null)
+    {
+        FakeAiAgent? agent = null;
+        Func<Task>? toolCall = null;
+        if (notes is { Count: > 0 })
+        {
+            toolCall = () =>
+            {
+                var sink = agent?.LastSessionOptions?.CapabilityTools?
+                    .OfType<ImplementationReviewResultSinkMcpTools>().FirstOrDefault();
+                if (sink is null) return Task.CompletedTask;
+                foreach (var note in notes)
+                    sink.RecordReviewNote(note.Description, note.FilePath, note.Severity);
+                return Task.CompletedTask;
+            };
+        }
+        agent = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[new ScriptedTurn("", "", toolCall)]]));
+        return agent;
+    }
 
     protected ImplementationFakeRegistry DefaultRegistry(
         WorkItem? workItem = null,

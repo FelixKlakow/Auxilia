@@ -20,9 +20,10 @@ public sealed class HappyPathTests : ScenarioTestBase
             });
 
         // One session handles all files – a single turn matches any file-review prompt
-        var primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>(
+        FakeAiAgent? primaryAi = null;
+        primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>(
         [
-            [ReviewedTurn()]
+            [ReviewedTurn(() => primaryAi)]
         ]));
 
         var registry = new CodeReviewFakeRegistry(
@@ -51,9 +52,10 @@ public sealed class HappyPathTests : ScenarioTestBase
                 ["src/Widget.cs"] = [Hunk("src/Widget.cs")],
             });
 
-        var primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>(
+        FakeAiAgent? primaryAi = null;
+        primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>(
         [
-            [ReviewedTurn()]
+            [ReviewedTurn(() => primaryAi)]
         ]));
 
         var registry = new CodeReviewFakeRegistry(

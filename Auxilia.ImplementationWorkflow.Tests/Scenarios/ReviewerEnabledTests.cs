@@ -10,7 +10,7 @@ public sealed class ReviewerEnabledTests : ScenarioTestBase
     [Test]
     public async Task AgentSucceeds_ReviewerEnabled_NoIssues_EmitsOnlyCompletedSignal()
     {
-        var reviewerAgent = DefaultReviewerAgent("[]");
+        var reviewerAgent = DefaultReviewerAgent();
 
         var registry = DefaultRegistry(
             reviewerAgent: reviewerAgent,

@@ -25,7 +25,8 @@ public sealed class WriteBackFilteringTests : ScenarioTestBase
                 ["src/Foo.cs"] = [Hunk("src/Foo.cs")],
             });
 
-        var primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn()]]));
+        FakeAiAgent? primaryAi = null;
+        primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn(() => primaryAi)]]));
 
         var registry = new CodeReviewFakeRegistry(
             new FakeSourceControlAccess(),
@@ -53,7 +54,8 @@ public sealed class WriteBackFilteringTests : ScenarioTestBase
                 ["src/Foo.cs"] = [Hunk("src/Foo.cs")],
             });
 
-        var primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn()]]));
+        FakeAiAgent? primaryAi = null;
+        primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn(() => primaryAi)]]));
 
         var registry = new CodeReviewFakeRegistry(
             new FakeSourceControlAccess(),
@@ -81,7 +83,8 @@ public sealed class WriteBackFilteringTests : ScenarioTestBase
                 ["src/Foo.cs"] = [Hunk("src/Foo.cs")],
             });
 
-        var primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn()]]));
+        FakeAiAgent? primaryAi = null;
+        primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn(() => primaryAi)]]));
 
         var registry = new CodeReviewFakeRegistry(
             new FakeSourceControlAccess(),

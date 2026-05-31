@@ -1,14 +1,17 @@
-using System.Text.Json;
 using Auxilia.CodeReview.Workflow.Context;
 using Auxilia.CodeReview.Workflow.Findings;
+using Auxilia.CodeReview.Workflow.Mcp;
 using Auxilia.Workflows.AiAgent;
+using Auxilia.Workflows.Mcp;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Auxilia.CodeReview.Workflow;
 
 public sealed class TwoEyesPassService(
     [FromKeyedServices("secondary-reviewer")] IAiAgent secondaryAgent,
-    TwoEyesConfiguration config)
+    TwoEyesConfiguration config,
+    ILoggerFactory? loggerFactory = null)
 {
     public async Task<IReadOnlyList<ReviewFinding>> RunAsync(
         IReadOnlyList<StagedFinding> staged,
@@ -33,31 +36,39 @@ public sealed class TwoEyesPassService(
                 ? string.Join("\n", file.Hunks.Select(h => h.Content))
                 : string.Empty;
 
-            await using var session = await secondaryAgent.OpenSessionAsync();
-            var prompt =
-                $"Review this finding:\nFile: {finding.FilePath}, Lines {finding.LineStart}-{finding.LineEnd}\n" +
-                $"Severity: {finding.Severity}, Category: {finding.Category}\nMessage: {finding.Message}\n" +
-                $"Diff context:\n{hunkContent}\n\n" +
-                "Respond with JSON: {\"verdict\": \"Approved|Rejected\"}";
+            var sink = new CodeReviewResultSinkMcpTools("secondary-review-sink", loggerFactory);
+            try
+            {
+                await sink.StartAsync(new HttpMcpTransportConfig("http://localhost:0/mcp", "secondary-review-sink"), CancellationToken.None);
 
-            var verdictText = await session.ExecuteAsync(prompt);
-            results.Add(ReviewFinding.FromStaged(finding, ParseVerdict(verdictText), "secondary-reviewer"));
+                var options = new AiSessionOptions { CapabilityTools = [sink] };
+                await using var session = await secondaryAgent.OpenSessionAsync(options);
+
+                var prompt =
+                    $"Review this finding:\nFile: {finding.FilePath}, Lines {finding.LineStart}-{finding.LineEnd}\n" +
+                    $"Severity: {finding.Severity}, Category: {finding.Category}\nMessage: {finding.Message}\n" +
+                    $"Diff context:\n{hunkContent}\n\n" +
+                    "Use the provided tools to record your verdict (Approved or Rejected) for this finding.";
+
+                await session.ExecuteAsync(prompt);
+
+                var verdict = sink.TakeSecondaryVerdict();
+                if (verdict is null)
+                {
+                    loggerFactory?.CreateLogger<TwoEyesPassService>()
+                        .LogWarning("No secondary verdict recorded via tool call for finding in '{FilePath}'; defaulting to Approved.", finding.FilePath);
+                    verdict = SecondaryVerdict.Approved;
+                }
+
+                results.Add(ReviewFinding.FromStaged(finding, verdict.Value, "secondary-reviewer"));
+            }
+            finally
+            {
+                using var stopCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                await sink.StopAsync(stopCts.Token);
+            }
         }
 
         return results.AsReadOnly();
-    }
-
-    private static SecondaryVerdict ParseVerdict(string text)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(text);
-            var verdictStr = doc.RootElement.GetProperty("verdict").GetString() ?? "Approved";
-            return Enum.TryParse<SecondaryVerdict>(verdictStr, true, out var v) ? v : SecondaryVerdict.Approved;
-        }
-        catch
-        {
-            return SecondaryVerdict.Approved;
-        }
     }
 }

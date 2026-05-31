@@ -1,5 +1,6 @@
 using Auxilia.CodeReview.Workflow.Context;
 using Auxilia.CodeReview.Workflow.Findings;
+using Auxilia.CodeReview.Workflow.Mcp;
 using Auxilia.Workflows.AiAgent;
 
 namespace Auxilia.CodeReview.Workflow.Tests;
@@ -118,16 +119,21 @@ public sealed class FindingsAggregatorTests
 
         public Task<IAiSession> OpenSessionAsync(AiSessionOptions? options = null, CancellationToken cancellationToken = default)
         {
-            var verdict = verdictSequence.Length == 0 ? "Approved"
+            var verdictStr = verdictSequence.Length == 0 ? "Approved"
                 : verdictSequence[Math.Min(_callIndex++, verdictSequence.Length - 1)];
-            return Task.FromResult<IAiSession>(new FakeAiSession(verdict));
+            var verdict = Enum.Parse<SecondaryVerdict>(verdictStr, ignoreCase: true);
+            return Task.FromResult<IAiSession>(new FakeAiSession(verdict, options));
         }
     }
 
-    private sealed class FakeAiSession(string verdict) : IAiSession
+    private sealed class FakeAiSession(SecondaryVerdict verdict, AiSessionOptions? options) : IAiSession
     {
         public Task<string> ExecuteAsync(string prompt, CancellationToken cancellationToken = default)
-            => Task.FromResult($"{{\"verdict\":\"{verdict}\"}}");
+        {
+            var sink = options?.CapabilityTools?.OfType<CodeReviewResultSinkMcpTools>().FirstOrDefault();
+            sink?.RecordSecondaryVerdict(verdict);
+            return Task.FromResult("");
+        }
 
         public Task CompactAsync(string focusDescription, CancellationToken cancellationToken = default)
             => Task.CompletedTask;

@@ -26,13 +26,15 @@ public sealed class TwoEyesTests : ScenarioTestBase
                 ["src/D.cs"] = [Hunk("src/D.cs")],
             });
 
-        // One primary session handles all files via a generic review turn
-        var primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn()]]));
+        FakeAiAgent? primaryAi = null;
+        primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn(() => primaryAi)]]));
 
         // Secondary opens a new session per finding — 4 findings, alternating Approved/Rejected
-        var secondaryAi = new FakeAiAgent(new Queue<ScriptedTurn>(
+        FakeAiAgent? secondaryAi = null;
+        secondaryAi = new FakeAiAgent(new Queue<ScriptedTurn>(
         [
-            ApprovedTurn(), RejectedTurn(), ApprovedTurn(), RejectedTurn(),
+            ApprovedTurn(() => secondaryAi), RejectedTurn(() => secondaryAi),
+            ApprovedTurn(() => secondaryAi), RejectedTurn(() => secondaryAi),
         ]));
 
         var registry = new CodeReviewFakeRegistry(
@@ -73,7 +75,8 @@ public sealed class TwoEyesTests : ScenarioTestBase
                 ["src/Widget.cs"] = [Hunk("src/Widget.cs")],
             });
 
-        var primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn()]]));
+        FakeAiAgent? primaryAi = null;
+        primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn(() => primaryAi)]]));
         var secondaryAi = new FakeAiAgent(new Queue<ScriptedTurn>()); // must not be opened
 
         var registry = new CodeReviewFakeRegistry(

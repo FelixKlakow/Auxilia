@@ -30,13 +30,15 @@ public sealed class PrimarySecondaryDisagreementTests : ScenarioTestBase
                 ["src/F.cs"] = [Hunk("src/F.cs")],
             });
 
-        var primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn()]]));
+        FakeAiAgent? primaryAi = null;
+        primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn(() => primaryAi)]]));
 
-        var secondaryAi = new FakeAiAgent(new Queue<ScriptedTurn>(
+        FakeAiAgent? secondaryAi = null;
+        secondaryAi = new FakeAiAgent(new Queue<ScriptedTurn>(
         [
-            ApprovedTurn(), RejectedTurn(),
-            ApprovedTurn(), RejectedTurn(),
-            ApprovedTurn(), RejectedTurn(),
+            ApprovedTurn(() => secondaryAi), RejectedTurn(() => secondaryAi),
+            ApprovedTurn(() => secondaryAi), RejectedTurn(() => secondaryAi),
+            ApprovedTurn(() => secondaryAi), RejectedTurn(() => secondaryAi),
         ]));
 
         var registry = new CodeReviewFakeRegistry(
