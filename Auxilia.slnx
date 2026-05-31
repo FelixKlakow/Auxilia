@@ -47,6 +47,11 @@
   </Folder>
   <Folder Name="/06_WorkflowImplementations/">
     <Project Path="Auxilia.CodeReview.Workflow.Tests\Auxilia.CodeReview.Workflow.Tests.csproj" />
+    <Project Path="Auxilia.FakeSlots.CodeReview.Happy\Auxilia.FakeSlots.CodeReview.Happy.csproj" />
+    <Project Path="Auxilia.FakeSlots.CodeReview.WriteBackFailure\Auxilia.FakeSlots.CodeReview.WriteBackFailure.csproj" />
+    <Project Path="Auxilia.FakeSlots.Implementation.AgentFailure\Auxilia.FakeSlots.Implementation.AgentFailure.csproj" />
+    <Project Path="Auxilia.FakeSlots.Implementation.Happy\Auxilia.FakeSlots.Implementation.Happy.csproj" />
+    <Project Path="Auxilia.FakeSlots.Tests\Auxilia.FakeSlots.Tests.csproj" />
     <Project Path="Auxilia.ImplementationWorkflow.Tests/Auxilia.ImplementationWorkflow.Tests.csproj">
       <Build Solution="Debug|*" Project="false" />
     </Project>
