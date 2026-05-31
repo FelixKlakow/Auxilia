@@ -274,4 +274,13 @@ public class WorkflowBuilderTests
         Assert.That(manifest.Outputs[0].Name, Is.EqualTo("a"));
         Assert.That(manifest.Outputs[1].Name, Is.EqualTo("b"));
     }
+
+    [Test]
+    public void BuildSchema_ViaInterface_ReturnsWorkflowSchema()
+    {
+        var builder = (IWorkflowBuilder)WorkflowBuilder.Create("test-workflow");
+        var schema = builder.BuildSchema();
+        Assert.That(schema, Is.Not.Null);
+        Assert.That(schema.WorkflowName, Is.EqualTo("test-workflow"));
+    }
 }
