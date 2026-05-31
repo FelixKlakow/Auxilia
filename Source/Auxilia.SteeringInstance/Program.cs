@@ -4,6 +4,7 @@ using Auxilia.SteeringInstance.Workflows;
 using Auxilia.SteeringInstance.Workflows.Storage;
 using Auxilia.Workflows;
 using Auxilia.Workflows.Crypto;
+using Microsoft.Extensions.Options;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -86,6 +87,8 @@ try
     // --- Slot configuration seeding ---
     builder.Services.AddSingleton<SlotProviderRegistry>();
     builder.Services.AddSingleton<SlotConfigurationSeedHandler>();
+    builder.Services.Configure<SlotConfigurationsSettings>(
+        builder.Configuration.GetSection("SlotConfigurations"));
 
     // --- OpenTelemetry(tracing + metrics) ---
     var otlpEndpoint = builder.Configuration["Otlp:Endpoint"];
@@ -129,6 +132,19 @@ try
 
     var configSeedHandler = app.Services.GetRequiredService<SlotConfigurationSeedHandler>();
     await configSeedHandler.StartAsync(app.Lifetime.ApplicationStopping);
+
+    // Seed slot providers and configurations from startup config (env vars / appsettings).
+    var launcherSettings = app.Services.GetRequiredService<IOptions<DockerWorkflowLauncherSettings>>().Value;
+    var providerRegistry = app.Services.GetRequiredService<SlotProviderRegistry>();
+    foreach (var (providerType, dllPath) in launcherSettings.SlotPackages)
+        providerRegistry.Upsert(providerType, dllPath);
+
+    var slotConfigSettings = app.Services.GetRequiredService<IOptions<SlotConfigurationsSettings>>().Value;
+    var slotStore = app.Services.GetRequiredService<SlotConfigurationStore>();
+    foreach (var (workflowType, entries) in slotConfigSettings.Workflows)
+        foreach (var entry in entries)
+            slotStore.UpsertConfiguration(workflowType,
+                new StoredSlotConfiguration(entry.SlotName, entry.ProviderType, entry.Settings, ConfigurationStatus.Valid));
 
     var handler = app.Services.GetRequiredService<WorkflowRegistrationHandler>();
     await handler.StartAsync(app.Lifetime.ApplicationStopping);
