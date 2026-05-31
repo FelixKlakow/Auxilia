@@ -41,59 +41,10 @@ Each file contains:
 
 Do **not** include: configuration samples, test category rules, dependency tables, or anything already covered here.
 
-## AI Session Retry and Resilience
-Retry logic and resilience for `IAiAgent.OpenSessionAsync` and `IAiSession.ExecuteAsync` must be
-handled at the `IAiAgent` layer — either inside the provider implementation or via a decorator such
-as `ResilientAiAgent` from `Auxilia.Workflows.AiAgent`.  
-**Never** implement per-workflow retry loops in orchestrators or workflow classes.  
-Use `AiAgentServiceCollectionExtensions.WrapAiAgentWithResilience` to opt in to the decorator.
+## AI
 
-## Structured AI Output: Result-Sink MCP Tool Pattern
-
-**Never** instruct the AI model to "respond with JSON", "return a JSON array", or emit any structured
-text format in its reply. When an orchestrator needs structured output, use a result-sink
-`ICapabilityMcpTools` registered in `AiSessionOptions.CapabilityTools`.
-
-### The four-step pattern
-
-1. **Instantiate and start** the result-sink MCP tool server (e.g. `CodeReviewResultSinkMcpTools`,
-   `ImplementationReviewResultSinkMcpTools`).
-2. **Register it** in `AiSessionOptions.CapabilityTools` when calling `IAiAgent.OpenSessionAsync`.
-3. **Call `ExecuteAsync`** with a plain prompt — the model calls the typed tools to report results.
-4. **Drain results** after `ExecuteAsync` returns (e.g. `DrainFindings()`, `TakeFileVerdict()`,
-   `DrainNotes()`). Always **stop the sink in a `finally` block**.
-
-```csharp
-var sink = new XxxResultSinkMcpTools(...);
-await sink.StartAsync(new HttpMcpTransportConfig("http://localhost:0/mcp", "sink-name"), ct);
-try
-{
-    var options = new AiSessionOptions { CapabilityTools = [sink, ...otherTools] };
-    await using var session = await agent.OpenSessionAsync(options, ct);
-    await session.ExecuteAsync(prompt, ct);   // model calls typed tools
-
-    var results = sink.DrainXxx();            // read accumulated results
-}
-finally
-{
-    await sink.StopAsync();
-}
-```
-
-### Anti-patterns — never do these
-
-- Prompts containing "Respond with JSON:", "Return a JSON array", or any structured-output instruction.
-- `ParseXxx` helper methods that deserialise `ExecuteAsync` return values.
-- `catch { return default; }` or `catch (JsonException) { return []; }` as silent fallbacks.
-
-### Key types
-
-| Type | Location |
-|---|---|
-| `ICapabilityMcpTools` | `Auxilia.Workflows/Mcp/` |
-| `AiSessionOptions.CapabilityTools` | `Auxilia.Workflows.AiAgent/` |
-| `HttpMcpTransportConfig` | `Auxilia.Workflows/Mcp/` |
-| `CapabilityMcpToolsBase` | `Auxilia.Workflows/Mcp/` |
+- Retry and resilience must be implemented directly inside the `IAiAgent` provider implementation. Never use a decorator or per-workflow retry loops.
+- Never instruct the AI model to emit structured text (e.g. "Respond with JSON"). Use a result-sink `ICapabilityMcpTools` in `AiSessionOptions.CapabilityTools` to collect structured output via typed tool calls.
 
 ## Commit convention
 `<type>: <description>` – allowed types: `feat fix refactor plan docs style merge revert`.
