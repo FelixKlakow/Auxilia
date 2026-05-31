@@ -33,12 +33,12 @@ public class WorkflowPackageVerifierTests
             SignatureBase64: string.Empty,
             PublicKeyBase64: publicKeyBase64);
 
-        var unsignedBytes = JsonSerializer.SerializeToUtf8Bytes(unsignedManifest, WorkflowPackageVerifier.SerializeOptions);
+        var unsignedBytes = JsonSerializer.SerializeToUtf8Bytes(unsignedManifest, WorkflowPackageJsonOptions.SerializeOptions);
         var manifestHash = SHA256.HashData(unsignedBytes);
         var signature = _rsa.SignHash(manifestHash, HashAlgorithmName.SHA256, RSASignaturePadding.Pss);
 
         var signedManifest = unsignedManifest with { SignatureBase64 = Convert.ToBase64String(signature) };
-        var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(signedManifest, WorkflowPackageVerifier.SerializeOptions);
+        var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(signedManifest, WorkflowPackageJsonOptions.SerializeOptions);
 
         _validZipStream = BuildZip([("workflow-schema.json", schemaContent), ("package-manifest.json", manifestBytes)]);
     }
@@ -100,11 +100,11 @@ public class WorkflowPackageVerifierTests
             SignatureBase64: string.Empty,
             PublicKeyBase64: publicKeyBase64);
 
-        var unsignedBytes = JsonSerializer.SerializeToUtf8Bytes(unsignedManifest, WorkflowPackageVerifier.SerializeOptions);
+        var unsignedBytes = JsonSerializer.SerializeToUtf8Bytes(unsignedManifest, WorkflowPackageJsonOptions.SerializeOptions);
         var manifestHash = SHA256.HashData(unsignedBytes);
         var signature = _rsa.SignHash(manifestHash, HashAlgorithmName.SHA256, RSASignaturePadding.Pss);
         var signedManifest = unsignedManifest with { SignatureBase64 = Convert.ToBase64String(signature) };
-        var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(signedManifest, WorkflowPackageVerifier.SerializeOptions);
+        var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(signedManifest, WorkflowPackageJsonOptions.SerializeOptions);
 
         var tamperedContent = Encoding.UTF8.GetBytes("tampered content");
         using var zipStream = BuildZip([("workflow-schema.json", tamperedContent), ("package-manifest.json", manifestBytes)]);
@@ -138,7 +138,7 @@ public class WorkflowPackageVerifierTests
         }
 
         var tamperedManifest = originalManifest with { SignatureBase64 = randomSignature };
-        var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(tamperedManifest, WorkflowPackageVerifier.SerializeOptions);
+        var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(tamperedManifest, WorkflowPackageJsonOptions.SerializeOptions);
 
         using var zipStream = BuildZip([("workflow-schema.json", schemaContent), ("package-manifest.json", manifestBytes)]);
 
