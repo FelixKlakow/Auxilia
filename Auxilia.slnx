@@ -32,6 +32,8 @@
     <File Path="USE-CASES.md" />
   </Folder>
   <Folder Name="/05_WorkflowsDomain/">
+    <Project Path="Auxilia.Workflows.Packer.Tests\Auxilia.Workflows.Packer.Tests.csproj" />
+    <Project Path="Auxilia.Workflows.Packer\Auxilia.Workflows.Packer.csproj" />
     <Project Path="Auxilia.Workflows.SlotPackages.Tests\Auxilia.Workflows.SlotPackages.Tests.csproj" />
     <Project Path="Auxilia.Workflows.Testing.Tests\Auxilia.Workflows.Testing.Tests.csproj" />
     <Project Path="Auxilia.Workflows.Testing\Auxilia.Workflows.Testing.csproj" />

@@ -1,7 +1,6 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 
 namespace Auxilia.Workflows.Crypto;
@@ -13,12 +12,6 @@ public sealed class WorkflowPackageVerifier(
     internal static readonly JsonSerializerOptions DeserializeOptions = new()
     {
         PropertyNameCaseInsensitive = true
-    };
-
-    internal static readonly JsonSerializerOptions SerializeOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.Never
     };
 
     public bool Verify(Stream zipStream)
@@ -60,7 +53,7 @@ public sealed class WorkflowPackageVerifier(
         }
 
         var unsignedManifest = manifest with { SignatureBase64 = string.Empty };
-        var unsignedBytes = JsonSerializer.SerializeToUtf8Bytes(unsignedManifest, SerializeOptions);
+        var unsignedBytes = JsonSerializer.SerializeToUtf8Bytes(unsignedManifest, WorkflowPackageJsonOptions.SerializeOptions);
         var manifestHash = SHA256.HashData(unsignedBytes);
 
         var signatureBytes = Convert.FromBase64String(manifest.SignatureBase64);
