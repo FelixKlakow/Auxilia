@@ -49,9 +49,11 @@ public sealed class WorkflowRegistrationHandler(
             logger.LogInformation(
                 "Workflow {WorkflowInstanceId} declares no slots — responding with empty configuration.",
                 request.WorkflowInstanceId);
+            var signalHandlers = configResolver.ResolveSignalHandlers(request.Manifest.WorkflowName);
             await messageBus.PublishAsync(request.ResponseTopic, new WorkflowConfigurationResponse(
                 request.WorkflowInstanceId, true, null,
-                new Dictionary<string, EncryptedSlotConfiguration>()),
+                new Dictionary<string, EncryptedSlotConfiguration>(),
+                signalHandlers),
                 cancellationToken);
             _registeredInstances.TryAdd(request.WorkflowInstanceId, 0);
             return;

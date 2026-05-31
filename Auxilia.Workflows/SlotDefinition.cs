@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Auxilia.Workflows;
 
 public sealed record SlotDefinition(
@@ -5,5 +7,9 @@ public sealed record SlotDefinition(
     object? Capabilities,
     string? Description = null)
 {
-    public required Type ServiceType { get; init; }
+    /// <summary>
+    /// Runtime DI service type. Not persisted to JSON — populated in-process only.
+    /// </summary>
+    [JsonIgnore]
+    public Type? ServiceType { get; init; }
 }

@@ -58,7 +58,10 @@ public class WorkflowDispatchPipelineComponentTests
                 });
 
                 services.AddSingleton<SlotConfigurationStore>();
+                services.AddSingleton<SignalHandlerStore>();
                 services.AddSingleton<WorkflowSchemaStore>();
+                services.AddSingleton<PendingWorkflowPackageStore>();
+                services.AddSingleton<WorkflowInstanceRegistry>();
                 services.AddSingleton<DirtyConfigurationDetector>();
                 services.AddSingleton<EnvironmentValidator>();
                 services.AddSingleton<ConfigurationResolver>();
