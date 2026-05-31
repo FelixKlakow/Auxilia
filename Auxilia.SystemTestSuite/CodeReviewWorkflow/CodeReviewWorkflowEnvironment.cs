@@ -123,29 +123,29 @@ public class CodeReviewWorkflowEnvironment
 
         MessageBusClient = await RabbitMqClient.CreateAsync(RabbitMqHost, RabbitMqPort);
 
-        const string happySeedQueue = HappyCommandQueue + "-slot-seed";
-        const string edgeSeedQueue  = EdgeCommandQueue  + "-slot-seed";
+        var happySeedBase = HappyCommandQueue + "-slot-seed";
+        var edgeSeedBase  = EdgeCommandQueue  + "-slot-seed";
 
         // Happy container: register provider + seed all six slots
-        await MessageBusClient.PublishAsync(happySeedQueue,
+        await MessageBusClient.PublishAsync(happySeedBase + ".register",
             new RegisterSlotProviderCommand(
                 "fake-code-review-happy",
                 $"{ContainerPluginsDir}/Auxilia.FakeSlots.CodeReview.Happy.slothandler.dll"));
         foreach (var slotName in new[] { "repository", "pull-request", "work-items",
                                           "primary-reviewer", "secondary-reviewer", "workflow-bootstrap" })
-            await MessageBusClient.PublishAsync(happySeedQueue,
+            await MessageBusClient.PublishAsync(happySeedBase + ".upsert",
                 new UpsertSlotConfigurationCommand(
                     "pull-request-code-review", slotName, "fake-code-review-happy",
                     new Dictionary<string, string>()));
 
         // Edge container: register provider + seed all six slots
-        await MessageBusClient.PublishAsync(edgeSeedQueue,
+        await MessageBusClient.PublishAsync(edgeSeedBase + ".register",
             new RegisterSlotProviderCommand(
                 "fake-code-review-write-back-failure",
                 $"{ContainerPluginsDir}/Auxilia.FakeSlots.CodeReview.WriteBackFailure.slothandler.dll"));
         foreach (var slotName in new[] { "repository", "pull-request", "work-items",
                                           "primary-reviewer", "secondary-reviewer", "workflow-bootstrap" })
-            await MessageBusClient.PublishAsync(edgeSeedQueue,
+            await MessageBusClient.PublishAsync(edgeSeedBase + ".upsert",
                 new UpsertSlotConfigurationCommand(
                     "pull-request-code-review", slotName, "fake-code-review-write-back-failure",
                     new Dictionary<string, string>()));

@@ -21,14 +21,25 @@ public sealed class SlotConfigurationSeedHandler(
         await messageBus.SubscribeToExchangeAsync<RegisterSlotProviderCommand>("slot-configurations", HandleRegisterProviderAsync, ct);
         await messageBus.SubscribeToExchangeAsync<RemoveSlotProviderCommand>("slot-configurations", HandleRemoveProviderAsync, ct);
 
-        // Per-instance seed queue: allows targeted config delivery without fanout broadcast.
-        // Queue name is deterministic from CommandQueueName — no extra env var needed.
-        var seedQueue = dispatcherSettings.Value.CommandQueueName + "-slot-seed";
-        await messageBus.DeclareQueueAsync(seedQueue, ct);
-        await messageBus.SubscribeAsync<UpsertSlotConfigurationCommand>(seedQueue, HandleUpsertAsync, ct);
-        await messageBus.SubscribeAsync<RemoveSlotConfigurationCommand>(seedQueue, HandleRemoveSlotAsync, ct);
-        await messageBus.SubscribeAsync<RegisterSlotProviderCommand>(seedQueue, HandleRegisterProviderAsync, ct);
-        await messageBus.SubscribeAsync<RemoveSlotProviderCommand>(seedQueue, HandleRemoveProviderAsync, ct);
+        // Per-instance seed queues: one sub-queue per command type so that each typed consumer
+        // only receives messages it can deserialize. Using a single queue with multiple competing
+        // typed consumers causes round-robin delivery, which silently drops messages when the wrong
+        // consumer receives a message it cannot deserialize.
+        var seedBase = dispatcherSettings.Value.CommandQueueName + "-slot-seed";
+        var upsertQueue          = seedBase + ".upsert";
+        var removeQueue          = seedBase + ".remove";
+        var registerQueue        = seedBase + ".register";
+        var removeProviderQueue  = seedBase + ".remove-provider";
+
+        await messageBus.DeclareQueueAsync(upsertQueue,         ct);
+        await messageBus.DeclareQueueAsync(removeQueue,         ct);
+        await messageBus.DeclareQueueAsync(registerQueue,       ct);
+        await messageBus.DeclareQueueAsync(removeProviderQueue, ct);
+
+        await messageBus.SubscribeAsync<UpsertSlotConfigurationCommand>(upsertQueue,         HandleUpsertAsync,          ct);
+        await messageBus.SubscribeAsync<RemoveSlotConfigurationCommand>(removeQueue,         HandleRemoveSlotAsync,      ct);
+        await messageBus.SubscribeAsync<RegisterSlotProviderCommand>   (registerQueue,       HandleRegisterProviderAsync, ct);
+        await messageBus.SubscribeAsync<RemoveSlotProviderCommand>     (removeProviderQueue, HandleRemoveProviderAsync,  ct);
 
         logger.LogInformation("SlotConfigurationSeedHandler started — subscribed to slot-configurations exchange.");
     }

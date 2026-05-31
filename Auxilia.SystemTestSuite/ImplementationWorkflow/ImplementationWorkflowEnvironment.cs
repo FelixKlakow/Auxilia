@@ -128,29 +128,29 @@ public class ImplementationWorkflowEnvironment
         // ensures each container receives only its own provider and slot configurations.
         // Both containers use the same workflow-type name "implementation-workflow",
         // so fanout broadcast would cause last-write-wins collisions on shared (workflowType, slotName) keys.
-        const string happySeedQueue = HappyCommandQueue + "-slot-seed";
-        const string edgeSeedQueue  = EdgeCommandQueue  + "-slot-seed";
+        var happySeedBase = HappyCommandQueue + "-slot-seed";
+        var edgeSeedBase  = EdgeCommandQueue  + "-slot-seed";
 
         // Happy container: register provider + seed all six slots
-        await MessageBusClient.PublishAsync(happySeedQueue,
+        await MessageBusClient.PublishAsync(happySeedBase + ".register",
             new RegisterSlotProviderCommand(
                 "fake-implementation-happy",
                 $"{ContainerPluginsDir}/Auxilia.FakeSlots.Implementation.Happy.slothandler.dll"));
         foreach (var slotName in new[] { "repository", "task-source", "implementation-agent",
                                           "reviewer-agent", "test-runner", "pull-request" })
-            await MessageBusClient.PublishAsync(happySeedQueue,
+            await MessageBusClient.PublishAsync(happySeedBase + ".upsert",
                 new UpsertSlotConfigurationCommand(
                     "implementation-workflow", slotName, "fake-implementation-happy",
                     new Dictionary<string, string>()));
 
         // Edge container: register provider + seed all six slots
-        await MessageBusClient.PublishAsync(edgeSeedQueue,
+        await MessageBusClient.PublishAsync(edgeSeedBase + ".register",
             new RegisterSlotProviderCommand(
                 "fake-implementation-agent-failure",
                 $"{ContainerPluginsDir}/Auxilia.FakeSlots.Implementation.AgentFailure.slothandler.dll"));
         foreach (var slotName in new[] { "repository", "task-source", "implementation-agent",
                                           "reviewer-agent", "test-runner", "pull-request" })
-            await MessageBusClient.PublishAsync(edgeSeedQueue,
+            await MessageBusClient.PublishAsync(edgeSeedBase + ".upsert",
                 new UpsertSlotConfigurationCommand(
                     "implementation-workflow", slotName, "fake-implementation-agent-failure",
                     new Dictionary<string, string>()));
