@@ -23,6 +23,7 @@ public sealed class WorkflowDispatcher(
     IMessageBusClient messageBus,
     IWorkflowLauncher launcher,
     IOptions<DockerWorkflowLauncherSettings> launcherSettings,
+    IOptions<WorkflowDispatcherSettings> dispatcherSettings,
     IHttpClientFactory httpClientFactory,
     IWorkflowPackageVerifier packageVerifier,
     PendingWorkflowPackageStore pendingPackages,
@@ -33,11 +34,12 @@ public sealed class WorkflowDispatcher(
 
     public async Task StartAsync(CancellationToken ct = default)
     {
-        await messageBus.DeclareQueueAsync("workflow.run-commands", ct);
+        var queueName = dispatcherSettings.Value.CommandQueueName;
+        await messageBus.DeclareQueueAsync(queueName, ct);
         _subscription = await messageBus.SubscribeAsync<RunWorkflowCommand>(
-            "workflow.run-commands", HandleAsync, ct);
+            queueName, HandleAsync, ct);
 
-        logger.LogInformation("WorkflowDispatcher started — listening on workflow.run-commands.");
+        logger.LogInformation("WorkflowDispatcher started — listening on {QueueName}.", queueName);
     }
 
     private async Task HandleAsync(RunWorkflowCommand command, CancellationToken ct)
@@ -45,6 +47,61 @@ public sealed class WorkflowDispatcher(
         logger.LogInformation(
             "Received RunWorkflowCommand. CommandId={CommandId} WorkflowType={WorkflowType} PackageUri={PackageUri}",
             command.CommandId, command.WorkflowType, command.WorkflowPackageUri);
+
+        var settings = launcherSettings.Value;
+
+        // 5. Build env vars
+        var env = new Dictionary<string, string>
+        {
+            ["RabbitMq__Host"]     = settings.RabbitMqHost,
+            ["RabbitMq__Port"]     = settings.RabbitMqPort.ToString(),
+            ["RabbitMq__UserName"] = settings.RabbitMqUserName,
+            ["RabbitMq__Password"] = settings.RabbitMqPassword,
+        };
+
+        foreach (var (key, value) in command.Context)
+            env[$"WORKFLOW_CONTEXT__{key.ToUpperInvariant()}"] = value;
+
+        // Merge extra environment variables (e.g. AUXILIA_DEVELOPER_MODE)
+        if (settings.ExtraEnvironmentVariables is not null)
+            foreach (var (key, value) in settings.ExtraEnvironmentVariables)
+                env[key] = value;
+
+        // 5b. Resolve slot plugin files
+        var pluginFiles = new List<SlotPluginFile>();
+        var providerTypes = slotStore.GetConfigurations(command.WorkflowType)
+            .Select(c => c.ProviderType)
+            .Distinct();
+
+        foreach (var providerType in providerTypes)
+        {
+            if (!settings.SlotPackages.TryGetValue(providerType, out var dllPath))
+            {
+                logger.LogWarning(
+                    "No SlotPackages entry for ProviderType={ProviderType} (WorkflowType={WorkflowType}). Skipping.",
+                    providerType, command.WorkflowType);
+                continue;
+            }
+
+            var manifestPath = Path.ChangeExtension(dllPath, null) + ".manifest.json";
+            pluginFiles.Add(new SlotPluginFile(dllPath, manifestPath));
+        }
+
+        if (pluginFiles.Count > 0)
+            logger.LogInformation(
+                "Resolved {Count} slot plugin file(s) for {WorkflowType}: {ProviderTypes}",
+                pluginFiles.Count, command.WorkflowType,
+                string.Join(", ", pluginFiles.Select(f => f.DllPath)));
+
+        // docker:// URI — skip download/verify/extract; use baked image
+        if (command.WorkflowPackageUri.StartsWith("docker://", StringComparison.OrdinalIgnoreCase))
+        {
+            var imageName = command.WorkflowPackageUri.Substring("docker://".Length);
+            await launcher.LaunchAsync(
+                new WorkflowLaunchRequest(string.Empty, env, pluginFiles) { DockerImageUri = imageName },
+                ct);
+            return;
+        }
 
         // 1. Download the package
         var http = httpClientFactory.CreateClient("workflow-packages");
@@ -81,45 +138,6 @@ public sealed class WorkflowDispatcher(
 
         // 4. Register for the announcement handler
         pendingPackages.Store(command.WorkflowType, extractedPath);
-
-        // 5. Build env vars
-        var settings = launcherSettings.Value;
-        var env = new Dictionary<string, string>
-        {
-            ["RabbitMq__Host"]     = settings.RabbitMqHost,
-            ["RabbitMq__Port"]     = settings.RabbitMqPort.ToString(),
-            ["RabbitMq__UserName"] = settings.RabbitMqUserName,
-            ["RabbitMq__Password"] = settings.RabbitMqPassword,
-        };
-
-        foreach (var (key, value) in command.Context)
-            env[$"WORKFLOW_CONTEXT__{key.ToUpperInvariant()}"] = value;
-
-        // 5b. Resolve slot plugin files
-        var pluginFiles = new List<SlotPluginFile>();
-        var providerTypes = slotStore.GetConfigurations(command.WorkflowType)
-            .Select(c => c.ProviderType)
-            .Distinct();
-
-        foreach (var providerType in providerTypes)
-        {
-            if (!settings.SlotPackages.TryGetValue(providerType, out var dllPath))
-            {
-                logger.LogWarning(
-                    "No SlotPackages entry for ProviderType={ProviderType} (WorkflowType={WorkflowType}). Skipping.",
-                    providerType, command.WorkflowType);
-                continue;
-            }
-
-            var manifestPath = Path.ChangeExtension(dllPath, null) + ".manifest.json";
-            pluginFiles.Add(new SlotPluginFile(dllPath, manifestPath));
-        }
-
-        if (pluginFiles.Count > 0)
-            logger.LogInformation(
-                "Resolved {Count} slot plugin file(s) for {WorkflowType}: {ProviderTypes}",
-                pluginFiles.Count, command.WorkflowType,
-                string.Join(", ", pluginFiles.Select(f => f.DllPath)));
 
         // 6. Launch
         await launcher.LaunchAsync(new WorkflowLaunchRequest(extractedPath, env, pluginFiles), ct);

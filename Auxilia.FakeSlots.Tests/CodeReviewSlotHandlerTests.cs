@@ -20,38 +20,38 @@ public class CodeReviewSlotHandlerTests
     // ── Happy path: per-slot registration ──────────────────────────────────
 
     [Test]
-    public void CodeReviewHappy_RepositorySlot_RegistersKeyedISourceControlAccess()
+    public void CodeReviewHappy_RepositorySlot_RegistersNonKeyedISourceControlAccess()
     {
         var services = new ServiceCollection();
         var handler = new CodeReviewHappySlotHandler();
         handler.Register(services, "repository", typeof(ISourceControlAccess), FakeConfig);
 
         using var sp = services.BuildServiceProvider();
-        var resolved = sp.GetRequiredKeyedService<ISourceControlAccess>("repository");
+        var resolved = sp.GetRequiredService<ISourceControlAccess>();
         Assert.That(resolved, Is.Not.Null);
     }
 
     [Test]
-    public void CodeReviewHappy_PullRequestSlot_RegistersKeyedIPullRequestAccess()
+    public void CodeReviewHappy_PullRequestSlot_RegistersNonKeyedIPullRequestAccess()
     {
         var services = new ServiceCollection();
         var handler = new CodeReviewHappySlotHandler();
         handler.Register(services, "pull-request", typeof(IPullRequestAccess), FakeConfig);
 
         using var sp = services.BuildServiceProvider();
-        var resolved = sp.GetRequiredKeyedService<IPullRequestAccess>("pull-request");
+        var resolved = sp.GetRequiredService<IPullRequestAccess>();
         Assert.That(resolved, Is.Not.Null);
     }
 
     [Test]
-    public void CodeReviewHappy_WorkItemsSlot_RegistersKeyedITaskSourceAccess()
+    public void CodeReviewHappy_WorkItemsSlot_RegistersNonKeyedIWorkItemAccess()
     {
         var services = new ServiceCollection();
         var handler = new CodeReviewHappySlotHandler();
-        handler.Register(services, "work-items", typeof(ITaskSourceAccess), FakeConfig);
+        handler.Register(services, "work-items", typeof(IWorkItemAccess), FakeConfig);
 
         using var sp = services.BuildServiceProvider();
-        var resolved = sp.GetRequiredKeyedService<ITaskSourceAccess>("work-items");
+        var resolved = sp.GetRequiredService<IWorkItemAccess>();
         Assert.That(resolved, Is.Not.Null);
     }
 
@@ -145,38 +145,38 @@ public class CodeReviewSlotHandlerTests
     private static readonly SlotConfiguration WbfConfig = new("fake-code-review-write-back-failure", new Dictionary<string, string>());
 
     [Test]
-    public void WriteBackFailure_RepositorySlot_RegistersKeyedISourceControlAccess()
+    public void WriteBackFailure_RepositorySlot_RegistersNonKeyedISourceControlAccess()
     {
         var services = new ServiceCollection();
         var handler = new CodeReviewWriteBackFailureSlotHandler();
         handler.Register(services, "repository", typeof(ISourceControlAccess), WbfConfig);
 
         using var sp = services.BuildServiceProvider();
-        var resolved = sp.GetRequiredKeyedService<ISourceControlAccess>("repository");
+        var resolved = sp.GetRequiredService<ISourceControlAccess>();
         Assert.That(resolved, Is.Not.Null);
     }
 
     [Test]
-    public void WriteBackFailure_PullRequestSlot_RegistersKeyedIPullRequestAccess()
+    public void WriteBackFailure_PullRequestSlot_RegistersNonKeyedIPullRequestAccess()
     {
         var services = new ServiceCollection();
         var handler = new CodeReviewWriteBackFailureSlotHandler();
         handler.Register(services, "pull-request", typeof(IPullRequestAccess), WbfConfig);
 
         using var sp = services.BuildServiceProvider();
-        var resolved = sp.GetRequiredKeyedService<IPullRequestAccess>("pull-request");
+        var resolved = sp.GetRequiredService<IPullRequestAccess>();
         Assert.That(resolved, Is.Not.Null);
     }
 
     [Test]
-    public void WriteBackFailure_WorkItemsSlot_RegistersKeyedITaskSourceAccess()
+    public void WriteBackFailure_WorkItemsSlot_RegistersNonKeyedIWorkItemAccess()
     {
         var services = new ServiceCollection();
         var handler = new CodeReviewWriteBackFailureSlotHandler();
-        handler.Register(services, "work-items", typeof(ITaskSourceAccess), WbfConfig);
+        handler.Register(services, "work-items", typeof(IWorkItemAccess), WbfConfig);
 
         using var sp = services.BuildServiceProvider();
-        var resolved = sp.GetRequiredKeyedService<ITaskSourceAccess>("work-items");
+        var resolved = sp.GetRequiredService<IWorkItemAccess>();
         Assert.That(resolved, Is.Not.Null);
     }
 
@@ -226,7 +226,7 @@ public class CodeReviewSlotHandlerTests
         handler.Register(services, "pull-request", typeof(IPullRequestAccess), WbfConfig);
 
         using var sp = services.BuildServiceProvider();
-        var pr = sp.GetRequiredKeyedService<IPullRequestAccess>("pull-request");
+        var pr = sp.GetRequiredService<IPullRequestAccess>();
 
         var ex = Assert.ThrowsAsync<Exception>(async () =>
             await pr.PostCommentAsync("some comment"));

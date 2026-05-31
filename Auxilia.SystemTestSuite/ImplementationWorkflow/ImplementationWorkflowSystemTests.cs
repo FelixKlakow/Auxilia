@@ -32,16 +32,12 @@ public sealed class ImplementationWorkflowSystemTests
             cancellationToken);
 
         var command = new RunWorkflowCommand(
-            CommandId:     Guid.NewGuid(),
-            WorkflowType:  "implementation-workflow",
-            WorkflowPackageUri: ImplementationWorkflowEnvironment.HarnessImageName,
-            Context: new Dictionary<string, string>
-            {
-                ["WORKFLOW_NAME"] = "implementation-workflow",
-                ["FAKE_MODE"]     = "happy-path"
-            });
+            CommandId:          Guid.NewGuid(),
+            WorkflowType:       "implementation-workflow",
+            WorkflowPackageUri: "docker://auxilia-implementation-workflow:system-test",
+            Context:            new Dictionary<string, string>());
 
-        await Bus.PublishAsync("workflow.run-commands", command, cancellationToken);
+        await Bus.PublishAsync(ImplementationWorkflowEnvironment.HappyCommandQueue, command, cancellationToken);
 
         var completed = await Task.WhenAny(
             stateTcs.Task,
@@ -78,16 +74,12 @@ public sealed class ImplementationWorkflowSystemTests
             cancellationToken);
 
         var command = new RunWorkflowCommand(
-            CommandId:     Guid.NewGuid(),
-            WorkflowType:  "implementation-workflow",
-            WorkflowPackageUri: ImplementationWorkflowEnvironment.HarnessImageName,
-            Context: new Dictionary<string, string>
-            {
-                ["WORKFLOW_NAME"] = "implementation-workflow",
-                ["FAKE_MODE"]     = "agent-failure"
-            });
+            CommandId:          Guid.NewGuid(),
+            WorkflowType:       "implementation-workflow",
+            WorkflowPackageUri: "docker://auxilia-implementation-workflow:system-test",
+            Context:            new Dictionary<string, string>());
 
-        await Bus.PublishAsync("workflow.run-commands", command, cancellationToken);
+        await Bus.PublishAsync(ImplementationWorkflowEnvironment.EdgeCommandQueue, command, cancellationToken);
 
         var completed = await Task.WhenAny(
             stateTcs.Task,

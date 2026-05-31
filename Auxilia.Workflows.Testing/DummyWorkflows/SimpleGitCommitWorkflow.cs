@@ -16,7 +16,7 @@ public static class SimpleGitCommitWorkflow
     public const string WorkflowName = "simple-git-commit-workflow";
 
     /// <summary>Image tag used when building the dummy-workflows Docker image for system tests.</summary>
-    public const string ImageName = "auxilia-dummy-workflows:system-test";
+    public const string ImageName = "docker://auxilia-dummy-workflows:system-test";
 
     public static Task RunAsync(string[] args) =>
         WorkflowBuilder
