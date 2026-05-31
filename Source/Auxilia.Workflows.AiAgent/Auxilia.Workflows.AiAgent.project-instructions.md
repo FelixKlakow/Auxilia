@@ -51,3 +51,4 @@ Source/Auxilia.Workflows.AiAgent/
 ## Special rules
 - `IAiAgent` and `IAiSession` must not reference `Auxilia.AI`. The SDK bridge lives in provider packages only.
 - Never embed JSON-format instructions (e.g. "Respond with JSON:", "Return a JSON array") in AI prompts. Register a result-sink `ICapabilityMcpTools` in `AiSessionOptions.CapabilityTools` instead. See the global copilot-instructions for the full pattern.
+- Retry and resilience belong inside the provider's `IAiAgent` implementation, not in a decorator.
