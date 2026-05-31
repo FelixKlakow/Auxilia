@@ -43,6 +43,8 @@ public class ResilientAiAgentTests
         public FakeSession(string response) => _response = response;
         public Task<string> ExecuteAsync(string prompt, CancellationToken cancellationToken = default)
             => Task.FromResult(_response);
+        public Task CompactAsync(string focusDescription, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 

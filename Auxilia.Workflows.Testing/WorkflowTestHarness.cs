@@ -109,8 +109,7 @@ public sealed class WorkflowTestHarness
 
                 foreach (var (name, slot) in _slots)
                 {
-                    var json = JsonSerializer.Serialize(
-                        new { slot.ProviderType, Settings = slot.Settings });
+                    var json = JsonSerializer.Serialize(slot.Settings);
                     var plainBytes = Encoding.UTF8.GetBytes(json);
                     var encryptedBytes = rsa.Encrypt(plainBytes, RSAEncryptionPadding.OaepSHA256);
                     encryptedSlots[name] = new EncryptedSlotConfiguration(

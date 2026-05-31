@@ -21,7 +21,16 @@ public sealed class PrimaryReviewOrchestrator(
         if (context.Files.Count == 0)
             return;
 
-        var session = await aiAgent.OpenSessionAsync(cancellationToken: cancellationToken);
+        IAiSession session;
+        try
+        {
+            session = await aiAgent.OpenSessionAsync(cancellationToken: cancellationToken);
+        }
+        catch when (!cancellationToken.IsCancellationRequested)
+        {
+            session = await aiAgent.OpenSessionAsync(cancellationToken: cancellationToken);
+        }
+
         try
         {
             foreach (var file in context.Files)
@@ -32,7 +41,7 @@ public sealed class PrimaryReviewOrchestrator(
 
                 if (compactionService.ShouldCompact(_currentTokenCount))
                 {
-                    session = await compactionService.CompactAsync(session, aiAgent);
+                    await compactionService.CompactAsync(session, "Code review compaction", cancellationToken);
                     _currentTokenCount = 0;
                 }
             }

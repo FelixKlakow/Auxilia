@@ -29,5 +29,10 @@ public sealed class FakeAiSession : IAiSession
             $"No scripted turn matched prompt. Available substrings: [{available}]. Prompt: '{prompt}'");
     }
 
+    public Func<string, CancellationToken, Task>? CompactAsyncCallback { get; set; }
+
+    public Task CompactAsync(string focusDescription, CancellationToken cancellationToken = default)
+        => CompactAsyncCallback?.Invoke(focusDescription, cancellationToken) ?? Task.CompletedTask;
+
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
