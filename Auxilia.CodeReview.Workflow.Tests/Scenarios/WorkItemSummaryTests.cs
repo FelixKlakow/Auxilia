@@ -26,7 +26,8 @@ public sealed class WorkItemSummaryTests : ScenarioTestBase
                 ["WI-42"] = new WorkItem("WI-42", "My Story", "Do the thing", null, null, [])
             });
 
-        var primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn()]]));
+        FakeAiAgent? primaryAi = null;
+        primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn(() => primaryAi)]]));
 
         var workItemComments = new List<(string Id, string Comment)>();
         var workItemAccess = new FakeWorkItemAccess(
@@ -64,7 +65,8 @@ public sealed class WorkItemSummaryTests : ScenarioTestBase
                 ["src/Foo.cs"] = [Hunk("src/Foo.cs")],
             });
 
-        var primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn()]]));
+        FakeAiAgent? primaryAi = null;
+        primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn(() => primaryAi)]]));
 
         var registry = new CodeReviewFakeRegistry(
             new FakeSourceControlAccess(),

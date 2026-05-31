@@ -18,9 +18,11 @@ public sealed class TwoEyesPassTests : ScenarioTestBase
                 ["src/Foo.cs"] = [Hunk("src/Foo.cs")],
             });
 
-        var primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn()]]));
+        FakeAiAgent? primaryAi = null;
+        primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn(() => primaryAi)]]));
         // Secondary opens a new session per finding
-        var secondaryAi = new FakeAiAgent(new Queue<ScriptedTurn>([ApprovedTurn()]));
+        FakeAiAgent? secondaryAi = null;
+        secondaryAi = new FakeAiAgent(new Queue<ScriptedTurn>([ApprovedTurn(() => secondaryAi)]));
 
         var registry = new CodeReviewFakeRegistry(
             new FakeSourceControlAccess(),
@@ -49,8 +51,10 @@ public sealed class TwoEyesPassTests : ScenarioTestBase
                 ["src/Foo.cs"] = [Hunk("src/Foo.cs")],
             });
 
-        var primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn()]]));
-        var secondaryAi = new FakeAiAgent(new Queue<ScriptedTurn>([RejectedTurn()]));
+        FakeAiAgent? primaryAi = null;
+        primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn(() => primaryAi)]]));
+        FakeAiAgent? secondaryAi = null;
+        secondaryAi = new FakeAiAgent(new Queue<ScriptedTurn>([RejectedTurn(() => secondaryAi)]));
 
         var registry = new CodeReviewFakeRegistry(
             new FakeSourceControlAccess(),
@@ -79,7 +83,8 @@ public sealed class TwoEyesPassTests : ScenarioTestBase
                 ["src/Foo.cs"] = [Hunk("src/Foo.cs")],
             });
 
-        var primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn()]]));
+        FakeAiAgent? primaryAi = null;
+        primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn(() => primaryAi)]]));
         var secondaryAi = new FakeAiAgent(new Queue<ScriptedTurn>()); // must not be called
 
         var registry = new CodeReviewFakeRegistry(

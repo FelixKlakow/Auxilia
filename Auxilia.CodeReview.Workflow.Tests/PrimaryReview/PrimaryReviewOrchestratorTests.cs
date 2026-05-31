@@ -1,4 +1,5 @@
 using Auxilia.CodeReview.Workflow.Findings;
+using Auxilia.CodeReview.Workflow.Mcp;
 using Auxilia.CodeReview.Workflow.PrimaryReview;
 using Auxilia.CodeReview.Workflow.Verdicts;
 using Auxilia.Workflows.AiAgent;
@@ -46,7 +47,7 @@ public sealed class PrimaryReviewOrchestratorTests
     {
         var verdictMap = new VerdictMap();
         var orchestrator = BuildOrchestrator(
-            new FakeAiAgent("Reviewed"),
+            new FakeAiAgent(FileVerdict.Reviewed),
             verdictMap: verdictMap);
 
         var context = BuildContext(MakeFile("a.cs"), MakeFile("b.cs"), MakeFile("c.cs"));
@@ -60,7 +61,7 @@ public sealed class PrimaryReviewOrchestratorTests
     {
         var verdictMap = new VerdictMap();
         var orchestrator = BuildOrchestrator(
-            new FakeAiAgent("Skipped"),
+            new FakeAiAgent(FileVerdict.Skipped),
             verdictMap: verdictMap);
 
         var context = BuildContext(MakeFile("critical.cs", FileCriticality.Critical));
@@ -74,7 +75,7 @@ public sealed class PrimaryReviewOrchestratorTests
     {
         var verdictMap = new VerdictMap();
         var orchestrator = BuildOrchestrator(
-            new FakeAiAgent("Skipped"),
+            new FakeAiAgent(FileVerdict.Skipped),
             verdictMap: verdictMap);
 
         var context = BuildContext(MakeFile("normal.cs", FileCriticality.Normal));
@@ -88,7 +89,7 @@ public sealed class PrimaryReviewOrchestratorTests
     {
         var store = new StagedFindingsStore();
         var orchestrator = BuildOrchestrator(
-            new FakeAiAgent("Reviewed", oneFinding: true),
+            new FakeAiAgent(FileVerdict.Reviewed, oneFinding: true),
             store: store);
 
         var context = BuildContext(MakeFile("foo.cs"));
@@ -109,7 +110,7 @@ public sealed class PrimaryReviewOrchestratorTests
             CompactionTriggerFraction = 1.0  // trigger at 100% of limit
         };
         var orchestrator = BuildOrchestrator(
-            new FakeAiAgent("Reviewed"),
+            new FakeAiAgent(FileVerdict.Reviewed),
             verdictMap: verdictMap,
             opts: compactionOpts);
 
@@ -122,22 +123,24 @@ public sealed class PrimaryReviewOrchestratorTests
 
     // ---- Fake helpers ----
 
-    private sealed class FakeAiAgent(string verdict, bool oneFinding = false) : IAiAgent
+    private sealed class FakeAiAgent(FileVerdict verdict, bool oneFinding = false) : IAiAgent
     {
         public Task<IAiSession> OpenSessionAsync(AiSessionOptions? options = null, CancellationToken cancellationToken = default)
-            => Task.FromResult<IAiSession>(new FakeAiSession(verdict, oneFinding));
+            => Task.FromResult<IAiSession>(new FakeAiSession(verdict, oneFinding, options));
     }
 
-    private sealed class FakeAiSession(string verdict, bool oneFinding) : IAiSession
+    private sealed class FakeAiSession(FileVerdict verdict, bool oneFinding, AiSessionOptions? options) : IAiSession
     {
         public Task<string> ExecuteAsync(string prompt, CancellationToken cancellationToken = default)
         {
-            string json;
-            if (oneFinding)
-                json = $"{{\"verdict\":\"{verdict}\",\"findings\":[{{\"lineStart\":1,\"lineEnd\":2,\"severity\":\"Info\",\"category\":\"Style\",\"message\":\"test\",\"suggestion\":null}}]}}";
-            else
-                json = $"{{\"verdict\":\"{verdict}\",\"findings\":[]}}";
-            return Task.FromResult(json);
+            var sink = options?.CapabilityTools?.OfType<CodeReviewResultSinkMcpTools>().FirstOrDefault();
+            if (sink is not null)
+            {
+                if (oneFinding)
+                    sink.RecordFinding("finding.cs", 1, 2, FindingSeverity.Info, "Style", "test", null);
+                sink.RecordFileVerdict(verdict);
+            }
+            return Task.FromResult(string.Empty);
         }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;

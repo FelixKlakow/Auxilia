@@ -1,4 +1,7 @@
+using Auxilia.CodeReview.Workflow.Findings;
+using Auxilia.CodeReview.Workflow.Mcp;
 using Auxilia.CodeReview.Workflow.Tests.Fakes;
+using Auxilia.CodeReview.Workflow.Verdicts;
 using Auxilia.Workflows;
 using Auxilia.Workflows.Messaging.Messages;
 using Auxilia.Workflows.PullRequestAccess;
@@ -9,9 +12,6 @@ namespace Auxilia.CodeReview.Workflow.Tests.Scenarios;
 public abstract class ScenarioTestBase
 {
     protected string OutputDir = "";
-
-    private const string ReviewedJson =
-        """{"verdict":"Reviewed","findings":[{"lineStart":1,"lineEnd":2,"severity":"Medium","category":"Style","message":"Review finding","suggestion":"Fix it"}]}""";
 
     [SetUp]
     public void SetUp()
@@ -27,18 +27,55 @@ public abstract class ScenarioTestBase
             Directory.Delete(OutputDir, recursive: true);
     }
 
-    protected static ScriptedTurn ReviewedTurn(string? substringOverride = null) =>
-        new(substringOverride ?? "Review the following file changes", ReviewedJson);
+    protected static ScriptedTurn ReviewedTurn(Func<FakeAiAgent?>? agentGetter = null, string? substringOverride = null)
+    {
+        Func<Task>? toolCall = agentGetter is null ? null : () =>
+        {
+            var sink = agentGetter()?.LastSessionOptions?.CapabilityTools?
+                .OfType<CodeReviewResultSinkMcpTools>().FirstOrDefault();
+            if (sink is null) return Task.CompletedTask;
+            sink.RecordFinding("review-finding.cs", 1, 2, FindingSeverity.Medium, "Style", "Review finding", "Fix it");
+            sink.RecordFileVerdict(FileVerdict.Reviewed);
+            return Task.CompletedTask;
+        };
+        return new(substringOverride ?? "Review the following file changes", "", toolCall);
+    }
 
-    protected static ScriptedTurn SkippedTurn() =>
-        new("Review the following file changes",
-            """{"verdict":"Skipped","findings":[]}""");
+    protected static ScriptedTurn SkippedTurn(Func<FakeAiAgent?>? agentGetter = null)
+    {
+        Func<Task>? toolCall = agentGetter is null ? null : () =>
+        {
+            var sink = agentGetter()?.LastSessionOptions?.CapabilityTools?
+                .OfType<CodeReviewResultSinkMcpTools>().FirstOrDefault();
+            sink?.RecordFileVerdict(FileVerdict.Skipped);
+            return Task.CompletedTask;
+        };
+        return new("Review the following file changes", "", toolCall);
+    }
 
-    protected static ScriptedTurn ApprovedTurn() =>
-        new("Review this finding", """{"verdict":"Approved"}""");
+    protected static ScriptedTurn ApprovedTurn(Func<FakeAiAgent?>? agentGetter = null)
+    {
+        Func<Task>? toolCall = agentGetter is null ? null : () =>
+        {
+            var sink = agentGetter()?.LastSessionOptions?.CapabilityTools?
+                .OfType<CodeReviewResultSinkMcpTools>().FirstOrDefault();
+            sink?.RecordSecondaryVerdict(SecondaryVerdict.Approved);
+            return Task.CompletedTask;
+        };
+        return new("Review this finding", "", toolCall);
+    }
 
-    protected static ScriptedTurn RejectedTurn() =>
-        new("Review this finding", """{"verdict":"Rejected"}""");
+    protected static ScriptedTurn RejectedTurn(Func<FakeAiAgent?>? agentGetter = null)
+    {
+        Func<Task>? toolCall = agentGetter is null ? null : () =>
+        {
+            var sink = agentGetter()?.LastSessionOptions?.CapabilityTools?
+                .OfType<CodeReviewResultSinkMcpTools>().FirstOrDefault();
+            sink?.RecordSecondaryVerdict(SecondaryVerdict.Rejected);
+            return Task.CompletedTask;
+        };
+        return new("Review this finding", "", toolCall);
+    }
 
     protected static ChangedFile File(string path, ChangeKind kind = ChangeKind.Modified) =>
         new(path, kind);
