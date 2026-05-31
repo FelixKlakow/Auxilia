@@ -110,6 +110,7 @@ public class WorkflowDispatcherTests
             CreateHttpClientFactory(_validPackageZip),
             _mockVerifier.Object,
             _mockPendingPackages.Object,
+            new SlotConfigurationStore(),
             NullLogger<WorkflowDispatcher>.Instance);
 
         await _sut.StartAsync(CancellationToken.None);
@@ -288,5 +289,139 @@ public class WorkflowDispatcherTests
             p => p.Store("my-workflow", It.Is<string>(s => s.Contains("auxilia-wf-"))),
             Times.Once);
     }
-}
 
+    // ------------------------------------------------------------------ SlotPluginFile enrichment
+
+    [Test]
+    public async Task Enrichment_MatchFound_SlotPluginFilesHasOneEntry()
+    {
+        var slotStore = new SlotConfigurationStore();
+        slotStore.UpsertConfiguration("my-workflow",
+            new StoredSlotConfiguration("slot1", "MyProvider",
+                new Dictionary<string, string>(), ConfigurationStatus.Valid));
+
+        var settings = DefaultSettings();
+        settings.SlotPackages["MyProvider"] = "/plugins/my-provider.slothandler.dll";
+
+        WorkflowLaunchRequest? captured = null;
+        _mockLauncher
+            .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
+            .Returns(Task.CompletedTask);
+
+        await _sut.StopAsync();
+        _sut = new WorkflowDispatcher(
+            _mockBus.Object,
+            _mockLauncher.Object,
+            Options.Create(settings),
+            CreateHttpClientFactory(_validPackageZip),
+            _mockVerifier.Object,
+            _mockPendingPackages.Object,
+            slotStore,
+            NullLogger<WorkflowDispatcher>.Instance);
+        await _sut.StartAsync(CancellationToken.None);
+
+        var command = new RunWorkflowCommand(
+            Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
+            new Dictionary<string, string>());
+        await _capturedHandler!(command, CancellationToken.None);
+
+        Assert.That(captured, Is.Not.Null);
+        Assert.That(captured!.SlotPluginFiles, Has.Count.EqualTo(1));
+        Assert.That(captured.SlotPluginFiles[0].DllPath, Is.EqualTo("/plugins/my-provider.slothandler.dll"));
+    }
+
+    [Test]
+    public async Task Enrichment_NoSlotConfig_SlotPluginFilesIsEmpty()
+    {
+        WorkflowLaunchRequest? captured = null;
+        _mockLauncher
+            .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
+            .Returns(Task.CompletedTask);
+
+        var command = new RunWorkflowCommand(
+            Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
+            new Dictionary<string, string>());
+        await _capturedHandler!(command, CancellationToken.None);
+
+        Assert.That(captured, Is.Not.Null);
+        Assert.That(captured!.SlotPluginFiles, Is.Empty);
+    }
+
+    [Test]
+    public async Task Enrichment_ProviderTypeAbsentFromSlotPackages_SlotPluginFilesIsEmpty()
+    {
+        var slotStore = new SlotConfigurationStore();
+        slotStore.UpsertConfiguration("my-workflow",
+            new StoredSlotConfiguration("slot1", "UnknownProvider",
+                new Dictionary<string, string>(), ConfigurationStatus.Valid));
+
+        WorkflowLaunchRequest? captured = null;
+        _mockLauncher
+            .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
+            .Returns(Task.CompletedTask);
+
+        await _sut.StopAsync();
+        _sut = new WorkflowDispatcher(
+            _mockBus.Object,
+            _mockLauncher.Object,
+            Options.Create(DefaultSettings()),
+            CreateHttpClientFactory(_validPackageZip),
+            _mockVerifier.Object,
+            _mockPendingPackages.Object,
+            slotStore,
+            NullLogger<WorkflowDispatcher>.Instance);
+        await _sut.StartAsync(CancellationToken.None);
+
+        var command = new RunWorkflowCommand(
+            Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
+            new Dictionary<string, string>());
+        await _capturedHandler!(command, CancellationToken.None);
+
+        Assert.That(captured, Is.Not.Null);
+        Assert.That(captured!.SlotPluginFiles, Is.Empty);
+    }
+
+    [Test]
+    public async Task Enrichment_DuplicateProviderType_DeduplicatesToOneEntry()
+    {
+        var slotStore = new SlotConfigurationStore();
+        slotStore.UpsertConfiguration("my-workflow",
+            new StoredSlotConfiguration("slot1", "MyProvider",
+                new Dictionary<string, string>(), ConfigurationStatus.Valid));
+        slotStore.UpsertConfiguration("my-workflow",
+            new StoredSlotConfiguration("slot2", "MyProvider",
+                new Dictionary<string, string>(), ConfigurationStatus.Valid));
+
+        var settings = DefaultSettings();
+        settings.SlotPackages["MyProvider"] = "/plugins/my-provider.slothandler.dll";
+
+        WorkflowLaunchRequest? captured = null;
+        _mockLauncher
+            .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
+            .Returns(Task.CompletedTask);
+
+        await _sut.StopAsync();
+        _sut = new WorkflowDispatcher(
+            _mockBus.Object,
+            _mockLauncher.Object,
+            Options.Create(settings),
+            CreateHttpClientFactory(_validPackageZip),
+            _mockVerifier.Object,
+            _mockPendingPackages.Object,
+            slotStore,
+            NullLogger<WorkflowDispatcher>.Instance);
+        await _sut.StartAsync(CancellationToken.None);
+
+        var command = new RunWorkflowCommand(
+            Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
+            new Dictionary<string, string>());
+        await _capturedHandler!(command, CancellationToken.None);
+
+        Assert.That(captured, Is.Not.Null);
+        Assert.That(captured!.SlotPluginFiles, Has.Count.EqualTo(1));
+    }
+}

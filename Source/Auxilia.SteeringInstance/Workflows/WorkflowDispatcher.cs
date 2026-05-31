@@ -26,6 +26,7 @@ public sealed class WorkflowDispatcher(
     IHttpClientFactory httpClientFactory,
     IWorkflowPackageVerifier packageVerifier,
     PendingWorkflowPackageStore pendingPackages,
+    SlotConfigurationStore slotStore,
     ILogger<WorkflowDispatcher> logger)
 {
     private IAsyncDisposable? _subscription;
@@ -94,8 +95,34 @@ public sealed class WorkflowDispatcher(
         foreach (var (key, value) in command.Context)
             env[$"WORKFLOW_CONTEXT__{key.ToUpperInvariant()}"] = value;
 
+        // 5b. Resolve slot plugin files
+        var pluginFiles = new List<SlotPluginFile>();
+        var providerTypes = slotStore.GetConfigurations(command.WorkflowType)
+            .Select(c => c.ProviderType)
+            .Distinct();
+
+        foreach (var providerType in providerTypes)
+        {
+            if (!settings.SlotPackages.TryGetValue(providerType, out var dllPath))
+            {
+                logger.LogWarning(
+                    "No SlotPackages entry for ProviderType={ProviderType} (WorkflowType={WorkflowType}). Skipping.",
+                    providerType, command.WorkflowType);
+                continue;
+            }
+
+            var manifestPath = Path.ChangeExtension(dllPath, null) + ".manifest.json";
+            pluginFiles.Add(new SlotPluginFile(dllPath, manifestPath));
+        }
+
+        if (pluginFiles.Count > 0)
+            logger.LogInformation(
+                "Resolved {Count} slot plugin file(s) for {WorkflowType}: {ProviderTypes}",
+                pluginFiles.Count, command.WorkflowType,
+                string.Join(", ", pluginFiles.Select(f => f.DllPath)));
+
         // 6. Launch
-        await launcher.LaunchAsync(new WorkflowLaunchRequest(extractedPath, env), ct);
+        await launcher.LaunchAsync(new WorkflowLaunchRequest(extractedPath, env, pluginFiles), ct);
     }
 
     public async ValueTask StopAsync()
