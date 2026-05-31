@@ -73,4 +73,17 @@ public sealed class ConfigurationResolver(
 
         return ResolverResult.Ok(encrypted, handlerMap);
     }
+
+    /// <summary>
+    /// Returns the signal handlers registered for <paramref name="workflowTypeName"/>
+    /// without performing slot resolution. Used when a workflow declares no slots.
+    /// </summary>
+    public IReadOnlyDictionary<string, ISignalHandlerDescriptor> ResolveSignalHandlers(string workflowTypeName)
+    {
+        var signalHandlers = signalHandlerStore.GetHandlers(workflowTypeName);
+        var handlerMap = new Dictionary<string, ISignalHandlerDescriptor>(signalHandlers.Count);
+        foreach (var handler in signalHandlers)
+            handlerMap[handler.SignalName] = handler.HandlerDescriptor;
+        return handlerMap;
+    }
 }
