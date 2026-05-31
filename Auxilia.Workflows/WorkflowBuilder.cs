@@ -140,7 +140,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 var configSub = await context.MessageBus.SubscribeAsync<WorkflowConfigurationResponse>(
                     responseTopic, (msg, _) => { configTcs.TrySetResult(msg); return Task.CompletedTask; });
 
-                await context.MessageBus.PublishAsync("workflow-registration",
+                await context.MessageBus.PublishAsync(
+                    System.Environment.GetEnvironmentVariable("Workflow__RegistrationQueue") ?? "workflow-registration",
                     new WorkflowRegistrationRequest(instanceId, BuildManifest(instanceId),
                         keyPair.PublicKeyBase64, responseTopic));
 
