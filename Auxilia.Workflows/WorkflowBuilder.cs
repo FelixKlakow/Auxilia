@@ -181,7 +181,9 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 {
                     var services = new ServiceCollection();
                     services.AddSingleton(context.MessageBus);
-                    if (TestContext == null)
+                    if (TestSlotHandlerResolver is { } testResolver)
+                        new WorkflowBootstrapper(response, keyPair, testResolver, _slots.AsReadOnly(), instanceId).Apply(services);
+                    else if (TestContext == null)
                     {
                         var resolver = new SlotHandlerResolver();
                         var devMode = new EnvironmentDeveloperModeProvider();
@@ -193,8 +195,6 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                         loader.Load(plugins);
                         new WorkflowBootstrapper(response, keyPair, resolver, _slots.AsReadOnly(), instanceId).Apply(services);
                     }
-                    else if (TestSlotHandlerResolver is { } testResolver)
-                        new WorkflowBootstrapper(response, keyPair, testResolver, _slots.AsReadOnly(), instanceId).Apply(services);
 
                     _configureServices?.Invoke(services);
 

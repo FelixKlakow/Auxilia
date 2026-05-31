@@ -147,6 +147,7 @@ public class WorkflowBuilderRunRoutingTests
     public void TearDown()
     {
         WorkflowBuilder.TestContext = null;
+        WorkflowBuilder.TestSlotHandlerResolver = null;
     }
 
     [Test]
@@ -197,6 +198,43 @@ public class WorkflowBuilderRunRoutingTests
 
         Assert.That(bus.Published("workflow.schema"), Has.Count.EqualTo(0));
         Assert.That(bus.Published("workflow.announcements"), Has.Count.EqualTo(0));
+    }
+
+    [Test]
+    public async Task Run_WithTestHarnessFlag_AndTestSlotHandlerResolverSet_ButTestContextNull_UsesTestResolver()
+    {
+        var bus = new RecordingBus();
+        var mockExit = new Mock<IProcessExitService>();
+        var context = new FakeWorkflowRunContext(bus, mockExit.Object);
+
+        bus.OnPublish = (topic, message) =>
+        {
+            if (topic == "workflow.announcements" && message is WorkflowAnnouncementMessage ann)
+            {
+                bus.DeliverAsync(ann.ResponseTopic,
+                    new WorkflowDirective(ann.WorkflowInstanceId, WorkflowDirectiveKind.Run));
+            }
+            else if (topic == "workflow-registration" && message is WorkflowRegistrationRequest req)
+            {
+                bus.DeliverAsync(req.ResponseTopic,
+                    new WorkflowConfigurationResponse(req.WorkflowInstanceId, true, null,
+                        new Dictionary<string, EncryptedSlotConfiguration>()));
+            }
+        };
+
+        var resolver = new SlotHandlerResolver();
+        WorkflowBuilder.TestSlotHandlerResolver = resolver;
+        // TestContext intentionally left null
+
+        var builder = (WorkflowBuilder)WorkflowBuilder.Create("test-workflow")
+            .WithApplication((_, _) => Task.CompletedTask);
+        builder._directiveTimeout = TimeSpan.FromSeconds(5);
+
+        await builder.Run(["--test-harness"], context);
+
+        // Plugin discovery was NOT taken — run completed via the test resolver path
+        Assert.That(bus.Published("workflow.schema"), Has.Count.EqualTo(0));
+        mockExit.Verify(e => e.Exit(0), Times.Once);
     }
 
     [Test]
