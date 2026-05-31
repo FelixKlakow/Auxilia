@@ -6,5 +6,12 @@ namespace Auxilia.SteeringInstance.Workflows;
 public sealed record WorkflowLaunchRequest(
     /// <summary>Path to the directory containing the extracted workflow package contents.</summary>
     string ExtractedContentDirectory,
-    IReadOnlyDictionary<string, string> EnvironmentVariables);
+    IReadOnlyDictionary<string, string> EnvironmentVariables,
+    IReadOnlyList<SlotPluginFile> SlotPluginFiles)
+{
+    public WorkflowLaunchRequest(
+        string extractedContentDirectory,
+        IReadOnlyDictionary<string, string> environmentVariables)
+        : this(extractedContentDirectory, environmentVariables, []) { }
+}
 

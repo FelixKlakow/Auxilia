@@ -37,6 +37,12 @@ public sealed class DockerWorkflowLauncherSettings
     /// The extracted package is bind-mounted over the container filesystem.
     /// </summary>
     public string RuntimeImage { get; set; } = "mcr.microsoft.com/dotnet/runtime:8.0";
+
+    /// <summary>
+    /// Maps ProviderType → absolute path to the *.slothandler.dll on the SteeringInstance filesystem.
+    /// The matching *.slothandler.manifest.json is always co-located with the DLL.
+    /// </summary>
+    public Dictionary<string, string> SlotPackages { get; set; } = new();
 }
 
 

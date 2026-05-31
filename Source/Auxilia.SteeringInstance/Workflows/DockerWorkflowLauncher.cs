@@ -14,6 +14,7 @@ namespace Auxilia.SteeringInstance.Workflows;
 /// </summary>
 public sealed class DockerWorkflowLauncher(
     IOptions<DockerWorkflowLauncherSettings> settingsOptions,
+    IDockerClientFactory clientFactory,
     ILogger<DockerWorkflowLauncher> logger) : IWorkflowLauncher
 {
 
@@ -22,14 +23,37 @@ public sealed class DockerWorkflowLauncher(
         var settings = settingsOptions.Value;
         var createParams = BuildCreateContainerParameters(request, settings);
 
-        using var client = new DockerClientConfiguration(new Uri(settings.DockerSocketPath))
-            .CreateClient();
+        using var client = clientFactory.CreateClient(settings.DockerSocketPath);
 
         logger.LogInformation(
             "Creating workflow container. RuntimeImage={RuntimeImage} ExtractedDir={ExtractedDir} Network={Network}",
             settings.RuntimeImage, request.ExtractedContentDirectory, settings.NetworkName ?? "<default>");
 
         var created = await client.Containers.CreateContainerAsync(createParams, ct);
+
+        if (request.SlotPluginFiles.Count > 0)
+        {
+            var pkgManifest = JsonSerializer.Deserialize<WorkflowPackageManifest>(
+                File.ReadAllText(Path.Combine(request.ExtractedContentDirectory, "package-manifest.json")),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+            var execRelDir = Path.GetDirectoryName(pkgManifest.ExecutableRelativePath)?.Replace('\\', '/');
+            var targetDir = string.IsNullOrEmpty(execRelDir)
+                ? request.ExtractedContentDirectory
+                : Path.Combine(request.ExtractedContentDirectory,
+                               execRelDir.Replace('/', Path.DirectorySeparatorChar));
+
+            Directory.CreateDirectory(targetDir);
+            foreach (var file in request.SlotPluginFiles)
+            {
+                File.Copy(file.DllPath,
+                          Path.Combine(targetDir, Path.GetFileName(file.DllPath)),
+                          overwrite: true);
+                File.Copy(file.ManifestPath,
+                          Path.Combine(targetDir, Path.GetFileName(file.ManifestPath)),
+                          overwrite: true);
+            }
+        }
+
         await client.Containers.StartContainerAsync(created.ID, new ContainerStartParameters(), ct);
 
         logger.LogInformation(
