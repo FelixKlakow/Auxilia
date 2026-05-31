@@ -5,9 +5,6 @@ public sealed class StagedFindingsStore : IStagedFindingsStore
     private readonly List<StagedFinding> _findings = new();
     private readonly object _lock = new();
 
-    /// <summary>Configurable spill threshold. Spill-to-disk deferred to a future iteration.</summary>
-    public const long MemoryThresholdBytes = 10 * 1024 * 1024; // 10 MB
-
     public void Append(StagedFinding finding)
     {
         lock (_lock)

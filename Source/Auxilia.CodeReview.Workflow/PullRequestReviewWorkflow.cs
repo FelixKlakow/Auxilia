@@ -37,14 +37,14 @@ public static class PullRequestReviewWorkflow
         var sp = scope.ServiceProvider;
 
         var assembler = sp.GetRequiredService<ContextAssembler>();
-        var context = await assembler.AssembleAsync(new PullRequestReference("pr", "main", "head"), cancellationToken);
+        var context = await assembler.AssembleAsync(cancellationToken);
 
         var primaryOrchestrator = sp.GetRequiredService<PrimaryReviewOrchestrator>();
         await primaryOrchestrator.RunAsync(context, cancellationToken);
 
         var store = sp.GetRequiredService<IStagedFindingsStore>();
         var aggregator = sp.GetRequiredService<FindingsAggregator>();
-        var result = await aggregator.AggregateAsync(store, context);
+        var result = await aggregator.AggregateAsync(store, context, cancellationToken);
 
         var writeBack = sp.GetRequiredService<WriteBackService>();
         await writeBack.WriteBackAsync(result, context.LinkedWorkItems.Select(wi => wi.Id).ToList());

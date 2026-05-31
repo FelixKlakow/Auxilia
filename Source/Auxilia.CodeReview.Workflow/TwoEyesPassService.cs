@@ -15,7 +15,8 @@ public sealed class TwoEyesPassService(
 {
     public async Task<IReadOnlyList<ReviewFinding>> RunAsync(
         IReadOnlyList<StagedFinding> staged,
-        ReviewContext context)
+        ReviewContext context,
+        CancellationToken cancellationToken = default)
     {
         if (!config.Enabled)
         {
@@ -39,7 +40,7 @@ public sealed class TwoEyesPassService(
             var sink = new CodeReviewResultSinkMcpTools("secondary-review-sink", loggerFactory);
             try
             {
-                await sink.StartAsync(new HttpMcpTransportConfig("http://localhost:0/mcp", "secondary-review-sink"), CancellationToken.None);
+                await sink.StartAsync(new HttpMcpTransportConfig("http://localhost:0/mcp", "secondary-review-sink"), cancellationToken);
 
                 var options = new AiSessionOptions { CapabilityTools = [sink] };
                 await using var session = await secondaryAgent.OpenSessionAsync(options);
@@ -50,7 +51,7 @@ public sealed class TwoEyesPassService(
                     $"Diff context:\n{hunkContent}\n\n" +
                     "Use the provided tools to record your verdict (Approved or Rejected) for this finding.";
 
-                await session.ExecuteAsync(prompt);
+                await session.ExecuteAsync(prompt, cancellationToken);
 
                 var verdict = sink.TakeSecondaryVerdict();
                 if (verdict is null)

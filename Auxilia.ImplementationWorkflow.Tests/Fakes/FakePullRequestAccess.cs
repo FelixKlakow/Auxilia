@@ -5,6 +5,9 @@ namespace Auxilia.ImplementationWorkflow.Tests.Fakes;
 public sealed class FakePullRequestAccess : IPullRequestAccess
 {
     public string PrUrl { get; set; } = "https://example.com/pr/1";
+    public string PrIdentifier { get; set; } = "PR-1";
+    public string BaseRef { get; set; } = "main";
+    public string HeadRef { get; set; } = "feature/test";
     public List<(string Title, PullRequestOptions Options)> OpenedPullRequests { get; } = new();
 
     public Task<IReadOnlyList<ChangedFile>> GetChangedFilesAsync(CancellationToken cancellationToken = default)
