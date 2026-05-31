@@ -11,11 +11,7 @@ public sealed class ContextCompactionTests : ScenarioTestBase
     [Test]
     public async Task Compaction_TriggeredMidLoop_Succeeds()
     {
-        // Three files; threshold=1 with fraction=1.0 means compaction fires after every file
-        // (hunk "diff content" = 12 chars → ~3 tokens > threshold).
-        // Expected OpenSessionAsync call count: 4 (1 initial + 1 per compaction × 3 files).
-        const int fileCount = 3;
-
+        // Three files; threshold=1 with fraction=1.0 means compaction fires after every file.
         var pullRequest = new FakePullRequestAccess(
             changedFiles: [File("src/A.cs"), File("src/B.cs"), File("src/C.cs")],
             diffHunks: new Dictionary<string, IReadOnlyList<DiffHunk>>
@@ -25,20 +21,13 @@ public sealed class ContextCompactionTests : ScenarioTestBase
                 ["src/C.cs"] = [Hunk("src/C.cs")],
             });
 
-        // Each session is scripted with the expected turn sequence for its lifecycle.
-        var sessions = new Queue<IReadOnlyList<ScriptedTurn>>(
-        [
-            // Session 1: review file A, then answer the compaction summary prompt
-            [ReviewedTurn(), CompactionSummaryTurn()],
-            // Session 2: accept the context-injection prompt, review file B, then compact
-            [ContextInjectionTurn(), ReviewedTurn(), CompactionSummaryTurn()],
-            // Session 3: accept context injection, review file C, then compact
-            [ContextInjectionTurn(), ReviewedTurn(), CompactionSummaryTurn()],
-            // Session 4: accept final context injection (opened by last compaction; no more files)
-            [ContextInjectionTurn()],
-        ]);
+        int compactionCount = 0;
+        var session = new FakeAiSession([ReviewedTurn(), ReviewedTurn(), ReviewedTurn()])
+        {
+            CompactAsyncCallback = (_, _) => { compactionCount++; return Task.CompletedTask; }
+        };
 
-        var primaryAi = new FakeAiAgent(sessions);
+        var primaryAi = new FakeAiAgent(new Queue<FakeAiSession>([session]));
         var compactionOptions = new ContextCompactionOptions
         {
             TokenLimitThreshold = 1,
@@ -57,7 +46,9 @@ public sealed class ContextCompactionTests : ScenarioTestBase
         var result = await RunScenarioAsync(registry);
 
         Assert.That(result.State, Is.EqualTo(WorkflowState.Success));
-        Assert.That(primaryAi.OpenSessionCallCount, Is.GreaterThan(fileCount),
-            "OpenSessionAsync should be called more times than the file count when compaction fires");
+        Assert.That(primaryAi.OpenSessionCallCount, Is.EqualTo(1),
+            "Only one session should be opened in the single-session compaction model");
+        Assert.That(compactionCount, Is.EqualTo(3),
+            "CompactAsync should be called once per file when compaction fires after every file");
     }
 }

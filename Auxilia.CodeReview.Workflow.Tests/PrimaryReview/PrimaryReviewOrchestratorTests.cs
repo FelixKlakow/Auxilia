@@ -141,5 +141,8 @@ public sealed class PrimaryReviewOrchestratorTests
         }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+        public Task CompactAsync(string focusDescription, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 }

@@ -108,6 +108,37 @@ public sealed class ResilientAiAgent : IAiAgent
             throw lastException!;
         }
 
+        public async Task CompactAsync(string focusDescription, CancellationToken cancellationToken = default)
+        {
+            Exception? lastException = null;
+            var backoff = TimeSpan.FromMilliseconds(_options.InitialBackoffMs);
+
+            for (int attempt = 0; attempt < _options.MaxAttempts; attempt++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    await _inner.CompactAsync(focusDescription, cancellationToken);
+                    return;
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                    if (attempt < _options.MaxAttempts - 1)
+                    {
+                        await _delay(backoff, cancellationToken);
+                        backoff = TimeSpan.FromMilliseconds(backoff.TotalMilliseconds * 2);
+                    }
+                }
+            }
+
+            throw lastException!;
+        }
+
         public ValueTask DisposeAsync() => _inner.DisposeAsync();
     }
 }

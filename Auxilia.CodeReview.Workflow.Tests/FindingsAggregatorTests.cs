@@ -129,6 +129,9 @@ public sealed class FindingsAggregatorTests
         public Task<string> ExecuteAsync(string prompt, CancellationToken cancellationToken = default)
             => Task.FromResult($"{{\"verdict\":\"{verdict}\"}}");
 
+        public Task CompactAsync(string focusDescription, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

@@ -1,5 +1,5 @@
 using Auxilia.CodeReview.Workflow.Compaction;
-using Auxilia.Workflows.AiAgent;
+using Auxilia.CodeReview.Workflow.Tests.Fakes;
 using Microsoft.Extensions.Options;
 
 namespace Auxilia.CodeReview.Workflow.Tests.Compaction;
@@ -36,30 +36,17 @@ public sealed class ContextCompactionServiceTests
     }
 
     [Test]
-    public async Task CompactAsync_ReturnsNewSession()
+    public async Task CompactAsync_ForwardsToSession()
     {
         var svc = Build();
-        var fakeAgent = new FakeAiAgent();
-        var original = await fakeAgent.OpenSessionAsync();
+        string? receivedFocus = null;
+        var session = new FakeAiSession([])
+        {
+            CompactAsyncCallback = (focus, _) => { receivedFocus = focus; return Task.CompletedTask; }
+        };
 
-        var replacement = await svc.CompactAsync(original, fakeAgent);
+        await svc.CompactAsync(session, "focus text");
 
-        Assert.That(replacement, Is.Not.SameAs(original));
-    }
-
-    // ---- Fake helpers ----
-
-    private sealed class FakeAiAgent : IAiAgent
-    {
-        public Task<IAiSession> OpenSessionAsync(AiSessionOptions? options = null, CancellationToken cancellationToken = default)
-            => Task.FromResult<IAiSession>(new FakeAiSession());
-    }
-
-    private sealed class FakeAiSession : IAiSession
-    {
-        public Task<string> ExecuteAsync(string prompt, CancellationToken cancellationToken = default)
-            => Task.FromResult("summary of findings");
-
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        Assert.That(receivedFocus, Is.EqualTo("focus text"));
     }
 }

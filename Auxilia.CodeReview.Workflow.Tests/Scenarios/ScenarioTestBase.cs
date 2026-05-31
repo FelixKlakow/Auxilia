@@ -40,12 +40,6 @@ public abstract class ScenarioTestBase
     protected static ScriptedTurn RejectedTurn() =>
         new("Review this finding", """{"verdict":"Rejected"}""");
 
-    protected static ScriptedTurn CompactionSummaryTurn() =>
-        new("Summarize all findings", "compact summary");
-
-    protected static ScriptedTurn ContextInjectionTurn() =>
-        new("Context from prior reviews", "ok");
-
     protected static ChangedFile File(string path, ChangeKind kind = ChangeKind.Modified) =>
         new(path, kind);
 

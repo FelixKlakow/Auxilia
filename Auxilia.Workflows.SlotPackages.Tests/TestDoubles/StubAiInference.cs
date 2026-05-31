@@ -21,6 +21,9 @@ public sealed class StubAiInference : IAiAgent
         public Task<string> ExecuteAsync(string prompt, CancellationToken cancellationToken = default)
             => Task.FromResult(FixedResponse);
 
+        public Task CompactAsync(string focusDescription, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
         public ValueTask DisposeAsync()
         {
             _owner.DisposedCount++;
