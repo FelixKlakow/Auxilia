@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Auxilia.FakeSlots.CodeReview.Happy.slothandler</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="*.slothandler.manifest.json" CopyToOutputDirectory="Always" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Auxilia.Workflows\Auxilia.Workflows.csproj" />
+    <ProjectReference Include="..\Source\Auxilia.CodeReview.Workflow\Auxilia.CodeReview.Workflow.csproj" />
+    <ProjectReference Include="..\Source\Auxilia.Workflows.AiAgent\Auxilia.Workflows.AiAgent.csproj" />
+    <ProjectReference Include="..\Source\Auxilia.Workflows.SourceControl\Auxilia.Workflows.SourceControl.csproj" />
+    <ProjectReference Include="..\Source\Auxilia.Workflows.PullRequestAccess\Auxilia.Workflows.PullRequestAccess.csproj" />
+    <ProjectReference Include="..\Source\Auxilia.Workflows.TaskSource\Auxilia.Workflows.TaskSource.csproj" />
+  </ItemGroup>
+
+</Project>
