@@ -53,10 +53,11 @@ public sealed class WorkflowDispatcher(
         // 5. Build env vars
         var env = new Dictionary<string, string>
         {
-            ["RabbitMq__Host"]     = settings.RabbitMqHost,
-            ["RabbitMq__Port"]     = settings.RabbitMqPort.ToString(),
-            ["RabbitMq__UserName"] = settings.RabbitMqUserName,
-            ["RabbitMq__Password"] = settings.RabbitMqPassword,
+            ["RabbitMq__Host"]               = settings.RabbitMqHost,
+            ["RabbitMq__Port"]               = settings.RabbitMqPort.ToString(),
+            ["RabbitMq__UserName"]           = settings.RabbitMqUserName,
+            ["RabbitMq__Password"]           = settings.RabbitMqPassword,
+            ["Workflow__RegistrationQueue"]  = dispatcherSettings.Value.RegistrationQueueName,
         };
 
         foreach (var (key, value) in command.Context)

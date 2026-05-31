@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Auxilia.Messaging;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Auxilia.SteeringInstance.Workflows;
 
@@ -10,6 +11,7 @@ public sealed class WorkflowRegistrationHandler(
     EnvironmentValidator environmentValidator,
     ConfigurationResolver configResolver,
     WorkflowInstanceRegistry instanceRegistry,
+    IOptions<WorkflowDispatcherSettings> dispatcherSettings,
     ILogger<WorkflowRegistrationHandler> logger)
 {
     private readonly ConcurrentDictionary<Guid, byte> _registeredInstances = new();
@@ -19,9 +21,10 @@ public sealed class WorkflowRegistrationHandler(
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        await messageBus.DeclareQueueAsync("workflow-registration", cancellationToken);
+        var queueName = dispatcherSettings.Value.RegistrationQueueName;
+        await messageBus.DeclareQueueAsync(queueName, cancellationToken);
         _subscription = await messageBus.SubscribeAsync<WorkflowRegistrationRequest>(
-            "workflow-registration", HandleAsync, cancellationToken);
+            queueName, HandleAsync, cancellationToken);
     }
 
     private async Task HandleAsync(WorkflowRegistrationRequest request, CancellationToken cancellationToken)

@@ -87,7 +87,8 @@ public class CodeReviewWorkflowEnvironment
             .WithEnvironment("WorkflowLauncher__RabbitMqPort",     "5672")
             .WithEnvironment("WorkflowLauncher__RabbitMqUserName", "guest")
             .WithEnvironment("WorkflowLauncher__RabbitMqPassword", "guest")
-            .WithEnvironment("WorkflowDispatcher__CommandQueueName", HappyCommandQueue)
+            .WithEnvironment("WorkflowDispatcher__CommandQueueName",      HappyCommandQueue)
+            .WithEnvironment("WorkflowDispatcher__RegistrationQueueName", "workflow-registration-crw-happy")
             .WithEnvironment("WorkflowLauncher__ExtraEnvironmentVariables__AUXILIA_DEVELOPER_MODE", "1")
             .WithEnvironment("WorkflowLauncher__SlotPackages__fake-code-review-happy",
                 $"{ContainerPluginsDir}/Auxilia.FakeSlots.CodeReview.Happy.slothandler.dll")
@@ -119,7 +120,8 @@ public class CodeReviewWorkflowEnvironment
             .WithEnvironment("WorkflowLauncher__RabbitMqPort",     "5672")
             .WithEnvironment("WorkflowLauncher__RabbitMqUserName", "guest")
             .WithEnvironment("WorkflowLauncher__RabbitMqPassword", "guest")
-            .WithEnvironment("WorkflowDispatcher__CommandQueueName", EdgeCommandQueue)
+            .WithEnvironment("WorkflowDispatcher__CommandQueueName",      EdgeCommandQueue)
+            .WithEnvironment("WorkflowDispatcher__RegistrationQueueName", "workflow-registration-crw-edge")
             .WithEnvironment("WorkflowLauncher__ExtraEnvironmentVariables__AUXILIA_DEVELOPER_MODE", "1")
             .WithEnvironment("WorkflowLauncher__SlotPackages__fake-code-review-write-back-failure",
                 $"{ContainerPluginsDir}/Auxilia.FakeSlots.CodeReview.WriteBackFailure.slothandler.dll")

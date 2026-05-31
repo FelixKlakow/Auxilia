@@ -5,5 +5,6 @@ namespace Auxilia.SteeringInstance.Workflows;
 /// </summary>
 public sealed class WorkflowDispatcherSettings
 {
-    public string CommandQueueName { get; set; } = "workflow.run-commands";
+    public string CommandQueueName      { get; set; } = "workflow.run-commands";
+    public string RegistrationQueueName { get; set; } = "workflow-registration";
 }
