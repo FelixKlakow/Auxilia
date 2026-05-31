@@ -55,6 +55,7 @@ try
 
     // --- Workflow services ---
     builder.Services.AddSingleton<WorkflowSchemaStore>();
+    builder.Services.AddSingleton<PendingWorkflowPackageStore>();
     builder.Services.AddSingleton<SlotConfigurationStore>();
     builder.Services.AddSingleton<SignalHandlerStore>();
     builder.Services.AddSingleton<WorkflowInstanceRegistry>();

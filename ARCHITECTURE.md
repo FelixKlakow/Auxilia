@@ -284,8 +284,9 @@ stateDiagram-v2
 
 **Key lifecycle properties:**
 - Workflows are **stateful and long-running** - once started they run until Completed, Failed, or explicitly Cancelled
-- A **pre-flight check** runs before any workflow is dispatched, verifying that signature, required account bundles, resource proxies, and AI accounts are all available
+- A **pre-flight check** runs before any workflow is dispatched, verifying that signature, required account bundles, resource proxies, and AI accounts are all available; it also fetches and verifies the signed `*.workflow.zip` package and pre-loads the workflow schema into the schema store
 - If pre-flight fails the work item is held and the user/AI is notified; it can be requeued automatically when the condition resolves (configurable)
+- **Schema pre-loading**: the `WorkflowAnnouncementHandler` reads `workflow-schema.json` from the extracted ZIP package and populates `WorkflowSchemaStore` before sending the `Run` directive — no `EmitSchema` round-trip is required
 - **Workflow artifacts** are declared by the workflow and configured by the user - where they are stored and how they are linked back to the work item is a per-workflow configuration
 
 ---
@@ -295,11 +296,11 @@ stateDiagram-v2
 ```mermaid
 graph TD
     subgraph Workflow Trust
-        DEV["Developer submits workflow"] --> SIGN_SVC["Trust Service signs artifact"]
+        DEV["Developer submits *.workflow.zip"] --> SIGN_SVC["Trust Service signs ZIP package"]
         SIGN_SVC --> REG["Workflow Registry"]
         REG --> WR["Workflow Runner"]
-        WR --> VERIFY["Signature verified before execution"]
-        VERIFY -->|Valid| LAUNCH["Container / Process launched"]
+        WR --> VERIFY["WorkflowPackageVerifier: RSA-PSS signature and manifest verified before execution"]
+        VERIFY -->|Valid| LAUNCH["ZIP extracted; process launched from extracted content"]
         VERIFY -->|Invalid| REJECT["Execution rejected - always"]
         VERIFY -->|Dev mode - signing off| LAUNCH
     end
@@ -564,9 +565,9 @@ All modes share the same codebase. Runtime behaviour is driven entirely by confi
 
 | Mode | Message Bus | Workflow Runtime | Signing | Identity |
 |---|---|---|---|---|
-| **Local / Dev** | RabbitMQ in Docker or in-process | OS Process (fully debuggable) | Disabled (no ceremony) | Local accounts |
-| **On-premise** | RabbitMQ cluster | Docker / k3s | HashiCorp Vault Transit | LDAP / AD / OIDC |
-| **Cloud (Azure)** | Azure Service Bus | AKS | Azure Key Vault | Entra ID |
+| **Local / Dev** | RabbitMQ in Docker or in-process | OS Process (fully debuggable) — signed `*.workflow.zip` extracted and bind-mounted | Disabled (no ceremony) | Local accounts |
+| **On-premise** | RabbitMQ cluster | Docker / k3s — signed `*.workflow.zip` extracted and bind-mounted | HashiCorp Vault Transit | LDAP / AD / OIDC |
+| **Cloud (Azure)** | Azure Service Bus | AKS — signed `*.workflow.zip` extracted and bind-mounted | Azure Key Vault | Entra ID |
 
 Pluggable interfaces: **IMessageBus**, **IWorkflowRunner**, **ISigningProvider**, **IIdentityProvider**, **IResourceProxy**
 The core platform has no hard dependency on RabbitMQ, Docker, Vault, or AAD.
