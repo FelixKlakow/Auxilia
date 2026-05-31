@@ -141,7 +141,29 @@ public sealed class PrimaryReviewOrchestratorTests
             "No findings should be staged when tool call is absent");
     }
 
+    [Test]
+    public async Task RunAsync_OpenSessionThrows_ExceptionPropagatesAndNotRetried()
+    {
+        var agent = new ThrowingOpenSessionAiAgent();
+        var orchestrator = BuildOrchestrator(agent);
+        var context = BuildContext(MakeFile("a.cs"));
+
+        Assert.ThrowsAsync<InvalidOperationException>(() => orchestrator.RunAsync(context));
+        Assert.That(agent.OpenSessionCallCount, Is.EqualTo(1), "must not retry");
+    }
+
     // ---- Fake helpers ----
+
+    private sealed class ThrowingOpenSessionAiAgent : IAiAgent
+    {
+        public int OpenSessionCallCount { get; private set; }
+
+        public Task<IAiSession> OpenSessionAsync(AiSessionOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            OpenSessionCallCount++;
+            throw new InvalidOperationException("simulated transient failure");
+        }
+    }
 
     private sealed class FakeAiAgent(FileVerdict verdict, bool oneFinding = false, bool skipSink = false) : IAiAgent
     {

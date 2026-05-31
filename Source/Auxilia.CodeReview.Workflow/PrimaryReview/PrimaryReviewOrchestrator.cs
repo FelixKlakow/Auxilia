@@ -30,15 +30,7 @@ public sealed class PrimaryReviewOrchestrator(
             await sink.StartAsync(new HttpMcpTransportConfig("http://localhost:0/mcp", "code-review-sink"), cancellationToken);
 
             var options = new AiSessionOptions { CapabilityTools = [sink] };
-            IAiSession session;
-            try
-            {
-                session = await aiAgent.OpenSessionAsync(options, cancellationToken);
-            }
-            catch when (!cancellationToken.IsCancellationRequested)
-            {
-                session = await aiAgent.OpenSessionAsync(options, cancellationToken);
-            }
+            var session = await aiAgent.OpenSessionAsync(options, cancellationToken);
 
             try
             {
