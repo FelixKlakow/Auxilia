@@ -1,4 +1,6 @@
+using Auxilia.ImplementationWorkflow.Context;
 using Auxilia.Workflows;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Auxilia.ImplementationWorkflow.Tests.Fakes;
 
@@ -11,7 +13,8 @@ public sealed class ImplementationFakeRegistry
     private readonly FakeAiAgent _implementerAgent;
     private readonly FakeAiAgent _reviewerAgent;
     private readonly FakeSignalEmitter _signalEmitter;
-    private readonly FakeWorkflowBootstrapSlotHandler _bootstrapHandler;
+    private readonly string _workItemId;
+    private readonly ImplementationWorkflowConfiguration _configuration;
 
     public ImplementationFakeRegistry(
         FakeSourceControlWriteAccess repository,
@@ -32,9 +35,8 @@ public sealed class ImplementationFakeRegistry
         _implementerAgent = implementerAgent;
         _reviewerAgent = reviewerAgent;
         _signalEmitter = signalEmitter;
-
-        _bootstrapHandler = new FakeWorkflowBootstrapSlotHandler(
-            outputDirectory, signalEmitter, workItemId, configuration);
+        _workItemId = workItemId;
+        _configuration = configuration;
     }
 
     public FakeSignalEmitter SignalEmitter => _signalEmitter;
@@ -43,13 +45,17 @@ public sealed class ImplementationFakeRegistry
 
     public void Register(SlotHandlerResolver resolver)
     {
-        resolver.Register("fake-repository",           new FakeSourceControlWriteAccessSlotHandler(_repository));
+        resolver.Register("fake-repository", new FakeSourceControlWriteAccessSlotHandler(_repository, services =>
+        {
+            services.AddSingleton<ISignalEmitter>(_signalEmitter);
+            services.AddSingleton(_configuration);
+            services.AddSingleton(new WorkItemTrigger(_workItemId));
+        }));
         resolver.Register("fake-task-source",          new FakeTaskSourceAccessSlotHandler(_taskSource));
         resolver.Register("fake-implementation-agent", new FakeAiAgentSlotHandler(_implementerAgent));
         resolver.Register("fake-reviewer-agent",       new FakeAiAgentSlotHandler(_reviewerAgent));
         resolver.Register("fake-test-runner",          new FakeTestRunnerSlotHandler(_testRunner));
         resolver.Register("fake-pull-request",         new FakePullRequestAccessSlotHandler(_pullRequest));
-        resolver.Register("fake-workflow-config",      _bootstrapHandler);
         WorkflowBuilder.TestSlotHandlerResolver = resolver;
     }
 
@@ -62,6 +68,5 @@ public sealed class ImplementationFakeRegistry
             ("reviewer-agent",       "fake-reviewer-agent",       new Dictionary<string, string>()),
             ("test-runner",          "fake-test-runner",          new Dictionary<string, string>()),
             ("pull-request",         "fake-pull-request",         new Dictionary<string, string>()),
-            ("workflow-config",      "fake-workflow-config",      new Dictionary<string, string>()),
         ];
 }
