@@ -96,7 +96,7 @@ public sealed class ReviewerOrchestrator(
             if (dtos is null)
                 return [];
 
-            return dtos.Select(d => new ReviewNote(d.Description, d.FilePath, d.Severity)).ToList();
+            return dtos.Select(d => new ReviewNote(d.Description, d.FilePath, Enum.Parse<ReviewNoteSeverity>(d.Severity, ignoreCase: true))).ToList();
         }
         catch (JsonException ex)
         {
