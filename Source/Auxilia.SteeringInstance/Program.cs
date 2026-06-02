@@ -2,6 +2,8 @@
 using Auxilia.Messaging;
 using Auxilia.SteeringInstance.Workflows;
 using Auxilia.SteeringInstance.Workflows.Storage;
+using Auxilia.Workflows;
+using Auxilia.Workflows.Crypto;
 using Microsoft.Extensions.Options;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
@@ -55,6 +57,7 @@ try
 
     // --- Workflow services ---
     builder.Services.AddSingleton<WorkflowSchemaStore>();
+    builder.Services.AddSingleton<PendingWorkflowPackageStore>();
     builder.Services.AddSingleton<SlotConfigurationStore>();
     builder.Services.AddSingleton<SignalHandlerStore>();
     builder.Services.AddSingleton<WorkflowInstanceRegistry>();
@@ -68,16 +71,26 @@ try
     builder.Services.AddSingleton<WorkflowCancelDispatcher>();
     builder.Services.AddSingleton<WorkflowStateHandler>();
     builder.Services.AddSingleton<IWorkflowLauncher, DockerWorkflowLauncher>();
+    builder.Services.AddSingleton<IDockerClientFactory, DefaultDockerClientFactory>();
+    builder.Services.AddSingleton<IDeveloperModeProvider, EnvironmentDeveloperModeProvider>();
+    builder.Services.AddSingleton<IWorkflowPackageVerifier, WorkflowPackageVerifier>();
+    builder.Services.AddHttpClient("workflow-packages");
 
     // --- Workflow launcher settings ---
     builder.Services.Configure<DockerWorkflowLauncherSettings>(
         builder.Configuration.GetSection("WorkflowLauncher"));
 
+    // --- Workflow dispatcher settings ---
+    builder.Services.Configure<WorkflowDispatcherSettings>(
+        builder.Configuration.GetSection("WorkflowDispatcher"));
+
     // --- Slot configuration seeding ---
+    builder.Services.AddSingleton<SlotProviderRegistry>();
+    builder.Services.AddSingleton<SlotConfigurationSeedHandler>();
     builder.Services.Configure<SlotConfigurationsSettings>(
         builder.Configuration.GetSection("SlotConfigurations"));
 
-    // --- OpenTelemetry (tracing + metrics) ---
+    // --- OpenTelemetry(tracing + metrics) ---
     var otlpEndpoint = builder.Configuration["Otlp:Endpoint"];
     var serviceVersion = Assembly.GetExecutingAssembly()
         .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
@@ -117,18 +130,21 @@ try
 
     var app = builder.Build();
 
-    // --- Seed slot configurations from config ---
-    var slotConfigSettings = app.Services
-        .GetRequiredService<IOptions<SlotConfigurationsSettings>>().Value;
+    var configSeedHandler = app.Services.GetRequiredService<SlotConfigurationSeedHandler>();
+    await configSeedHandler.StartAsync(app.Lifetime.ApplicationStopping);
+
+    // Seed slot providers and configurations from startup config (env vars / appsettings).
+    var launcherSettings = app.Services.GetRequiredService<IOptions<DockerWorkflowLauncherSettings>>().Value;
+    var providerRegistry = app.Services.GetRequiredService<SlotProviderRegistry>();
+    foreach (var (providerType, dllPath) in launcherSettings.SlotPackages)
+        providerRegistry.Upsert(providerType, dllPath);
+
+    var slotConfigSettings = app.Services.GetRequiredService<IOptions<SlotConfigurationsSettings>>().Value;
     var slotStore = app.Services.GetRequiredService<SlotConfigurationStore>();
     foreach (var (workflowType, entries) in slotConfigSettings.Workflows)
         foreach (var entry in entries)
             slotStore.UpsertConfiguration(workflowType,
-                new StoredSlotConfiguration(
-                    entry.SlotName,
-                    entry.ProviderType,
-                    entry.Settings,
-                    ConfigurationStatus.Valid));
+                new StoredSlotConfiguration(entry.SlotName, entry.ProviderType, entry.Settings, ConfigurationStatus.Valid));
 
     var handler = app.Services.GetRequiredService<WorkflowRegistrationHandler>();
     await handler.StartAsync(app.Lifetime.ApplicationStopping);

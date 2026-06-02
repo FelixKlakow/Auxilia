@@ -31,6 +31,24 @@ public sealed class DockerWorkflowLauncherSettings
     /// Defaults to the standard Unix socket. Override in config or env for remote daemons.
     /// </summary>
     public string DockerSocketPath { get; set; } = "unix:///var/run/docker.sock";
+
+    /// <summary>
+    /// Base container image used to run workflow assemblies.
+    /// The extracted package is bind-mounted over the container filesystem.
+    /// </summary>
+    public string RuntimeImage { get; set; } = "mcr.microsoft.com/dotnet/runtime:8.0";
+
+    /// <summary>
+    /// Maps ProviderType → absolute path to the *.slothandler.dll on the SteeringInstance filesystem.
+    /// The matching *.slothandler.manifest.json is always co-located with the DLL.
+    /// </summary>
+    public Dictionary<string, string> SlotPackages { get; set; } = new();
+
+    /// <summary>
+    /// Additional environment variables injected into every workflow container launch.
+    /// For example: <c>{"AUXILIA_DEVELOPER_MODE": "1"}</c>.
+    /// </summary>
+    public Dictionary<string, string>? ExtraEnvironmentVariables { get; set; }
 }
 
 

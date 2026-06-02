@@ -41,6 +41,7 @@ public class WorkflowRegistrationHandlerTests
             validator,
             resolver,
             instanceRegistry ?? new WorkflowInstanceRegistry(),
+            Options.Create(new WorkflowDispatcherSettings()),
             NullLogger<WorkflowRegistrationHandler>.Instance);
     }
 

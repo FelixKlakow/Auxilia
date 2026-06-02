@@ -14,18 +14,18 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddCodeReviewWorkflow(this IServiceCollection services, string outputDirectory = "output")
     {
         // Configuration defaults (overridable by pre-registering before calling this method)
-        services.TryAddSingleton(new TwoEyesConfiguration());
-        services.TryAddSingleton(new WriteBackConfiguration());
-        services.TryAdd(ServiceDescriptor.Singleton(typeof(WorkItemRetrievalFailureBehavior), (object)WorkItemRetrievalFailureBehavior.Ignore));
-        services.TryAddSingleton(new CriticalityClassifier(Array.Empty<string>()));
-        services.TryAddSingleton<IOptions<ContextCompactionOptions>>(Options.Create(new ContextCompactionOptions()));
+        services.TryAddScoped(_ => new TwoEyesConfiguration());
+        services.TryAddScoped(_ => new WriteBackConfiguration());
+        services.TryAdd(new ServiceDescriptor(typeof(WorkItemRetrievalFailureBehavior), _ => WorkItemRetrievalFailureBehavior.Ignore, ServiceLifetime.Scoped));
+        services.TryAddScoped(_ => new CriticalityClassifier(Array.Empty<string>()));
+        services.TryAddScoped<IOptions<ContextCompactionOptions>>(_ => Options.Create(new ContextCompactionOptions()));
 
         // Phase 2 — Context Assembly
         services.TryAddScoped<ContextAssembler>();
 
         // Phase 3 — Primary Review
-        services.TryAddSingleton<IStagedFindingsStore, StagedFindingsStore>();
-        services.TryAddSingleton<VerdictMap>();
+        services.TryAddScoped<IStagedFindingsStore, StagedFindingsStore>();
+        services.TryAddScoped<VerdictMap>();
         services.TryAddScoped<ContextCompactionService>();
         services.TryAddScoped<PrimaryReviewOrchestrator>();
 

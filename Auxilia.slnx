@@ -32,6 +32,8 @@
     <File Path="USE-CASES.md" />
   </Folder>
   <Folder Name="/05_WorkflowsDomain/">
+    <Project Path="Auxilia.Workflows.Packer.Tests\Auxilia.Workflows.Packer.Tests.csproj" />
+    <Project Path="Auxilia.Workflows.Packer\Auxilia.Workflows.Packer.csproj" />
     <Project Path="Auxilia.Workflows.SlotPackages.Tests\Auxilia.Workflows.SlotPackages.Tests.csproj" />
     <Project Path="Auxilia.Workflows.Testing.Tests\Auxilia.Workflows.Testing.Tests.csproj" />
     <Project Path="Auxilia.Workflows.Testing\Auxilia.Workflows.Testing.csproj" />
@@ -45,12 +47,13 @@
   </Folder>
   <Folder Name="/06_WorkflowImplementations/">
     <Project Path="Auxilia.CodeReview.Workflow.Tests\Auxilia.CodeReview.Workflow.Tests.csproj" />
-    <Project Path="Auxilia.ImplementationWorkflow.Tests/Auxilia.ImplementationWorkflow.Tests.csproj">
-      <Build Solution="Debug|*" Project="false" />
-    </Project>
-    <Project Path="Source/Auxilia.ImplementationWorkflow/Auxilia.ImplementationWorkflow.csproj">
-      <Build Solution="Debug|*" Project="false" />
-    </Project>
+    <Project Path="Auxilia.FakeSlots.CodeReview.Happy\Auxilia.FakeSlots.CodeReview.Happy.csproj" />
+    <Project Path="Auxilia.FakeSlots.CodeReview.WriteBackFailure\Auxilia.FakeSlots.CodeReview.WriteBackFailure.csproj" />
+    <Project Path="Auxilia.FakeSlots.Implementation.AgentFailure\Auxilia.FakeSlots.Implementation.AgentFailure.csproj" />
+    <Project Path="Auxilia.FakeSlots.Implementation.Happy\Auxilia.FakeSlots.Implementation.Happy.csproj" />
+    <Project Path="Auxilia.FakeSlots.Tests\Auxilia.FakeSlots.Tests.csproj" />
+    <Project Path="Auxilia.ImplementationWorkflow.Tests/Auxilia.ImplementationWorkflow.Tests.csproj" />
+    <Project Path="Source/Auxilia.ImplementationWorkflow/Auxilia.ImplementationWorkflow.csproj" />
     <Project Path="Source\Auxilia.CodeReview.Workflow\Auxilia.CodeReview.Workflow.csproj" />
   </Folder>
   <Project Path="Auxilia.SystemTestSuite\Auxilia.SystemTestSuite.csproj" />

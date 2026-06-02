@@ -8,10 +8,10 @@ namespace Auxilia.CodeReview.Workflow.Tests.Scenarios;
 public sealed class AiProviderFailureTests : ScenarioTestBase
 {
     [Test]
-    public async Task TransientFailure_Retries_Succeeds()
+    public async Task TransientFailure_NoOrchestratorRetry_WorkflowFails()
     {
-        // Primary AI fails on the first OpenSessionAsync call, then succeeds on the second.
-        // PrimaryReviewOrchestrator retries once, so the workflow should complete successfully.
+        // PrimaryReviewOrchestrator no longer retries internally; a single OpenSessionAsync
+        // failure propagates immediately and causes the workflow to fail.
         var pullRequest = new FakePullRequestAccess(
             changedFiles: [File("src/Foo.cs")],
             diffHunks: new Dictionary<string, IReadOnlyList<DiffHunk>>
@@ -19,7 +19,7 @@ public sealed class AiProviderFailureTests : ScenarioTestBase
                 ["src/Foo.cs"] = [Hunk("src/Foo.cs")],
             });
 
-        // initialFailCount=1 causes the first call to throw; the retry succeeds from the queue
+        // initialFailCount=1 causes the first (and only) call to throw; no retry occurs
         var primaryAi = new FakeAiAgent(
             new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn()]]),
             initialFailCount: 1);
@@ -34,14 +34,14 @@ public sealed class AiProviderFailureTests : ScenarioTestBase
 
         var result = await RunScenarioAsync(registry);
 
-        Assert.That(result.State, Is.EqualTo(WorkflowState.Success),
-            "One transient failure should be recovered by the retry logic");
+        Assert.That(result.State, Is.EqualTo(WorkflowState.Failed),
+            "Transient failure must propagate: orchestrator no longer retries internally");
     }
 
     [Test]
-    public async Task PermanentFailure_ExhaustsRetries_Fails()
+    public async Task PermanentFailure_AllCallsThrow_WorkflowFails()
     {
-        // All OpenSessionAsync calls throw — both the initial attempt and the retry fail.
+        // All OpenSessionAsync calls throw — workflow fails with no retry.
         var pullRequest = new FakePullRequestAccess(
             changedFiles: [File("src/Foo.cs")],
             diffHunks: new Dictionary<string, IReadOnlyList<DiffHunk>>

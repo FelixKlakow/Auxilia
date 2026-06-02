@@ -1,9 +1,7 @@
-using Auxilia.ImplementationWorkflow.Branch;
 using Auxilia.ImplementationWorkflow.Context;
 using Auxilia.ImplementationWorkflow.Signals;
 using Auxilia.Workflows;
 using Auxilia.Workflows.AiAgent;
-using Auxilia.Workflows.Capabilities;
 using Auxilia.Workflows.PullRequestAccess;
 using Auxilia.Workflows.SourceControl;
 using Auxilia.Workflows.TaskSource;
@@ -27,11 +25,11 @@ public static class ImplementationWorkflow
             .RequiresTestRunner("test-runner", new TestRunnerCapabilities())
             .RequiresPullRequestAccess("pull-request",
                 new PullRequestAccessCapabilities { RequiredPermissions = [PullRequestPermission.Read, PullRequestPermission.Write] })
-            .Requires<object>("workflow-config", new NoCapabilities())
             .DeclaresOutput("implementation-summary", "output/implementation-summary.json", "Implementation run summary with branch, PR URL, and review notes")
             .DeclaresSignal<CompletedSignalPayload>("Completed", "Emitted when the workflow completes successfully")
             .DeclaresSignal<ReviewNotesFlaggedSignalPayload>("ReviewNotesFlagged", "Emitted when the reviewer flags issues")
             .DeclaresSignal<FailedSignalPayload>("Failed", "Emitted when the implementation agent fails")
+            .ConfigureServices(services => services.AddImplementationWorkflow())
             .WithApplication(ExecuteAsync)
             .Run(args);
 
@@ -40,20 +38,27 @@ public static class ImplementationWorkflow
     private static async Task ExecuteAsync(IServiceProvider provider, CancellationToken cancellationToken)
     {
         var contextAssembler = provider.GetRequiredService<ContextAssembler>();
-        var branchSetup = provider.GetRequiredService<BranchSetupService>();
+        var repository = provider.GetRequiredKeyedService<ISourceControlWriteAccess>("repository");
         var agentOrchestrator = provider.GetRequiredService<AgentOrchestrator>();
         var reviewerOrchestrator = provider.GetRequiredService<ReviewerOrchestrator>();
-        var pullRequestService = provider.GetRequiredService<PullRequestService>();
+        var pullRequestAccess = provider.GetRequiredKeyedService<IPullRequestAccess>("pull-request");
         var writeBackService = provider.GetRequiredService<WriteBackService>();
         var summaryWriter = provider.GetRequiredService<ImplementationSummaryWriter>();
         var completionSignalEmitter = provider.GetRequiredService<CompletionSignalEmitter>();
 
         var context = await contextAssembler.AssembleAsync(cancellationToken);
-        await branchSetup.SetupAsync(context.BranchName, cancellationToken);
+        await repository.CreateBranchAsync(context.BranchName, cancellationToken: cancellationToken);
 
         var agentResult = await agentOrchestrator.RunAsync(context, cancellationToken);
         var reviewNotes = await reviewerOrchestrator.RunAsync(agentResult, context, cancellationToken);
-        var prUrl = await pullRequestService.OpenAsync(agentResult, context, cancellationToken);
+
+        var prOptions = new PullRequestOptions(
+            Title: $"impl: {context.WorkItem.Title}",
+            SourceBranch: agentResult.BranchName,
+            TargetBranch: pullRequestAccess.BaseRef,
+            Description: agentResult.AgentResponseText,
+            LinkedWorkItemIds: [context.WorkItem.Id]);
+        var prUrl = await pullRequestAccess.OpenPullRequestAsync(prOptions, cancellationToken);
 
         await writeBackService.WriteAsync(context, prUrl, cancellationToken);
 

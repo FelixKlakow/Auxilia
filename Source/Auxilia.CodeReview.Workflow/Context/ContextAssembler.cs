@@ -1,6 +1,7 @@
 using Auxilia.Workflows.PullRequestAccess;
 using Auxilia.Workflows.SourceControl;
 using Auxilia.Workflows.TaskSource;
+using Microsoft.Extensions.Logging;
 using PrChangeKind = Auxilia.Workflows.PullRequestAccess.ChangeKind;
 
 namespace Auxilia.CodeReview.Workflow.Context;
@@ -10,9 +11,10 @@ public sealed class ContextAssembler(
     IPullRequestAccess pullRequestAccess,
     IWorkItemAccess workItemAccess,
     CriticalityClassifier classifier,
-    WorkItemRetrievalFailureBehavior failureBehavior)
+    WorkItemRetrievalFailureBehavior failureBehavior,
+    ILogger<ContextAssembler>? logger = null)
 {
-    public async Task<ReviewContext> AssembleAsync(PullRequestReference pr, CancellationToken cancellationToken = default)
+    public async Task<ReviewContext> AssembleAsync(CancellationToken cancellationToken = default)
     {
         var workingPath = sourceControl.WorkingPath;
         var changedFiles = await pullRequestAccess.GetChangedFilesAsync(cancellationToken);
@@ -42,8 +44,9 @@ public sealed class ContextAssembler(
                 .ToList()
                 .AsReadOnly();
         }
-        catch
+        catch (Exception ex)
         {
+            logger?.LogWarning(ex, "Failed to retrieve linked work items for PR '{PrIdentifier}'; continuing without them.", pullRequestAccess.PrIdentifier);
             if (failureBehavior == WorkItemRetrievalFailureBehavior.Fail)
                 throw;
             linkedWorkItems = Array.Empty<WorkItemSummary>();
@@ -51,7 +54,7 @@ public sealed class ContextAssembler(
 
         return new ReviewContext
         {
-            PullRequest = pr,
+            PullRequest = new PullRequestReference(pullRequestAccess.PrIdentifier, pullRequestAccess.BaseRef, pullRequestAccess.HeadRef),
             RepositoryWorkingPath = workingPath,
             Files = reviewableFiles.AsReadOnly(),
             LinkedWorkItems = linkedWorkItems

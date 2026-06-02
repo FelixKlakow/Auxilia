@@ -18,7 +18,7 @@ public sealed class CompletionSignalEmitter(ISignalEmitter signalEmitter)
                 PrUrl = prUrl,
                 BranchName = agentResult.BranchName,
                 WorkItemId = agentResult.WorkItemId,
-                ReviewNotes = reviewNotes.Select(n => new ReviewNoteDto(n.Description, n.FilePath, n.Severity)).ToList()
+                ReviewNotes = reviewNotes.Select(n => new ReviewNoteDto(n.Description, n.FilePath, n.Severity.ToString())).ToList()
             }, cancellationToken);
         }
 

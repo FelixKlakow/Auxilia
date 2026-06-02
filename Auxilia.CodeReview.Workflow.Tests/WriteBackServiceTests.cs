@@ -92,6 +92,9 @@ public sealed class WriteBackServiceTests
 
     private sealed class FakePullRequestAccess : IPullRequestAccess
     {
+        public string PrIdentifier => "PR-1";
+        public string BaseRef => "main";
+        public string HeadRef => "feature/test";
         public int PostCommentCount { get; private set; }
 
         public Task<IReadOnlyList<ChangedFile>> GetChangedFilesAsync(CancellationToken cancellationToken = default)

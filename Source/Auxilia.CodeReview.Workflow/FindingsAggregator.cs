@@ -5,10 +5,10 @@ namespace Auxilia.CodeReview.Workflow;
 
 public sealed class FindingsAggregator(TwoEyesPassService twoEyesPassService)
 {
-    public async Task<CodeReviewResult> AggregateAsync(IStagedFindingsStore store, ReviewContext context)
+    public async Task<CodeReviewResult> AggregateAsync(IStagedFindingsStore store, ReviewContext context, CancellationToken cancellationToken = default)
     {
         var staged = store.Snapshot();
-        var reviewed = await twoEyesPassService.RunAsync(staged, context);
+        var reviewed = await twoEyesPassService.RunAsync(staged, context, cancellationToken);
 
         var survivors = reviewed
             .Where(f => f.TwoEyesVerdict == SecondaryVerdict.Approved

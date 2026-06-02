@@ -1,5 +1,6 @@
 using Auxilia.CodeReview.Workflow.Context;
 using Auxilia.CodeReview.Workflow.Findings;
+using Auxilia.CodeReview.Workflow.Mcp;
 using Auxilia.Workflows.AiAgent;
 
 namespace Auxilia.CodeReview.Workflow.Tests;
@@ -22,7 +23,7 @@ public sealed class TwoEyesPassServiceTests
     public async Task Disabled_ReturnsAllFindings_AsNotReviewed()
     {
         var svc = new TwoEyesPassService(
-            new FakeAiAgent("Approved"),
+            new FakeAiAgent(SecondaryVerdict.Approved),
             new TwoEyesConfiguration { Enabled = false });
 
         var staged = new[] { MakeFinding("a.cs"), MakeFinding("b.cs") };
@@ -35,7 +36,7 @@ public sealed class TwoEyesPassServiceTests
     [Test]
     public async Task Disabled_NoSessionCreated()
     {
-        var fakeAgent = new FakeAiAgent("Approved");
+        var fakeAgent = new FakeAiAgent(SecondaryVerdict.Approved);
         var svc = new TwoEyesPassService(
             fakeAgent,
             new TwoEyesConfiguration { Enabled = false });
@@ -49,7 +50,7 @@ public sealed class TwoEyesPassServiceTests
     public async Task Enabled_AllApproved_AllReturnedAsApproved()
     {
         var svc = new TwoEyesPassService(
-            new FakeAiAgent("Approved"),
+            new FakeAiAgent(SecondaryVerdict.Approved),
             new TwoEyesConfiguration { Enabled = true });
 
         var staged = new[] { MakeFinding("a.cs"), MakeFinding("b.cs"), MakeFinding("c.cs") };
@@ -64,7 +65,7 @@ public sealed class TwoEyesPassServiceTests
     {
         // First two findings approved, third rejected
         var svc = new TwoEyesPassService(
-            new FakeAiAgent("Approved", "Approved", "Rejected"),
+            new FakeAiAgent(SecondaryVerdict.Approved, SecondaryVerdict.Approved, SecondaryVerdict.Rejected),
             new TwoEyesConfiguration { Enabled = true });
 
         var staged = new[] { MakeFinding("a.cs"), MakeFinding("b.cs"), MakeFinding("c.cs") };
@@ -79,7 +80,7 @@ public sealed class TwoEyesPassServiceTests
     [Test]
     public async Task Enabled_EmptyStore_NoSessionOpened()
     {
-        var fakeAgent = new FakeAiAgent("Approved");
+        var fakeAgent = new FakeAiAgent(SecondaryVerdict.Approved);
         var svc = new TwoEyesPassService(
             fakeAgent,
             new TwoEyesConfiguration { Enabled = true });
@@ -90,9 +91,24 @@ public sealed class TwoEyesPassServiceTests
         Assert.That(fakeAgent.SessionsCreated, Is.EqualTo(0));
     }
 
+    [Test]
+    public async Task Enabled_NoToolCall_DefaultsToApproved()
+    {
+        var svc = new TwoEyesPassService(
+            new NoSinkFakeAiAgent(),
+            new TwoEyesConfiguration { Enabled = true });
+
+        var staged = new[] { MakeFinding("a.cs"), MakeFinding("b.cs") };
+        var result = await svc.RunAsync(staged, MakeContext());
+
+        Assert.That(result, Has.Count.EqualTo(2));
+        Assert.That(result, Has.All.Matches<ReviewFinding>(f => f.TwoEyesVerdict == SecondaryVerdict.Approved),
+            "Absent tool calls should fall back to Approved (documented conservative default)");
+    }
+
     // ---- Fake helpers ----
 
-    private sealed class FakeAiAgent(params string[] verdictSequence) : IAiAgent
+    private sealed class FakeAiAgent(params SecondaryVerdict[] verdictSequence) : IAiAgent
     {
         private int _callIndex;
         public int SessionsCreated { get; private set; }
@@ -100,16 +116,41 @@ public sealed class TwoEyesPassServiceTests
         public Task<IAiSession> OpenSessionAsync(AiSessionOptions? options = null, CancellationToken cancellationToken = default)
         {
             SessionsCreated++;
-            var verdict = verdictSequence.Length == 0 ? "Approved"
+            var verdict = verdictSequence.Length == 0 ? SecondaryVerdict.Approved
                 : verdictSequence[Math.Min(_callIndex++, verdictSequence.Length - 1)];
-            return Task.FromResult<IAiSession>(new FakeAiSession(verdict));
+            return Task.FromResult<IAiSession>(new FakeAiSession(verdict, options));
         }
     }
 
-    private sealed class FakeAiSession(string verdict) : IAiSession
+    private sealed class FakeAiSession(SecondaryVerdict verdict, AiSessionOptions? options) : IAiSession
     {
         public Task<string> ExecuteAsync(string prompt, CancellationToken cancellationToken = default)
-            => Task.FromResult($"{{\"verdict\":\"{verdict}\"}}");
+        {
+            var sink = options?.CapabilityTools?.OfType<CodeReviewResultSinkMcpTools>().FirstOrDefault();
+            sink?.RecordSecondaryVerdict(verdict);
+            return Task.FromResult(string.Empty);
+        }
+
+        public Task CompactAsync(string focusDescription, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    /// <summary>Simulates a model that makes no tool call (no sink recording).</summary>
+    private sealed class NoSinkFakeAiAgent : IAiAgent
+    {
+        public Task<IAiSession> OpenSessionAsync(AiSessionOptions? options = null, CancellationToken cancellationToken = default)
+            => Task.FromResult<IAiSession>(new NoSinkFakeAiSession());
+    }
+
+    private sealed class NoSinkFakeAiSession : IAiSession
+    {
+        public Task<string> ExecuteAsync(string prompt, CancellationToken cancellationToken = default)
+            => Task.FromResult(string.Empty);
+
+        public Task CompactAsync(string focusDescription, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }

@@ -1,4 +1,5 @@
 using Auxilia.CodeReview.Workflow.Findings;
+using Auxilia.CodeReview.Workflow.Mcp;
 using Auxilia.CodeReview.Workflow.PrimaryReview;
 using Auxilia.CodeReview.Workflow.Verdicts;
 using Auxilia.Workflows.AiAgent;
@@ -46,7 +47,7 @@ public sealed class PrimaryReviewOrchestratorTests
     {
         var verdictMap = new VerdictMap();
         var orchestrator = BuildOrchestrator(
-            new FakeAiAgent("Reviewed"),
+            new FakeAiAgent(FileVerdict.Reviewed),
             verdictMap: verdictMap);
 
         var context = BuildContext(MakeFile("a.cs"), MakeFile("b.cs"), MakeFile("c.cs"));
@@ -60,7 +61,7 @@ public sealed class PrimaryReviewOrchestratorTests
     {
         var verdictMap = new VerdictMap();
         var orchestrator = BuildOrchestrator(
-            new FakeAiAgent("Skipped"),
+            new FakeAiAgent(FileVerdict.Skipped),
             verdictMap: verdictMap);
 
         var context = BuildContext(MakeFile("critical.cs", FileCriticality.Critical));
@@ -74,7 +75,7 @@ public sealed class PrimaryReviewOrchestratorTests
     {
         var verdictMap = new VerdictMap();
         var orchestrator = BuildOrchestrator(
-            new FakeAiAgent("Skipped"),
+            new FakeAiAgent(FileVerdict.Skipped),
             verdictMap: verdictMap);
 
         var context = BuildContext(MakeFile("normal.cs", FileCriticality.Normal));
@@ -88,7 +89,7 @@ public sealed class PrimaryReviewOrchestratorTests
     {
         var store = new StagedFindingsStore();
         var orchestrator = BuildOrchestrator(
-            new FakeAiAgent("Reviewed", oneFinding: true),
+            new FakeAiAgent(FileVerdict.Reviewed, oneFinding: true),
             store: store);
 
         var context = BuildContext(MakeFile("foo.cs"));
@@ -108,38 +109,93 @@ public sealed class PrimaryReviewOrchestratorTests
             TokenLimitThreshold = 10,   // 10 tokens
             CompactionTriggerFraction = 1.0  // trigger at 100% of limit
         };
-        var orchestrator = BuildOrchestrator(
-            new FakeAiAgent("Reviewed"),
-            verdictMap: verdictMap,
-            opts: compactionOpts);
+        var agent = new FakeAiAgent(FileVerdict.Reviewed);
+        var orchestrator = BuildOrchestrator(agent, verdictMap: verdictMap, opts: compactionOpts);
 
         var context = BuildContext(
             MakeFile("a.cs"), MakeFile("b.cs"), MakeFile("c.cs"), MakeFile("d.cs"), MakeFile("e.cs"));
         await orchestrator.RunAsync(context);
 
         Assert.That(verdictMap.AsReadOnly().Count, Is.EqualTo(5));
+        Assert.That(agent.OpenSessionCallCount, Is.EqualTo(1),
+            "Blueprint/37 in-session model: only one session is opened per RunAsync call");
+    }
+
+    [Test]
+    public async Task RunAsync_NoToolCall_DefaultsToReviewedWithNoFindings()
+    {
+        var store = new StagedFindingsStore();
+        var verdictMap = new VerdictMap();
+        var orchestrator = BuildOrchestrator(
+            new FakeAiAgent(FileVerdict.Reviewed, skipSink: true),
+            store: store,
+            verdictMap: verdictMap);
+
+        var context = BuildContext(MakeFile("a.cs"), MakeFile("b.cs"));
+        await orchestrator.RunAsync(context);
+
+        Assert.That(verdictMap.AsReadOnly().Count, Is.EqualTo(2));
+        Assert.That(verdictMap.AsReadOnly().Values.All(v => v.Verdict == FileVerdict.Reviewed), Is.True,
+            "Absent tool calls default to FileVerdict.Reviewed");
+        Assert.That(store.Snapshot(), Is.Empty,
+            "No findings should be staged when tool call is absent");
+    }
+
+    [Test]
+    public async Task RunAsync_OpenSessionThrows_ExceptionPropagatesAndNotRetried()
+    {
+        var agent = new ThrowingOpenSessionAiAgent();
+        var orchestrator = BuildOrchestrator(agent);
+        var context = BuildContext(MakeFile("a.cs"));
+
+        Assert.ThrowsAsync<InvalidOperationException>(() => orchestrator.RunAsync(context));
+        Assert.That(agent.OpenSessionCallCount, Is.EqualTo(1), "must not retry");
     }
 
     // ---- Fake helpers ----
 
-    private sealed class FakeAiAgent(string verdict, bool oneFinding = false) : IAiAgent
+    private sealed class ThrowingOpenSessionAiAgent : IAiAgent
     {
+        public int OpenSessionCallCount { get; private set; }
+
         public Task<IAiSession> OpenSessionAsync(AiSessionOptions? options = null, CancellationToken cancellationToken = default)
-            => Task.FromResult<IAiSession>(new FakeAiSession(verdict, oneFinding));
+        {
+            OpenSessionCallCount++;
+            throw new InvalidOperationException("simulated transient failure");
+        }
     }
 
-    private sealed class FakeAiSession(string verdict, bool oneFinding) : IAiSession
+    private sealed class FakeAiAgent(FileVerdict verdict, bool oneFinding = false, bool skipSink = false) : IAiAgent
+    {
+        public int OpenSessionCallCount { get; private set; }
+
+        public Task<IAiSession> OpenSessionAsync(AiSessionOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            OpenSessionCallCount++;
+            return Task.FromResult<IAiSession>(new FakeAiSession(verdict, oneFinding, options, skipSink));
+        }
+    }
+
+    private sealed class FakeAiSession(FileVerdict verdict, bool oneFinding, AiSessionOptions? options, bool skipSink = false) : IAiSession
     {
         public Task<string> ExecuteAsync(string prompt, CancellationToken cancellationToken = default)
         {
-            string json;
-            if (oneFinding)
-                json = $"{{\"verdict\":\"{verdict}\",\"findings\":[{{\"lineStart\":1,\"lineEnd\":2,\"severity\":\"Info\",\"category\":\"Style\",\"message\":\"test\",\"suggestion\":null}}]}}";
-            else
-                json = $"{{\"verdict\":\"{verdict}\",\"findings\":[]}}";
-            return Task.FromResult(json);
+            if (!skipSink)
+            {
+                var sink = options?.CapabilityTools?.OfType<CodeReviewResultSinkMcpTools>().FirstOrDefault();
+                if (sink is not null)
+                {
+                    if (oneFinding)
+                        sink.RecordFinding("finding.cs", 1, 2, FindingSeverity.Info, "Style", "test", null);
+                    sink.RecordFileVerdict(verdict);
+                }
+            }
+            return Task.FromResult(string.Empty);
         }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+        public Task CompactAsync(string focusDescription, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 }

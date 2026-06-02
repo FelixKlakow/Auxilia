@@ -20,7 +20,8 @@ public sealed class CriticalFilesTests : ScenarioTestBase
                 ["src/Auth.critical.cs"] = [Hunk("src/Auth.critical.cs")],
             });
 
-        var primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[SkippedTurn()]]));
+        FakeAiAgent? primaryAi = null;
+        primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[SkippedTurn(() => primaryAi)]]));
 
         var registry = new CodeReviewFakeRegistry(
             new FakeSourceControlAccess(),
@@ -50,7 +51,8 @@ public sealed class CriticalFilesTests : ScenarioTestBase
                 ["src/Auth.critical.cs"] = [Hunk("src/Auth.critical.cs")],
             });
 
-        var primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn()]]));
+        FakeAiAgent? primaryAi = null;
+        primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn(() => primaryAi)]]));
 
         var registry = new CodeReviewFakeRegistry(
             new FakeSourceControlAccess(),
@@ -79,7 +81,8 @@ public sealed class CriticalFilesTests : ScenarioTestBase
                 ["src/Utils.cs"] = [Hunk("src/Utils.cs")],
             });
 
-        var primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[SkippedTurn()]]));
+        FakeAiAgent? primaryAi = null;
+        primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[SkippedTurn(() => primaryAi)]]));
 
         var registry = new CodeReviewFakeRegistry(
             new FakeSourceControlAccess(),

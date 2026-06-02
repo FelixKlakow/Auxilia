@@ -1,4 +1,7 @@
+using System.IO.Compression;
 using Auxilia.Messaging;
+using Auxilia.SteeringInstance.Workflows.Storage;
+using Auxilia.Workflows.Crypto;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.Options;
 
@@ -6,53 +9,140 @@ namespace Auxilia.SteeringInstance.Workflows;
 
 /// <summary>
 /// Subscribes to the <c>workflow.run-commands</c> queue. For each
-/// <see cref="RunWorkflowCommand"/> it builds a <see cref="WorkflowLaunchRequest"/>
-/// (injecting RabbitMQ connection details and the command's context as environment
-/// variables) and delegates to <see cref="IWorkflowLauncher"/>.
-///
-/// The dispatcher does not wait for the workflow to finish — lifecycle tracking is
-/// handled downstream by <see cref="WorkflowRegistrationHandler"/> and
-/// <see cref="WorkflowAnnouncementHandler"/>.
+/// <see cref="RunWorkflowCommand"/> it:
+/// <list type="number">
+/// <item>Downloads the workflow ZIP from <see cref="RunWorkflowCommand.WorkflowPackageUri"/>.</item>
+/// <item>Verifies the package signature via <see cref="IWorkflowPackageVerifier"/>.</item>
+/// <item>Extracts the ZIP to a temporary directory.</item>
+/// <item>Registers the extracted path in <see cref="PendingWorkflowPackageStore"/> for the
+///     announcement handler to consume.</item>
+/// <item>Launches the workflow container via <see cref="IWorkflowLauncher"/>.</item>
+/// </list>
 /// </summary>
 public sealed class WorkflowDispatcher(
     IMessageBusClient messageBus,
     IWorkflowLauncher launcher,
     IOptions<DockerWorkflowLauncherSettings> launcherSettings,
+    IOptions<WorkflowDispatcherSettings> dispatcherSettings,
+    IHttpClientFactory httpClientFactory,
+    IWorkflowPackageVerifier packageVerifier,
+    PendingWorkflowPackageStore pendingPackages,
+    SlotConfigurationStore slotStore,
+    SlotProviderRegistry providerRegistry,
     ILogger<WorkflowDispatcher> logger)
 {
     private IAsyncDisposable? _subscription;
 
     public async Task StartAsync(CancellationToken ct = default)
     {
-        await messageBus.DeclareQueueAsync("workflow.run-commands", ct);
+        var queueName = dispatcherSettings.Value.CommandQueueName;
+        await messageBus.DeclareQueueAsync(queueName, ct);
         _subscription = await messageBus.SubscribeAsync<RunWorkflowCommand>(
-            "workflow.run-commands", HandleAsync, ct);
+            queueName, HandleAsync, ct);
 
-        logger.LogInformation("WorkflowDispatcher started — listening on workflow.run-commands.");
+        logger.LogInformation("WorkflowDispatcher started — listening on {QueueName}.", queueName);
     }
 
     private async Task HandleAsync(RunWorkflowCommand command, CancellationToken ct)
     {
         logger.LogInformation(
-            "Received RunWorkflowCommand. CommandId={CommandId} WorkflowType={WorkflowType} Image={Image}",
-            command.CommandId, command.WorkflowType, command.WorkflowImage);
+            "Received RunWorkflowCommand. CommandId={CommandId} WorkflowType={WorkflowType} PackageUri={PackageUri}",
+            command.CommandId, command.WorkflowType, command.WorkflowPackageUri);
 
         var settings = launcherSettings.Value;
 
+        // 5. Build env vars
         var env = new Dictionary<string, string>
         {
-            ["RabbitMq__Host"]     = settings.RabbitMqHost,
-            ["RabbitMq__Port"]     = settings.RabbitMqPort.ToString(),
-            ["RabbitMq__UserName"] = settings.RabbitMqUserName,
-            ["RabbitMq__Password"] = settings.RabbitMqPassword,
+            ["RabbitMq__Host"]               = settings.RabbitMqHost,
+            ["RabbitMq__Port"]               = settings.RabbitMqPort.ToString(),
+            ["RabbitMq__UserName"]           = settings.RabbitMqUserName,
+            ["RabbitMq__Password"]           = settings.RabbitMqPassword,
+            ["Workflow__RegistrationQueue"]  = dispatcherSettings.Value.RegistrationQueueName,
         };
 
-        // Forward caller-supplied context as WORKFLOW_CONTEXT__<KEY> env vars so
-        // the workflow binary can read them without coupling to a specific message shape.
         foreach (var (key, value) in command.Context)
             env[$"WORKFLOW_CONTEXT__{key.ToUpperInvariant()}"] = value;
 
-        await launcher.LaunchAsync(new WorkflowLaunchRequest(command.WorkflowImage, env), ct);
+        // Merge extra environment variables (e.g. AUXILIA_DEVELOPER_MODE)
+        if (settings.ExtraEnvironmentVariables is not null)
+            foreach (var (key, value) in settings.ExtraEnvironmentVariables)
+                env[key] = value;
+
+        // 5b. Resolve slot plugin files
+        var pluginFiles = new List<SlotPluginFile>();
+        var providerTypes = slotStore.GetConfigurations(command.WorkflowType)
+            .Select(c => c.ProviderType)
+            .Distinct();
+
+        foreach (var providerType in providerTypes)
+        {
+            if (!providerRegistry.TryGet(providerType, out var dllPath))
+            {
+                logger.LogWarning(
+                    "No SlotPackages entry for ProviderType={ProviderType} (WorkflowType={WorkflowType}). Skipping.",
+                    providerType, command.WorkflowType);
+                continue;
+            }
+
+            var manifestPath = Path.ChangeExtension(dllPath, null) + ".manifest.json";
+            pluginFiles.Add(new SlotPluginFile(dllPath, manifestPath));
+        }
+
+        if (pluginFiles.Count > 0)
+            logger.LogInformation(
+                "Resolved {Count} slot plugin file(s) for {WorkflowType}: {ProviderTypes}",
+                pluginFiles.Count, command.WorkflowType,
+                string.Join(", ", pluginFiles.Select(f => f.DllPath)));
+
+        // docker:// URI — skip download/verify/extract; use baked image
+        if (command.WorkflowPackageUri.StartsWith("docker://", StringComparison.OrdinalIgnoreCase))
+        {
+            var imageName = command.WorkflowPackageUri.Substring("docker://".Length);
+            await launcher.LaunchAsync(
+                new WorkflowLaunchRequest(string.Empty, env, pluginFiles) { DockerImageUri = imageName },
+                ct);
+            return;
+        }
+
+        // 1. Download the package
+        var http = httpClientFactory.CreateClient("workflow-packages");
+        byte[] packageBytes;
+        try
+        {
+            packageBytes = await http.GetByteArrayAsync(command.WorkflowPackageUri, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Failed to download workflow package from {PackageUri}.", command.WorkflowPackageUri);
+            return;
+        }
+
+        // 2. Verify the package
+        if (!packageVerifier.Verify(new MemoryStream(packageBytes)))
+        {
+            logger.LogError(
+                "Workflow package verification failed for {WorkflowType}. Aborting launch.",
+                command.WorkflowType);
+            return;
+        }
+
+        // 3. Extract to a temp directory
+        var extractedPath = Path.Combine(Path.GetTempPath(), $"auxilia-wf-{Guid.NewGuid()}");
+        Directory.CreateDirectory(extractedPath);
+        using var archive = new ZipArchive(new MemoryStream(packageBytes), ZipArchiveMode.Read);
+        archive.ExtractToDirectory(extractedPath);
+
+        logger.LogInformation(
+            "Workflow package extracted. WorkflowType={WorkflowType} Path={Path}",
+            command.WorkflowType, extractedPath);
+
+        // 4. Register for the announcement handler
+        pendingPackages.Store(command.WorkflowType, extractedPath);
+
+        // 6. Launch
+        await launcher.LaunchAsync(new WorkflowLaunchRequest(extractedPath, env, pluginFiles), ct);
     }
 
     public async ValueTask StopAsync()
@@ -61,5 +151,4 @@ public sealed class WorkflowDispatcher(
             await _subscription.DisposeAsync();
     }
 }
-
 

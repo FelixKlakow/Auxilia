@@ -19,6 +19,10 @@ public sealed class PolicyGuardedPullRequestAccess : IPullRequestAccess
         _slotName = slotName;
     }
 
+    public string PrIdentifier => _inner.PrIdentifier;
+    public string BaseRef => _inner.BaseRef;
+    public string HeadRef => _inner.HeadRef;
+
     public Task<IReadOnlyList<ChangedFile>> GetChangedFilesAsync(CancellationToken cancellationToken = default)
     {
         if (!_policy.IsAllowed(PullRequestOperation.GetChangedFiles))

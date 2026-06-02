@@ -1,3 +1,4 @@
+using Auxilia.ImplementationWorkflow;
 using Auxilia.ImplementationWorkflow.Signals;
 using Auxilia.ImplementationWorkflow.Tests.Fakes;
 using Auxilia.Workflows.Messaging.Messages;
@@ -11,8 +12,9 @@ public sealed class ReviewerFlagsIssuesTests : ScenarioTestBase
     [Test]
     public async Task AgentSucceeds_ReviewerEnabled_FlagsIssues_EmitsBothSignalsInOrder()
     {
-        const string reviewJson = """[{"description":"Potential null reference","filePath":"src/Handler.cs","severity":"warning"}]""";
-        var reviewerAgent = DefaultReviewerAgent(reviewJson);
+        var reviewerAgent = DefaultReviewerAgent([
+            new ReviewNote("Potential null reference", "src/Handler.cs", ReviewNoteSeverity.Warning)
+        ]);
 
         var registry = DefaultRegistry(
             reviewerAgent: reviewerAgent,

@@ -62,9 +62,10 @@ public sealed class AgentOrchestrator(
         }
         finally
         {
-            await scmTools.StopAsync(CancellationToken.None);
-            await testRunnerTools.StopAsync(CancellationToken.None);
-            await taskSourceTools.StopAsync(CancellationToken.None);
+            using var stopCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await scmTools.StopAsync(stopCts.Token);
+            await testRunnerTools.StopAsync(stopCts.Token);
+            await taskSourceTools.StopAsync(stopCts.Token);
         }
     }
 

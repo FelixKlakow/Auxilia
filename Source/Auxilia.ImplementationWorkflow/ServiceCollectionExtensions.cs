@@ -1,4 +1,3 @@
-using Auxilia.ImplementationWorkflow.Branch;
 using Auxilia.ImplementationWorkflow.Context;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -11,13 +10,7 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services,
         string? outputDirectory = null)
     {
-        services.TryAddSingleton<ImplementationWorkflowConfiguration>(sp =>
-        {
-            var config = new ImplementationWorkflowConfiguration();
-            return outputDirectory is not null
-                ? config with { OutputDirectory = outputDirectory }
-                : config;
-        });
+        services.TryAddSingleton(new ImplementationWorkflowConfiguration { OutputDirectory = outputDirectory ?? "output" });
 
         services.TryAddSingleton<WorkItemTrigger>(_ =>
             throw new InvalidOperationException("WorkItemTrigger must be registered before calling AddImplementationWorkflow."));
@@ -25,10 +18,8 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<BranchNamingService>();
         services.TryAddSingleton<InstructionsFileLocator>();
         services.TryAddSingleton<ContextAssembler>();
-        services.TryAddSingleton<BranchSetupService>();
         services.TryAddSingleton<AgentOrchestrator>();
         services.TryAddSingleton<ReviewerOrchestrator>();
-        services.TryAddSingleton<PullRequestService>();
         services.TryAddSingleton<WriteBackService>();
         services.TryAddSingleton<ImplementationSummaryWriter>();
         services.TryAddSingleton<CompletionSignalEmitter>();

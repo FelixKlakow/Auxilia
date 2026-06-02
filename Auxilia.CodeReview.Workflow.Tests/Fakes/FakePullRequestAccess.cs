@@ -15,14 +15,24 @@ public sealed class FakePullRequestAccess : IPullRequestAccess
         IReadOnlyDictionary<string, IReadOnlyList<DiffHunk>>? diffHunks = null,
         IReadOnlyList<ReviewComment>? comments = null,
         IReadOnlyList<WorkItemReference>? linkedWorkItems = null,
-        Exception? throwOnPost = null)
+        Exception? throwOnPost = null,
+        string prIdentifier = "PR-1",
+        string baseRef = "main",
+        string headRef = "feature/test")
     {
         _changedFiles = changedFiles ?? [];
         _diffHunks = diffHunks ?? new Dictionary<string, IReadOnlyList<DiffHunk>>();
         _comments = comments ?? [];
         _linkedWorkItems = linkedWorkItems ?? [];
         _throwOnPost = throwOnPost;
+        PrIdentifier = prIdentifier;
+        BaseRef = baseRef;
+        HeadRef = headRef;
     }
+
+    public string PrIdentifier { get; }
+    public string BaseRef { get; }
+    public string HeadRef { get; }
 
     public List<(string Body, string? FilePath, int? LineNumber)> PostedComments { get; } = [];
 

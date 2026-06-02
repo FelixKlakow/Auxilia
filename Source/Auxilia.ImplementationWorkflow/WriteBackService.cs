@@ -34,7 +34,7 @@ public sealed class WriteBackService(
 
         try
         {
-            await taskSource.UpdateStatusAsync(context.WorkItem.Id, "InReview", cancellationToken);
+            await taskSource.UpdateStatusAsync(context.WorkItem.Id, WorkflowItemStatus.InReview, cancellationToken);
         }
         catch (Exception ex)
         {

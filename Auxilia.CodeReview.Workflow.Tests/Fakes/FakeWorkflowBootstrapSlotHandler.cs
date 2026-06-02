@@ -36,15 +36,15 @@ public sealed class FakeWorkflowBootstrapSlotHandler : ISlotHandler
     {
         // Pre-register test-specific overrides BEFORE AddCodeReviewWorkflow (which uses TryAdd)
         if (_twoEyes != null)
-            services.AddSingleton(_twoEyes);
+            services.AddScoped(_ => _twoEyes);
         if (_writeBack != null)
-            services.AddSingleton(_writeBack);
+            services.AddScoped(_ => _writeBack);
 
-        services.Add(ServiceDescriptor.Singleton(typeof(WorkItemRetrievalFailureBehavior), (object)_failureBehavior));
-        services.AddSingleton(new CriticalityClassifier(_criticalPatterns ?? Array.Empty<string>()));
+        services.Add(new ServiceDescriptor(typeof(WorkItemRetrievalFailureBehavior), _ => _failureBehavior, ServiceLifetime.Scoped));
+        services.AddScoped(_ => new CriticalityClassifier(_criticalPatterns ?? Array.Empty<string>()));
 
         if (_compactionOptions != null)
-            services.AddSingleton<IOptions<ContextCompactionOptions>>(Options.Create(_compactionOptions));
+            services.AddScoped<IOptions<ContextCompactionOptions>>(_ => Options.Create(_compactionOptions));
 
         services.AddCodeReviewWorkflow(_outputDirectory);
     }

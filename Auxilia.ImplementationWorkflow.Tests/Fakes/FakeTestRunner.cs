@@ -10,7 +10,7 @@ public sealed class FakeTestRunner : ITestRunner
     public Task<TestRunResult> RunTestsAsync(TestRunRequest request, CancellationToken cancellationToken = default)
     {
         if (ThrowAsync)
-            throw new TaskCanceledException("Scripted async test runner failure.");
+            throw new InvalidOperationException("Scripted async test runner failure.");
 
         if (Results.Count == 0)
             return Task.FromResult(new TestRunResult(true, 0, 0, 0, 0, "No results scripted."));

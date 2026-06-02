@@ -23,8 +23,16 @@ public class WorkflowBuilderHandshakeTests
         bus.OnPublish = (topic, message) =>
         {
             if (topic == "workflow.announcements" && message is WorkflowAnnouncementMessage ann)
+            {
                 bus.DeliverAsync(ann.ResponseTopic,
-                    new WorkflowDirective(ann.WorkflowInstanceId, WorkflowDirectiveKind.EmitSchema));
+                    new WorkflowDirective(ann.WorkflowInstanceId, WorkflowDirectiveKind.Run));
+            }
+            else if (topic == "workflow-registration" && message is WorkflowRegistrationRequest req)
+            {
+                bus.DeliverAsync(req.ResponseTopic,
+                    new WorkflowConfigurationResponse(req.WorkflowInstanceId, false, "rejected",
+                        new Dictionary<string, EncryptedSlotConfiguration>()));
+            }
         };
 
         var builder = (WorkflowBuilder)WorkflowBuilder.Create("test-workflow")
@@ -42,7 +50,7 @@ public class WorkflowBuilderHandshakeTests
     }
 
     [Test]
-    public async Task Run_WhenEmitSchemaDirectiveReceived_PublishesSchemaMessageAndExits0()
+    public async Task Run_WhenUnrecognisedDirectiveReceived_LogsErrorAndExits1()
     {
         var bus = new RecordingBus();
         var mockExit = new Mock<IProcessExitService>();
@@ -52,7 +60,7 @@ public class WorkflowBuilderHandshakeTests
         {
             if (topic == "workflow.announcements" && message is WorkflowAnnouncementMessage ann)
                 bus.DeliverAsync(ann.ResponseTopic,
-                    new WorkflowDirective(ann.WorkflowInstanceId, WorkflowDirectiveKind.EmitSchema));
+                    new WorkflowDirective(ann.WorkflowInstanceId, (WorkflowDirectiveKind)99));
         };
 
         var builder = (WorkflowBuilder)WorkflowBuilder.Create("test-workflow");
@@ -60,11 +68,8 @@ public class WorkflowBuilderHandshakeTests
 
         await builder.Run([], context);
 
-        var schemaMessages = bus.Published("workflow.schema");
-        Assert.That(schemaMessages, Has.Count.EqualTo(1));
-        Assert.That(schemaMessages[0], Is.InstanceOf<WorkflowSchemaMessage>());
-        mockExit.Verify(e => e.Exit(0), Times.Once);
-        mockExit.Verify(e => e.Exit(1), Times.Never);
+        mockExit.Verify(e => e.Exit(1), Times.Once);
+        mockExit.Verify(e => e.Exit(0), Times.Never);
     }
 
     [Test]

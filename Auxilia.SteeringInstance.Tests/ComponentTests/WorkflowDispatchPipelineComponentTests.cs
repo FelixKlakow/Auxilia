@@ -1,12 +1,17 @@
+using System.IO.Compression;
+using System.Net;
 using System.Security.Cryptography;
+using System.Text.Json;
 using Auxilia.Messaging;
 using Auxilia.SteeringInstance.Workflows;
 using Auxilia.SteeringInstance.Workflows.Storage;
 using Auxilia.Workflows;
+using Auxilia.Workflows.Crypto;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Moq;
 
 namespace Auxilia.SteeringInstance.Tests.ComponentTests;
 
@@ -27,6 +32,35 @@ public class WorkflowDispatchPipelineComponentTests
     private FakeMessageBusClient _bus = null!;
     private FakeWorkflowLauncher _launcher = null!;
     private SlotConfigurationStore _slotStore = null!;
+    private SlotProviderRegistry _providerRegistry = null!;
+
+    private static byte[] CreateMinimalPackageZip(string workflowType = "my-workflow")
+    {
+        using var ms = new MemoryStream();
+        using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            var entry = zip.CreateEntry("package-manifest.json");
+            using var writer = new StreamWriter(entry.Open());
+            writer.Write(JsonSerializer.Serialize(new
+            {
+                files = Array.Empty<object>(),
+                signatureBase64 = "c2ln",
+                publicKeyBase64 = "a2V5",
+                executableRelativePath = "bin/my-workflow"
+            }));
+        }
+        return ms.ToArray();
+    }
+
+    private sealed class StubHttpMessageHandler(byte[] bytes) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(bytes)
+            });
+    }
 
     [SetUp]
     public async Task SetUp()
@@ -34,11 +68,23 @@ public class WorkflowDispatchPipelineComponentTests
         _bus = new FakeMessageBusClient();
         _launcher = new FakeWorkflowLauncher();
 
+        var packageZip = CreateMinimalPackageZip();
+        var httpClientFactory = new Mock<IHttpClientFactory>();
+        httpClientFactory
+            .Setup(f => f.CreateClient("workflow-packages"))
+            .Returns(new HttpClient(new StubHttpMessageHandler(packageZip)));
+
+        var developerMode = new Mock<IDeveloperModeProvider>();
+        developerMode.Setup(d => d.IsActive).Returns(true);
+
         _host = Host.CreateDefaultBuilder()
             .ConfigureServices(services =>
             {
                 services.AddSingleton<IMessageBusClient>(_bus);
                 services.AddSingleton<IWorkflowLauncher>(_launcher);
+                services.AddSingleton(httpClientFactory.Object);
+                services.AddSingleton(developerMode.Object);
+                services.AddSingleton<IWorkflowPackageVerifier, WorkflowPackageVerifier>();
 
                 // Launcher settings — internal network alias
                 services.Configure<DockerWorkflowLauncherSettings>(s =>
@@ -58,7 +104,11 @@ public class WorkflowDispatchPipelineComponentTests
                 });
 
                 services.AddSingleton<SlotConfigurationStore>();
+                services.AddSingleton<SlotProviderRegistry>();
+                services.AddSingleton<SignalHandlerStore>();
                 services.AddSingleton<WorkflowSchemaStore>();
+                services.AddSingleton<PendingWorkflowPackageStore>();
+                services.AddSingleton<WorkflowInstanceRegistry>();
                 services.AddSingleton<DirtyConfigurationDetector>();
                 services.AddSingleton<EnvironmentValidator>();
                 services.AddSingleton<ConfigurationResolver>();
@@ -69,6 +119,7 @@ public class WorkflowDispatchPipelineComponentTests
             .Build();
 
         _slotStore = _host.Services.GetRequiredService<SlotConfigurationStore>();
+        _providerRegistry = _host.Services.GetRequiredService<SlotProviderRegistry>();
 
         // Start all handlers (mirrors what Program.cs does)
         var regHandler   = _host.Services.GetRequiredService<WorkflowRegistrationHandler>();
@@ -89,10 +140,10 @@ public class WorkflowDispatchPipelineComponentTests
     // ------------------------------------------------------------------ Dispatcher tests
 
     [Test]
-    public async Task WhenRunCommandPublished_WorkflowLauncherIsCalledWithCorrectImage()
+    public async Task WhenRunCommandPublished_WorkflowLauncherIsCalledWithExtractedPath()
     {
         var command = new RunWorkflowCommand(
-            Guid.NewGuid(), "my-workflow", "auxilia-my-workflow:latest",
+            Guid.NewGuid(), "my-workflow", "https://example.com/my-workflow.zip",
             new Dictionary<string, string>());
 
         await _bus.SimulateReceivedAsync("workflow.run-commands", command);
@@ -101,14 +152,14 @@ public class WorkflowDispatchPipelineComponentTests
             () => _launcher.Calls.Count > 0, Timeout);
 
         Assert.That(launched, Is.True, "Launcher was not called within the timeout.");
-        Assert.That(_launcher.Calls[0].Image, Is.EqualTo("auxilia-my-workflow:latest"));
+        Assert.That(_launcher.Calls[0].ExtractedContentDirectory, Does.Contain("auxilia-wf-"));
     }
 
     [Test]
     public async Task WhenRunCommandPublished_LauncherReceivesRabbitMqEnvVars()
     {
         var command = new RunWorkflowCommand(
-            Guid.NewGuid(), "wf", "image:latest", new Dictionary<string, string>());
+            Guid.NewGuid(), "wf", "https://example.com/wf.zip", new Dictionary<string, string>());
 
         await _bus.SimulateReceivedAsync("workflow.run-commands", command);
 
@@ -125,7 +176,7 @@ public class WorkflowDispatchPipelineComponentTests
     public async Task WhenRunCommandPublished_ContextIsPropagatedAsEnvVars()
     {
         var command = new RunWorkflowCommand(
-            Guid.NewGuid(), "wf", "image:latest",
+            Guid.NewGuid(), "wf", "https://example.com/wf.zip",
             new Dictionary<string, string> { ["REPO_URL"] = "https://example.com/repo" });
 
         await _bus.SimulateReceivedAsync("workflow.run-commands", command);
@@ -266,5 +317,28 @@ public class WorkflowDispatchPipelineComponentTests
         using var rsa = RSA.Create(2048);
         return Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
     }
-}
 
+    // ------------------------------------------------------------------ SlotPluginFiles component test
+
+    [Test]
+    public async Task WhenRunCommandPublished_AndSlotPackagesSeeded_LauncherReceivesSlotPluginFiles()
+    {
+        _slotStore.UpsertConfiguration("my-workflow",
+            new StoredSlotConfiguration("slot1", "MyProvider",
+                new Dictionary<string, string>(), ConfigurationStatus.Valid));
+        _providerRegistry.Upsert("MyProvider", "/fake/path.slothandler.dll");
+
+        var command = new RunWorkflowCommand(
+            Guid.NewGuid(), "my-workflow", "https://example.com/my-workflow.zip",
+            new Dictionary<string, string>());
+
+        await _bus.SimulateReceivedAsync("workflow.run-commands", command);
+
+        var launched = await _bus.WaitForConditionAsync(
+            () => _launcher.Calls.Count > 0, Timeout);
+
+        Assert.That(launched, Is.True, "Launcher was not called within the timeout.");
+        Assert.That(_launcher.Calls[0].SlotPluginFiles, Has.Count.EqualTo(1));
+        Assert.That(_launcher.Calls[0].SlotPluginFiles[0].DllPath, Is.EqualTo("/fake/path.slothandler.dll"));
+    }
+}

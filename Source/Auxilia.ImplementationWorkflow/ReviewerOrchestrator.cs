@@ -1,6 +1,5 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Auxilia.ImplementationWorkflow.Context;
+using Auxilia.ImplementationWorkflow.Mcp;
 using Auxilia.Workflows;
 using Auxilia.Workflows.AiAgent;
 using Auxilia.Workflows.Mcp;
@@ -30,29 +29,33 @@ public sealed class ReviewerOrchestrator(
 
         var scmTools = new SourceControlAccessMcpTools("repository", repository, loggerFactory);
         var prTools = new PullRequestAccessMcpTools("pull-request", pullRequestAccess, loggerFactory);
+        var sinkTools = new ImplementationReviewResultSinkMcpTools("review-sink", loggerFactory);
 
         try
         {
             await scmTools.StartAsync(new HttpMcpTransportConfig("http://localhost:0/mcp", "repository"), cancellationToken);
             await prTools.StartAsync(new HttpMcpTransportConfig("http://localhost:0/mcp", "pull-request"), cancellationToken);
+            await sinkTools.StartAsync(new HttpMcpTransportConfig("http://localhost:0/mcp", "review-sink"), cancellationToken);
 
             var options = new AiSessionOptions
             {
-                SystemPrompt = "You are an expert code reviewer. Review the implementation for quality, correctness, and adherence to acceptance criteria. Return a JSON array of issues found.",
-                CapabilityTools = [scmTools, prTools]
+                SystemPrompt = "You are an expert code reviewer. Review the implementation for quality, correctness, and adherence to acceptance criteria.",
+                CapabilityTools = [scmTools, prTools, sinkTools]
             };
 
             await using var session = await reviewerAgent.OpenSessionAsync(options, cancellationToken);
 
             var prompt = BuildReviewerPrompt(context);
-            var response = await session.ExecuteAsync(prompt, cancellationToken);
+            await session.ExecuteAsync(prompt, cancellationToken);
 
-            return ParseReviewNotes(response, loggerFactory?.CreateLogger<ReviewerOrchestrator>());
+            return sinkTools.DrainNotes();
         }
         finally
         {
-            await scmTools.StopAsync(CancellationToken.None);
-            await prTools.StopAsync(CancellationToken.None);
+            using var stopCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await scmTools.StopAsync(stopCts.Token);
+            await prTools.StopAsync(stopCts.Token);
+            await sinkTools.StopAsync(stopCts.Token);
         }
     }
 
@@ -69,45 +72,7 @@ public sealed class ReviewerOrchestrator(
             **Description:** {desc}
 
             Please review the implementation on the current branch. Use the repository tools to read changed files.
-            Return a JSON array of issues found. Each issue should have:
-            - "description": string — describe the issue
-            - "filePath": string or null — file path if applicable
-            - "severity": string — one of: "info", "warning", "error"
-
-            If there are no issues, return an empty array: []
-
-            Respond with only the JSON array, no additional text.
+            Use the provided review-note tools to record any issues you find.
             """;
     }
-
-    private static IReadOnlyList<ReviewNote> ParseReviewNotes(string response, ILogger? logger)
-    {
-        try
-        {
-            var trimmed = response.Trim();
-            var start = trimmed.IndexOf('[');
-            var end = trimmed.LastIndexOf(']');
-            if (start < 0 || end < 0)
-                return [];
-
-            var json = trimmed[start..(end + 1)];
-            var dtos = JsonSerializer.Deserialize<List<ReviewNoteDto>>(json, _jsonOptions);
-            if (dtos is null)
-                return [];
-
-            return dtos.Select(d => new ReviewNote(d.Description, d.FilePath, d.Severity)).ToList();
-        }
-        catch (JsonException ex)
-        {
-            logger?.LogWarning(ex, "Failed to parse reviewer JSON response; treating as no issues.");
-            return [];
-        }
-    }
-
-    private static readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
-
-    private sealed record ReviewNoteDto(
-        [property: JsonPropertyName("description")] string Description,
-        [property: JsonPropertyName("filePath")] string? FilePath,
-        [property: JsonPropertyName("severity")] string Severity);
 }

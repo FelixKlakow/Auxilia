@@ -16,12 +16,12 @@ public sealed class WorkflowBootstrapper(
     {
         foreach (var (slotName, encryptedSlot) in response.Slots)
         {
-            var definition = slotDefinitions.FirstOrDefault(d => d.SlotName == slotName)
-                ?? throw new InvalidOperationException($"No SlotDefinition found for slot '{slotName}'.");
+            var definition = slotDefinitions.FirstOrDefault(d => d.SlotName == slotName);
+            var serviceType = definition?.ServiceType ?? typeof(object);
 
             var config = SlotConfigurationCrypto.Decrypt(encryptedSlot, keyPair);
             var handler = resolver.Resolve(config.ProviderType);
-            handler.Register(services, slotName, definition.ServiceType, config);
+            handler.Register(services, slotName, serviceType, config);
         }
 
         var contextId = instanceId == default ? Guid.NewGuid() : instanceId;

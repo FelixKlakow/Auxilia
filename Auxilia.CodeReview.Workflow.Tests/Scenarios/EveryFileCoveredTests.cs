@@ -47,7 +47,8 @@ public sealed class EveryFileCoveredTests : ScenarioTestBase
                 ["src/Generated.cs"] = [Hunk("src/Generated.cs")],
             });
 
-        var primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[SkippedTurn()]]));
+        FakeAiAgent? primaryAi = null;
+        primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[SkippedTurn(() => primaryAi)]]));
 
         var registry = new CodeReviewFakeRegistry(
             new FakeSourceControlAccess(),
@@ -83,7 +84,7 @@ public sealed class EveryFileCoveredTests : ScenarioTestBase
 
         var primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>(
         [
-            [ReviewedTurn("src/File1.cs")], // only matches the first file's review prompt
+            [ReviewedTurn(substringOverride: "src/File1.cs")], // only matches the first file's review prompt
         ]));
 
         var registry = new CodeReviewFakeRegistry(

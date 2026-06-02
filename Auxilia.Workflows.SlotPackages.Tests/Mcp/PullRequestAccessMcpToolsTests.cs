@@ -23,7 +23,7 @@ public class PullRequestAccessMcpToolsTests
     }
 
     [Test]
-    public async Task ToolNames_AfterStart_ContainsAllFivePrefixedNames()
+    public async Task ToolNames_AfterStart_ContainsAllSixPrefixedNames()
     {
         var tools = new PullRequestAccessMcpTools(SlotName, new StubPullRequestAccess());
         await tools.StartAsync(new HttpMcpTransportConfig("http://localhost:0", "test"));
@@ -35,7 +35,8 @@ public class PullRequestAccessMcpToolsTests
                 SlotMcpPrefix.Format(SlotName, "get_diff_hunks"),
                 SlotMcpPrefix.Format(SlotName, "get_comments"),
                 SlotMcpPrefix.Format(SlotName, "get_linked_work_items"),
-                SlotMcpPrefix.Format(SlotName, "post_comment")
+                SlotMcpPrefix.Format(SlotName, "post_comment"),
+                SlotMcpPrefix.Format(SlotName, "open_pull_request")
             }));
         }
         finally

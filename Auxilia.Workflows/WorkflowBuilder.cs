@@ -134,19 +134,14 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
 
         switch (directive.Directive)
         {
-            case WorkflowDirectiveKind.EmitSchema:
-                await context.MessageBus.PublishAsync("workflow.schema",
-                    new WorkflowSchemaMessage(instanceId, BuildSchema()));
-                context.ExitService.Exit(0);
-                return;
-
             case WorkflowDirectiveKind.Run:
             {
                 var configTcs = new TaskCompletionSource<WorkflowConfigurationResponse>();
                 var configSub = await context.MessageBus.SubscribeAsync<WorkflowConfigurationResponse>(
                     responseTopic, (msg, _) => { configTcs.TrySetResult(msg); return Task.CompletedTask; });
 
-                await context.MessageBus.PublishAsync("workflow-registration",
+                await context.MessageBus.PublishAsync(
+                    System.Environment.GetEnvironmentVariable("Workflow__RegistrationQueue") ?? "workflow-registration",
                     new WorkflowRegistrationRequest(instanceId, BuildManifest(instanceId),
                         keyPair.PublicKeyBase64, responseTopic));
 
@@ -181,7 +176,9 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 {
                     var services = new ServiceCollection();
                     services.AddSingleton(context.MessageBus);
-                    if (TestContext == null)
+                    if (TestSlotHandlerResolver is { } testResolver)
+                        new WorkflowBootstrapper(response, keyPair, testResolver, _slots.AsReadOnly(), instanceId).Apply(services);
+                    else if (TestContext == null)
                     {
                         var resolver = new SlotHandlerResolver();
                         var devMode = new EnvironmentDeveloperModeProvider();
@@ -193,8 +190,6 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                         loader.Load(plugins);
                         new WorkflowBootstrapper(response, keyPair, resolver, _slots.AsReadOnly(), instanceId).Apply(services);
                     }
-                    else if (TestSlotHandlerResolver is { } testResolver)
-                        new WorkflowBootstrapper(response, keyPair, testResolver, _slots.AsReadOnly(), instanceId).Apply(services);
 
                     _configureServices?.Invoke(services);
 
@@ -236,7 +231,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
         }
     }
 
-    internal WorkflowSchema BuildSchema()
+    public WorkflowSchema BuildSchema()
         => new(_workflowName, _slots.AsReadOnly(), _environmentRequirements.AsReadOnly())
         {
             Version = _metadata.Version,
