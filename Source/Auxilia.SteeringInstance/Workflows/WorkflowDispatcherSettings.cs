@@ -51,6 +51,17 @@ public sealed class WorkflowDispatcherSettings
         Path.Combine(Path.GetTempPath(), "auxilia-run-output");
 
     /// <summary>
+    /// Host path of the directory mounted at <see cref="RunOutputDirectory"/> when the
+    /// Steering Instance itself runs in a container. Bind-mount sources are resolved by the
+    /// Docker daemon on the HOST, so a container-local <see cref="RunOutputDirectory"/> is
+    /// invisible to it. When set, the dispatcher keeps creating and reading
+    /// {RunOutputDirectory}/{id} (its own view) but hands {RunOutputHostDirectory}/{id}
+    /// (the daemon's view of the same physical directory) to the launcher as the bind source.
+    /// Null (default) means <see cref="RunOutputDirectory"/> is already a host path.
+    /// </summary>
+    public string? RunOutputHostDirectory { get; set; }
+
+    /// <summary>
     /// Directory under which each run gets its repository workspace ({dir}/{instanceId:N}).
     /// Mounted into workflow containers at /workspace (ARCHITECTURE §9). Must be a path the
     /// Docker daemon can bind-mount (host path) in container mode.

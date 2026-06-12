@@ -87,6 +87,28 @@ public class EmailAdapterSystemTests
         });
     }
 
+    [Test]
+    [CancelAfter(60_000)]
+    public async Task SendReply_WithoutOriginalMessageId_StillArrives(
+        CancellationToken cancellationToken)
+    {
+        // The email work-items slot replies without threading information (empty
+        // In-Reply-To id) — MimeKit must not reject the empty Message-Id.
+        const string recipient = "threadless@localhost";
+        const string subject = "Re: Please review PR-7";
+
+        await _client.SendReplyAsync(
+            recipient, subject, "Looks good.", inReplyToMessageId: string.Empty, cancellationToken);
+
+        var reply = await WaitForMessageAsync(
+            recipient, m => m.Subject == subject, cancellationToken);
+        Assert.Multiple(() =>
+        {
+            Assert.That(reply.Subject, Is.EqualTo(subject), "An existing Re: prefix must not be doubled.");
+            Assert.That(reply.TextBody, Does.Contain("Looks good."));
+        });
+    }
+
     private async Task SendMailAsync(
         string from, string to, string subject, string body, CancellationToken ct)
     {

@@ -140,6 +140,45 @@ public class CodeReviewSlotHandlerTests
         Assert.That(verdict, Is.EqualTo(SecondaryVerdict.Approved));
     }
 
+    [Test]
+    public async Task CodeReviewHappy_PullRequestAccess_LinksWorkItemFromLaunchContext()
+    {
+        var services = new ServiceCollection();
+        var handler = new CodeReviewHappySlotHandler();
+        handler.Register(services, "pull-request", typeof(IPullRequestAccess), FakeConfig);
+
+        using var sp = services.BuildServiceProvider();
+        var pr = sp.GetRequiredService<IPullRequestAccess>();
+
+        Environment.SetEnvironmentVariable("WORKFLOW_CONTEXT__WORKITEMID", "mail-abc123");
+        try
+        {
+            var linked = await pr.GetLinkedWorkItemsAsync();
+            Assert.That(linked, Has.Count.EqualTo(1));
+            Assert.That(linked[0].Id, Is.EqualTo("mail-abc123"));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("WORKFLOW_CONTEXT__WORKITEMID", null);
+        }
+
+        var withoutContext = await pr.GetLinkedWorkItemsAsync();
+        Assert.That(withoutContext, Is.Empty,
+            "Runs without a work-item launch context must keep behaving as before.");
+    }
+
+    [Test]
+    public void CodeReviewHappy_WorkflowBootstrapSlot_EnablesWorkItemSummaryWriteBack()
+    {
+        var services = new ServiceCollection();
+        var handler = new CodeReviewHappySlotHandler();
+        handler.Register(services, "workflow-bootstrap", typeof(object), FakeConfig);
+
+        using var sp = services.BuildServiceProvider();
+        var writeBack = sp.GetRequiredService<WriteBackConfiguration>();
+        Assert.That(writeBack.PostSummaryToWorkItems, Is.True);
+    }
+
     // ── WriteBackFailure: per-slot registration ─────────────────────────────
 
     private static readonly SlotConfiguration WbfConfig = new("fake-code-review-write-back-failure", new Dictionary<string, string>());

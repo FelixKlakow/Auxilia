@@ -21,6 +21,12 @@ public sealed class CodeReviewHappySlotHandler : ISlotHandler
         {
             case "repository":
                 services.AddScoped<ISourceControlAccess>(_ => new FakeSourceControlAccess());
+                // The production JIT activation path registers handlers only for DECLARED
+                // slots, and pull-request-code-review declares no "workflow-bootstrap" slot —
+                // in a container the dedicated case below never runs. Piggy-back the workflow
+                // configuration on the always-declared repository slot so containerized runs
+                // get the same TwoEyes/WriteBack setup as the eager/unit-test path.
+                RegisterWorkflowBootstrap(services);
                 break;
 
             case "pull-request":
@@ -40,16 +46,27 @@ public sealed class CodeReviewHappySlotHandler : ISlotHandler
                 break;
 
             case "workflow-bootstrap":
-                var outputDirectory = Path.Combine(Path.GetTempPath(), $"fake-cr-{Guid.NewGuid():N}");
-                Directory.CreateDirectory(outputDirectory);
-                services.AddScoped(_ => new TwoEyesConfiguration { Enabled = true });
-                services.AddScoped(_ => new WriteBackConfiguration { MinimumSeverity = FindingSeverity.Info });
-                services.AddCodeReviewWorkflow(outputDirectory);
+                RegisterWorkflowBootstrap(services);
                 break;
 
             default:
                 throw new InvalidOperationException($"Unknown slot: {slotName}");
         }
+    }
+
+    private static void RegisterWorkflowBootstrap(IServiceCollection services)
+    {
+        var outputDirectory = Path.Combine(Path.GetTempPath(), $"fake-cr-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(outputDirectory);
+        services.AddScoped(_ => new TwoEyesConfiguration { Enabled = true });
+        services.AddScoped(_ => new WriteBackConfiguration
+        {
+            MinimumSeverity = FindingSeverity.Info,
+            // Summaries reach the work-items slot only when the run carries a linked
+            // work item (see FakePullRequestAccess) — a no-op for plain runs.
+            PostSummaryToWorkItems = true
+        });
+        services.AddCodeReviewWorkflow(outputDirectory);
     }
 
     private sealed class FakeSourceControlAccess : ISourceControlAccess
@@ -81,8 +98,15 @@ public sealed class CodeReviewHappySlotHandler : ISlotHandler
         public Task<IReadOnlyList<ReviewComment>> GetCommentsAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<ReviewComment>>([]);
 
+        // When the run was triggered by a work-item event, the dispatcher forwards the
+        // triggering item via WORKFLOW_CONTEXT__WORKITEMID; surfacing it as the PR's linked
+        // work item lets end-to-end tests exercise the work-item write-back path. Runs
+        // without that context behave as before (no linked items).
         public Task<IReadOnlyList<WorkItemReference>> GetLinkedWorkItemsAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<WorkItemReference>>([]);
+            => Task.FromResult<IReadOnlyList<WorkItemReference>>(
+                Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__WORKITEMID") is { Length: > 0 } workItemId
+                    ? [new WorkItemReference(workItemId, null, null)]
+                    : []);
 
         public Task PostCommentAsync(string body, string? filePath = null, int? lineNumber = null, CancellationToken cancellationToken = default)
             => Task.CompletedTask;

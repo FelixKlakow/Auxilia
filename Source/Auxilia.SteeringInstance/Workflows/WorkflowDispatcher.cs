@@ -124,10 +124,13 @@ public sealed class WorkflowDispatcher(
         };
 
         // Per-run output directory: mounted into the container; declared outputs found
-        // there are persisted to the artifact store when the run succeeds.
+        // there are persisted to the artifact store when the run succeeds. The dispatcher
+        // (and ArtifactPersister) always use the local view; the launcher gets the bind
+        // source the Docker daemon can resolve (see ResolveOutputDirectoryBind).
         var outputDirectory = Path.Combine(
             dispatcherSettings.Value.RunOutputDirectory, instanceId.ToString("N"));
         Directory.CreateDirectory(outputDirectory);
+        var outputDirectoryBind = ResolveOutputDirectoryBind(dispatcherSettings.Value, instanceId);
 
         foreach (var (key, value) in command.Context)
             env[$"WORKFLOW_CONTEXT__{key.ToUpperInvariant()}"] = value;
@@ -212,7 +215,7 @@ public sealed class WorkflowDispatcher(
                 new WorkflowLaunchRequest(string.Empty, env, pluginFiles)
                 {
                     DockerImageUri = imageName,
-                    OutputDirectoryBind = outputDirectory,
+                    OutputDirectoryBind = outputDirectoryBind,
                     NetworkPolicy = networkPolicy,
                     WorkspaceDirectoryBind = workspaceRoot
                 },
@@ -264,11 +267,30 @@ public sealed class WorkflowDispatcher(
         // 6. Launch
         await launcher.LaunchAsync(new WorkflowLaunchRequest(extractedPath, env, pluginFiles)
         {
-            OutputDirectoryBind = outputDirectory,
+            OutputDirectoryBind = outputDirectoryBind,
             NetworkPolicy = networkPolicy,
             WorkspaceDirectoryBind = workspaceRoot
         }, ct);
         await MarkQueuedAsync(instanceId, command.WorkflowType, ct);
+    }
+
+    /// <summary>
+    /// Selects the run-output bind source handed to the launcher. The Docker daemon resolves
+    /// bind sources on the HOST, so when the Steering Instance runs in a container (its
+    /// RunOutputDirectory being a container-local mount of a host directory), the launcher
+    /// must receive the host view ({RunOutputHostDirectory}/{id}) of the directory the
+    /// dispatcher created as {RunOutputDirectory}/{id}. The host path's separator style is
+    /// preserved as-is (e.g. <c>C:\…</c> administered from a Linux container) because the
+    /// daemon interprets it, not this process's OS.
+    /// </summary>
+    internal static string ResolveOutputDirectoryBind(WorkflowDispatcherSettings settings, Guid instanceId)
+    {
+        if (string.IsNullOrWhiteSpace(settings.RunOutputHostDirectory))
+            return Path.Combine(settings.RunOutputDirectory, instanceId.ToString("N"));
+
+        var root = settings.RunOutputHostDirectory.TrimEnd('/', '\\');
+        var separator = root.Contains('\\') ? '\\' : '/';
+        return $"{root}{separator}{instanceId:N}";
     }
 
     private async Task FailPreFlightAsync(Guid instanceId, string workflowType, string reason, CancellationToken ct)

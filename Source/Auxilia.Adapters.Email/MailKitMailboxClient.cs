@@ -70,7 +70,9 @@ public sealed class MailKitMailboxClient(IOptions<EmailTaskSourceSettings> optio
         message.Subject = subject.StartsWith("Re:", StringComparison.OrdinalIgnoreCase)
             ? subject
             : $"Re: {subject}";
-        message.InReplyTo = inReplyToMessageId;
+        // MimeKit rejects an empty Message-Id; an empty value means "reply without threading".
+        if (!string.IsNullOrEmpty(inReplyToMessageId))
+            message.InReplyTo = inReplyToMessageId;
         message.Body = new TextPart("plain") { Text = body };
 
         using var client = new SmtpClient();
