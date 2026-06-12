@@ -8,7 +8,8 @@
 
 <PageTitle>Trigger — Auxilia</PageTitle>
 
-<h1>Trigger a workflow</h1>
+<PageHeader Title="Trigger a workflow"
+            Subtitle="Developer tool: publishes a run command straight to the command queue, bypassing task-source adapters."/>
 
 @if (_error is not null)
 {
@@ -19,20 +20,29 @@
     <div class="panel success">@_success</div>
 }
 
-<div class="form-grid">
-    <label>
-        Workflow type
-        <input @bind="_workflowType" placeholder="e.g. CodeReviewWorkflow"/>
-    </label>
-    <label>
-        Package URI
-        <input @bind="_packageUri" placeholder="https://packages.example.com/my.workflow.zip"/>
-    </label>
-    <label>
-        Work item ID (optional)
-        <input @bind="_workItemId"/>
-    </label>
-    <button @onclick="SubmitAsync" disabled="@_busy">Trigger</button>
+<div class="card">
+    <div class="card-header">
+        <h2>Run parameters</h2>
+        <p class="card-subtitle">The run is dispatched as your principal and shows up under Runs immediately.</p>
+    </div>
+    <div class="card-body form-grid">
+        <label>
+            Workflow type
+            <input @bind="_workflowType" placeholder="e.g. CodeReviewWorkflow"/>
+        </label>
+        <label>
+            Package URI
+            <input @bind="_packageUri" placeholder="https://packages.example.com/my.workflow.zip"/>
+            <span class="field-hint">Signed workflow package the Steering Instance should launch.</span>
+        </label>
+        <label>
+            Work item ID (optional)
+            <input @bind="_workItemId"/>
+        </label>
+        <div class="button-row">
+            <button class="btn btn-primary" @onclick="SubmitAsync" disabled="@_busy">Trigger</button>
+        </div>
+    </div>
 </div>
 
 @code {

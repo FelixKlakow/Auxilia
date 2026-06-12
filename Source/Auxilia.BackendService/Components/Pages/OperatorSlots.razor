@@ -8,7 +8,8 @@
 
 <PageTitle>Slots — Auxilia</PageTitle>
 
-<h1>Slot configuration</h1>
+<PageHeader Title="Slots"
+            Subtitle="Which plugin provider fills each capability slot of a workflow, and how it is configured."/>
 
 @if (!_loaded)
 {
@@ -20,11 +21,13 @@ else if (!_allowed)
 }
 else
 {
-    <section class="admin-section">
-        <h2>Registered slot providers</h2>
-        @if (_providers.Count == 0)
+    <section class="card">
+        <div class="card-header">
+            <h2>Registered slot providers</h2>
+        </div>
+        @if (HandlerProviders.Count == 0)
         {
-            <p class="muted">No slot providers registered.</p>
+            <div class="card-body"><p class="muted view-empty">No slot providers registered.</p></div>
         }
         else
         {
@@ -36,11 +39,11 @@ else
                 </tr>
                 </thead>
                 <tbody>
-                @foreach (var provider in _providers)
+                @foreach (var provider in HandlerProviders)
                 {
                     <tr>
-                        <td>@provider.ProviderType</td>
-                        <td>@provider.DllPath</td>
+                        <td class="cell-strong">@provider.ProviderType</td>
+                        <td><span class="muted cell-mono">@provider.DllPath</span></td>
                     </tr>
                 }
                 </tbody>
@@ -48,16 +51,18 @@ else
         }
     </section>
 
-    <section class="admin-section">
-        <h2>Slot configurations</h2>
-        <p class="muted">Settings are encrypted at rest — only key names are shown, values stay opaque.</p>
-        @if (_configurations.Count == 0)
+    <section class="card">
+        <div class="card-header">
+            <h2>Slot configurations</h2>
+            <p class="card-subtitle">Settings are encrypted at rest — only key names are shown, values stay opaque.</p>
+        </div>
+        @if (!MainConfigurations.Any())
         {
-            <p class="muted">No slot configurations stored.</p>
+            <div class="card-body"><p class="muted view-empty">No slot configurations stored.</p></div>
         }
-        @foreach (var group in _configurations.GroupBy(c => c.WorkflowType).OrderBy(g => g.Key))
+        @foreach (var group in MainConfigurations.GroupBy(c => c.WorkflowType).OrderBy(g => g.Key))
         {
-            <h3>@group.Key</h3>
+            <h3 class="table-caption">@group.Key</h3>
             <table class="data-table">
                 <thead>
                 <tr>
@@ -71,9 +76,9 @@ else
                 @foreach (var configuration in group.OrderBy(c => c.SlotName))
                 {
                     <tr>
-                        <td>@configuration.SlotName</td>
+                        <td class="cell-strong">@configuration.SlotName</td>
                         <td>@configuration.ProviderType</td>
-                        <td>@configuration.Status</td>
+                        <td><span class="badge badge-state badge-@configuration.Status.ToLowerInvariant()">@configuration.Status</span></td>
                         <td>
                             @{ var keys = ProtectedSettingsInspector.SettingKeys(Protector, configuration.ProtectedSettingsJson); }
                             @if (keys.Count == 0)
@@ -82,7 +87,7 @@ else
                             }
                             @foreach (var key in keys)
                             {
-                                <span class="badge">@key = •••</span>
+                                <span class="badge badge-secret">@key = •••</span>
                             }
                         </td>
                     </tr>
@@ -91,6 +96,65 @@ else
             </table>
         }
     </section>
+
+    @if (LibraryProviders.Count > 0 || LibraryConfigurations.Any())
+    {
+        <details class="advanced-section">
+            <summary>Library assemblies (advanced)</summary>
+            <div class="advanced-body">
+                <p class="muted">
+                    Dependency DLLs shipped alongside slot handler plugins, and the internal slot wirings
+                    that load them. They are plumbing, not configurable providers.
+                </p>
+                @if (LibraryProviders.Count > 0)
+                {
+                    <table class="data-table">
+                        <thead>
+                        <tr>
+                            <th>Assembly</th>
+                            <th>DLL</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var provider in LibraryProviders)
+                        {
+                            <tr>
+                                <td>@provider.ProviderType</td>
+                                <td><span class="muted cell-mono">@provider.DllPath</span></td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                }
+                @if (LibraryConfigurations.Any())
+                {
+                    <h3 class="table-caption">Dependency slot wirings</h3>
+                    <table class="data-table">
+                        <thead>
+                        <tr>
+                            <th>Workflow</th>
+                            <th>Slot</th>
+                            <th>Assembly</th>
+                            <th>Status</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var configuration in LibraryConfigurations
+                                      .OrderBy(c => c.WorkflowType).ThenBy(c => c.SlotName))
+                        {
+                            <tr>
+                                <td>@configuration.WorkflowType</td>
+                                <td>@configuration.SlotName</td>
+                                <td>@configuration.ProviderType</td>
+                                <td><span class="badge badge-state badge-@configuration.Status.ToLowerInvariant()">@configuration.Status</span></td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </details>
+    }
 }
 
 @code {
@@ -103,6 +167,26 @@ else
     private string _denyReason = "";
     private IReadOnlyList<SlotProviderRecord> _providers = [];
     private IReadOnlyList<SlotConfigurationRecord> _configurations = [];
+
+    // Providers whose DLL is a real slot handler plugin; everything else is a dependency
+    // library that only ships alongside one and is demoted to the collapsed section.
+    private static bool IsHandler(SlotProviderRecord provider)
+        => provider.DllPath.EndsWith(".slothandler.dll", StringComparison.OrdinalIgnoreCase);
+
+    private IReadOnlyList<SlotProviderRecord> HandlerProviders
+        => _providers.Where(IsHandler).ToList();
+
+    private IReadOnlyList<SlotProviderRecord> LibraryProviders
+        => _providers.Where(p => !IsHandler(p)).ToList();
+
+    private HashSet<string> LibraryProviderTypes
+        => LibraryProviders.Select(p => p.ProviderType).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    private IEnumerable<SlotConfigurationRecord> MainConfigurations
+        => _configurations.Where(c => !LibraryProviderTypes.Contains(c.ProviderType));
+
+    private IEnumerable<SlotConfigurationRecord> LibraryConfigurations
+        => _configurations.Where(c => LibraryProviderTypes.Contains(c.ProviderType));
 
     protected override async Task OnInitializedAsync()
     {

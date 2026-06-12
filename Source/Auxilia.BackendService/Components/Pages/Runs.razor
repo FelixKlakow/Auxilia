@@ -5,46 +5,83 @@
 
 <PageTitle>Runs — Auxilia</PageTitle>
 
-<h1>Runs</h1>
+<PageHeader Title="Runs" Subtitle="Every workflow execution on this platform — click a run to inspect its views."/>
 
 @if (_runs.Count == 0)
 {
-    <p class="muted">No workflow runs yet.</p>
+    <EmptyState Title="No workflow runs yet"
+                Description="Runs appear here as soon as a task source, schedule, or trigger dispatches a workflow."/>
 }
 else
 {
-    <table class="data-table">
-        <thead>
-        <tr>
-            <th>State</th>
-            <th>Type</th>
-            <th>Created (UTC)</th>
-            <th>Completed (UTC)</th>
-            <th>Error</th>
-        </tr>
-        </thead>
-        <tbody>
-        @foreach (var run in _runs)
+    <div class="chip-bar" role="group" aria-label="Filter runs by state">
+        @foreach (var state in StateOptions)
         {
-            <tr>
-                <td><span class="badge badge-@run.State.ToLowerInvariant()">@run.State</span></td>
-                <td><a href="runs/@run.Id">@run.WorkflowType</a></td>
-                <td>@run.CreatedUtc.ToString("yyyy-MM-dd HH:mm:ss")</td>
-                <td>@(run.CompletedUtc?.ToString("yyyy-MM-dd HH:mm:ss") ?? "—")</td>
-                <td class="error-cell">@run.ErrorMessage</td>
-            </tr>
+            var count = CountOf(state);
+            <button class="chip @(_stateFilter == state ? "active" : null)"
+                    @onclick="() => _stateFilter = state">
+                @state
+                <span class="chip-count">@count</span>
+            </button>
         }
-        </tbody>
-    </table>
+    </div>
+
+    <div class="card">
+        <table class="data-table">
+            <thead>
+            <tr>
+                <th>State</th>
+                <th>Workflow</th>
+                <th>Started</th>
+                <th>Duration</th>
+                <th>Error</th>
+            </tr>
+            </thead>
+            <tbody>
+            @foreach (var run in FilteredRuns)
+            {
+                <tr>
+                    <td><span class="badge badge-state badge-@run.State.ToLowerInvariant()">@run.State</span></td>
+                    <td>
+                        <a class="cell-strong" href="runs/@run.Id">@run.WorkflowType</a>
+                        <span class="muted mono"> @ShortId(run.Id)</span>
+                    </td>
+                    <td>
+                        @TimeText.Relative(run.CreatedUtc)
+                        <span class="cell-sub">@run.CreatedUtc.ToString("yyyy-MM-dd HH:mm:ss") UTC</span>
+                    </td>
+                    <td>@TimeText.Duration(run.CreatedUtc, run.CompletedUtc)</td>
+                    <td class="error-cell">@run.ErrorMessage</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+        @if (!FilteredRuns.Any())
+        {
+            <div class="card-body"><p class="muted view-empty">No runs in this state.</p></div>
+        }
+    </div>
 }
 
 @code {
+
+    private static readonly string[] StateOptions =
+        ["All", "Running", "Success", "Failed", "Queued", "Cancelled", "PreFlightFailed"];
 
     // Backplane-less v1: the component polls the data layer every 2 s instead of
     // subscribing to the SignalR fan-out hub from its own circuit.
     private IReadOnlyList<WorkflowInstanceRecord> _runs = [];
     private readonly CancellationTokenSource _cts = new();
     private PeriodicTimer? _timer;
+    private string _stateFilter = "All";
+
+    private IEnumerable<WorkflowInstanceRecord> FilteredRuns
+        => _stateFilter == "All" ? _runs : _runs.Where(r => r.State == _stateFilter);
+
+    private int CountOf(string state)
+        => state == "All" ? _runs.Count : _runs.Count(r => r.State == state);
+
+    private static string ShortId(Guid id) => id.ToString("N")[..8];
 
     protected override Task OnInitializedAsync() => LoadAsync();
 

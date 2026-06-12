@@ -6,8 +6,8 @@
 
 <PageTitle>Artifact triggers — Auxilia</PageTitle>
 
-<h1>Artifact triggers</h1>
-<p class="muted">Workflow chaining: when an artifact of the given type is persisted, the configured follow-up workflow is dispatched.</p>
+<PageHeader Title="Chaining"
+            Subtitle="Workflow chaining: when an artifact of the given type is persisted, the configured follow-up workflow is dispatched."/>
 
 @if (!_loaded)
 {
@@ -24,9 +24,61 @@ else
         <div class="panel denied">@_error</div>
     }
 
-    <section class="admin-section">
-        <h2>Create chaining rule</h2>
-        <div class="form-grid">
+    <section class="card">
+        <div class="card-header">
+            <h2>Chaining rules</h2>
+        </div>
+        @if (_triggers.Count == 0)
+        {
+            <div class="card-body">
+                <p class="muted view-empty">No artifact triggers configured yet — create a rule below.</p>
+            </div>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                <tr>
+                    <th>Artifact type</th>
+                    <th>Follow-up workflow</th>
+                    <th>Enabled</th>
+                    <th>Run as</th>
+                    <th>Actions</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var trigger in _triggers)
+                {
+                    <tr>
+                        <td class="cell-strong">@trigger.ArtifactType</td>
+                        <td>@trigger.WorkflowType</td>
+                        <td>
+                            <span class="badge badge-state @(trigger.Enabled ? "badge-success" : "badge-cancelled")">
+                                @(trigger.Enabled ? "Enabled" : "Disabled")
+                            </span>
+                        </td>
+                        <td>@PrincipalName(trigger.RunAsPrincipalId)</td>
+                        <td>
+                            <div class="cell-actions">
+                                <button class="btn btn-secondary btn-sm" @onclick="() => ToggleAsync(trigger)" disabled="@_busy">
+                                    @(trigger.Enabled ? "Disable" : "Enable")
+                                </button>
+                                <button class="btn btn-danger btn-sm" @onclick="() => DeleteAsync(trigger.Id)" disabled="@_busy">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </section>
+
+    <section class="card">
+        <div class="card-header">
+            <h2>Create chaining rule</h2>
+            <p class="card-subtitle">Example: every persisted code-review-report artifact starts a follow-up fix workflow.</p>
+        </div>
+        <div class="card-body form-grid">
             <label>Artifact type <input @bind="_artifactType" placeholder="e.g. code-review-report"/></label>
             <label>Follow-up workflow type <input @bind="_workflowType"/></label>
             <label>Package URI <input @bind="_packageUri"/></label>
@@ -40,48 +92,11 @@ else
                     }
                 </select>
             </label>
-            <label><input type="checkbox" @bind="_enabled"/> Enabled</label>
-            <button @onclick="SaveAsync" disabled="@_busy">Save rule</button>
+            <label class="check-label"><input type="checkbox" @bind="_enabled"/> Enabled</label>
+            <div class="button-row">
+                <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_busy">Save rule</button>
+            </div>
         </div>
-    </section>
-
-    <section class="admin-section">
-        <h2>Chaining rules</h2>
-        @if (_triggers.Count == 0)
-        {
-            <p class="muted">No artifact triggers configured.</p>
-        }
-        else
-        {
-            <table class="data-table">
-                <thead>
-                <tr>
-                    <th>Artifact type</th>
-                    <th>Workflow type</th>
-                    <th>Enabled</th>
-                    <th>Run as</th>
-                    <th>Actions</th>
-                </tr>
-                </thead>
-                <tbody>
-                @foreach (var trigger in _triggers)
-                {
-                    <tr>
-                        <td>@trigger.ArtifactType</td>
-                        <td>@trigger.WorkflowType</td>
-                        <td>@(trigger.Enabled ? "Yes" : "No")</td>
-                        <td>@PrincipalName(trigger.RunAsPrincipalId)</td>
-                        <td>
-                            <button @onclick="() => ToggleAsync(trigger)" disabled="@_busy">
-                                @(trigger.Enabled ? "Disable" : "Enable")
-                            </button>
-                            <button @onclick="() => DeleteAsync(trigger.Id)" disabled="@_busy">Delete</button>
-                        </td>
-                    </tr>
-                }
-                </tbody>
-            </table>
-        }
     </section>
 }
 

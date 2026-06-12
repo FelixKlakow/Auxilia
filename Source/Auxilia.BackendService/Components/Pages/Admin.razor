@@ -7,7 +7,8 @@
 
 <PageTitle>Admin — Auxilia</PageTitle>
 
-<h1>Administration</h1>
+<PageHeader Title="Principals"
+            Subtitle="Everyone — and everything — that can act on this platform: people, services, and AI agents."/>
 
 @if (!_loaded)
 {
@@ -31,26 +32,10 @@ else
         </div>
     }
 
-    <section class="admin-section">
-        <h2>Create human principal</h2>
-        <div class="form-grid">
-            <label>Display name <input @bind="_humanDisplayName"/></label>
-            <label>Username <input @bind="_humanUsername"/></label>
-            <label>Password <input type="password" @bind="_humanPassword"/></label>
-            <button @onclick="CreateHumanAsync" disabled="@_busy">Create human</button>
+    <section class="card">
+        <div class="card-header">
+            <h2>Principals</h2>
         </div>
-    </section>
-
-    <section class="admin-section">
-        <h2>Create AI principal</h2>
-        <div class="form-grid">
-            <label>Display name <input @bind="_aiDisplayName"/></label>
-            <button @onclick="CreateAiAsync" disabled="@_busy">Create AI principal</button>
-        </div>
-    </section>
-
-    <section class="admin-section">
-        <h2>Principals</h2>
         <table class="data-table">
             <thead>
             <tr>
@@ -66,37 +51,75 @@ else
             {
                 var roles = RolesOf(principal.Id);
                 <tr>
-                    <td>@principal.DisplayName</td>
+                    <td class="cell-strong">@principal.DisplayName</td>
                     <td>@principal.Kind</td>
-                    <td>@principal.Status</td>
+                    <td>
+                        <span class="badge badge-state @(principal.Status == "Active" ? "badge-success" : "badge-cancelled")">
+                            @principal.Status
+                        </span>
+                    </td>
                     <td>
                         @foreach (var role in roles)
                         {
                             <span class="badge badge-role">
                                 @role
-                                <button class="link-button" title="Revoke role"
+                                <button class="chip-x" title="Revoke role"
                                         @onclick="() => RevokeRoleAsync(principal.Id, role)">✕</button>
                             </span>
                         }
                     </td>
                     <td>
-                        <select @bind="_roleSelections[principal.Id]">
-                            @foreach (var role in BuiltInRoles.AllRoleNames.Except(roles))
+                        <div class="cell-actions">
+                            <select class="select-inline" @bind="_roleSelections[principal.Id]">
+                                @foreach (var role in BuiltInRoles.AllRoleNames.Except(roles))
+                                {
+                                    <option value="@role">@role</option>
+                                }
+                            </select>
+                            <button class="btn btn-secondary btn-sm" @onclick="() => AssignRoleAsync(principal.Id)" disabled="@_busy">Assign</button>
+                            @if (principal.Status == "Active")
                             {
-                                <option value="@role">@role</option>
+                                <button class="btn btn-danger btn-sm" @onclick="() => DisableAsync(principal.Id)" disabled="@_busy">Disable</button>
                             }
-                        </select>
-                        <button @onclick="() => AssignRoleAsync(principal.Id)" disabled="@_busy">Assign</button>
-                        @if (principal.Status == "Active")
-                        {
-                            <button @onclick="() => DisableAsync(principal.Id)" disabled="@_busy">Disable</button>
-                        }
+                        </div>
                     </td>
                 </tr>
             }
             </tbody>
         </table>
     </section>
+
+    <div class="card-row">
+        <section class="card">
+            <div class="card-header">
+                <h2>Create human principal</h2>
+                <p class="card-subtitle">A person who signs in to this dashboard with username and password.</p>
+            </div>
+            <div class="card-body form-grid">
+                <label>Display name <input @bind="_humanDisplayName"/></label>
+                <label>Username <input @bind="_humanUsername"/></label>
+                <label>Password <input type="password" @bind="_humanPassword"/></label>
+                <div class="button-row">
+                    <button class="btn btn-primary" @onclick="CreateHumanAsync" disabled="@_busy">Create human</button>
+                </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <div class="card-header">
+                <h2>Create AI principal</h2>
+                <p class="card-subtitle">
+                    A service or AI agent that authenticates with an API key — the key is shown once after creation.
+                </p>
+            </div>
+            <div class="card-body form-grid">
+                <label>Display name <input @bind="_aiDisplayName"/></label>
+                <div class="button-row">
+                    <button class="btn btn-primary" @onclick="CreateAiAsync" disabled="@_busy">Create AI principal</button>
+                </div>
+            </div>
+        </section>
+    </div>
 }
 
 @code {

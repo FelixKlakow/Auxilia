@@ -1,27 +1,35 @@
 @page "/login"
+@layout LoginLayout
 
 <PageTitle>Login — Auxilia</PageTitle>
 
-<h1>Login</h1>
+<div class="login-card">
+    <div class="login-brand">
+        <span class="brand-mark">A</span>
+        <span>Auxilia</span>
+    </div>
+    <h1>Sign in</h1>
+    <p class="login-tagline">The workflow operations dashboard.</p>
 
-@if (!string.IsNullOrEmpty(Error))
-{
-    <div class="panel denied">Invalid username or password.</div>
-}
+    @if (!string.IsNullOrEmpty(Error))
+    {
+        <div class="panel denied">Invalid username or password.</div>
+    }
 
-@* Plain HTML form: the browser POSTs to the form-encoded auth endpoint, which sets the
-   session cookie and redirects — no JS interop or circuit involvement required. *@
-<form method="post" action="auth/login-form" class="login-form">
-    <label>
-        Username
-        <input name="username" autocomplete="username" required/>
-    </label>
-    <label>
-        Password
-        <input type="password" name="password" autocomplete="current-password" required/>
-    </label>
-    <button type="submit">Login</button>
-</form>
+    @* Plain HTML form: the browser POSTs to the form-encoded auth endpoint, which sets the
+       session cookie and redirects — no JS interop or circuit involvement required. *@
+    <form method="post" action="auth/login-form" class="login-form">
+        <label>
+            Username
+            <input name="username" autocomplete="username" required/>
+        </label>
+        <label>
+            Password
+            <input type="password" name="password" autocomplete="current-password" required/>
+        </label>
+        <button type="submit" class="btn btn-primary">Sign in</button>
+    </form>
+</div>
 
 @code {
 

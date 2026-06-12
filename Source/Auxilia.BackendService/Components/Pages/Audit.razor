@@ -5,7 +5,8 @@
 
 <PageTitle>Audit — Auxilia</PageTitle>
 
-<h1>Audit log</h1>
+<PageHeader Title="Audit log"
+            Subtitle="Every policy decision and administrative change, newest first. Entries are immutable."/>
 
 @if (!_loaded)
 {
@@ -17,37 +18,49 @@ else if (!_allowed)
 }
 else
 {
-    <div class="form-grid">
+    <div class="toolbar">
         <label>
             Filter (action / actor)
-            <input @bind="_filter" @bind:event="oninput"/>
+            <input @bind="_filter" @bind:event="oninput" placeholder="e.g. policy.allowed"/>
         </label>
-        <button @onclick="LoadAsync">Apply</button>
+        <button class="btn btn-secondary" @onclick="LoadAsync">Apply</button>
     </div>
 
-    <table class="data-table">
-        <thead>
-        <tr>
-            <th>Timestamp (UTC)</th>
-            <th>Actor</th>
-            <th>Action</th>
-            <th>Subject</th>
-            <th>Outcome</th>
-        </tr>
-        </thead>
-        <tbody>
-        @foreach (var entry in _entries)
-        {
-            <tr>
-                <td>@entry.TimestampUtc.ToString("yyyy-MM-dd HH:mm:ss")</td>
-                <td>@entry.Actor</td>
-                <td>@entry.Action</td>
-                <td>@entry.Subject</td>
-                <td>@entry.Outcome</td>
-            </tr>
-        }
-        </tbody>
-    </table>
+    @if (_entries.Count == 0)
+    {
+        <EmptyState Title="No audit entries"
+                    Description="Nothing matches the current filter."/>
+    }
+    else
+    {
+        <div class="card">
+            <table class="data-table">
+                <thead>
+                <tr>
+                    <th>Timestamp (UTC)</th>
+                    <th>Actor</th>
+                    <th>Action</th>
+                    <th>Subject</th>
+                    <th>Outcome</th>
+                    <th>Details</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var entry in _entries)
+                {
+                    <tr>
+                        <td class="cell-mono">@entry.TimestampUtc.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td><span class="cell-mono cell-truncate" title="@entry.Actor">@entry.Actor</span></td>
+                        <td class="cell-strong">@entry.Action</td>
+                        <td><span class="cell-mono cell-truncate" title="@entry.Subject">@entry.Subject</span></td>
+                        <td>@entry.Outcome</td>
+                        <td><span class="cell-mono cell-truncate" title="@entry.DetailJson">@entry.DetailJson</span></td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    }
 }
 
 @code {

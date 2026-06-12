@@ -13,7 +13,7 @@
 
 <PageTitle>Dashboard — Auxilia</PageTitle>
 
-<h1>Dashboard</h1>
+<PageHeader Title="Dashboard" Subtitle="Views you pinned from workflow runs, updated live."/>
 
 @if (!_loaded)
 {
@@ -25,7 +25,12 @@ else if (_principalId is null)
 }
 else if (_panels.Count == 0)
 {
-    <p class="muted">Nothing pinned yet — open a <a href="runs">run</a> and pin one of its views.</p>
+    <EmptyState Title="Nothing pinned yet">
+        <p class="empty-description">
+            Open a <a href="runs">run</a> and pin one of its views — it will stay on this dashboard
+            and update live while the workflow is running.
+        </p>
+    </EmptyState>
 }
 else
 {
@@ -34,32 +39,40 @@ else
         <div class="panel denied">@_error</div>
     }
 
-    @foreach (var panel in _panels)
-    {
-        <section class="dashboard-panel">
-            <h2>
-                @panel.Pin.DisplayTitle
-                @if (panel.Run is not null)
-                {
-                    <span class="badge badge-@panel.Run.State.ToLowerInvariant()">@panel.Run.State</span>
-                }
-                <a href="runs/@panel.Pin.InstanceId">open run</a>
-                <button class="link-button" @onclick="() => UnpinAsync(panel.Pin)">Unpin</button>
-            </h2>
-            @if (!panel.Allowed)
-            {
-                <div class="panel denied">Access denied: @panel.DenyReason</div>
-            }
-            else if (panel.Descriptor is null)
-            {
-                <div class="panel denied">View '@panel.Pin.ViewName' is no longer declared by this run.</div>
-            }
-            else
-            {
-                <ViewRenderer Descriptor="panel.Descriptor" Items="panel.Buffer.Items"/>
-            }
-        </section>
-    }
+    <div class="panel-grid">
+        @foreach (var panel in _panels)
+        {
+            <section class="card dashboard-panel">
+                <div class="card-header">
+                    <h2 class="view-title">
+                        @panel.Pin.DisplayTitle
+                        @if (panel.Run is not null)
+                        {
+                            <span class="badge badge-state badge-@panel.Run.State.ToLowerInvariant()">@panel.Run.State</span>
+                        }
+                    </h2>
+                    <div class="card-actions">
+                        <a class="btn btn-secondary btn-sm" href="runs/@panel.Pin.InstanceId">Open run</a>
+                        <button class="btn btn-secondary btn-sm" @onclick="() => UnpinAsync(panel.Pin)">Unpin</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    @if (!panel.Allowed)
+                    {
+                        <div class="panel denied">Access denied: @panel.DenyReason</div>
+                    }
+                    else if (panel.Descriptor is null)
+                    {
+                        <div class="panel denied">View '@panel.Pin.ViewName' is no longer declared by this run.</div>
+                    }
+                    else
+                    {
+                        <ViewRenderer Descriptor="panel.Descriptor" Items="panel.Buffer.Items"/>
+                    }
+                </div>
+            </section>
+        }
+    </div>
 }
 
 @code {

@@ -6,7 +6,8 @@
 
 <PageTitle>Schedules — Auxilia</PageTitle>
 
-<h1>Scheduled triggers</h1>
+<PageHeader Title="Schedules"
+            Subtitle="Run a workflow automatically on a fixed interval — like cron for workflows."/>
 
 @if (!_loaded)
 {
@@ -23,37 +24,15 @@ else
         <div class="panel denied">@_error</div>
     }
 
-    <section class="admin-section">
-        <h2>@(_editingId is null ? "Create schedule" : "Edit schedule")</h2>
-        <div class="form-grid">
-            <label>Workflow type <input @bind="_workflowType"/></label>
-            <label>Package URI <input @bind="_packageUri"/></label>
-            <label>Interval (seconds) <input type="number" @bind="_intervalSeconds"/></label>
-            <label>Context JSON (optional, string map) <input @bind="_contextJson" placeholder='{"Key":"Value"}'/></label>
-            <label>
-                Run as principal
-                <select @bind="_runAsPrincipalId">
-                    <option value="">(none)</option>
-                    @foreach (var principal in _principals)
-                    {
-                        <option value="@principal.Id">@principal.DisplayName</option>
-                    }
-                </select>
-            </label>
-            <label><input type="checkbox" @bind="_enabled"/> Enabled</label>
-            <button @onclick="SaveAsync" disabled="@_busy">@(_editingId is null ? "Create" : "Save")</button>
-            @if (_editingId is not null)
-            {
-                <button @onclick="ResetForm" disabled="@_busy">Cancel edit</button>
-            }
+    <section class="card">
+        <div class="card-header">
+            <h2>Configured schedules</h2>
         </div>
-    </section>
-
-    <section class="admin-section">
-        <h2>Schedules</h2>
         @if (_triggers.Count == 0)
         {
-            <p class="muted">No scheduled triggers configured.</p>
+            <div class="card-body">
+                <p class="muted view-empty">No scheduled triggers configured yet — create one below.</p>
+            </div>
         }
         else
         {
@@ -64,7 +43,7 @@ else
                     <th>Interval</th>
                     <th>Enabled</th>
                     <th>Run as</th>
-                    <th>Last dispatched (UTC)</th>
+                    <th>Last dispatched</th>
                     <th>Actions</th>
                 </tr>
                 </thead>
@@ -72,23 +51,64 @@ else
                 @foreach (var trigger in _triggers)
                 {
                     <tr>
-                        <td>@trigger.WorkflowType</td>
+                        <td class="cell-strong">@trigger.WorkflowType</td>
                         <td>@trigger.IntervalSeconds s</td>
-                        <td>@(trigger.Enabled ? "Yes" : "No")</td>
-                        <td>@PrincipalName(trigger.RunAsPrincipalId)</td>
-                        <td>@(trigger.LastDispatchedUtc?.ToString("yyyy-MM-dd HH:mm:ss") ?? "—")</td>
                         <td>
-                            <button @onclick="() => Edit(trigger)" disabled="@_busy">Edit</button>
-                            <button @onclick="() => ToggleAsync(trigger)" disabled="@_busy">
-                                @(trigger.Enabled ? "Disable" : "Enable")
-                            </button>
-                            <button @onclick="() => DeleteAsync(trigger.Id)" disabled="@_busy">Delete</button>
+                            <span class="badge badge-state @(trigger.Enabled ? "badge-success" : "badge-cancelled")">
+                                @(trigger.Enabled ? "Enabled" : "Disabled")
+                            </span>
+                        </td>
+                        <td>@PrincipalName(trigger.RunAsPrincipalId)</td>
+                        <td>@(trigger.LastDispatchedUtc is { } dispatched ? $"{TimeText.Relative(dispatched)}" : "—")</td>
+                        <td>
+                            <div class="cell-actions">
+                                <button class="btn btn-secondary btn-sm" @onclick="() => Edit(trigger)" disabled="@_busy">Edit</button>
+                                <button class="btn btn-secondary btn-sm" @onclick="() => ToggleAsync(trigger)" disabled="@_busy">
+                                    @(trigger.Enabled ? "Disable" : "Enable")
+                                </button>
+                                <button class="btn btn-danger btn-sm" @onclick="() => DeleteAsync(trigger.Id)" disabled="@_busy">Delete</button>
+                            </div>
                         </td>
                     </tr>
                 }
                 </tbody>
             </table>
         }
+    </section>
+
+    <section class="card">
+        <div class="card-header">
+            <h2>@(_editingId is null ? "Create schedule" : "Edit schedule")</h2>
+            <p class="card-subtitle">The workflow is dispatched on the interval as the selected principal.</p>
+        </div>
+        <div class="card-body form-grid">
+            <label>Workflow type <input @bind="_workflowType"/></label>
+            <label>Package URI <input @bind="_packageUri"/></label>
+            <label>Interval (seconds) <input type="number" @bind="_intervalSeconds"/></label>
+            <label>
+                Context JSON (optional, string map)
+                <input @bind="_contextJson" placeholder='{"Key":"Value"}'/>
+                <span class="field-hint">Passed to the workflow as its initial context.</span>
+            </label>
+            <label>
+                Run as principal
+                <select @bind="_runAsPrincipalId">
+                    <option value="">(none)</option>
+                    @foreach (var principal in _principals)
+                    {
+                        <option value="@principal.Id">@principal.DisplayName</option>
+                    }
+                </select>
+            </label>
+            <label class="check-label"><input type="checkbox" @bind="_enabled"/> Enabled</label>
+            <div class="button-row">
+                <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_busy">@(_editingId is null ? "Create" : "Save")</button>
+                @if (_editingId is not null)
+                {
+                    <button class="btn btn-secondary" @onclick="ResetForm" disabled="@_busy">Cancel edit</button>
+                }
+            </div>
+        </div>
     </section>
 }
 
