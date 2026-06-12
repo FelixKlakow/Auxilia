@@ -103,6 +103,20 @@ public class DashboardTests
     }
 
     [Test]
+    public async Task Root_UnauthenticatedBrowserNavigation_RedirectsToLoginPage()
+    {
+        using var client = CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/");
+        request.Headers.Accept.ParseAdd("text/html,application/xhtml+xml");
+
+        var response = await client.SendAsync(request);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Found),
+            "A browser (Accept: text/html) must land on the login page, not an empty 401.");
+        Assert.That(response.Headers.Location!.PathAndQuery, Does.StartWith("/login"));
+    }
+
+    [Test]
     public async Task LoginPage_Unauthenticated_Returns200()
     {
         using var client = CreateClient();

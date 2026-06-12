@@ -126,8 +126,18 @@ try
             o.Cookie.HttpOnly = true;
             o.ExpireTimeSpan = TimeSpan.FromHours(8);
             o.SlidingExpiration = true;
-            // API/hub clients get status codes, not login redirects.
-            o.Events.OnRedirectToLogin = ctx => { ctx.Response.StatusCode = 401; return Task.CompletedTask; };
+            o.LoginPath = "/login";
+            // Browser navigations (Accept: text/html) land on the login page; API and hub
+            // clients get the bare status code — a redirect would corrupt their protocols.
+            o.Events.OnRedirectToLogin = ctx =>
+            {
+                if (ctx.Request.Headers.Accept.Any(
+                        v => v?.Contains("text/html", StringComparison.OrdinalIgnoreCase) == true))
+                    ctx.Response.Redirect(ctx.RedirectUri);
+                else
+                    ctx.Response.StatusCode = 401;
+                return Task.CompletedTask;
+            };
             o.Events.OnRedirectToAccessDenied = ctx => { ctx.Response.StatusCode = 403; return Task.CompletedTask; };
         })
         .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions,

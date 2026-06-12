@@ -31,6 +31,7 @@
   </Folder>
   <Folder Name="/Scripts/">
     <File Path="Scripts\Run-SystemTests.ps1" />
+    <Project Path="Auxilia.DevStand\Auxilia.DevStand.csproj" />
   </Folder>
   <Folder Name="/Overview/">
     <File Path="ARCHITECTURE.md" />
