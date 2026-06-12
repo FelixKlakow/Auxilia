@@ -394,6 +394,56 @@ public class WorkflowBuilderTests
     }
 
     [Test]
+    public void RequiresRepository_NoCall_BothArtifactsHaveEmptyRepositories()
+    {
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+
+        Assert.That(wb.BuildSchema().Repositories, Is.Empty);
+        Assert.That(wb.BuildManifest().Repositories, Is.Empty);
+    }
+
+    [Test]
+    public void RequiresRepository_OneCall_LandsInSchemaAndManifest()
+    {
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+        wb.RequiresRepository("main-app", "https://example.com/main-app.git", "develop", noCache: true);
+
+        var expected = new Workspace.RepositoryDeclaration(
+            "main-app", "https://example.com/main-app.git", "develop", NoCache: true);
+        Assert.That(wb.BuildSchema().Repositories, Is.EqualTo(new[] { expected }));
+        Assert.That(wb.BuildManifest().Repositories, Is.EqualTo(new[] { expected }));
+    }
+
+    [Test]
+    public void RequiresRepository_DefaultArguments_BranchNullAndNoCacheFalse()
+    {
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+        wb.RequiresRepository("main-app", "https://example.com/main-app.git");
+
+        var repo = wb.BuildSchema().Repositories[0];
+        Assert.That(repo.Branch, Is.Null);
+        Assert.That(repo.NoCache, Is.False);
+    }
+
+    [Test]
+    public void RequiresRepository_DuplicateId_ThrowsInvalidOperationException()
+    {
+        var builder = WorkflowBuilder.Create("test");
+        builder.RequiresRepository("main-app", "https://example.com/a.git");
+
+        Assert.Throws<InvalidOperationException>(
+            () => builder.RequiresRepository("main-app", "https://example.com/b.git"));
+    }
+
+    [Test]
+    public void RequiresRepository_FluentChain_ReturnsSameBuilderInstance()
+    {
+        var builder = WorkflowBuilder.Create("test");
+        var result = builder.RequiresRepository("main-app", "https://example.com/main-app.git");
+        Assert.That(result, Is.SameAs(builder));
+    }
+
+    [Test]
     public void BuildSchema_ViaInterface_ReturnsWorkflowSchema()
     {
         var builder = (IWorkflowBuilder)WorkflowBuilder.Create("test-workflow");

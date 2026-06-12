@@ -63,7 +63,8 @@ public class WorkflowStateHandlerTests
         _settings = new WorkflowDispatcherSettings
         {
             CommandQueueName = CommandQueue,
-            RunOutputDirectory = Path.Combine(_tempRoot, "run-output")
+            RunOutputDirectory = Path.Combine(_tempRoot, "run-output"),
+            WorkspaceRootDirectory = Path.Combine(_tempRoot, "workspaces")
         };
         _artifactStore = TestStores.NewArtifactStore(Path.Combine(_tempRoot, "platform-data"));
         _sut = new WorkflowStateHandler(
@@ -73,6 +74,7 @@ public class WorkflowStateHandlerTests
             TestStores.NewAuditLog(),
             TestStores.NewStatusPublisher(_mockBus.Object),
             TestStores.NewArtifactPersister(_mockBus.Object, _artifactStore, _settings),
+            TestStores.NewWorkspaceManager(_settings),
             Options.Create(_settings),
             NullLogger<WorkflowStateHandler>.Instance);
 
@@ -144,6 +146,24 @@ public class WorkflowStateHandlerTests
 
         Assert.That(_tokenRegistry.Validate(issued.WorkflowInstanceId, issued.Token), Is.False,
             "The instance credential must die with the run.");
+    }
+
+    // ------------------------------------------------------------------ Workspace cleanup
+
+    [TestCase(WorkflowState.Success)]
+    [TestCase(WorkflowState.Failed)]
+    [TestCase(WorkflowState.Cancelled)]
+    public async Task WhenTerminalStateReceived_RemovesRunWorkspace(WorkflowState state)
+    {
+        var instanceId = Guid.NewGuid();
+        var runRoot = Path.Combine(_settings.WorkspaceRootDirectory, instanceId.ToString("N"));
+        Directory.CreateDirectory(runRoot);
+
+        await _capturedHandler!(
+            new WorkflowStateMessage(instanceId, state, null), CancellationToken.None);
+
+        Assert.That(Directory.Exists(runRoot), Is.False,
+            "The run's workspace must die with the run.");
     }
 
     // ------------------------------------------------------------------ Drain-and-replace

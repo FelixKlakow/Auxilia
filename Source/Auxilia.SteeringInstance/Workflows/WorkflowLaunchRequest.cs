@@ -27,5 +27,11 @@ public sealed record WorkflowLaunchRequest(
     /// it to select the container network. Null means no policy was resolved (legacy callers).
     /// </summary>
     public EffectiveNetworkPolicy? NetworkPolicy { get; init; }
+
+    /// <summary>
+    /// Host directory prepared by the Workspace Manager (ARCHITECTURE §9), mounted read-write
+    /// at <c>/workspace</c> — workflows commit locally; pushes go through slots.
+    /// </summary>
+    public string? WorkspaceDirectoryBind { get; init; }
 }
 

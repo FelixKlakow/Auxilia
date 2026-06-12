@@ -71,6 +71,25 @@ public class DockerWorkflowLauncherParamTests
         Assert.That(p.HostConfig.Binds, Has.Some.EndsWith(":/workflow:ro"));
     }
 
+    [Test]
+    public void WhenWorkspaceDirectoryBindSet_BindsContainReadWriteWorkspaceMount()
+    {
+        var request = SimpleRequest() with { WorkspaceDirectoryBind = "/host/workspaces/run1" };
+        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(request, new DockerWorkflowLauncherSettings());
+
+        Assert.That(p.HostConfig.Binds, Does.Contain("/host/workspaces/run1:/workspace"),
+            "The workspace must be mounted read-write — workflows commit locally; pushes go through slots.");
+    }
+
+    [Test]
+    public void WhenWorkspaceDirectoryBindNotSet_NoWorkspaceMount()
+    {
+        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(
+            SimpleRequest(), new DockerWorkflowLauncherSettings());
+
+        Assert.That(p.HostConfig.Binds.Any(b => b.EndsWith(":/workspace")), Is.False);
+    }
+
     // ------------------------------------------------------------------ cmd
 
     [Test]

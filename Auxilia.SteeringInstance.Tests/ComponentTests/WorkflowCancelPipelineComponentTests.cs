@@ -48,6 +48,7 @@ public class WorkflowCancelPipelineComponentTests
                 services.AddSingleton<Auxilia.SteeringInstance.Workflows.Storage.WorkflowInstanceTokenRegistry>();
                 services.AddSingleton<IArtifactStore, FileSystemArtifactStore>();
                 services.AddSingleton<ArtifactPersister>();
+                services.AddSingleton<WorkspaceManager>();
                 services.AddSingleton<WorkflowStateHandler>();
                 services.AddSingleton<WorkflowCancelDispatcher>();
             })

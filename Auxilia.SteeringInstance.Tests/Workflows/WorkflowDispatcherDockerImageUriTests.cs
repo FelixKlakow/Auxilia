@@ -81,6 +81,7 @@ public class WorkflowDispatcherDockerImageUriTests
             TestStores.NewStatusPublisher(_mockBus.Object),
             TestStores.NewWorkflowSchemaStore(),
             new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
+            TestStores.NewWorkspaceManager(),
             TestStores.NewAuditLog(),
             TestStores.NewInstanceInfo(),
             NullLogger<WorkflowDispatcher>.Instance);

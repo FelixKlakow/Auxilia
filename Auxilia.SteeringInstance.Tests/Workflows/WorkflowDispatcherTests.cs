@@ -147,6 +147,7 @@ public class WorkflowDispatcherTests
             TestStores.NewStatusPublisher(_mockBus.Object),
             _schemaStore,
             new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
+            TestStores.NewWorkspaceManager(),
             new AuditLog(_auditRecords, TimeProvider.System),
             TestStores.NewInstanceInfo(),
             NullLogger<WorkflowDispatcher>.Instance);
@@ -368,6 +369,7 @@ public class WorkflowDispatcherTests
             TestStores.NewStatusPublisher(_mockBus.Object),
             _schemaStore,
             new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
+            TestStores.NewWorkspaceManager(),
             new AuditLog(_auditRecords, TimeProvider.System),
             TestStores.NewInstanceInfo(),
             NullLogger<WorkflowDispatcher>.Instance);
@@ -432,6 +434,7 @@ public class WorkflowDispatcherTests
             TestStores.NewStatusPublisher(_mockBus.Object),
             _schemaStore,
             new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
+            TestStores.NewWorkspaceManager(),
             new AuditLog(_auditRecords, TimeProvider.System),
             TestStores.NewInstanceInfo(),
             NullLogger<WorkflowDispatcher>.Instance);
@@ -484,6 +487,7 @@ public class WorkflowDispatcherTests
             TestStores.NewStatusPublisher(_mockBus.Object),
             _schemaStore,
             new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
+            TestStores.NewWorkspaceManager(),
             new AuditLog(_auditRecords, TimeProvider.System),
             TestStores.NewInstanceInfo(),
             NullLogger<WorkflowDispatcher>.Instance);

@@ -20,6 +20,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     private readonly List<IEnvironmentRequirement> _environmentRequirements = new();
     private readonly List<WorkflowOutputDescriptor> _outputs = new();
     private readonly List<Network.NetworkEndpointDeclaration> _networkEndpoints = new();
+    private readonly List<Workspace.RepositoryDeclaration> _repositories = new();
     private readonly List<SignalDescriptor> _signals = new();
     private readonly List<Views.ViewDescriptor> _views = new();
     private readonly WorkflowMetadata _metadata = new();
@@ -84,6 +85,17 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     {
         ArgumentException.ThrowIfNullOrEmpty(endpoint);
         _networkEndpoints.Add(new Network.NetworkEndpointDeclaration(endpoint, purpose));
+        return this;
+    }
+
+    public IWorkflowBuilder RequiresRepository(
+        string id, string cloneUrl, string? branch = null, bool noCache = false)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(id);
+        ArgumentException.ThrowIfNullOrEmpty(cloneUrl);
+        if (_repositories.Any(r => r.Id == id))
+            throw new InvalidOperationException($"A repository with id '{id}' has already been declared.");
+        _repositories.Add(new Workspace.RepositoryDeclaration(id, cloneUrl, branch, noCache));
         return this;
     }
 
@@ -328,7 +340,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             Signals = _signals.AsReadOnly(),
             Lifetime = _lifetime,
             Views = _views.AsReadOnly(),
-            NetworkEndpoints = _networkEndpoints.AsReadOnly()
+            NetworkEndpoints = _networkEndpoints.AsReadOnly(),
+            Repositories = _repositories.AsReadOnly()
         };
 
     internal WorkflowManifest BuildManifest(Guid instanceId = default)
@@ -338,6 +351,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             Signals = _signals.AsReadOnly(),
             Lifetime = _lifetime,
             Views = _views.AsReadOnly(),
-            NetworkEndpoints = _networkEndpoints.AsReadOnly()
+            NetworkEndpoints = _networkEndpoints.AsReadOnly(),
+            Repositories = _repositories.AsReadOnly()
         };
 }

@@ -116,6 +116,8 @@ public sealed class DockerWorkflowLauncher(
         var binds = new List<string> { $"{request.ExtractedContentDirectory}:/workflow:ro" };
         if (request.OutputDirectoryBind is not null)
             binds.Add($"{request.OutputDirectoryBind}:/workflow-output");
+        if (request.WorkspaceDirectoryBind is not null)
+            binds.Add($"{request.WorkspaceDirectoryBind}:/workspace");
 
         var parameters = new CreateContainerParameters
         {
@@ -161,6 +163,8 @@ public sealed class DockerWorkflowLauncher(
         var binds = new List<string>();
         if (request.OutputDirectoryBind is not null)
             binds.Add($"{request.OutputDirectoryBind}:/workflow-output");
+        if (request.WorkspaceDirectoryBind is not null)
+            binds.Add($"{request.WorkspaceDirectoryBind}:/workspace");
 
         var parameters = new CreateContainerParameters
         {

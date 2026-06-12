@@ -15,4 +15,5 @@ public sealed record WorkflowSchema(
     public IReadOnlyList<SignalDescriptor> Signals { get; init; } = [];
     public IReadOnlyList<Views.ViewDescriptor> Views { get; init; } = [];
     public IReadOnlyList<Network.NetworkEndpointDeclaration> NetworkEndpoints { get; init; } = [];
+    public IReadOnlyList<Workspace.RepositoryDeclaration> Repositories { get; init; } = [];
 }

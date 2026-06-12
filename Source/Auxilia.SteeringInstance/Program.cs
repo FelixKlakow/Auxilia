@@ -100,6 +100,7 @@ try
     builder.Services.AddSingleton<SlotActivationHandler>();
     builder.Services.AddSingleton<ResourceProxyHandler>();
     builder.Services.AddSingleton<NetworkPolicyResolver>();
+    builder.Services.AddSingleton<WorkspaceManager>();
     builder.Services.AddSingleton<SignalDispatcher>();
     builder.Services.AddSingleton<WorkflowAnnouncementHandler>();
     builder.Services.AddSingleton<WorkflowDispatcher>();

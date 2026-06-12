@@ -26,6 +26,13 @@ public interface IWorkflowBuilder
     /// </summary>
     IWorkflowBuilder RequiresNetworkEndpoint(string endpoint, string purpose);
 
+    /// <summary>
+    /// Declares a repository this workflow needs in its workspace (ARCHITECTURE §9); the
+    /// platform prepares a per-run copy at <c>/workspace/repos/&lt;id&gt;</c> before launch.
+    /// </summary>
+    IWorkflowBuilder RequiresRepository(
+        string id, string cloneUrl, string? branch = null, bool noCache = false);
+
     IWorkflowBuilder DeclaresSignal<TPayload>(string name, string? description = null);
 
     /// <summary>

@@ -58,6 +58,24 @@ public class DockerWorkflowLauncherBakedImageTests
     }
 
     [Test]
+    public void BuildBakedImageContainerParameters_WorkspaceDirectoryBindSet_AddsReadWriteWorkspaceMount()
+    {
+        var request = MakeBakedRequest() with { WorkspaceDirectoryBind = "/host/workspaces/run1" };
+        var p = DockerWorkflowLauncher.BuildBakedImageContainerParameters(request, DefaultSettings);
+
+        Assert.That(p.HostConfig.Binds, Does.Contain("/host/workspaces/run1:/workspace"),
+            "The workspace must be mounted read-write — workflows commit locally; pushes go through slots.");
+    }
+
+    [Test]
+    public void BuildBakedImageContainerParameters_NoWorkspaceDirectoryBind_NoWorkspaceMount()
+    {
+        var p = DockerWorkflowLauncher.BuildBakedImageContainerParameters(MakeBakedRequest(), DefaultSettings);
+
+        Assert.That(p.HostConfig.Binds.Any(b => b.EndsWith(":/workspace")), Is.False);
+    }
+
+    [Test]
     public void BuildBakedImageContainerParameters_CmdIsNullOrEmpty()
     {
         var request = MakeBakedRequest();

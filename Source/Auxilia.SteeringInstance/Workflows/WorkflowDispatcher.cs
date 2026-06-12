@@ -41,6 +41,7 @@ public sealed class WorkflowDispatcher(
     WorkflowStatusPublisher statusPublisher,
     WorkflowSchemaStore schemaStore,
     NetworkPolicyResolver networkPolicyResolver,
+    WorkspaceManager workspaceManager,
     AuditLog auditLog,
     SteeringInstanceInfo instanceInfo,
     ILogger<WorkflowDispatcher> logger)
@@ -177,6 +178,32 @@ public sealed class WorkflowDispatcher(
                 note = networkPolicy.Note
             }), ct);
 
+        // Per-run repository workspace (ARCHITECTURE §9): declared repos from the stored
+        // schema are prepared by the Workspace Manager and bind-mounted at /workspace.
+        string? workspaceRoot = null;
+        var repositories = schema?.Repositories ?? [];
+        if (repositories.Count > 0)
+        {
+            try
+            {
+                workspaceRoot = await workspaceManager.PrepareAsync(instanceId, repositories, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogError(ex,
+                    "Workspace preparation failed. InstanceId={InstanceId} WorkflowType={WorkflowType}",
+                    instanceId, command.WorkflowType);
+                await FailPreFlightAsync(instanceId, command.WorkflowType,
+                    $"workspace preparation failed: {ex.Message}", ct);
+                return;
+            }
+
+            env[WorkflowEnvironmentVariables.WorkspaceDirectory] = "/workspace";
+            await auditLog.AppendAsync(
+                "steering-instance", "workflow.workspace-prepared",
+                instanceId.ToString(), repositories.Count.ToString(), ct: ct);
+        }
+
         // docker:// URI — skip download/verify/extract; use baked image
         if (command.WorkflowPackageUri.StartsWith("docker://", StringComparison.OrdinalIgnoreCase))
         {
@@ -186,7 +213,8 @@ public sealed class WorkflowDispatcher(
                 {
                     DockerImageUri = imageName,
                     OutputDirectoryBind = outputDirectory,
-                    NetworkPolicy = networkPolicy
+                    NetworkPolicy = networkPolicy,
+                    WorkspaceDirectoryBind = workspaceRoot
                 },
                 ct);
             await MarkQueuedAsync(instanceId, command.WorkflowType, ct);
@@ -237,7 +265,8 @@ public sealed class WorkflowDispatcher(
         await launcher.LaunchAsync(new WorkflowLaunchRequest(extractedPath, env, pluginFiles)
         {
             OutputDirectoryBind = outputDirectory,
-            NetworkPolicy = networkPolicy
+            NetworkPolicy = networkPolicy,
+            WorkspaceDirectoryBind = workspaceRoot
         }, ct);
         await MarkQueuedAsync(instanceId, command.WorkflowType, ct);
     }

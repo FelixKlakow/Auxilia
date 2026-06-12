@@ -15,4 +15,6 @@ public static class WorkflowEnvironmentVariables
     public const string InstanceToken = "Workflow__InstanceToken";
     /// <summary>Directory where the workflow writes its declared outputs for persistence.</summary>
     public const string OutputDirectory = "Workflow__OutputDirectory";
+    /// <summary>Directory containing the per-run repository workspace (ARCHITECTURE §9).</summary>
+    public const string WorkspaceDirectory = "Workflow__WorkspaceDirectory";
 }

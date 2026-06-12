@@ -50,6 +50,21 @@ public sealed class WorkflowDispatcherSettings
     public string RunOutputDirectory { get; set; } =
         Path.Combine(Path.GetTempPath(), "auxilia-run-output");
 
+    /// <summary>
+    /// Directory under which each run gets its repository workspace ({dir}/{instanceId:N}).
+    /// Mounted into workflow containers at /workspace (ARCHITECTURE §9). Must be a path the
+    /// Docker daemon can bind-mount (host path) in container mode.
+    /// </summary>
+    public string WorkspaceRootDirectory { get; set; } =
+        Path.Combine(Path.GetTempPath(), "auxilia-workspaces");
+
+    /// <summary>
+    /// Warm repository cache (ARCHITECTURE §9): one entry per clone URL, host-only,
+    /// never bind-mounted into any container.
+    /// </summary>
+    public string WarmCacheDirectory { get; set; } =
+        Path.Combine(Path.GetTempPath(), "auxilia-repo-cache");
+
     /// <summary>Per-(run, view) persisted item cap; items beyond it are dropped and logged.</summary>
     public long MaxViewItemsPerView { get; set; } = 10_000;
 

@@ -14,6 +14,7 @@ public sealed class WorkflowStateHandler(
     AuditLog auditLog,
     WorkflowStatusPublisher statusPublisher,
     ArtifactPersister artifactPersister,
+    WorkspaceManager workspaceManager,
     IOptions<WorkflowDispatcherSettings> dispatcherSettings,
     ILogger<WorkflowStateHandler> logger)
 {
@@ -84,6 +85,10 @@ public sealed class WorkflowStateHandler(
                 message.WorkflowInstanceId, record.WorkflowType, record.OutputsJson,
                 workItemId ?? string.Empty, ct);
         }
+
+        // The run's repository workspace dies with the run (ARCHITECTURE §9).
+        if (message.State is WorkflowState.Success or WorkflowState.Failed or WorkflowState.Cancelled)
+            await workspaceManager.CleanupAsync(message.WorkflowInstanceId);
 
         // Drain-and-replace: a drained long-living instance is replaced with a fresh run
         // that boots with the updated configuration (ARCHITECTURE §6).
