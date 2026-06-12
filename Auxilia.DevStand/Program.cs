@@ -1,18 +1,20 @@
 using System.Diagnostics;
+using Auxilia.DevStand;
 using Auxilia.SystemTestSuite.EndToEnd;
 using MailKit;
 using MailKit.Net.Imap;
-using MailKit.Net.Smtp;
 using MailKit.Security;
-using MimeKit;
 
 // Interactive dev stand: boots the SAME environment as the EndToEnd acceptance test —
 // GreenMail, RabbitMQ, MongoDB, Steering Instance, Backend Service with the email task
 // source and seeded Code Review slot configurations — and keeps it running until you quit,
 // so the dashboard can be explored in a browser. F5-able from Visual Studio.
+//
+// Screenshot mode (`-- --screenshots [outputDir]`): no interactive loop — triggers one demo
+// run, captures every dashboard page as a full-page PNG, tears down, and exits.
 
-const string AdapterMailbox = "workflows@localhost"; // the mailbox the email adapter polls
-const string OperatorMailbox = "operator@localhost"; // demo mails are sent from here
+if (args.Length > 0 && args[0] == "--screenshots")
+    return await ScreenshotHarness.RunAsync(args.Length > 1 ? args[1] : null);
 
 var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
@@ -66,7 +68,7 @@ try
                     break;
                 case ConsoleKey.M:
                     var subject = $"Please review PR-{++demoCounter} (dev stand)";
-                    await SendDemoMailAsync(subject, cts.Token);
+                    await DemoMail.SendAsync(subject, cts.Token);
                     Console.WriteLine($"  -> mail sent: \"{subject}\" — the run appears on the dashboard within a few seconds.");
                     _ = WatchForReplyAsync(subject, cts.Token);
                     break;
@@ -80,7 +82,7 @@ finally
     await environment.OneTimeTearDown();
 }
 
-return;
+return 0;
 
 static void OpenBrowser(string url)
 {
@@ -92,24 +94,6 @@ static void OpenBrowser(string url)
     {
         // No default browser (headless host) — the URL is printed either way.
     }
-}
-
-static async Task SendDemoMailAsync(string subject, CancellationToken ct)
-{
-    var message = new MimeMessage();
-    message.From.Add(MailboxAddress.Parse(OperatorMailbox));
-    message.To.Add(MailboxAddress.Parse(AdapterMailbox));
-    message.Subject = subject;
-    message.Body = new TextPart("plain")
-    {
-        Text = "Dev-stand demo: please review the changes in PR-42."
-    };
-
-    using var smtp = new SmtpClient();
-    await smtp.ConnectAsync(
-        EndToEndEnvironment.MailHost, EndToEndEnvironment.MappedSmtp, SecureSocketOptions.None, ct);
-    await smtp.SendAsync(message, ct);
-    await smtp.DisconnectAsync(quit: true, ct);
 }
 
 // The Code Review workflow writes its summary back as a mail reply — announce it when it lands.
@@ -124,7 +108,7 @@ static async Task WatchForReplyAsync(string subject, CancellationToken ct)
             await imap.ConnectAsync(
                 EndToEndEnvironment.MailHost, EndToEndEnvironment.MappedImap,
                 SecureSocketOptions.None, ct);
-            await imap.AuthenticateAsync(OperatorMailbox, "pw", ct);
+            await imap.AuthenticateAsync(DemoMail.OperatorMailbox, "pw", ct);
             var inbox = imap.Inbox;
             await inbox.OpenAsync(FolderAccess.ReadOnly, ct);
 
