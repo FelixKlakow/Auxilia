@@ -126,7 +126,10 @@ try
             // API/hub clients get status codes, not login redirects.
             o.Events.OnRedirectToLogin = ctx => { ctx.Response.StatusCode = 401; return Task.CompletedTask; };
             o.Events.OnRedirectToAccessDenied = ctx => { ctx.Response.StatusCode = 403; return Task.CompletedTask; };
-        });
+        })
+        .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions,
+            Auxilia.BackendService.Mcp.McpApiKeyAuthenticationHandler>(
+            Auxilia.BackendService.Mcp.McpApiKeyAuthenticationHandler.SchemeName, null);
     builder.Services.AddAuthorization();
     builder.Services.AddSignalR();
     builder.Services.AddHostedService<Auxilia.BackendService.Dashboard.ViewDataFanOutHandler>();
@@ -137,6 +140,11 @@ try
     var dashboardSettings = new Auxilia.BackendService.Dashboard.DashboardSettings();
     builder.Configuration.GetSection("Dashboard").Bind(dashboardSettings);
     builder.Services.AddSingleton(dashboardSettings);
+
+    // --- MCP server: AI-agent UI parity over Streamable HTTP, API-key authenticated ---
+    builder.Services.AddMcpServer()
+        .WithHttpTransport(o => o.Stateless = true)
+        .WithTools<Auxilia.BackendService.Mcp.AuxiliaMcpTools>();
 
     // --- Platform host (status fan-out, heartbeat monitor, scheduler) ---
     builder.Services.Configure<PlatformHostSettings>(
@@ -167,6 +175,10 @@ try
     app.UseAntiforgery();
     Auxilia.BackendService.Dashboard.DashboardAuthEndpoints.MapDashboardAuth(app);
     app.MapHub<Auxilia.BackendService.Dashboard.ViewDataHub>("/hubs/views");
+    app.MapMcp("/mcp").RequireAuthorization(new Microsoft.AspNetCore.Authorization.AuthorizeAttribute
+    {
+        AuthenticationSchemes = Auxilia.BackendService.Mcp.McpApiKeyAuthenticationHandler.SchemeName
+    });
     app.MapRazorComponents<Auxilia.BackendService.Components.App>()
         .AddInteractiveServerRenderMode();
 
