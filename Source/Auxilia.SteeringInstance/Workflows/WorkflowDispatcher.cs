@@ -35,6 +35,7 @@ public sealed class WorkflowDispatcher(
     PendingWorkflowPackageStore pendingPackages,
     SlotConfigurationStore slotStore,
     SlotProviderRegistry providerRegistry,
+    WorkflowConfigurationStore configurationStore,
     WorkflowInstanceTokenRegistry tokenRegistry,
     IPolicyEngine policyEngine,
     WorkflowInstanceRegistry instanceRegistry,
@@ -60,18 +61,48 @@ public sealed class WorkflowDispatcher(
 
     private async Task HandleAsync(RunWorkflowCommand command, CancellationToken ct)
     {
+        // Named-configuration dispatch (#18): the configuration supplies workflow type and
+        // package URI when the command omits them. A missing or disabled configuration still
+        // creates the instance record first so the pre-flight failure is visible everywhere.
+        StoredWorkflowConfiguration? configuration = null;
+        string? configurationError = null;
+        if (command.WorkflowConfigurationId is { } configurationId)
+        {
+            configuration = await configurationStore.GetAsync(configurationId, ct);
+            if (configuration is null)
+                configurationError = $"workflow configuration '{configurationId}' not found";
+            else if (!configuration.Enabled)
+                configurationError = $"workflow configuration '{configuration.Name}' is disabled";
+        }
+
+        var workflowType = configuration?.WorkflowType ?? command.WorkflowType ?? string.Empty;
+        var packageUri = configuration?.PackageUri ?? command.WorkflowPackageUri ?? string.Empty;
+
         logger.LogInformation(
             "Received RunWorkflowCommand. CommandId={CommandId} WorkflowType={WorkflowType} PackageUri={PackageUri}",
-            command.CommandId, command.WorkflowType, command.WorkflowPackageUri);
+            command.CommandId, workflowType, packageUri);
 
         // The instance identity exists for the whole lifecycle — including pre-flight
         // rejections — so every outcome is visible in the dashboard.
-        var issued = tokenRegistry.Issue(command.WorkflowType);
+        var issued = tokenRegistry.Issue(workflowType);
         var instanceId = issued.WorkflowInstanceId;
         await instanceRegistry.CreateAsync(
-            instanceId, command.WorkflowType, "Received",
-            instanceInfo.ServiceId, JsonSerializer.Serialize(command), ct);
-        await statusPublisher.PublishAsync(instanceId, command.WorkflowType, "Received", ct: ct);
+            instanceId, workflowType, "Received",
+            instanceInfo.ServiceId, JsonSerializer.Serialize(command),
+            configuration?.Id, configuration?.Name, ct);
+        await statusPublisher.PublishAsync(instanceId, workflowType, "Received", ct: ct);
+
+        if (configurationError is not null)
+        {
+            logger.LogWarning(
+                "Dispatch rejected: {Reason}. CommandId={CommandId}",
+                configurationError, command.CommandId);
+            await auditLog.AppendAsync(
+                "steering-instance", "workflow.dispatch.rejected",
+                instanceId.ToString(), configurationError, ct: ct);
+            await FailPreFlightAsync(instanceId, workflowType, configurationError, ct);
+            return;
+        }
 
         // Pre-flight authorization: the trigger permission of the requesting principal.
         if (command.RequestedBy is { } principalId)
@@ -79,14 +110,14 @@ public sealed class WorkflowDispatcher(
             var decision = await policyEngine.EvaluateAsync(
                 new PolicyContext(principalId, PermissionActions.WorkflowTrigger, command.CommandId.ToString())
                 {
-                    WorkflowType = command.WorkflowType
+                    WorkflowType = workflowType
                 }, ct);
             if (!decision.Allowed)
             {
                 logger.LogWarning(
                     "Dispatch denied by policy. CommandId={CommandId} WorkflowType={WorkflowType} Principal={Principal} Reason={Reason}",
-                    command.CommandId, command.WorkflowType, principalId, decision.Reason);
-                await FailPreFlightAsync(instanceId, command.WorkflowType,
+                    command.CommandId, workflowType, principalId, decision.Reason);
+                await FailPreFlightAsync(instanceId, workflowType,
                     $"dispatch denied by policy: {decision.Reason}", ct);
                 return;
             }
@@ -96,7 +127,7 @@ public sealed class WorkflowDispatcher(
             logger.LogWarning(
                 "Dispatch rejected: RunWorkflowCommand without RequestedBy principal while RequirePrincipal is enabled. CommandId={CommandId}",
                 command.CommandId);
-            await FailPreFlightAsync(instanceId, command.WorkflowType,
+            await FailPreFlightAsync(instanceId, workflowType,
                 "dispatch rejected: no requesting principal", ct);
             return;
         }
@@ -140,36 +171,64 @@ public sealed class WorkflowDispatcher(
             foreach (var (key, value) in settings.ExtraEnvironmentVariables)
                 env[key] = value;
 
-        // 5b. Resolve slot plugin files
+        // 5b. Resolve slot plugin files. A named configuration fully defines the run's slot
+        // bindings; an unregistered provider type fails pre-flight there. The configuration-less
+        // path stays byte-for-byte: providers come from the global (type, slot) table and
+        // missing registrations are merely skipped.
         var pluginFiles = new List<SlotPluginFile>();
-        var providerTypes = (await slotStore.GetConfigurationsAsync(command.WorkflowType, ct))
-            .Select(c => c.ProviderType)
-            .Distinct();
-
-        foreach (var providerType in providerTypes)
+        if (configuration is not null)
         {
-            var dllPath = await providerRegistry.GetDllPathAsync(providerType, ct);
-            if (dllPath is null)
+            foreach (var providerType in configuration.SlotBindings.Select(b => b.ProviderType).Distinct())
             {
-                logger.LogWarning(
-                    "No SlotPackages entry for ProviderType={ProviderType} (WorkflowType={WorkflowType}). Skipping.",
-                    providerType, command.WorkflowType);
-                continue;
-            }
+                var dllPath = await providerRegistry.GetDllPathAsync(providerType, ct);
+                if (dllPath is null)
+                {
+                    var reason =
+                        $"workflow configuration '{configuration.Name}' references unregistered slot provider '{providerType}'";
+                    logger.LogWarning(
+                        "Dispatch rejected: {Reason}. CommandId={CommandId}", reason, command.CommandId);
+                    await auditLog.AppendAsync(
+                        "steering-instance", "workflow.dispatch.rejected",
+                        instanceId.ToString(), reason, ct: ct);
+                    await FailPreFlightAsync(instanceId, workflowType, reason, ct);
+                    return;
+                }
 
-            var manifestPath = Path.ChangeExtension(dllPath, null) + ".manifest.json";
-            pluginFiles.Add(new SlotPluginFile(dllPath, manifestPath));
+                var manifestPath = Path.ChangeExtension(dllPath, null) + ".manifest.json";
+                pluginFiles.Add(new SlotPluginFile(dllPath, manifestPath));
+            }
+        }
+        else
+        {
+            var providerTypes = (await slotStore.GetConfigurationsAsync(workflowType, ct))
+                .Select(c => c.ProviderType)
+                .Distinct();
+
+            foreach (var providerType in providerTypes)
+            {
+                var dllPath = await providerRegistry.GetDllPathAsync(providerType, ct);
+                if (dllPath is null)
+                {
+                    logger.LogWarning(
+                        "No SlotPackages entry for ProviderType={ProviderType} (WorkflowType={WorkflowType}). Skipping.",
+                        providerType, workflowType);
+                    continue;
+                }
+
+                var manifestPath = Path.ChangeExtension(dllPath, null) + ".manifest.json";
+                pluginFiles.Add(new SlotPluginFile(dllPath, manifestPath));
+            }
         }
 
         if (pluginFiles.Count > 0)
             logger.LogInformation(
                 "Resolved {Count} slot plugin file(s) for {WorkflowType}: {ProviderTypes}",
-                pluginFiles.Count, command.WorkflowType,
+                pluginFiles.Count, workflowType,
                 string.Join(", ", pluginFiles.Select(f => f.DllPath)));
 
         // Effective network policy (ARCHITECTURE §10): manifest baseline (last stored schema)
         // merged with run-configuration extras, clamped by platform policy, audited per run.
-        var schema = await schemaStore.GetSchemaAsync(command.WorkflowType, ct);
+        var schema = await schemaStore.GetSchemaAsync(workflowType, ct);
         var networkPolicy = networkPolicyResolver.Resolve(
             schema?.NetworkEndpoints ?? [], command.Context, dispatcherSettings.Value);
         await auditLog.AppendAsync(
@@ -195,8 +254,8 @@ public sealed class WorkflowDispatcher(
             {
                 logger.LogError(ex,
                     "Workspace preparation failed. InstanceId={InstanceId} WorkflowType={WorkflowType}",
-                    instanceId, command.WorkflowType);
-                await FailPreFlightAsync(instanceId, command.WorkflowType,
+                    instanceId, workflowType);
+                await FailPreFlightAsync(instanceId, workflowType,
                     $"workspace preparation failed: {ex.Message}", ct);
                 return;
             }
@@ -208,9 +267,9 @@ public sealed class WorkflowDispatcher(
         }
 
         // docker:// URI — skip download/verify/extract; use baked image
-        if (command.WorkflowPackageUri.StartsWith("docker://", StringComparison.OrdinalIgnoreCase))
+        if (packageUri.StartsWith("docker://", StringComparison.OrdinalIgnoreCase))
         {
-            var imageName = command.WorkflowPackageUri.Substring("docker://".Length);
+            var imageName = packageUri.Substring("docker://".Length);
             await launcher.LaunchAsync(
                 new WorkflowLaunchRequest(string.Empty, env, pluginFiles)
                 {
@@ -220,7 +279,7 @@ public sealed class WorkflowDispatcher(
                     WorkspaceDirectoryBind = workspaceRoot
                 },
                 ct);
-            await MarkQueuedAsync(instanceId, command.WorkflowType, ct);
+            await MarkQueuedAsync(instanceId, workflowType, ct);
             return;
         }
 
@@ -229,13 +288,13 @@ public sealed class WorkflowDispatcher(
         byte[] packageBytes;
         try
         {
-            packageBytes = await http.GetByteArrayAsync(command.WorkflowPackageUri, ct);
+            packageBytes = await http.GetByteArrayAsync(packageUri, ct);
         }
         catch (Exception ex)
         {
             logger.LogError(ex,
-                "Failed to download workflow package from {PackageUri}.", command.WorkflowPackageUri);
-            await FailPreFlightAsync(instanceId, command.WorkflowType,
+                "Failed to download workflow package from {PackageUri}.", packageUri);
+            await FailPreFlightAsync(instanceId, workflowType,
                 "workflow package download failed", ct);
             return;
         }
@@ -245,8 +304,8 @@ public sealed class WorkflowDispatcher(
         {
             logger.LogError(
                 "Workflow package verification failed for {WorkflowType}. Aborting launch.",
-                command.WorkflowType);
-            await FailPreFlightAsync(instanceId, command.WorkflowType,
+                workflowType);
+            await FailPreFlightAsync(instanceId, workflowType,
                 "workflow package signature verification failed", ct);
             return;
         }
@@ -259,10 +318,10 @@ public sealed class WorkflowDispatcher(
 
         logger.LogInformation(
             "Workflow package extracted. WorkflowType={WorkflowType} Path={Path}",
-            command.WorkflowType, extractedPath);
+            workflowType, extractedPath);
 
         // 4. Register for the announcement handler
-        pendingPackages.Store(command.WorkflowType, extractedPath);
+        pendingPackages.Store(workflowType, extractedPath);
 
         // 6. Launch
         await launcher.LaunchAsync(new WorkflowLaunchRequest(extractedPath, env, pluginFiles)
@@ -271,7 +330,7 @@ public sealed class WorkflowDispatcher(
             NetworkPolicy = networkPolicy,
             WorkspaceDirectoryBind = workspaceRoot
         }, ct);
-        await MarkQueuedAsync(instanceId, command.WorkflowType, ct);
+        await MarkQueuedAsync(instanceId, workflowType, ct);
     }
 
     /// <summary>

@@ -11,13 +11,17 @@ namespace Auxilia.SteeringInstance.Tests;
 public class ConfigurationResolverTests
 {
     private SlotConfigurationStore _store = null!;
+    private WorkflowConfigurationStore _configurationStore = null!;
     private ConfigurationResolver _resolver = null!;
 
     [SetUp]
     public void SetUp()
     {
         _store = TestStores.NewSlotConfigurationStore();
-        _resolver = new ConfigurationResolver(_store, TestStores.NewSignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance);
+        _configurationStore = TestStores.NewWorkflowConfigurationStore();
+        _resolver = new ConfigurationResolver(
+            _store, TestStores.NewSignalHandlerStore(), _configurationStore,
+            NullLogger<ConfigurationResolver>.Instance);
     }
 
     // ------------------------------------------------------------------ ValidateConfiguredAsync
@@ -188,6 +192,114 @@ public class ConfigurationResolverTests
 
         Assert.That(success, Is.False);
         Assert.That(error, Does.Contain("RSA public key"));
+        Assert.That(slot, Is.Null);
+    }
+
+    // ------------------------------------------------------------------ Named workflow configurations (#18)
+
+    private Task<StoredWorkflowConfiguration> SeedConfigurationAsync(
+        bool enabled = true, IReadOnlyList<StoredSlotBinding>? bindings = null)
+        => _configurationStore.UpsertAsync(new StoredWorkflowConfiguration(
+            "alpha", "Alpha", "TestWorkflow", "docker://test-wf:1", enabled,
+            bindings ?? [new StoredSlotBinding("slotA", "ConfigProvider",
+                new Dictionary<string, string> { ["ApiKey"] = "from-config" })]));
+
+    [Test]
+    public async Task ValidateConfiguration_Missing_ReturnsInvalid()
+    {
+        var (isValid, reason) = await _resolver.ValidateConfigurationAsync(Guid.NewGuid());
+
+        Assert.That(isValid, Is.False);
+        Assert.That(reason, Does.Contain("not found"));
+    }
+
+    [Test]
+    public async Task ValidateConfiguration_Disabled_ReturnsInvalid()
+    {
+        var configuration = await SeedConfigurationAsync(enabled: false);
+
+        var (isValid, reason) = await _resolver.ValidateConfigurationAsync(configuration.Id);
+
+        Assert.That(isValid, Is.False);
+        Assert.That(reason, Does.Contain("disabled"));
+    }
+
+    [Test]
+    public async Task ValidateConfiguration_NoBindings_ReturnsInvalid()
+    {
+        var configuration = await SeedConfigurationAsync(bindings: []);
+
+        var (isValid, reason) = await _resolver.ValidateConfigurationAsync(configuration.Id);
+
+        Assert.That(isValid, Is.False);
+        Assert.That(reason, Does.Contain("no slot bindings"));
+    }
+
+    [Test]
+    public async Task ValidateConfiguration_EnabledWithBindings_ReturnsValid()
+    {
+        var configuration = await SeedConfigurationAsync();
+
+        var (isValid, reason) = await _resolver.ValidateConfigurationAsync(configuration.Id);
+
+        Assert.That(isValid, Is.True);
+        Assert.That(reason, Is.Null);
+    }
+
+    [Test]
+    public async Task ResolveConfigurationSlot_HappyPath_DecryptsToBindingSettings()
+    {
+        using var rsa = RSA.Create(4096);
+        var publicKey = Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
+        var configuration = await SeedConfigurationAsync();
+
+        var (success, error, slot) = await _resolver.ResolveConfigurationSlotAsync(
+            configuration.Id, "slotA", publicKey);
+
+        Assert.That(success, Is.True);
+        Assert.That(error, Is.Null);
+        Assert.That(slot!.ProviderType, Is.EqualTo("ConfigProvider"));
+
+        var plainJson = System.Text.Encoding.UTF8.GetString(
+            rsa.Decrypt(Convert.FromBase64String(slot.EncryptedSettings), RSAEncryptionPadding.OaepSHA256));
+        var decoded = JsonSerializer.Deserialize<Dictionary<string, string>>(plainJson);
+        Assert.That(decoded!["ApiKey"], Is.EqualTo("from-config"));
+    }
+
+    [Test]
+    public async Task ResolveConfigurationSlot_MissingConfiguration_ReturnsError()
+    {
+        var (success, error, slot) = await _resolver.ResolveConfigurationSlotAsync(
+            Guid.NewGuid(), "slotA", ValidPublicKey());
+
+        Assert.That(success, Is.False);
+        Assert.That(error, Does.Contain("not found"));
+        Assert.That(slot, Is.Null);
+    }
+
+    [Test]
+    public async Task ResolveConfigurationSlot_DisabledConfiguration_ReturnsError()
+    {
+        var configuration = await SeedConfigurationAsync(enabled: false);
+
+        var (success, error, slot) = await _resolver.ResolveConfigurationSlotAsync(
+            configuration.Id, "slotA", ValidPublicKey());
+
+        Assert.That(success, Is.False);
+        Assert.That(error, Does.Contain("disabled"));
+        Assert.That(slot, Is.Null);
+    }
+
+    [Test]
+    public async Task ResolveConfigurationSlot_UnboundSlot_ReturnsError()
+    {
+        var configuration = await SeedConfigurationAsync();
+
+        var (success, error, slot) = await _resolver.ResolveConfigurationSlotAsync(
+            configuration.Id, "ghost-slot", ValidPublicKey());
+
+        Assert.That(success, Is.False);
+        Assert.That(error, Does.Contain("ghost-slot"));
         Assert.That(slot, Is.Null);
     }
 

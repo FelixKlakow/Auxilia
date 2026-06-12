@@ -64,6 +64,7 @@ public class AuthenticatedHandshakeComponentTests
                 services.AddPlatformEntity<WorkflowSchemaRecord>(platformData);
                 services.AddPlatformEntity<SlotConfigurationRecord>(platformData);
                 services.AddPlatformEntity<SlotProviderRecord>(platformData);
+                services.AddPlatformEntity<WorkflowConfigurationRecord>(platformData);
                 services.AddPlatformEntity<SignalHandlerRecord>(platformData);
                 services.AddPlatformEntity<WorkflowInstanceRecord>(platformData);
                 services.AddPlatformEntity<AuditRecord>(platformData);
@@ -76,6 +77,7 @@ public class AuthenticatedHandshakeComponentTests
                 services.AddSingleton(new SteeringInstanceInfo(Guid.NewGuid(), DateTime.UtcNow));
                 services.AddSingleton<WorkflowInstanceTokenRegistry>();
                 services.AddSingleton<SlotConfigurationStore>();
+                services.AddSingleton<WorkflowConfigurationStore>();
                 services.AddSingleton<SlotProviderRegistry>();
                 services.AddSingleton<SignalHandlerStore>();
                 services.AddSingleton<WorkflowSchemaStore>();

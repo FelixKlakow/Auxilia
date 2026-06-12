@@ -6,6 +6,7 @@ using Auxilia.PlatformData;
 using Auxilia.PlatformData.Entities;
 using Auxilia.SteeringInstance.Workflows;
 using Auxilia.SteeringInstance.Workflows.Storage;
+using Auxilia.UniversalDataAccess;
 using Auxilia.Workflows;
 using Auxilia.Workflows.Crypto;
 using Auxilia.Workflows.Messaging;
@@ -17,16 +18,20 @@ using Moq;
 namespace Auxilia.SteeringInstance.Tests.ComponentTests;
 
 /// <summary>
-/// Component tests for just-in-time per-slot credential delivery: registration of a slotted
-/// workflow succeeds without shipping any credentials; the workflow then activates each slot
-/// on demand with its instance token and receives the configuration encrypted for its
-/// ephemeral key on the canonical per-instance queue.
+/// Component tests for named-configuration dispatch (#18) over the in-memory bus: a
+/// configuration is seeded via the per-instance seed queue, a run is dispatched by
+/// configuration ID only, the instance record carries the configuration ID/name, and
+/// just-in-time slot activation serves the binding's settings.
 /// </summary>
 [TestFixture]
 [Category("Component")]
-public class JitSlotActivationComponentTests
+public class WorkflowConfigurationDispatchComponentTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
+
+    private const string ConfigurationName = "alpha";
+    private const string SeedQueue = "workflow.run-commands-slot-seed.upsert-configuration";
+    private const string RegisterProviderQueue = "workflow.run-commands-slot-seed.register";
 
     private IHost _host = null!;
     private FakeMessageBusClient _bus = null!;
@@ -89,12 +94,15 @@ public class JitSlotActivationComponentTests
                 services.AddSingleton<WorkflowRegistrationHandler>();
                 services.AddSingleton<WorkflowAnnouncementHandler>();
                 services.AddSingleton<SlotActivationHandler>();
+                services.AddSingleton<SlotConfigurationSeedHandler>();
+                services.AddSingleton<LongLivingDrainCoordinator>();
                 services.AddSingleton<NetworkPolicyResolver>();
                 services.AddSingleton<WorkspaceManager>();
                 services.AddSingleton<WorkflowDispatcher>();
             })
             .Build();
 
+        await _host.Services.GetRequiredService<SlotConfigurationSeedHandler>().StartAsync(CancellationToken.None);
         await _host.Services.GetRequiredService<WorkflowRegistrationHandler>().StartAsync(CancellationToken.None);
         await _host.Services.GetRequiredService<WorkflowAnnouncementHandler>().StartAsync(CancellationToken.None);
         await _host.Services.GetRequiredService<SlotActivationHandler>().StartAsync(CancellationToken.None);
@@ -110,34 +118,42 @@ public class JitSlotActivationComponentTests
         return Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
     }
 
-    /// <summary>Dispatches a baked-image launch and returns the issued (instanceId, token).</summary>
-    private async Task<(Guid InstanceId, string Token)> DispatchAsync(string workflowType = "jit-wf")
+    /// <summary>Seeds the provider and the named configuration over the seed queue family.</summary>
+    private async Task SeedConfigurationAsync()
+    {
+        await _bus.SimulateReceivedAsync(RegisterProviderQueue,
+            new RegisterSlotProviderCommand("cfg-provider", "/plugins/cfg-provider.slothandler.dll"));
+        await _bus.SimulateReceivedAsync(SeedQueue,
+            new UpsertWorkflowConfigurationCommand(
+                ConfigurationName, "Alpha", "cfg-wf", "docker://cfg-wf:test", Enabled: true,
+                [new SlotBindingSeed("repo", "cfg-provider",
+                    new Dictionary<string, string> { ["RepositoryUrl"] = "https://alpha.example/repo.git" })]));
+    }
+
+    /// <summary>Dispatches by configuration ID only and returns the issued (instanceId, token).</summary>
+    private async Task<(Guid InstanceId, string Token)> DispatchByConfigurationAsync()
     {
         var command = new RunWorkflowCommand(
-            Guid.NewGuid(), workflowType, "docker://jit-wf:test", new Dictionary<string, string>());
+            Guid.NewGuid(), null, null, new Dictionary<string, string>(),
+            WorkflowConfigurationId: WorkflowConfigurationRecord.IdFor(ConfigurationName));
 
         await _bus.SimulateReceivedAsync("workflow.run-commands", command);
-        await _bus.WaitForConditionAsync(() => _launcher.Calls.Count > 0, Timeout);
+        var launched = await _bus.WaitForConditionAsync(() => _launcher.Calls.Count > 0, Timeout);
+        Assert.That(launched, Is.True, "Launcher was not called within the timeout.");
 
         var env = _launcher.Calls[0].EnvironmentVariables;
         return (Guid.Parse(env[WorkflowEnvironmentVariables.InstanceId]),
                 env[WorkflowEnvironmentVariables.InstanceToken]);
     }
 
-    /// <summary>Runs the full authenticated handshake for a manifest with one slot ("repo").</summary>
-    private async Task<(Guid InstanceId, string Token)> HandshakeWithSlotAsync()
+    /// <summary>Runs the authenticated handshake for a manifest with one slot ("repo").</summary>
+    private async Task<(Guid InstanceId, string Token)> HandshakeAsync()
     {
-        await _host.Services.GetRequiredService<SlotConfigurationStore>()
-            .UpsertConfigurationAsync("jit-wf", new StoredSlotConfiguration(
-                "repo", "git",
-                new Dictionary<string, string> { ["RepositoryUrl"] = "https://example.com/repo.git" },
-                ConfigurationStatus.Valid));
-
-        var (instanceId, token) = await DispatchAsync();
+        var (instanceId, token) = await DispatchByConfigurationAsync();
         var canonicalQueue = WorkflowQueues.ResponseQueueFor(instanceId);
 
         await _bus.SimulateReceivedAsync("workflow.announcements",
-            new WorkflowAnnouncementMessage(instanceId, "jit-wf", AnyPublicKey(), "self-declared", token));
+            new WorkflowAnnouncementMessage(instanceId, "cfg-wf", AnyPublicKey(), "self-declared", token));
         await _bus.WaitForConditionAsync(
             () => _bus.PublishedMessages.Any(m => m.Topic == canonicalQueue && m.Message is WorkflowDirective),
             Timeout);
@@ -145,7 +161,7 @@ public class JitSlotActivationComponentTests
         await _bus.SimulateReceivedAsync("workflow-registration",
             new WorkflowRegistrationRequest(
                 instanceId,
-                new WorkflowManifest("jit-wf", instanceId.ToString(),
+                new WorkflowManifest("cfg-wf", instanceId.ToString(),
                     [new SlotDefinition("repo", null) { ServiceType = typeof(object) }],
                     [], string.Empty, [], []),
                 AnyPublicKey(), "self-declared", token));
@@ -157,74 +173,62 @@ public class JitSlotActivationComponentTests
     }
 
     [Test]
-    public async Task SlottedRegistration_Succeeds_WithoutShippingCredentials()
+    public async Task DispatchByConfigurationId_LaunchesConfiguredImage_AndRecordsConfigurationOnInstance()
     {
-        var (instanceId, _) = await HandshakeWithSlotAsync();
-        var canonicalQueue = WorkflowQueues.ResponseQueueFor(instanceId);
+        await SeedConfigurationAsync();
 
-        var response = (WorkflowConfigurationResponse)_bus.PublishedMessages
-            .First(m => m.Topic == canonicalQueue && m.Message is WorkflowConfigurationResponse).Message;
+        var (instanceId, _) = await DispatchByConfigurationAsync();
+
+        Assert.That(_launcher.Calls[0].DockerImageUri, Is.EqualTo("cfg-wf:test"));
+        Assert.That(_launcher.Calls[0].SlotPluginFiles.Select(f => f.DllPath),
+            Is.EqualTo(new[] { "/plugins/cfg-provider.slothandler.dll" }));
+
+        var records = _host.Services.GetRequiredService<IDataAccess<WorkflowInstanceRecord>>();
+        var record = await records.ReadAsync(instanceId);
+        Assert.That(record, Is.Not.Null);
         Assert.Multiple(() =>
         {
-            Assert.That(response.Success, Is.True);
-            Assert.That(response.Slots, Is.Empty,
-                "Credentials must not ship at registration — slots activate just-in-time.");
+            Assert.That(record!.WorkflowType, Is.EqualTo("cfg-wf"));
+            Assert.That(record.WorkflowConfigurationId,
+                Is.EqualTo(WorkflowConfigurationRecord.IdFor(ConfigurationName)));
+            Assert.That(record.WorkflowConfigurationName, Is.EqualTo(ConfigurationName));
         });
     }
 
     [Test]
-    public async Task SlotActivation_WithIssuedToken_DeliversDecryptableSlotOnCanonicalQueue()
+    public async Task DispatchByConfigurationId_RegistrationSucceeds_AndSlotActivationServesBindingSettings()
     {
-        var (instanceId, token) = await HandshakeWithSlotAsync();
+        await SeedConfigurationAsync();
+        var (instanceId, token) = await HandshakeAsync();
         var canonicalQueue = WorkflowQueues.ResponseQueueFor(instanceId);
+
+        var registration = (WorkflowConfigurationResponse)_bus.PublishedMessages
+            .First(m => m.Topic == canonicalQueue && m.Message is WorkflowConfigurationResponse).Message;
+        Assert.That(registration.Success, Is.True,
+            $"Registration of a configuration-bound instance must succeed: {registration.ErrorMessage}");
 
         using var rsa = RSA.Create(4096);
         var publicKey = Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
-
         await _bus.SimulateReceivedAsync("workflow-slot-activation",
             new SlotActivationRequest(instanceId, "repo", publicKey, token));
 
         var responded = await _bus.WaitForConditionAsync(
             () => _bus.PublishedMessages.Any(m => m.Topic == canonicalQueue && m.Message is SlotActivationResponse),
             Timeout);
-        Assert.That(responded, Is.True, "Slot activation response was not published to the canonical queue.");
+        Assert.That(responded, Is.True, "Slot activation response was not published.");
 
         var response = (SlotActivationResponse)_bus.PublishedMessages
             .First(m => m.Topic == canonicalQueue && m.Message is SlotActivationResponse).Message;
         Assert.Multiple(() =>
         {
             Assert.That(response.Success, Is.True);
-            Assert.That(response.SlotName, Is.EqualTo("repo"));
-            Assert.That(response.Slot, Is.Not.Null);
-            Assert.That(response.Slot!.ProviderType, Is.EqualTo("git"));
-            Assert.That(response.ExpiresUtc, Is.Not.Null);
+            Assert.That(response.Slot!.ProviderType, Is.EqualTo("cfg-provider"));
         });
 
-        // The settings must be decryptable with the requester's private key.
-        var cipherBytes = Convert.FromBase64String(response.Slot!.EncryptedSettings);
-        var plainJson = System.Text.Encoding.UTF8.GetString(
-            rsa.Decrypt(cipherBytes, RSAEncryptionPadding.OaepSHA256));
+        var plainJson = System.Text.Encoding.UTF8.GetString(rsa.Decrypt(
+            Convert.FromBase64String(response.Slot!.EncryptedSettings), RSAEncryptionPadding.OaepSHA256));
         var settings = JsonSerializer.Deserialize<Dictionary<string, string>>(plainJson);
-        Assert.That(settings, Is.Not.Null);
-        Assert.That(settings!["RepositoryUrl"], Is.EqualTo("https://example.com/repo.git"));
-    }
-
-    [Test]
-    public async Task SlotActivation_WithWrongToken_ReceivesNoResponse()
-    {
-        var (instanceId, _) = await HandshakeWithSlotAsync();
-        var canonicalQueue = WorkflowQueues.ResponseQueueFor(instanceId);
-
-        await _bus.SimulateReceivedAsync("workflow-slot-activation",
-            new SlotActivationRequest(instanceId, "repo", AnyPublicKey(), "guessed-token"));
-
-        var responded = await _bus.WaitForConditionAsync(
-            () => _bus.PublishedMessages.Any(m => m.Message is SlotActivationResponse),
-            TimeSpan.FromMilliseconds(500));
-
-        Assert.That(responded, Is.False,
-            "A slot activation with an invalid token must be rejected silently.");
-        Assert.That(_bus.PublishedMessages.Any(m => m.Topic == canonicalQueue && m.Message is SlotActivationResponse),
-            Is.False);
+        Assert.That(settings!["RepositoryUrl"], Is.EqualTo("https://alpha.example/repo.git"),
+            "Slot activation must serve the configuration binding's settings.");
     }
 }

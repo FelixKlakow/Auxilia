@@ -50,8 +50,8 @@ public sealed class SlotActivationHandler(
             return;
         }
 
-        var workflowType = await instanceRegistry.GetWorkflowTypeAsync(request.WorkflowInstanceId, ct);
-        if (workflowType is null)
+        var instance = await instanceRegistry.GetAsync(request.WorkflowInstanceId, ct);
+        if (instance is null)
         {
             logger.LogWarning(
                 "SlotActivationRequest for unregistered instance {InstanceId} — rejecting.",
@@ -62,8 +62,14 @@ public sealed class SlotActivationHandler(
             return;
         }
 
-        var (success, error, slot) = await configResolver.ResolveSlotAsync(
-            workflowType, request.SlotName, request.PublicKey, ct);
+        // Source selection (#18): an instance dispatched from a named configuration is served
+        // from that configuration's slot bindings; every other instance keeps the global
+        // (workflow type, slot) table.
+        var (success, error, slot) = instance.WorkflowConfigurationId is { } configurationId
+            ? await configResolver.ResolveConfigurationSlotAsync(
+                configurationId, request.SlotName, request.PublicKey, ct)
+            : await configResolver.ResolveSlotAsync(
+                instance.WorkflowType, request.SlotName, request.PublicKey, ct);
         if (!success)
         {
             await auditLog.AppendAsync(

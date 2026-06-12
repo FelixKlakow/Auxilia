@@ -54,7 +54,8 @@ public class SignalDispatchPhaseTests
             new StoredSignalHandlerConfiguration("signal-a", new InvokeWorkflowSignalHandler("target-wf")));
 
         var resolver = new ConfigurationResolver(
-            TestStores.NewSlotConfigurationStore(), signalStore, NullLogger<ConfigurationResolver>.Instance);
+            TestStores.NewSlotConfigurationStore(), signalStore,
+            TestStores.NewWorkflowConfigurationStore(), NullLogger<ConfigurationResolver>.Instance);
 
         var handlers = await resolver.ResolveSignalHandlersAsync("TestWorkflow");
 
@@ -68,7 +69,8 @@ public class SignalDispatchPhaseTests
         var signalStore = TestStores.NewSignalHandlerStore(); // empty — no handlers
 
         var resolver = new ConfigurationResolver(
-            TestStores.NewSlotConfigurationStore(), signalStore, NullLogger<ConfigurationResolver>.Instance);
+            TestStores.NewSlotConfigurationStore(), signalStore,
+            TestStores.NewWorkflowConfigurationStore(), NullLogger<ConfigurationResolver>.Instance);
 
         var handlers = await resolver.ResolveSignalHandlersAsync("TestWorkflow");
 
@@ -95,7 +97,7 @@ public class SignalDispatchPhaseTests
         await signalStore.UpsertHandlerAsync("TestWorkflow",
             new StoredSignalHandlerConfiguration("on-done", new NotifySignalHandler("email", new Dictionary<string, string>())));
 
-        var resolver = new ConfigurationResolver(slotStore, signalStore, NullLogger<ConfigurationResolver>.Instance);
+        var resolver = new ConfigurationResolver(slotStore, signalStore, TestStores.NewWorkflowConfigurationStore(), NullLogger<ConfigurationResolver>.Instance);
         var registry = TestStores.NewWorkflowInstanceRegistry();
 
         var bus = new CapturingBus();

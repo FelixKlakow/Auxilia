@@ -37,6 +37,7 @@ public class WorkflowRegistrationHandlerTests
         var resolver = configResolver ?? new ConfigurationResolver(
             store,
             signalStore,
+            TestStores.NewWorkflowConfigurationStore(),
             NullLogger<ConfigurationResolver>.Instance);
 
         var settings = Options.Create(new WorkflowDispatcherSettings
@@ -117,7 +118,7 @@ public class WorkflowRegistrationHandlerTests
             new StoredSlotConfiguration("slotA", "ProviderX",
                 new Dictionary<string, string> { ["key"] = "val" },
                 ConfigurationStatus.Dirty));
-        var resolver = new ConfigurationResolver(store, TestStores.NewSignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance);
+        var resolver = new ConfigurationResolver(store, TestStores.NewSignalHandlerStore(), TestStores.NewWorkflowConfigurationStore(), NullLogger<ConfigurationResolver>.Instance);
 
         // Manifest must declare the slot so the resolver is reached.
         var manifest = new WorkflowManifest(
@@ -149,7 +150,7 @@ public class WorkflowRegistrationHandlerTests
             new StoredSlotConfiguration("slotA", "ProviderX",
                 new Dictionary<string, string> { ["key"] = "val" },
                 ConfigurationStatus.Valid));
-        var resolver = new ConfigurationResolver(store, TestStores.NewSignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance);
+        var resolver = new ConfigurationResolver(store, TestStores.NewSignalHandlerStore(), TestStores.NewWorkflowConfigurationStore(), NullLogger<ConfigurationResolver>.Instance);
 
         // Manifest must declare the slot so the configuration pre-flight runs.
         var manifest = new WorkflowManifest(
@@ -231,7 +232,7 @@ public class WorkflowRegistrationHandlerTests
             new StoredSlotConfiguration("slotA", "ProviderX",
                 new Dictionary<string, string> { ["key"] = "val" },
                 ConfigurationStatus.Valid));
-        var resolver = new ConfigurationResolver(store, TestStores.NewSignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance);
+        var resolver = new ConfigurationResolver(store, TestStores.NewSignalHandlerStore(), TestStores.NewWorkflowConfigurationStore(), NullLogger<ConfigurationResolver>.Instance);
 
         var instanceId = Guid.NewGuid();
         var request = new WorkflowRegistrationRequest(
@@ -286,7 +287,7 @@ public class WorkflowRegistrationHandlerTests
             new StoredSlotConfiguration("slotA", "ProviderX",
                 new Dictionary<string, string> { ["key"] = "val" },
                 ConfigurationStatus.Valid));
-        var resolver = new ConfigurationResolver(store, TestStores.NewSignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance);
+        var resolver = new ConfigurationResolver(store, TestStores.NewSignalHandlerStore(), TestStores.NewWorkflowConfigurationStore(), NullLogger<ConfigurationResolver>.Instance);
 
         var instanceId = Guid.NewGuid();
         var request = new WorkflowRegistrationRequest(

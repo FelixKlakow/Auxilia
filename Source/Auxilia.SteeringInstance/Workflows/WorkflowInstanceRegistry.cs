@@ -11,7 +11,9 @@ public sealed class WorkflowInstanceRegistry(
     /// <summary>Creates the lifecycle record at dispatch time, before the container starts.</summary>
     public Task CreateAsync(
         Guid instanceId, string workflowTypeName, string state,
-        Guid? ownerServiceId = null, string? dispatchCommandJson = null, CancellationToken ct = default)
+        Guid? ownerServiceId = null, string? dispatchCommandJson = null,
+        Guid? workflowConfigurationId = null, string? workflowConfigurationName = null,
+        CancellationToken ct = default)
         => dataAccess.SaveAsync(new WorkflowInstanceRecord
         {
             Id = instanceId,
@@ -19,7 +21,9 @@ public sealed class WorkflowInstanceRegistry(
             State = state,
             CreatedUtc = timeProvider.GetUtcNow(),
             OwnerServiceId = ownerServiceId,
-            DispatchCommandJson = dispatchCommandJson
+            DispatchCommandJson = dispatchCommandJson,
+            WorkflowConfigurationId = workflowConfigurationId,
+            WorkflowConfigurationName = workflowConfigurationName
         }, ct);
 
     /// <summary>

@@ -74,6 +74,7 @@ public class WorkflowDispatcherDockerImageUriTests
             _mockPendingPackages.Object,
             slotStore ?? TestStores.NewSlotConfigurationStore(),
             providerRegistry ?? TestStores.NewSlotProviderRegistry(),
+            TestStores.NewWorkflowConfigurationStore(),
             new WorkflowInstanceTokenRegistry(
                 Options.Create(new WorkflowDispatcherSettings()), TimeProvider.System),
             TestStores.NewPolicyEngine(),

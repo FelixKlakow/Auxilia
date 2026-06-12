@@ -129,10 +129,15 @@ public sealed class WorkflowRegistrationHandler(
             return;
         }
 
-        // Pre-flight only: verify every slot is configured and valid. No credentials are
+        // Pre-flight only: verify the slot configuration source is valid. No credentials are
         // delivered at registration — slots activate just-in-time (ARCHITECTURE §4/§7).
-        var (configsValid, invalidReason) = await configResolver.ValidateConfiguredAsync(
-            request.Manifest.WorkflowName, cancellationToken);
+        // Instances dispatched from a named configuration (#18) validate that configuration's
+        // bindings; all others keep the global (workflow type, slot) table.
+        var instanceRecord = await instanceRegistry.GetAsync(request.WorkflowInstanceId, cancellationToken);
+        var (configsValid, invalidReason) = instanceRecord?.WorkflowConfigurationId is { } configurationId
+            ? await configResolver.ValidateConfigurationAsync(configurationId, cancellationToken)
+            : await configResolver.ValidateConfiguredAsync(
+                request.Manifest.WorkflowName, cancellationToken);
         if (!configsValid)
         {
             logger.LogInformation(

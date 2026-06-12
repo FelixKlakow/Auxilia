@@ -27,6 +27,7 @@ public class SlotActivationHandlerTests
     private ManualTimeProvider _time = null!;
     private CapturingBus _bus = null!;
     private SlotConfigurationStore _store = null!;
+    private WorkflowConfigurationStore _configurationStore = null!;
     private WorkflowInstanceRegistry _instanceRegistry = null!;
     private WorkflowInstanceTokenRegistry _tokenRegistry = null!;
     private InMemoryDataAccess<AuditRecord> _auditRecords = null!;
@@ -37,6 +38,7 @@ public class SlotActivationHandlerTests
         _time = new ManualTimeProvider();
         _bus = new CapturingBus();
         _store = TestStores.NewSlotConfigurationStore();
+        _configurationStore = TestStores.NewWorkflowConfigurationStore();
         _instanceRegistry = TestStores.NewWorkflowInstanceRegistry();
         _tokenRegistry = new WorkflowInstanceTokenRegistry(
             Options.Create(new WorkflowDispatcherSettings()), _time);
@@ -55,7 +57,8 @@ public class SlotActivationHandlerTests
         });
         var handler = new SlotActivationHandler(
             _bus,
-            new ConfigurationResolver(_store, TestStores.NewSignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance),
+            new ConfigurationResolver(_store, TestStores.NewSignalHandlerStore(), _configurationStore,
+                NullLogger<ConfigurationResolver>.Instance),
             _instanceRegistry,
             _tokenRegistry,
             new AuditLog(_auditRecords, _time),
@@ -214,6 +217,99 @@ public class SlotActivationHandlerTests
         var response = (SlotActivationResponse)_bus.Published[0].Message;
         Assert.That(response.Success, Is.True);
         Assert.That(response.Slot, Is.Not.Null);
+    }
+
+    // ---------------------------------------------------- Source selection (#18): binding vs fallback
+
+    /// <summary>Decrypts an activation response's settings with the requester's private key.</summary>
+    private static Dictionary<string, string> Decrypt(SlotActivationResponse response, RSA rsa)
+        => System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(
+            System.Text.Encoding.UTF8.GetString(rsa.Decrypt(
+                Convert.FromBase64String(response.Slot!.EncryptedSettings),
+                RSAEncryptionPadding.OaepSHA256)))!;
+
+    [Test]
+    public async Task HandleAsync_InstanceDispatchedFromConfiguration_ServesBindingSettings()
+    {
+        // Both sources hold slotA — the configuration binding must win for a bound instance.
+        await SeedSlotAsync(); // global table: ProviderX / ApiKey=secret
+        var configuration = await _configurationStore.UpsertAsync(new StoredWorkflowConfiguration(
+            "alpha", "Alpha", "TestWorkflow", "docker://test-wf:1", Enabled: true,
+            [new StoredSlotBinding("slotA", "ConfigProvider",
+                new Dictionary<string, string> { ["ApiKey"] = "from-config" })]));
+
+        var issued = _tokenRegistry.Issue("TestWorkflow");
+        await _instanceRegistry.CreateAsync(
+            issued.WorkflowInstanceId, "TestWorkflow", "Queued",
+            workflowConfigurationId: configuration.Id, workflowConfigurationName: configuration.Name);
+        await StartHandlerAsync();
+
+        using var rsa = RSA.Create(4096);
+        var publicKey = Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
+        await _bus.InvokeAsync(new SlotActivationRequest(
+            issued.WorkflowInstanceId, "slotA", publicKey, issued.Token), CancellationToken.None);
+
+        Assert.That(_bus.Published, Has.Count.EqualTo(1));
+        var response = (SlotActivationResponse)_bus.Published[0].Message;
+        Assert.Multiple(() =>
+        {
+            Assert.That(response.Success, Is.True);
+            Assert.That(response.Slot!.ProviderType, Is.EqualTo("ConfigProvider"));
+            Assert.That(Decrypt(response, rsa)["ApiKey"], Is.EqualTo("from-config"));
+        });
+    }
+
+    [Test]
+    public async Task HandleAsync_InstanceWithoutConfiguration_FallsBackToGlobalTable()
+    {
+        await SeedSlotAsync(); // global table: ProviderX
+        await _configurationStore.UpsertAsync(new StoredWorkflowConfiguration(
+            "alpha", "Alpha", "TestWorkflow", "docker://test-wf:1", Enabled: true,
+            [new StoredSlotBinding("slotA", "ConfigProvider",
+                new Dictionary<string, string> { ["ApiKey"] = "from-config" })]));
+
+        var issued = _tokenRegistry.Issue("TestWorkflow");
+        await _instanceRegistry.CreateAsync(issued.WorkflowInstanceId, "TestWorkflow", "Queued");
+        await StartHandlerAsync();
+
+        await _bus.InvokeAsync(new SlotActivationRequest(
+            issued.WorkflowInstanceId, "slotA", ValidPublicKey(), issued.Token), CancellationToken.None);
+
+        Assert.That(_bus.Published, Has.Count.EqualTo(1));
+        var response = (SlotActivationResponse)_bus.Published[0].Message;
+        Assert.Multiple(() =>
+        {
+            Assert.That(response.Success, Is.True);
+            Assert.That(response.Slot!.ProviderType, Is.EqualTo("ProviderX"),
+                "An unbound instance must keep being served from the global (type, slot) table.");
+        });
+    }
+
+    [Test]
+    public async Task HandleAsync_BoundInstanceRequestsUnboundSlot_PublishesFailureResponse()
+    {
+        await SeedSlotAsync(); // global table holds slotA — must NOT be used as a fallback
+        var configuration = await _configurationStore.UpsertAsync(new StoredWorkflowConfiguration(
+            "alpha", "Alpha", "TestWorkflow", "docker://test-wf:1", Enabled: true,
+            [new StoredSlotBinding("other-slot", "ConfigProvider", new Dictionary<string, string>())]));
+
+        var issued = _tokenRegistry.Issue("TestWorkflow");
+        await _instanceRegistry.CreateAsync(
+            issued.WorkflowInstanceId, "TestWorkflow", "Queued",
+            workflowConfigurationId: configuration.Id, workflowConfigurationName: configuration.Name);
+        await StartHandlerAsync();
+
+        await _bus.InvokeAsync(new SlotActivationRequest(
+            issued.WorkflowInstanceId, "slotA", ValidPublicKey(), issued.Token), CancellationToken.None);
+
+        Assert.That(_bus.Published, Has.Count.EqualTo(1));
+        var response = (SlotActivationResponse)_bus.Published[0].Message;
+        Assert.Multiple(() =>
+        {
+            Assert.That(response.Success, Is.False);
+            Assert.That(response.ErrorMessage, Does.Contain("slotA"));
+            Assert.That(response.Slot, Is.Null);
+        });
     }
 
     [Test]

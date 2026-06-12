@@ -100,6 +100,7 @@ public class WorkflowDispatcherWorkspaceTests
             new Mock<PendingWorkflowPackageStore>().Object,
             TestStores.NewSlotConfigurationStore(),
             TestStores.NewSlotProviderRegistry(),
+            TestStores.NewWorkflowConfigurationStore(),
             new WorkflowInstanceTokenRegistry(
                 Options.Create(new WorkflowDispatcherSettings()), TimeProvider.System),
             TestStores.NewPolicyEngine(),

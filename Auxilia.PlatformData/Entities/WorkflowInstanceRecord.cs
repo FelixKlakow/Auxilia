@@ -21,4 +21,8 @@ public sealed record WorkflowInstanceRecord : IEntity
     public string? ViewsJson { get; init; }
     /// <summary>The originating dispatch command as JSON, kept for policy-driven re-dispatch.</summary>
     public string? DispatchCommandJson { get; init; }
+    /// <summary>The named workflow configuration this run was dispatched from, when any.</summary>
+    public Guid? WorkflowConfigurationId { get; init; }
+    /// <summary>Natural-key name of the dispatching configuration, for run-history grouping.</summary>
+    public string? WorkflowConfigurationName { get; init; }
 }

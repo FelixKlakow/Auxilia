@@ -25,6 +25,19 @@ internal static class TestStores
     public static SlotConfigurationStore NewSlotConfigurationStore()
         => new(new InMemoryDataAccess<SlotConfigurationRecord>(), new NullSettingsProtector());
 
+    public static WorkflowConfigurationStore NewWorkflowConfigurationStore()
+        => new(new InMemoryDataAccess<WorkflowConfigurationRecord>(), new NullSettingsProtector(),
+            NewAuditLog(), TimeProvider.System);
+
+    public static ConfigurationResolver NewConfigurationResolver(
+        SlotConfigurationStore? slotStore = null,
+        SignalHandlerStore? signalHandlerStore = null,
+        WorkflowConfigurationStore? configurationStore = null)
+        => new(slotStore ?? NewSlotConfigurationStore(),
+            signalHandlerStore ?? NewSignalHandlerStore(),
+            configurationStore ?? NewWorkflowConfigurationStore(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ConfigurationResolver>.Instance);
+
     public static WorkflowSchemaStore NewWorkflowSchemaStore()
         => new(new InMemoryDataAccess<WorkflowSchemaRecord>());
 

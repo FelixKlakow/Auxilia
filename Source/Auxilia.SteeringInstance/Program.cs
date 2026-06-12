@@ -66,6 +66,7 @@ try
     builder.Services.AddPlatformEntity<WorkflowSchemaRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<SlotConfigurationRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<SlotProviderRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<WorkflowConfigurationRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<SignalHandlerRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<WorkflowInstanceRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<AuditRecord>(platformDataSettings);
@@ -89,6 +90,7 @@ try
     builder.Services.AddSingleton<WorkflowSchemaStore>();
     builder.Services.AddSingleton<PendingWorkflowPackageStore>();
     builder.Services.AddSingleton<SlotConfigurationStore>();
+    builder.Services.AddSingleton<WorkflowConfigurationStore>();
     builder.Services.AddSingleton<SignalHandlerStore>();
     builder.Services.AddSingleton<WorkflowInstanceRegistry>();
     builder.Services.AddSingleton(TimeProvider.System);

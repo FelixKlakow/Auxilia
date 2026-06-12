@@ -23,6 +23,7 @@ public static class BuiltInRoles
                 // Administrators can also do everything operators and users can.
                 PermissionActions.WorkflowTypeManage,
                 PermissionActions.SlotConfigWrite,
+                PermissionActions.WorkflowConfigurationManage,
                 PermissionActions.TriggerConfigure,
                 PermissionActions.DashboardManage,
                 PermissionActions.WorkflowTrigger,
@@ -37,6 +38,7 @@ public static class BuiltInRoles
             {
                 PermissionActions.WorkflowTypeManage,
                 PermissionActions.SlotConfigWrite,
+                PermissionActions.WorkflowConfigurationManage,
                 PermissionActions.TriggerConfigure,
                 PermissionActions.DashboardManage,
                 PermissionActions.WorkflowTrigger,

@@ -15,10 +15,14 @@ public class CodeReviewWorkflowEnvironment
     internal const string ProductionImageName = "auxilia-code-review-workflow:system-test";
     internal const string HappyCommandQueue   = "workflow.run-commands-crw-happy";
     internal const string EdgeCommandQueue    = "workflow.run-commands-crw-edge";
+    /// <summary>Named workflow configuration (#18) seeded on the happy instance.</summary>
+    internal const string ConfigurationName   = "code-review-alpha";
     private  const string RabbitMqAlias       = "rabbitmq";
     private  const string RabbitMqImage       = "rabbitmq:3.13-management";
     private  const string DockerSocket        = "/var/run/docker.sock";
     private  const string ContainerPluginsDir = "/slot-plugins";
+    /// <summary>JSON platform-data directory inside the happy container (deterministic for asserts).</summary>
+    internal const string HappyPlatformDataDir = "/platform-data";
 
     private static readonly string NetworkName =
         $"auxilia-crw-{Guid.NewGuid():N}".Substring(0, 30);
@@ -36,6 +40,8 @@ public class CodeReviewWorkflowEnvironment
     public static IMessageBusClient MessageBusClient { get; private set; } = null!;
     public static string            RabbitMqHost     { get; private set; } = null!;
     public static int               RabbitMqPort     { get; private set; }
+    /// <summary>The happy steering container, exposed so tests can inspect its platform data.</summary>
+    public static IContainer        HappySteeringInstance { get; private set; } = null!;
 
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
@@ -93,6 +99,7 @@ public class CodeReviewWorkflowEnvironment
             .WithEnvironment("WorkflowLauncher__RabbitMqPort",     "5672")
             .WithEnvironment("WorkflowLauncher__RabbitMqUserName", "guest")
             .WithEnvironment("WorkflowLauncher__RabbitMqPassword", "guest")
+            .WithEnvironment("PlatformData__JsonDirectory", HappyPlatformDataDir)
             .WithEnvironment("WorkflowDispatcher__CommandQueueName",      HappyCommandQueue)
             .WithEnvironment("WorkflowDispatcher__RegistrationQueueName", "workflow-registration-crw-happy")
             .WithEnvironment("WorkflowDispatcher__AnnouncementQueueName", "workflow.announcements-crw-happy")
@@ -130,22 +137,35 @@ public class CodeReviewWorkflowEnvironment
             _happySteeringInstance.StartAsync(),
             _edgeSteeringInstance.StartAsync());
 
+        HappySteeringInstance = _happySteeringInstance;
         MessageBusClient = await RabbitMqClient.CreateAsync(RabbitMqHost, RabbitMqPort);
 
         var happySeedBase = HappyCommandQueue + "-slot-seed";
         var edgeSeedBase  = EdgeCommandQueue  + "-slot-seed";
 
         // Happy container: register provider + seed all six slots
+        var slotNames = new[] { "repository", "pull-request", "work-items",
+                                "primary-reviewer", "secondary-reviewer", "workflow-bootstrap" };
         await MessageBusClient.PublishAsync(happySeedBase + ".register",
             new RegisterSlotProviderCommand(
                 "fake-code-review-happy",
                 $"{ContainerPluginsDir}/Auxilia.FakeSlots.CodeReview.Happy.slothandler.dll"));
-        foreach (var slotName in new[] { "repository", "pull-request", "work-items",
-                                          "primary-reviewer", "secondary-reviewer", "workflow-bootstrap" })
+        foreach (var slotName in slotNames)
             await MessageBusClient.PublishAsync(happySeedBase + ".upsert",
                 new UpsertSlotConfigurationCommand(
                     "pull-request-code-review", slotName, "fake-code-review-happy",
                     new Dictionary<string, string>()));
+
+        // Named workflow configuration (#18) on the happy instance — bindings mirror the
+        // global slot configurations seeded above.
+        await MessageBusClient.PublishAsync(happySeedBase + ".upsert-configuration",
+            new UpsertWorkflowConfigurationCommand(
+                ConfigurationName, "Code Review Alpha", "pull-request-code-review",
+                $"docker://{ProductionImageName}", Enabled: true,
+                slotNames
+                    .Select(slotName => new SlotBindingSeed(
+                        slotName, "fake-code-review-happy", new Dictionary<string, string>()))
+                    .ToList()));
 
         // Edge container: register provider + seed all six slots
         await MessageBusClient.PublishAsync(edgeSeedBase + ".register",

@@ -14,6 +14,7 @@ public class SlotConfigurationSeedHandlerTests
     private FakeMessageBusClient _fakeBus = null!;
     private SlotConfigurationStore _slotStore = null!;
     private SlotProviderRegistry _providerRegistry = null!;
+    private WorkflowConfigurationStore _configurationStore = null!;
     private SlotConfigurationSeedHandler _sut = null!;
 
     [SetUp]
@@ -22,10 +23,12 @@ public class SlotConfigurationSeedHandlerTests
         _fakeBus = new FakeMessageBusClient();
         _slotStore = TestStores.NewSlotConfigurationStore();
         _providerRegistry = TestStores.NewSlotProviderRegistry();
+        _configurationStore = TestStores.NewWorkflowConfigurationStore();
         _sut = new SlotConfigurationSeedHandler(
             _fakeBus,
             _slotStore,
             _providerRegistry,
+            _configurationStore,
             TestStores.NewDrainCoordinator(_fakeBus),
             Options.Create(new WorkflowDispatcherSettings { CommandQueueName = "test-queue" }),
             NullLogger<SlotConfigurationSeedHandler>.Instance);
@@ -111,5 +114,51 @@ public class SlotConfigurationSeedHandlerTests
         Assert.That(configs, Has.Count.EqualTo(1));
         Assert.That(configs[0].SlotName, Is.EqualTo("slot-a"));
         Assert.That(configs[0].Status, Is.EqualTo(ConfigurationStatus.Valid));
+    }
+
+    // ---------------------------------------------------- Named workflow configurations (#18)
+
+    [Test]
+    public async Task WhenUpsertWorkflowConfigurationReceivedOnExchange_ConfigurationIsStored()
+    {
+        await _fakeBus.SimulateReceivedAsync("slot-configurations",
+            new UpsertWorkflowConfigurationCommand(
+                "alpha", "Alpha", "wf", "docker://wf:test", Enabled: true,
+                [new SlotBindingSeed("repo", "provider-x",
+                    new Dictionary<string, string> { ["Url"] = "https://example.com" })]));
+
+        var stored = await _configurationStore.GetByNameAsync("alpha");
+        Assert.That(stored, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(stored!.WorkflowType, Is.EqualTo("wf"));
+            Assert.That(stored.PackageUri, Is.EqualTo("docker://wf:test"));
+            Assert.That(stored.Enabled, Is.True);
+            Assert.That(stored.SlotBindings, Has.Count.EqualTo(1));
+            Assert.That(stored.SlotBindings[0].Settings["Url"], Is.EqualTo("https://example.com"));
+        });
+    }
+
+    [Test]
+    public async Task WhenUpsertWorkflowConfigurationReceivedOnSeedQueue_ConfigurationIsStored()
+    {
+        await _fakeBus.SimulateReceivedAsync("test-queue-slot-seed.upsert-configuration",
+            new UpsertWorkflowConfigurationCommand(
+                "beta", "Beta", "wf", "docker://wf:test", Enabled: true,
+                [new SlotBindingSeed("repo", "provider-x", new Dictionary<string, string>())]));
+
+        var stored = await _configurationStore.GetByNameAsync("beta");
+        Assert.That(stored, Is.Not.Null);
+        Assert.That(stored!.DisplayName, Is.EqualTo("Beta"));
+    }
+
+    [Test]
+    public async Task WhenUpsertWorkflowConfigurationIsInvalid_NothingIsStored()
+    {
+        await _fakeBus.SimulateReceivedAsync("test-queue-slot-seed.upsert-configuration",
+            new UpsertWorkflowConfigurationCommand(
+                "gamma", "Gamma", "", "docker://wf:test", Enabled: true, []));
+
+        Assert.That(await _configurationStore.GetByNameAsync("gamma"), Is.Null);
     }
 }
