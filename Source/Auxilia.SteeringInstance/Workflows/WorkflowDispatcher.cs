@@ -3,6 +3,7 @@ using System.Text.Json;
 using Auxilia.Governance;
 using Auxilia.Governance.Policy;
 using Auxilia.Messaging;
+using Auxilia.PlatformData;
 using Auxilia.SteeringInstance.Workflows.Storage;
 using Auxilia.Workflows;
 using Auxilia.Workflows.Crypto;
@@ -38,6 +39,9 @@ public sealed class WorkflowDispatcher(
     IPolicyEngine policyEngine,
     WorkflowInstanceRegistry instanceRegistry,
     WorkflowStatusPublisher statusPublisher,
+    WorkflowSchemaStore schemaStore,
+    NetworkPolicyResolver networkPolicyResolver,
+    AuditLog auditLog,
     SteeringInstanceInfo instanceInfo,
     ILogger<WorkflowDispatcher> logger)
 {
@@ -112,6 +116,7 @@ public sealed class WorkflowDispatcher(
             [WorkflowEnvironmentVariables.RegistrationQueue] = dispatcherSettings.Value.RegistrationQueueName,
             [WorkflowEnvironmentVariables.AnnouncementQueue] = dispatcherSettings.Value.AnnouncementQueueName,
             [WorkflowEnvironmentVariables.SlotActivationQueue] = dispatcherSettings.Value.SlotActivationQueueName,
+            [WorkflowEnvironmentVariables.ResourceProxyQueue] = dispatcherSettings.Value.ResourceProxyQueueName,
             [WorkflowEnvironmentVariables.InstanceId]        = instanceId.ToString("D"),
             [WorkflowEnvironmentVariables.InstanceToken]     = issued.Token,
             [WorkflowEnvironmentVariables.OutputDirectory]   = "/workflow-output",
@@ -158,6 +163,20 @@ public sealed class WorkflowDispatcher(
                 pluginFiles.Count, command.WorkflowType,
                 string.Join(", ", pluginFiles.Select(f => f.DllPath)));
 
+        // Effective network policy (ARCHITECTURE §10): manifest baseline (last stored schema)
+        // merged with run-configuration extras, clamped by platform policy, audited per run.
+        var schema = await schemaStore.GetSchemaAsync(command.WorkflowType, ct);
+        var networkPolicy = networkPolicyResolver.Resolve(
+            schema?.NetworkEndpoints ?? [], command.Context, dispatcherSettings.Value);
+        await auditLog.AppendAsync(
+            "steering-instance", "workflow.network-policy",
+            instanceId.ToString(), networkPolicy.Mode.ToString(),
+            JsonSerializer.Serialize(new
+            {
+                endpoints = networkPolicy.AllowedEndpoints,
+                note = networkPolicy.Note
+            }), ct);
+
         // docker:// URI — skip download/verify/extract; use baked image
         if (command.WorkflowPackageUri.StartsWith("docker://", StringComparison.OrdinalIgnoreCase))
         {
@@ -166,7 +185,8 @@ public sealed class WorkflowDispatcher(
                 new WorkflowLaunchRequest(string.Empty, env, pluginFiles)
                 {
                     DockerImageUri = imageName,
-                    OutputDirectoryBind = outputDirectory
+                    OutputDirectoryBind = outputDirectory,
+                    NetworkPolicy = networkPolicy
                 },
                 ct);
             await MarkQueuedAsync(instanceId, command.WorkflowType, ct);
@@ -216,7 +236,8 @@ public sealed class WorkflowDispatcher(
         // 6. Launch
         await launcher.LaunchAsync(new WorkflowLaunchRequest(extractedPath, env, pluginFiles)
         {
-            OutputDirectoryBind = outputDirectory
+            OutputDirectoryBind = outputDirectory,
+            NetworkPolicy = networkPolicy
         }, ct);
         await MarkQueuedAsync(instanceId, command.WorkflowType, ct);
     }

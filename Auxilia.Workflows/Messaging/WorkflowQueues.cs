@@ -7,4 +7,11 @@ namespace Auxilia.Workflows.Messaging;
 public static class WorkflowQueues
 {
     public static string ResponseQueueFor(Guid workflowInstanceId) => $"workflow-response-{workflowInstanceId}";
+
+    /// <summary>
+    /// Resource proxy responses use their own per-instance queue: a second subscriber on the
+    /// main response queue would compete for slot-activation/configuration messages.
+    /// </summary>
+    public static string ResourceResponseQueueFor(Guid workflowInstanceId)
+        => $"workflow-response-{workflowInstanceId}-resources";
 }

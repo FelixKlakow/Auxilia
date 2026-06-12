@@ -629,6 +629,8 @@ The core platform has no hard dependency on RabbitMQ, Docker, Vault, AAD, or a s
 
 **Isolation guarantees are container-only.** The workspace isolation (mount namespaces, UID isolation, CoW snapshots — section 9) and kernel-level network policy enforcement (section 10) exist only in the container runtimes (Docker / k3s / AKS). In **Local / Dev** mode the workflow runs as a plain OS process — typically on the developer's own machine, including Windows — with **no isolation and no network enforcement**. Dev mode is therefore **trusted-operator-only**: it must never be exposed to untrusted workflows, untrusted users, or production credentials. The security guarantees this document describes apply to the container-based modes.
 
+The execution isolation layer v1 realizes default-deny only as full internal-network isolation for runs declaring no endpoints; endpoint-granular egress enforcement and mount-namespace/UID hardening beyond Docker defaults are tracked follow-ups.
+
 ---
 
 ## 13. Open Questions and Concerns

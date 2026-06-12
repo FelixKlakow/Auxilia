@@ -19,6 +19,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     private readonly List<SlotDefinition> _slots = new();
     private readonly List<IEnvironmentRequirement> _environmentRequirements = new();
     private readonly List<WorkflowOutputDescriptor> _outputs = new();
+    private readonly List<Network.NetworkEndpointDeclaration> _networkEndpoints = new();
     private readonly List<SignalDescriptor> _signals = new();
     private readonly List<Views.ViewDescriptor> _views = new();
     private readonly WorkflowMetadata _metadata = new();
@@ -76,6 +77,13 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     public IWorkflowBuilder DeclaresOutput(string name, string relativePath, string? description = null)
     {
         _outputs.Add(new WorkflowOutputDescriptor(name, relativePath, description));
+        return this;
+    }
+
+    public IWorkflowBuilder RequiresNetworkEndpoint(string endpoint, string purpose)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(endpoint);
+        _networkEndpoints.Add(new Network.NetworkEndpointDeclaration(endpoint, purpose));
         return this;
     }
 
@@ -209,8 +217,16 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 }
 
                 SlotActivator? slotActivator = null;
+                ResourceProxyClient? resourceProxyClient = null;
                 try
                 {
+                    resourceProxyClient = new ResourceProxyClient(
+                        context.MessageBus, instanceId, instanceToken,
+                        System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.ResourceProxyQueue)
+                            ?? "workflow-resource-proxy",
+                        WorkflowQueues.ResourceResponseQueueFor(instanceId));
+                    await resourceProxyClient.StartAsync();
+
                     ISlotHandlerResolver? activeResolver = TestSlotHandlerResolver;
                     if (activeResolver is null && TestContext == null)
                     {
@@ -228,6 +244,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                     var services = new ServiceCollection();
                     services.AddSingleton(context.MessageBus);
                     services.AddSingleton(drainSignal);
+                    services.AddSingleton(resourceProxyClient);
                     services.AddSingleton<Views.IViewPublisher>(
                         new Views.DefaultViewPublisher(context.MessageBus, instanceId, _views.AsReadOnly()));
                     if (activeResolver is not null)
@@ -289,6 +306,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                         await drainSub.DisposeAsync();
                     if (slotActivator is not null)
                         await slotActivator.DisposeAsync();
+                    if (resourceProxyClient is not null)
+                        await resourceProxyClient.DisposeAsync();
                 }
                 return;
             }
@@ -308,7 +327,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             Outputs = _outputs.AsReadOnly(),
             Signals = _signals.AsReadOnly(),
             Lifetime = _lifetime,
-            Views = _views.AsReadOnly()
+            Views = _views.AsReadOnly(),
+            NetworkEndpoints = _networkEndpoints.AsReadOnly()
         };
 
     internal WorkflowManifest BuildManifest(Guid instanceId = default)
@@ -317,6 +337,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
         {
             Signals = _signals.AsReadOnly(),
             Lifetime = _lifetime,
-            Views = _views.AsReadOnly()
+            Views = _views.AsReadOnly(),
+            NetworkEndpoints = _networkEndpoints.AsReadOnly()
         };
 }

@@ -98,6 +98,8 @@ try
     builder.Services.AddSingleton<ConfigurationResolver>();
     builder.Services.AddSingleton<WorkflowRegistrationHandler>();
     builder.Services.AddSingleton<SlotActivationHandler>();
+    builder.Services.AddSingleton<ResourceProxyHandler>();
+    builder.Services.AddSingleton<NetworkPolicyResolver>();
     builder.Services.AddSingleton<SignalDispatcher>();
     builder.Services.AddSingleton<WorkflowAnnouncementHandler>();
     builder.Services.AddSingleton<WorkflowDispatcher>();
@@ -189,6 +191,9 @@ try
 
     var slotActivationHandler = app.Services.GetRequiredService<SlotActivationHandler>();
     await slotActivationHandler.StartAsync(app.Lifetime.ApplicationStopping);
+
+    var resourceProxyHandler = app.Services.GetRequiredService<ResourceProxyHandler>();
+    await resourceProxyHandler.StartAsync(app.Lifetime.ApplicationStopping);
 
     var viewDataHandler = app.Services.GetRequiredService<ViewDataHandler>();
     await viewDataHandler.StartAsync(app.Lifetime.ApplicationStopping);

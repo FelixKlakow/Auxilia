@@ -15,6 +15,14 @@ public sealed class DockerWorkflowLauncherSettings
     public string? NetworkName { get; set; }
 
     /// <summary>
+    /// Name of an operator-created internal Docker network (<c>docker network create --internal</c>)
+    /// that still hosts RabbitMQ but has no internet egress. Containers whose effective network
+    /// policy is default-deny with no allowed endpoints are attached here instead of
+    /// <see cref="NetworkName"/>. Leave null to disable internal-network isolation.
+    /// </summary>
+    public string? InternalNetworkName { get; set; }
+
+    /// <summary>
     /// RabbitMQ hostname as seen from inside the Docker network
     /// (e.g. the Testcontainer network alias "rabbitmq").
     /// </summary>

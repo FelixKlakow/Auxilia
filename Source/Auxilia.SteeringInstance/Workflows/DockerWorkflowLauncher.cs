@@ -31,7 +31,7 @@ public sealed class DockerWorkflowLauncher(
 
         logger.LogInformation(
             "Creating workflow container. RuntimeImage={RuntimeImage} ExtractedDir={ExtractedDir} Network={Network}",
-            settings.RuntimeImage, request.ExtractedContentDirectory, settings.NetworkName ?? "<default>");
+            settings.RuntimeImage, request.ExtractedContentDirectory, SelectNetworkName(request, settings) ?? "<default>");
 
         var created = await client.Containers.CreateContainerAsync(createParams, ct);
 
@@ -81,6 +81,20 @@ public sealed class DockerWorkflowLauncher(
     }
 
     /// <summary>
+    /// Selects the Docker network for a launch. A default-deny policy with no allowed
+    /// endpoints is attached to <see cref="DockerWorkflowLauncherSettings.InternalNetworkName"/>
+    /// (an operator-created <c>--internal</c> network without internet egress) when configured.
+    /// Endpoint-granular enforcement requires the future egress proxy; this realizes only the
+    /// no-egress case at the Docker level.
+    /// </summary>
+    internal static string? SelectNetworkName(
+        WorkflowLaunchRequest request, DockerWorkflowLauncherSettings settings)
+        => request.NetworkPolicy is { Mode: NetworkPolicyMode.DefaultDeny, AllowedEndpoints.Count: 0 }
+           && !string.IsNullOrWhiteSpace(settings.InternalNetworkName)
+            ? settings.InternalNetworkName
+            : settings.NetworkName;
+
+    /// <summary>
     /// Builds the Docker <see cref="CreateContainerParameters"/> for the given request and settings.
     /// Extracted as <c>internal static</c> so unit tests can verify parameter construction
     /// without requiring a live Docker daemon.
@@ -115,13 +129,14 @@ public sealed class DockerWorkflowLauncher(
             }
         };
 
-        if (!string.IsNullOrWhiteSpace(settings.NetworkName))
+        if (SelectNetworkName(request, settings) is { } networkName &&
+            !string.IsNullOrWhiteSpace(networkName))
         {
             parameters.NetworkingConfig = new NetworkingConfig
             {
                 EndpointsConfig = new Dictionary<string, EndpointSettings>
                 {
-                    [settings.NetworkName] = new EndpointSettings()
+                    [networkName] = new EndpointSettings()
                 }
             };
         }
@@ -159,13 +174,14 @@ public sealed class DockerWorkflowLauncher(
             }
         };
 
-        if (!string.IsNullOrWhiteSpace(settings.NetworkName))
+        if (SelectNetworkName(request, settings) is { } networkName &&
+            !string.IsNullOrWhiteSpace(networkName))
         {
             parameters.NetworkingConfig = new NetworkingConfig
             {
                 EndpointsConfig = new Dictionary<string, EndpointSettings>
                 {
-                    [settings.NetworkName] = new EndpointSettings()
+                    [networkName] = new EndpointSettings()
                 }
             };
         }

@@ -20,6 +20,12 @@ public interface IWorkflowBuilder
 
     IWorkflowBuilder DeclaresOutput(string name, string relativePath, string? description = null);
 
+    /// <summary>
+    /// Declares a network endpoint this workflow needs to reach directly (ARCHITECTURE §10).
+    /// Declarations form the signed baseline of the run's effective network policy.
+    /// </summary>
+    IWorkflowBuilder RequiresNetworkEndpoint(string endpoint, string purpose);
+
     IWorkflowBuilder DeclaresSignal<TPayload>(string name, string? description = null);
 
     /// <summary>

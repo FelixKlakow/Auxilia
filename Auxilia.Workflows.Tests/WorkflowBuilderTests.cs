@@ -344,6 +344,56 @@ public class WorkflowBuilderTests
     }
 
     [Test]
+    public void RequiresNetworkEndpoint_NoCall_BothArtifactsHaveEmptyNetworkEndpoints()
+    {
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+
+        Assert.That(wb.BuildSchema().NetworkEndpoints, Is.Empty);
+        Assert.That(wb.BuildManifest().NetworkEndpoints, Is.Empty);
+    }
+
+    [Test]
+    public void RequiresNetworkEndpoint_OneCall_LandsInSchemaAndManifest()
+    {
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+        wb.RequiresNetworkEndpoint("api.nuget.org", "NuGet package restore");
+
+        var schema = wb.BuildSchema();
+        var manifest = wb.BuildManifest();
+
+        Assert.That(schema.NetworkEndpoints, Has.Count.EqualTo(1));
+        Assert.That(schema.NetworkEndpoints[0].Endpoint, Is.EqualTo("api.nuget.org"));
+        Assert.That(schema.NetworkEndpoints[0].Purpose, Is.EqualTo("NuGet package restore"));
+        Assert.That(manifest.NetworkEndpoints, Has.Count.EqualTo(1));
+        Assert.That(manifest.NetworkEndpoints[0].Endpoint, Is.EqualTo("api.nuget.org"));
+        Assert.That(manifest.NetworkEndpoints[0].Purpose, Is.EqualTo("NuGet package restore"));
+    }
+
+    [Test]
+    public void RequiresNetworkEndpoint_TwoCalls_BothArtifactsHaveTwoDeclarationsInOrder()
+    {
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+        wb.RequiresNetworkEndpoint("api.nuget.org", "restore");
+        wb.RequiresNetworkEndpoint("registry.npmjs.org", "npm install");
+
+        var schema = wb.BuildSchema();
+        var manifest = wb.BuildManifest();
+
+        Assert.That(schema.NetworkEndpoints.Select(e => e.Endpoint),
+            Is.EqualTo(new[] { "api.nuget.org", "registry.npmjs.org" }));
+        Assert.That(manifest.NetworkEndpoints.Select(e => e.Endpoint),
+            Is.EqualTo(new[] { "api.nuget.org", "registry.npmjs.org" }));
+    }
+
+    [Test]
+    public void RequiresNetworkEndpoint_FluentChain_ReturnsSameBuilderInstance()
+    {
+        var builder = WorkflowBuilder.Create("test");
+        var result = builder.RequiresNetworkEndpoint("api.nuget.org", "restore");
+        Assert.That(result, Is.SameAs(builder));
+    }
+
+    [Test]
     public void BuildSchema_ViaInterface_ReturnsWorkflowSchema()
     {
         var builder = (IWorkflowBuilder)WorkflowBuilder.Create("test-workflow");

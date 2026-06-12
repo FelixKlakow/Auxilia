@@ -77,6 +77,24 @@ public class DockerWorkflowLauncherBakedImageTests
     }
 
     [Test]
+    public void BuildBakedImageContainerParameters_DefaultDenyWithNoEndpoints_AttachesInternalNetwork()
+    {
+        var settings = new DockerWorkflowLauncherSettings
+        {
+            NetworkName = "auxilia-net",
+            InternalNetworkName = "auxilia-internal"
+        };
+        var request = MakeBakedRequest() with
+        {
+            NetworkPolicy = new EffectiveNetworkPolicy(NetworkPolicyMode.DefaultDeny, [])
+        };
+
+        var p = DockerWorkflowLauncher.BuildBakedImageContainerParameters(request, settings);
+
+        Assert.That(p.NetworkingConfig!.EndpointsConfig.Keys, Is.EqualTo(new[] { "auxilia-internal" }));
+    }
+
+    [Test]
     public async Task LaunchAsync_WhenDockerImageUri_CallsBakedImagePath_NotExtractedPath()
     {
         // Arrange — mock Docker client

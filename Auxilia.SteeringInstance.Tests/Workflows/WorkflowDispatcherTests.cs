@@ -2,12 +2,16 @@ using System.IO.Compression;
 using System.Net;
 using System.Text.Json;
 using Auxilia.Messaging;
+using Auxilia.PlatformData;
+using Auxilia.PlatformData.Entities;
 using Auxilia.SteeringInstance.Workflows;
 using Auxilia.SteeringInstance.Workflows.Storage;
+using Auxilia.UniversalDataAccess.Implementations;
 using Auxilia.Workflows;
 using Auxilia.Workflows.Crypto;
 using Auxilia.Workflows.Messaging;
 using Auxilia.Workflows.Messaging.Messages;
+using Auxilia.Workflows.Network;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -26,6 +30,8 @@ public class WorkflowDispatcherTests
     private WorkflowDispatcher _sut = null!;
     private byte[] _validPackageZip = null!;
     private WorkflowInstanceTokenRegistry _tokenRegistry = null!;
+    private WorkflowSchemaStore _schemaStore = null!;
+    private InMemoryDataAccess<AuditRecord> _auditRecords = null!;
 
     private static DockerWorkflowLauncherSettings DefaultSettings() => new()
     {
@@ -79,6 +85,8 @@ public class WorkflowDispatcherTests
         _validPackageZip = CreateMinimalPackageZip();
         _tokenRegistry = new WorkflowInstanceTokenRegistry(
             Options.Create(new WorkflowDispatcherSettings()), TimeProvider.System);
+        _schemaStore = TestStores.NewWorkflowSchemaStore();
+        _auditRecords = new InMemoryDataAccess<AuditRecord>();
 
         _mockBus = new Mock<IMessageBusClient>(MockBehavior.Strict);
         _mockLauncher = new Mock<IWorkflowLauncher>(MockBehavior.Strict);
@@ -137,6 +145,9 @@ public class WorkflowDispatcherTests
             TestStores.NewPolicyEngine(),
             TestStores.NewWorkflowInstanceRegistry(),
             TestStores.NewStatusPublisher(_mockBus.Object),
+            _schemaStore,
+            new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
+            new AuditLog(_auditRecords, TimeProvider.System),
             TestStores.NewInstanceInfo(),
             NullLogger<WorkflowDispatcher>.Instance);
 
@@ -144,7 +155,11 @@ public class WorkflowDispatcherTests
     }
 
     [TearDown]
-    public async Task TearDown() => await _sut.StopAsync();
+    public async Task TearDown()
+    {
+        await _sut.StopAsync();
+        _auditRecords.Dispose();
+    }
 
     [Test]
     public void WhenStartCalled_DeclaresRunCommandsQueue()
@@ -351,6 +366,9 @@ public class WorkflowDispatcherTests
             TestStores.NewPolicyEngine(),
             TestStores.NewWorkflowInstanceRegistry(),
             TestStores.NewStatusPublisher(_mockBus.Object),
+            _schemaStore,
+            new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
+            new AuditLog(_auditRecords, TimeProvider.System),
             TestStores.NewInstanceInfo(),
             NullLogger<WorkflowDispatcher>.Instance);
         await _sut.StartAsync(CancellationToken.None);
@@ -412,6 +430,9 @@ public class WorkflowDispatcherTests
             TestStores.NewPolicyEngine(),
             TestStores.NewWorkflowInstanceRegistry(),
             TestStores.NewStatusPublisher(_mockBus.Object),
+            _schemaStore,
+            new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
+            new AuditLog(_auditRecords, TimeProvider.System),
             TestStores.NewInstanceInfo(),
             NullLogger<WorkflowDispatcher>.Instance);
         await _sut.StartAsync(CancellationToken.None);
@@ -461,6 +482,9 @@ public class WorkflowDispatcherTests
             TestStores.NewPolicyEngine(),
             TestStores.NewWorkflowInstanceRegistry(),
             TestStores.NewStatusPublisher(_mockBus.Object),
+            _schemaStore,
+            new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
+            new AuditLog(_auditRecords, TimeProvider.System),
             TestStores.NewInstanceInfo(),
             NullLogger<WorkflowDispatcher>.Instance);
         await _sut.StartAsync(CancellationToken.None);
@@ -540,5 +564,83 @@ public class WorkflowDispatcherTests
         _mockBus.Verify(
             b => b.DeclareQueueAsync(WorkflowQueues.ResponseQueueFor(instanceId), It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    // ------------------------------------------------------------------ Network policy
+
+    [Test]
+    public async Task WhenRunCommandReceived_ResolvedNetworkPolicyIsPassedToLaunchRequest()
+    {
+        await _schemaStore.SetSchemaAsync("my-workflow",
+            new WorkflowSchema("my-workflow", [], [])
+            {
+                NetworkEndpoints = [new NetworkEndpointDeclaration("api.nuget.org", "NuGet restore")]
+            });
+
+        WorkflowLaunchRequest? captured = null;
+        _mockLauncher
+            .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
+            .Returns(Task.CompletedTask);
+
+        var command = new RunWorkflowCommand(
+            Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
+            new Dictionary<string, string>());
+
+        await _capturedHandler!(command, CancellationToken.None);
+
+        Assert.That(captured, Is.Not.Null);
+        Assert.That(captured!.NetworkPolicy, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(captured.NetworkPolicy!.Mode, Is.EqualTo(NetworkPolicyMode.DefaultDeny));
+            Assert.That(captured.NetworkPolicy.AllowedEndpoints, Is.EqualTo(new[] { "api.nuget.org" }));
+        });
+    }
+
+    [Test]
+    public async Task WhenRunCommandReceived_NetworkPolicyIsAudited()
+    {
+        WorkflowLaunchRequest? captured = null;
+        _mockLauncher
+            .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
+            .Returns(Task.CompletedTask);
+
+        var command = new RunWorkflowCommand(
+            Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
+            new Dictionary<string, string> { ["NetworkAllow"] = "internal-api.corp.local" });
+
+        await _capturedHandler!(command, CancellationToken.None);
+
+        var instanceId = captured!.EnvironmentVariables[WorkflowEnvironmentVariables.InstanceId];
+        var entries = (await _auditRecords.ReadAsync())
+            .Where(r => r.Action == "workflow.network-policy").ToList();
+        Assert.That(entries, Has.Count.EqualTo(1));
+        Assert.Multiple(() =>
+        {
+            Assert.That(entries[0].Subject, Is.EqualTo(instanceId));
+            Assert.That(entries[0].Outcome, Is.EqualTo("DefaultDeny"));
+            Assert.That(entries[0].DetailJson, Does.Contain("internal-api.corp.local"));
+        });
+    }
+
+    [Test]
+    public async Task WhenRunCommandReceived_InjectsResourceProxyQueueEnvVar()
+    {
+        WorkflowLaunchRequest? captured = null;
+        _mockLauncher
+            .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
+            .Returns(Task.CompletedTask);
+
+        var command = new RunWorkflowCommand(
+            Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
+            new Dictionary<string, string>());
+
+        await _capturedHandler!(command, CancellationToken.None);
+
+        Assert.That(captured!.EnvironmentVariables[WorkflowEnvironmentVariables.ResourceProxyQueue],
+            Is.EqualTo("workflow-resource-proxy"));
     }
 }

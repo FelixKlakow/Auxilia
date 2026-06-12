@@ -22,8 +22,24 @@ public sealed class WorkflowDispatcherSettings
     /// </summary>
     public string SlotActivationQueueName { get; set; } = "workflow-slot-activation";
 
+    /// <summary>
+    /// Queue this instance listens on for audited Resource Proxy calls (ARCHITECTURE §8).
+    /// Unique per Steering Instance when several share a broker (same locality rule as the
+    /// announcement queue). The dispatcher injects this name into every launched workflow.
+    /// </summary>
+    public string ResourceProxyQueueName { get; set; } = "workflow-resource-proxy";
+
     /// <summary>Validity of a delivered slot credential; the SDK re-requests after expiry.</summary>
     public TimeSpan SlotCredentialLifetime { get; set; } = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// Platform ceiling for the network policy (ARCHITECTURE §10): when false (default),
+    /// run configurations requesting <c>allow-all</c> are clamped to default-deny.
+    /// </summary>
+    public bool AllowAllNetworkPermitted { get; set; }
+
+    /// <summary>Endpoints removed from every run's allowlist regardless of manifest or run config.</summary>
+    public List<string> BlockedEndpoints { get; set; } = [];
 
     /// <summary>
     /// Directory under which each run gets its output folder ({dir}/{instanceId}). Mounted

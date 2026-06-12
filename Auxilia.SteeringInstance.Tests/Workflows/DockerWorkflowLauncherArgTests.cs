@@ -150,6 +150,75 @@ public class DockerWorkflowLauncherParamTests
         Assert.That(p.NetworkingConfig, Is.Null);
     }
 
+    // ------------------------------------------------------------------ internal network selection
+
+    private static DockerWorkflowLauncherSettings DualNetworkSettings() => new()
+    {
+        NetworkName = "auxilia-net",
+        InternalNetworkName = "auxilia-internal"
+    };
+
+    [Test]
+    public void WhenDefaultDenyWithNoEndpoints_AndInternalNetworkConfigured_AttachesInternalNetwork()
+    {
+        var request = SimpleRequest() with
+        {
+            NetworkPolicy = new EffectiveNetworkPolicy(NetworkPolicyMode.DefaultDeny, [])
+        };
+
+        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(request, DualNetworkSettings());
+
+        Assert.That(p.NetworkingConfig!.EndpointsConfig.Keys, Is.EqualTo(new[] { "auxilia-internal" }));
+    }
+
+    [Test]
+    public void WhenDefaultDenyWithEndpoints_KeepsRegularNetwork()
+    {
+        var request = SimpleRequest() with
+        {
+            NetworkPolicy = new EffectiveNetworkPolicy(NetworkPolicyMode.DefaultDeny, ["api.nuget.org"])
+        };
+
+        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(request, DualNetworkSettings());
+
+        Assert.That(p.NetworkingConfig!.EndpointsConfig.Keys, Is.EqualTo(new[] { "auxilia-net" }));
+    }
+
+    [Test]
+    public void WhenAllowAll_KeepsRegularNetwork()
+    {
+        var request = SimpleRequest() with
+        {
+            NetworkPolicy = new EffectiveNetworkPolicy(NetworkPolicyMode.AllowAll, [])
+        };
+
+        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(request, DualNetworkSettings());
+
+        Assert.That(p.NetworkingConfig!.EndpointsConfig.Keys, Is.EqualTo(new[] { "auxilia-net" }));
+    }
+
+    [Test]
+    public void WhenDefaultDenyWithNoEndpoints_ButNoInternalNetworkConfigured_KeepsRegularNetwork()
+    {
+        var settings = new DockerWorkflowLauncherSettings { NetworkName = "auxilia-net" };
+        var request = SimpleRequest() with
+        {
+            NetworkPolicy = new EffectiveNetworkPolicy(NetworkPolicyMode.DefaultDeny, [])
+        };
+
+        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(request, settings);
+
+        Assert.That(p.NetworkingConfig!.EndpointsConfig.Keys, Is.EqualTo(new[] { "auxilia-net" }));
+    }
+
+    [Test]
+    public void WhenNoNetworkPolicy_KeepsRegularNetwork()
+    {
+        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(SimpleRequest(), DualNetworkSettings());
+
+        Assert.That(p.NetworkingConfig!.EndpointsConfig.Keys, Is.EqualTo(new[] { "auxilia-net" }));
+    }
+
     // ------------------------------------------------------------------ host config
 
     [Test]

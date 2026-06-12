@@ -21,5 +21,11 @@ public sealed record WorkflowLaunchRequest(
     /// declared outputs written there are persisted to the artifact store after success.
     /// </summary>
     public string? OutputDirectoryBind { get; init; }
+
+    /// <summary>
+    /// Effective network policy resolved at dispatch (ARCHITECTURE §10); the launcher uses
+    /// it to select the container network. Null means no policy was resolved (legacy callers).
+    /// </summary>
+    public EffectiveNetworkPolicy? NetworkPolicy { get; init; }
 }
 
