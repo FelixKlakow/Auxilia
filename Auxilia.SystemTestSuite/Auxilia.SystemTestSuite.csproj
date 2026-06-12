@@ -24,6 +24,7 @@
     </ItemGroup>
 
     <ItemGroup>
+        <ProjectReference Include="..\Source\Auxilia.Adapters.Email\Auxilia.Adapters.Email.csproj"/>
         <ProjectReference Include="..\Auxilia.PlatformData\Auxilia.PlatformData.csproj"/>
         <ProjectReference Include="..\Auxilia.Workflows.Testing\Auxilia.Workflows.Testing.csproj" />
         <ProjectReference Include="..\Auxilia.Workflows\Auxilia.Workflows.csproj" />

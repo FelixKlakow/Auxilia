@@ -17,9 +17,11 @@
     <Project Path="Source\Auxilia.SteeringInstance\Auxilia.SteeringInstance.csproj" />
   </Folder>
   <Folder Name="/04_BackendDomain/">
+    <Project Path="Auxilia.Adapters.Email.Tests\Auxilia.Adapters.Email.Tests.csproj" />
     <Project Path="Auxilia.Ai.Tests\Auxilia.Ai.Tests.csproj" />
     <Project Path="Auxilia.AI\Auxilia.AI.csproj" />
     <Project Path="Auxilia.BackendService.Tests\Auxilia.BackendService.Tests.csproj" />
+    <Project Path="Source\Auxilia.Adapters.Email\Auxilia.Adapters.Email.csproj" />
     <Project Path="Source\Auxilia.BackendService\Auxilia.BackendService.csproj" />
   </Folder>
   <Folder Name="/Hooks/">

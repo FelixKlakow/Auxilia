@@ -114,6 +114,13 @@ try
     builder.Services.AddHostedService<TriggerScheduler>();
     builder.Services.AddHostedService<ArtifactTriggerHandler>();
 
+    // --- Email task source (the v1 integration adapter) ---
+    builder.Services.Configure<Auxilia.Adapters.Email.EmailTaskSourceSettings>(
+        builder.Configuration.GetSection("EmailTaskSource"));
+    builder.Services.AddSingleton<Auxilia.Adapters.Email.IMailboxClient,
+        Auxilia.Adapters.Email.MailKitMailboxClient>();
+    builder.Services.AddHostedService<Auxilia.Adapters.Email.EmailTaskSourceAdapter>();
+
     // --- Hosted services ---
     builder.Services.AddHostedService<QueueInitializer>();
     builder.Services.AddHostedService<IdentificationRequestHandler>();
