@@ -3,6 +3,8 @@
     <File Path=".github/copilot-instructions.md" />
   </Folder>
   <Folder Name="/01_CommonDomain/">
+    <Project Path="Auxilia.PlatformData.Tests\Auxilia.PlatformData.Tests.csproj" />
+    <Project Path="Auxilia.PlatformData\Auxilia.PlatformData.csproj" />
     <Project Path="Auxilia.UniversalDataAccess.Tests\Auxilia.UniversalDataAccess.Tests.csproj" />
     <Project Path="Auxilia.UniversalDataAccess\Auxilia.UniversalDataAccess.csproj" />
     <Project Path="Source\Auxilia.Messaging\Auxilia.Messaging.csproj" />
