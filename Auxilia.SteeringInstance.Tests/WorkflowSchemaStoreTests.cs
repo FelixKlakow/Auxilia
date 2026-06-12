@@ -10,31 +10,31 @@ public class WorkflowSchemaStoreTests
     private WorkflowSchemaStore _store = null!;
 
     [SetUp]
-    public void SetUp() => _store = new WorkflowSchemaStore();
+    public void SetUp() => _store = TestStores.NewWorkflowSchemaStore();
 
     [Test]
-    public void TryGetSchema_AfterSet_ReturnsStoredSchema()
+    public async Task GetSchema_AfterSet_ReturnsStoredSchema()
     {
         var schema = new WorkflowSchema("TestWorkflow", [], []);
-        _store.SetSchema("TestWorkflow", schema);
+        await _store.SetSchemaAsync("TestWorkflow", schema);
 
-        var found = _store.TryGetSchema("TestWorkflow", out var result);
+        var result = await _store.GetSchemaAsync("TestWorkflow");
 
-        Assert.That(found, Is.True);
-        Assert.That(result, Is.EqualTo(schema));
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result!.WorkflowName, Is.EqualTo("TestWorkflow"));
+        Assert.That(result.Slots, Is.Empty);
     }
 
     [Test]
-    public void TryGetSchema_MissingKey_ReturnsFalse()
+    public async Task GetSchema_MissingKey_ReturnsNull()
     {
-        var found = _store.TryGetSchema("NonExistent", out var result);
+        var result = await _store.GetSchemaAsync("NonExistent");
 
-        Assert.That(found, Is.False);
         Assert.That(result, Is.Null);
     }
 
     [Test]
-    public void SetSchema_OverwritesExistingEntry()
+    public async Task SetSchema_OverwritesExistingEntry()
     {
         var schemaV1 = new WorkflowSchema("TestWorkflow", [], []);
         var schemaV2 = new WorkflowSchema(
@@ -42,10 +42,12 @@ public class WorkflowSchemaStoreTests
             [new SlotDefinition("slot1", null) { ServiceType = typeof(object) }],
             []);
 
-        _store.SetSchema("TestWorkflow", schemaV1);
-        _store.SetSchema("TestWorkflow", schemaV2);
+        await _store.SetSchemaAsync("TestWorkflow", schemaV1);
+        await _store.SetSchemaAsync("TestWorkflow", schemaV2);
 
-        _store.TryGetSchema("TestWorkflow", out var result);
-        Assert.That(result, Is.EqualTo(schemaV2));
+        var result = await _store.GetSchemaAsync("TestWorkflow");
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result!.Slots, Has.Count.EqualTo(1));
+        Assert.That(result.Slots[0].SlotName, Is.EqualTo("slot1"));
     }
 }

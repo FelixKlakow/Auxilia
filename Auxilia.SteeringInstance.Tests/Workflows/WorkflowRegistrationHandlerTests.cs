@@ -31,8 +31,8 @@ public class WorkflowRegistrationHandlerTests
             Options.Create(profile),
             NullLogger<EnvironmentValidator>.Instance);
 
-        var store = new SlotConfigurationStore();
-        var signalStore = new SignalHandlerStore();
+        var store = TestStores.NewSlotConfigurationStore();
+        var signalStore = TestStores.NewSignalHandlerStore();
         var resolver = configResolver ?? new ConfigurationResolver(
             store,
             signalStore,
@@ -47,8 +47,9 @@ public class WorkflowRegistrationHandlerTests
             messageBus,
             validator,
             resolver,
-            instanceRegistry ?? new WorkflowInstanceRegistry(),
+            instanceRegistry ?? TestStores.NewWorkflowInstanceRegistry(),
             tokenRegistry ?? new WorkflowInstanceTokenRegistry(settings, TimeProvider.System),
+            TestStores.NewAuditLog(),
             settings,
             NullLogger<WorkflowRegistrationHandler>.Instance);
     }
@@ -108,12 +109,12 @@ public class WorkflowRegistrationHandlerTests
     [Test]
     public async Task HandleAsync_DirtyConfig_PublishesFailureResponse()
     {
-        var store = new SlotConfigurationStore();
-        store.UpsertConfiguration("TestWorkflow",
+        var store = TestStores.NewSlotConfigurationStore();
+        await store.UpsertConfigurationAsync("TestWorkflow",
             new StoredSlotConfiguration("slotA", "ProviderX",
                 new Dictionary<string, string> { ["key"] = "val" },
                 ConfigurationStatus.Dirty));
-        var resolver = new ConfigurationResolver(store, new SignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance);
+        var resolver = new ConfigurationResolver(store, TestStores.NewSignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance);
 
         // Manifest must declare the slot so the resolver is reached.
         var manifest = new WorkflowManifest(
@@ -140,12 +141,12 @@ public class WorkflowRegistrationHandlerTests
         using var rsa = RSA.Create(2048);
         var publicKey = Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
 
-        var store = new SlotConfigurationStore();
-        store.UpsertConfiguration("TestWorkflow",
+        var store = TestStores.NewSlotConfigurationStore();
+        await store.UpsertConfigurationAsync("TestWorkflow",
             new StoredSlotConfiguration("slotA", "ProviderX",
                 new Dictionary<string, string> { ["key"] = "val" },
                 ConfigurationStatus.Valid));
-        var resolver = new ConfigurationResolver(store, new SignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance);
+        var resolver = new ConfigurationResolver(store, TestStores.NewSignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance);
 
         // Manifest must declare the slot so the config is resolved.
         var manifest = new WorkflowManifest(
@@ -217,12 +218,12 @@ public class WorkflowRegistrationHandlerTests
         using var rsa = RSA.Create(2048);
         var publicKey = Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
 
-        var store = new SlotConfigurationStore();
-        store.UpsertConfiguration("TestWorkflow",
+        var store = TestStores.NewSlotConfigurationStore();
+        await store.UpsertConfigurationAsync("TestWorkflow",
             new StoredSlotConfiguration("slotA", "ProviderX",
                 new Dictionary<string, string> { ["key"] = "val" },
                 ConfigurationStatus.Valid));
-        var resolver = new ConfigurationResolver(store, new SignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance);
+        var resolver = new ConfigurationResolver(store, TestStores.NewSignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance);
 
         var instanceId = Guid.NewGuid();
         var request = new WorkflowRegistrationRequest(

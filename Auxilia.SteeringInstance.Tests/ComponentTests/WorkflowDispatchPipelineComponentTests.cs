@@ -3,6 +3,8 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Auxilia.Messaging;
+using Auxilia.PlatformData;
+using Auxilia.PlatformData.Entities;
 using Auxilia.SteeringInstance.Workflows;
 using Auxilia.SteeringInstance.Workflows.Storage;
 using Auxilia.Workflows;
@@ -107,6 +109,16 @@ public class WorkflowDispatchPipelineComponentTests
                 // so they run in the unauthenticated dev mode. The authenticated handshake is
                 // covered by AuthenticatedHandshakeComponentTests.
                 services.Configure<WorkflowDispatcherSettings>(s => s.RequireInstanceToken = false);
+
+                var platformData = new PlatformDataSettings { Backend = PlatformDataBackend.InMemory };
+                services.AddPlatformEntity<WorkflowSchemaRecord>(platformData);
+                services.AddPlatformEntity<SlotConfigurationRecord>(platformData);
+                services.AddPlatformEntity<SlotProviderRecord>(platformData);
+                services.AddPlatformEntity<SignalHandlerRecord>(platformData);
+                services.AddPlatformEntity<WorkflowInstanceRecord>(platformData);
+                services.AddPlatformEntity<AuditRecord>(platformData);
+                services.AddSettingsProtection(platformData);
+                services.AddSingleton<AuditLog>();
 
                 services.AddSingleton(TimeProvider.System);
                 services.AddSingleton<WorkflowInstanceTokenRegistry>();
@@ -254,7 +266,7 @@ public class WorkflowDispatchPipelineComponentTests
     public async Task WhenSlotConfigSeeded_ConfigurationResponseContainsThatSlot()
     {
         // Seed the store directly (mirrors what Program.cs does from appsettings)
-        _slotStore.UpsertConfiguration("seeded-workflow",
+        await _slotStore.UpsertConfigurationAsync("seeded-workflow",
             new StoredSlotConfiguration(
                 "source-control", "LocalGit",
                 new Dictionary<string, string> { ["RepositoryPath"] = "/repos/test" },
@@ -330,10 +342,10 @@ public class WorkflowDispatchPipelineComponentTests
     [Test]
     public async Task WhenRunCommandPublished_AndSlotPackagesSeeded_LauncherReceivesSlotPluginFiles()
     {
-        _slotStore.UpsertConfiguration("my-workflow",
+        await _slotStore.UpsertConfigurationAsync("my-workflow",
             new StoredSlotConfiguration("slot1", "MyProvider",
                 new Dictionary<string, string>(), ConfigurationStatus.Valid));
-        _providerRegistry.Upsert("MyProvider", "/fake/path.slothandler.dll");
+        await _providerRegistry.UpsertAsync("MyProvider", "/fake/path.slothandler.dll");
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "my-workflow", "https://example.com/my-workflow.zip",

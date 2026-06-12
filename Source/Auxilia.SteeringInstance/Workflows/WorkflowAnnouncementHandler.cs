@@ -65,7 +65,7 @@ public sealed class WorkflowAnnouncementHandler(
                 Path.Combine(extractedPath, "workflow-schema.json"), ct);
             var schema = JsonSerializer.Deserialize<WorkflowSchema>(schemaJson);
             if (schema is not null)
-                schemaStore.SetSchema(message.WorkflowName, schema);
+                await schemaStore.SetSchemaAsync(message.WorkflowName, schema, ct);
         }
         else
         {

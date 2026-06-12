@@ -1,4 +1,6 @@
 using Auxilia.Messaging;
+using Auxilia.PlatformData;
+using Auxilia.PlatformData.Entities;
 using Auxilia.SteeringInstance.Workflows;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.DependencyInjection;
@@ -24,6 +26,13 @@ public class WorkflowCancelPipelineComponentTests
             .ConfigureServices(services =>
             {
                 services.AddSingleton<IMessageBusClient>(_bus);
+
+                var platformData = new PlatformDataSettings { Backend = PlatformDataBackend.InMemory };
+                services.AddPlatformEntity<WorkflowInstanceRecord>(platformData);
+                services.AddPlatformEntity<AuditRecord>(platformData);
+                services.AddSingleton<AuditLog>();
+
+                services.AddSingleton(TimeProvider.System);
                 services.AddSingleton<WorkflowInstanceRegistry>();
                 services.AddSingleton<WorkflowStateHandler>();
                 services.AddSingleton<WorkflowCancelDispatcher>();
@@ -45,7 +54,7 @@ public class WorkflowCancelPipelineComponentTests
     {
         var instanceId = Guid.NewGuid();
         var registry = _host.Services.GetRequiredService<WorkflowInstanceRegistry>();
-        registry.Register(instanceId, "test-workflow");
+        await registry.RegisterAsync(instanceId, "test-workflow");
 
         var command = new CancelWorkflowCommand(instanceId);
         var expectedTopic = $"workflow-cancel-{instanceId}";

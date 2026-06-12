@@ -15,52 +15,52 @@ public class DirtyConfigurationDetectorTests
     [SetUp]
     public void SetUp()
     {
-        _schemaStore = new WorkflowSchemaStore();
-        _configStore = new SlotConfigurationStore();
+        _schemaStore = TestStores.NewWorkflowSchemaStore();
+        _configStore = TestStores.NewSlotConfigurationStore();
         _detector = new DirtyConfigurationDetector(_schemaStore, _configStore);
     }
 
     [Test]
-    public void Detect_FirstCall_StoresSchemaAndReturnsNotDirty()
+    public async Task Detect_FirstCall_StoresSchemaAndReturnsNotDirty()
     {
         var schema = MakeSchema("mySlot", new Caps(42));
 
-        var result = _detector.Detect("TestWorkflow", schema);
+        var result = await _detector.DetectAsync("TestWorkflow", schema);
 
         Assert.That(result.IsDirty, Is.False);
         Assert.That(result.AddedRequiredFieldsCount, Is.EqualTo(0));
         Assert.That(result.DirtyConfigurationCount, Is.EqualTo(0));
 
         // Schema was stored
-        Assert.That(_schemaStore.TryGetSchema("TestWorkflow", out _), Is.True);
+        Assert.That(await _schemaStore.GetSchemaAsync("TestWorkflow"), Is.Not.Null);
     }
 
     [Test]
-    public void Detect_AddingOptionalField_ReturnsNotDirty()
+    public async Task Detect_AddingOptionalField_ReturnsNotDirty()
     {
         // First registration stores the old schema
-        _detector.Detect("TestWorkflow", MakeSchema("mySlot", new Caps(42)));
+        await _detector.DetectAsync("TestWorkflow", MakeSchema("mySlot", new Caps(42)));
 
         // New schema adds a property with null value (optional)
         var updated = MakeSchema("mySlot", new CapsWithOptional(42, null));
-        var result = _detector.Detect("TestWorkflow", updated);
+        var result = await _detector.DetectAsync("TestWorkflow", updated);
 
         Assert.That(result.IsDirty, Is.False);
         Assert.That(result.AddedRequiredFieldsCount, Is.EqualTo(0));
     }
 
     [Test]
-    public void Detect_AddingRequiredField_ReturnsDirtyWithCount()
+    public async Task Detect_AddingRequiredField_ReturnsDirtyWithCount()
     {
         // Seed a stored configuration so DirtyConfigurationCount can be > 0
-        _configStore.UpsertConfiguration("TestWorkflow",
+        await _configStore.UpsertConfigurationAsync("TestWorkflow",
             new StoredSlotConfiguration("mySlot", "SomeProvider",
                 new Dictionary<string, string>(), ConfigurationStatus.Valid));
 
-        _detector.Detect("TestWorkflow", MakeSchema("mySlot", new Caps(42)));
+        await _detector.DetectAsync("TestWorkflow", MakeSchema("mySlot", new Caps(42)));
 
         var updated = MakeSchema("mySlot", new CapsWithRequired(42, "value"));
-        var result = _detector.Detect("TestWorkflow", updated);
+        var result = await _detector.DetectAsync("TestWorkflow", updated);
 
         Assert.That(result.IsDirty, Is.True);
         Assert.That(result.AddedRequiredFieldsCount, Is.GreaterThan(0));
@@ -68,19 +68,19 @@ public class DirtyConfigurationDetectorTests
     }
 
     [Test]
-    public void Detect_AddingRequiredField_CallsMarkDirty()
+    public async Task Detect_AddingRequiredField_CallsMarkDirty()
     {
         // Seed a stored configuration
-        _configStore.UpsertConfiguration("TestWorkflow",
+        await _configStore.UpsertConfigurationAsync("TestWorkflow",
             new StoredSlotConfiguration("mySlot", "SomeProvider",
                 new Dictionary<string, string>(), ConfigurationStatus.Valid));
 
-        _detector.Detect("TestWorkflow", MakeSchema("mySlot", new Caps(42)));
+        await _detector.DetectAsync("TestWorkflow", MakeSchema("mySlot", new Caps(42)));
 
         var updated = MakeSchema("mySlot", new CapsWithRequired(42, "value"));
-        _detector.Detect("TestWorkflow", updated);
+        await _detector.DetectAsync("TestWorkflow", updated);
 
-        var configs = _configStore.GetConfigurations("TestWorkflow");
+        var configs = await _configStore.GetConfigurationsAsync("TestWorkflow");
         Assert.That(configs, Has.All.Property(nameof(StoredSlotConfiguration.Status))
             .EqualTo(ConfigurationStatus.Dirty));
     }

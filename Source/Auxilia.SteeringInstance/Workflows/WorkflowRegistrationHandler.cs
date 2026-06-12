@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Auxilia.Messaging;
+using Auxilia.PlatformData;
 using Auxilia.SteeringInstance.Workflows.Storage;
 using Auxilia.Workflows.Messaging;
 using Auxilia.Workflows.Messaging.Messages;
@@ -14,6 +15,7 @@ public sealed class WorkflowRegistrationHandler(
     ConfigurationResolver configResolver,
     WorkflowInstanceRegistry instanceRegistry,
     WorkflowInstanceTokenRegistry tokenRegistry,
+    AuditLog auditLog,
     IOptions<WorkflowDispatcherSettings> dispatcherSettings,
     ILogger<WorkflowRegistrationHandler> logger)
 {
@@ -40,6 +42,10 @@ public sealed class WorkflowRegistrationHandler(
                 logger.LogWarning(
                     "Rejected WorkflowRegistrationRequest with missing or invalid instance token. Workflow={WorkflowName} InstanceId={InstanceId}",
                     request.Manifest.WorkflowName, request.WorkflowInstanceId);
+                await auditLog.AppendAsync(
+                    "steering-instance", "workflow.registration.rejected",
+                    request.WorkflowInstanceId.ToString(), "invalid-instance-token",
+                    ct: cancellationToken);
                 return;
             }
 
@@ -72,17 +78,24 @@ public sealed class WorkflowRegistrationHandler(
             logger.LogInformation(
                 "Workflow {WorkflowInstanceId} declares no slots — responding with empty configuration.",
                 request.WorkflowInstanceId);
-            var signalHandlers = configResolver.ResolveSignalHandlers(request.Manifest.WorkflowName);
+            var signalHandlers = await configResolver.ResolveSignalHandlersAsync(
+                request.Manifest.WorkflowName, cancellationToken);
             await messageBus.PublishAsync(responseTopic, new WorkflowConfigurationResponse(
                 request.WorkflowInstanceId, true, null,
                 new Dictionary<string, EncryptedSlotConfiguration>(),
                 signalHandlers),
                 cancellationToken);
             _registeredInstances.TryAdd(request.WorkflowInstanceId, 0);
+            await instanceRegistry.RegisterAsync(
+                request.WorkflowInstanceId, request.Manifest.WorkflowName, cancellationToken);
+            await auditLog.AppendAsync(
+                "steering-instance", "workflow.registration.accepted",
+                request.WorkflowInstanceId.ToString(), "success", ct: cancellationToken);
             return;
         }
 
-        var resolverResult = configResolver.Resolve(request.Manifest.WorkflowName, request.PublicKey);
+        var resolverResult = await configResolver.ResolveAsync(
+            request.Manifest.WorkflowName, request.PublicKey, cancellationToken);
         if (!resolverResult.IsSuccess)
         {
             logger.LogInformation(
@@ -112,6 +125,10 @@ public sealed class WorkflowRegistrationHandler(
             cancellationToken);
 
         _registeredInstances.TryAdd(request.WorkflowInstanceId, 0);
-        instanceRegistry.Register(request.WorkflowInstanceId, request.Manifest.WorkflowName);
+        await instanceRegistry.RegisterAsync(
+            request.WorkflowInstanceId, request.Manifest.WorkflowName, cancellationToken);
+        await auditLog.AppendAsync(
+            "steering-instance", "workflow.registration.accepted",
+            request.WorkflowInstanceId.ToString(), "success", ct: cancellationToken);
     }
 }

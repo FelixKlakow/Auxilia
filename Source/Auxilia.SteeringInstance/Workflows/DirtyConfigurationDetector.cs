@@ -13,11 +13,13 @@ public sealed class DirtyConfigurationDetector(
     WorkflowSchemaStore schemaStore,
     SlotConfigurationStore configStore)
 {
-    public SchemaDiffResult Detect(string workflowTypeName, WorkflowSchema updatedSchema)
+    public async Task<SchemaDiffResult> DetectAsync(
+        string workflowTypeName, WorkflowSchema updatedSchema, CancellationToken ct = default)
     {
-        if (!schemaStore.TryGetSchema(workflowTypeName, out var storedSchema))
+        var storedSchema = await schemaStore.GetSchemaAsync(workflowTypeName, ct);
+        if (storedSchema is null)
         {
-            schemaStore.SetSchema(workflowTypeName, updatedSchema);
+            await schemaStore.SetSchemaAsync(workflowTypeName, updatedSchema, ct);
             return new SchemaDiffResult(0, 0);
         }
 
@@ -27,12 +29,11 @@ public sealed class DirtyConfigurationDetector(
         int addedRequiredFieldsCount = ComputeAddedRequiredFields(storedJson, updatedJson);
 
         if (addedRequiredFieldsCount > 0)
-            configStore.MarkDirty(workflowTypeName);
+            await configStore.MarkDirtyAsync(workflowTypeName, ct);
 
-        schemaStore.SetSchema(workflowTypeName, updatedSchema);
+        await schemaStore.SetSchemaAsync(workflowTypeName, updatedSchema, ct);
 
-        int dirtyConfigurationCount = configStore
-            .GetConfigurations(workflowTypeName)
+        int dirtyConfigurationCount = (await configStore.GetConfigurationsAsync(workflowTypeName, ct))
             .Count(c => c.Status == ConfigurationStatus.Dirty);
 
         return new SchemaDiffResult(addedRequiredFieldsCount, dirtyConfigurationCount);

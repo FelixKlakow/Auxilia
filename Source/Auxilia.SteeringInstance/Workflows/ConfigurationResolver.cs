@@ -11,9 +11,10 @@ public sealed class ConfigurationResolver(
     SignalHandlerStore signalHandlerStore,
     ILogger<ConfigurationResolver> logger)
 {
-    public ResolverResult Resolve(string workflowTypeName, string publicKeyBase64)
+    public async Task<ResolverResult> ResolveAsync(
+        string workflowTypeName, string publicKeyBase64, CancellationToken ct = default)
     {
-        var configurations = store.GetConfigurations(workflowTypeName);
+        var configurations = await store.GetConfigurationsAsync(workflowTypeName, ct);
 
         if (configurations.Count == 0)
         {
@@ -66,10 +67,7 @@ public sealed class ConfigurationResolver(
                 Convert.ToBase64String(cipherBytes));
         }
 
-        var signalHandlers = signalHandlerStore.GetHandlers(workflowTypeName);
-        var handlerMap = new Dictionary<string, ISignalHandlerDescriptor>(signalHandlers.Count);
-        foreach (var handler in signalHandlers)
-            handlerMap[handler.SignalName] = handler.HandlerDescriptor;
+        var handlerMap = await ResolveSignalHandlersAsync(workflowTypeName, ct);
 
         return ResolverResult.Ok(encrypted, handlerMap);
     }
@@ -78,9 +76,10 @@ public sealed class ConfigurationResolver(
     /// Returns the signal handlers registered for <paramref name="workflowTypeName"/>
     /// without performing slot resolution. Used when a workflow declares no slots.
     /// </summary>
-    public IReadOnlyDictionary<string, ISignalHandlerDescriptor> ResolveSignalHandlers(string workflowTypeName)
+    public async Task<IReadOnlyDictionary<string, ISignalHandlerDescriptor>> ResolveSignalHandlersAsync(
+        string workflowTypeName, CancellationToken ct = default)
     {
-        var signalHandlers = signalHandlerStore.GetHandlers(workflowTypeName);
+        var signalHandlers = await signalHandlerStore.GetHandlersAsync(workflowTypeName, ct);
         var handlerMap = new Dictionary<string, ISignalHandlerDescriptor>(signalHandlers.Count);
         foreach (var handler in signalHandlers)
             handlerMap[handler.SignalName] = handler.HandlerDescriptor;

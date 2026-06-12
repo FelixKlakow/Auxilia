@@ -25,7 +25,7 @@ public class WorkflowAnnouncementHandlerTests
     {
         _mockBus = new Mock<IMessageBusClient>(MockBehavior.Strict);
         _mockPendingPackages = new Mock<PendingWorkflowPackageStore>();
-        _schemaStore = new WorkflowSchemaStore();
+        _schemaStore = TestStores.NewWorkflowSchemaStore();
 
         string? outPath;
         _mockPendingPackages
@@ -214,7 +214,7 @@ public class WorkflowAnnouncementHandlerTests
             await _capturedHandler!(message, CancellationToken.None);
 
             // Assert
-            Assert.That(_schemaStore.TryGetSchema(workflowName, out _), Is.True,
+            Assert.That(await _schemaStore.GetSchemaAsync(workflowName), Is.Not.Null,
                 "Schema should have been pre-loaded from the pending package.");
             _mockBus.Verify(
                 b => b.PublishAsync(
@@ -293,7 +293,7 @@ public class WorkflowAnnouncementHandlerTests
         await _capturedHandler!(message, CancellationToken.None);
 
         // Assert
-        Assert.That(_schemaStore.TryGetSchema(workflowName, out _), Is.False,
+        Assert.That(await _schemaStore.GetSchemaAsync(workflowName), Is.Null,
             "No schema should have been stored when no pending package exists.");
         _mockBus.Verify(
             b => b.PublishAsync(

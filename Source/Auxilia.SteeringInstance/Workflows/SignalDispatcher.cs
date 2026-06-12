@@ -19,13 +19,14 @@ public sealed class SignalDispatcher(
 
     private async Task HandleAsync(WorkflowSignalMessage message, CancellationToken ct)
     {
-        if (!instanceRegistry.TryGetWorkflowType(message.WorkflowInstanceId, out var typeName))
+        var typeName = await instanceRegistry.GetWorkflowTypeAsync(message.WorkflowInstanceId, ct);
+        if (typeName is null)
         {
             logger.LogWarning("No registered workflow type for instance {InstanceId}", message.WorkflowInstanceId);
             return;
         }
 
-        var handlers = handlerStore.GetHandlers(typeName!);
+        var handlers = await handlerStore.GetHandlersAsync(typeName, ct);
         var stored = handlers.FirstOrDefault(h => h.SignalName == message.SignalName);
         if (stored is null)
         {

@@ -4,7 +4,7 @@ Central control-plane service. Receives workflow registration requests, validate
 
 ## Architecture
 
-All workflow state is held in three in-memory stores keyed by workflow-type name. No database is used.
+Workflow state (schemas, slot configurations, providers, signal handlers, run lifecycle records, audit log) is **durable**: the store classes under `Workflows/Storage/` are async repositories over `IDataAccess<TEntity>` from `Auxilia.PlatformData` (backend per `PlatformData` config section: Json default, MongoDb for replicated production, InMemory for tests). Slot settings are encrypted at rest via `ISettingsProtector` when `PlatformData:ProtectionKeyBase64` is set. Only `PendingWorkflowPackageStore` (host-local filesystem paths) and `WorkflowInstanceTokenRegistry` (ephemeral one-time tokens) remain in-memory by design.
 
 ```mermaid
 sequenceDiagram
@@ -39,10 +39,12 @@ Source/Auxilia.SteeringInstance/
     ├── RunnerProfile.cs                 # Config POCO: AvailableTools, OperatingSystem, OpenPorts
     ├── ResolverResult.cs / ValidationResult.cs / SchemaDiffResult.cs  # Result types
     └── Storage/
-        ├── WorkflowInstanceTokenRegistry.cs  # One-time launch tokens: issue / validate / consume
-        ├── WorkflowSchemaStore.cs        # ConcurrentDictionary: workflowType → WorkflowSchema
-        ├── SlotConfigurationStore.cs     # ConcurrentDictionary: workflowType → List<StoredSlotConfiguration>
-        ├── SlotProviderRegistry.cs       # ConcurrentDictionary: providerType → DLL path
+        ├── WorkflowInstanceTokenRegistry.cs  # One-time launch tokens: issue / validate / consume (in-memory by design)
+        ├── WorkflowSchemaStore.cs        # Durable: workflowType → WorkflowSchema (WorkflowSchemaRecord)
+        ├── SlotConfigurationStore.cs     # Durable + encrypted at rest: (workflowType, slot) → StoredSlotConfiguration
+        ├── SlotProviderRegistry.cs       # Durable: providerType → DLL path (SlotProviderRecord)
+        ├── SignalHandlerStore.cs         # Durable: (workflowType, signal) → handler descriptor JSON
+        ├── PendingWorkflowPackageStore.cs # In-memory by design: host-local extracted package paths
         ├── StoredSlotConfiguration.cs    # SlotName + ProviderType + Settings + ConfigurationStatus
-        └── ConfigurationStatus.cs        # enum Active | Dirty
+        └── ConfigurationStatus.cs        # enum Valid | Dirty
 ```

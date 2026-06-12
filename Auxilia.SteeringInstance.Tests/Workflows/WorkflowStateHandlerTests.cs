@@ -37,6 +37,8 @@ public class WorkflowStateHandlerTests
 
         _sut = new WorkflowStateHandler(
             _mockBus.Object,
+            TestStores.NewWorkflowInstanceRegistry(),
+            TestStores.NewAuditLog(),
             NullLogger<WorkflowStateHandler>.Instance);
 
         await _sut.StartAsync(CancellationToken.None);

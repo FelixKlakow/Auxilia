@@ -21,7 +21,8 @@ public sealed class WorkflowCancelDispatcher(
 
     private async Task HandleAsync(CancelWorkflowCommand command, CancellationToken ct)
     {
-        if (!instanceRegistry.TryGetWorkflowType(command.WorkflowInstanceId, out var typeName))
+        var typeName = await instanceRegistry.GetWorkflowTypeAsync(command.WorkflowInstanceId, ct);
+        if (typeName is null)
         {
             logger.LogWarning(
                 "Received CancelWorkflowCommand for unknown instance {InstanceId} — ignoring.",

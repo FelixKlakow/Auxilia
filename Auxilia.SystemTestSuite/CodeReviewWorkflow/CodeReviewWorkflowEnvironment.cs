@@ -174,8 +174,11 @@ public class CodeReviewWorkflowEnvironment
 
     private static async Task PublishProjectAsync(string projectRelativePath, string outputDir)
     {
+        // -nodeReuse:false + UseSharedCompilation=false: persistent MSBuild/Roslyn worker
+        // processes inherit the redirected stdout/stderr pipes; with node reuse the workers
+        // outlive the publish and ReadToEndAsync stalls until their idle timeout (~15 min).
         var psi = new ProcessStartInfo("dotnet",
-            $"publish {projectRelativePath} -c Release -o {outputDir} --no-self-contained")
+            $"publish {projectRelativePath} -c Release -o {outputDir} --no-self-contained -nodeReuse:false -p:UseSharedCompilation=false")
         {
             WorkingDirectory      = RepoRoot,
             RedirectStandardOutput = true,

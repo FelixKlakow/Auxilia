@@ -1,43 +1,37 @@
-using System.Collections.Concurrent;
+using System.Text.Json;
+using Auxilia.PlatformData.Entities;
+using Auxilia.UniversalDataAccess;
+using Auxilia.Workflows.Messaging.Messages;
 
 namespace Auxilia.SteeringInstance.Workflows.Storage;
 
-public sealed class SignalHandlerStore
+/// <summary>
+/// Durable signal handler repository; one record per (workflow type, signal name).
+/// Descriptors serialize polymorphically via the <see cref="ISignalHandlerDescriptor"/> contract.
+/// </summary>
+public sealed class SignalHandlerStore(IDataAccess<SignalHandlerRecord> dataAccess)
 {
-    private readonly ConcurrentDictionary<string, List<StoredSignalHandlerConfiguration>> _store = new();
-
-    public IReadOnlyList<StoredSignalHandlerConfiguration> GetHandlers(string workflowTypeName)
+    public async Task<IReadOnlyList<StoredSignalHandlerConfiguration>> GetHandlersAsync(
+        string workflowTypeName, CancellationToken ct = default)
     {
-        return _store.TryGetValue(workflowTypeName, out var list)
-            ? list.AsReadOnly()
-            : [];
+        var query = await dataAccess.ReadAsync(ct);
+        return query
+            .Where(r => r.WorkflowType == workflowTypeName)
+            .ToList()
+            .Select(r => new StoredSignalHandlerConfiguration(
+                r.SignalName,
+                JsonSerializer.Deserialize<ISignalHandlerDescriptor>(r.HandlerDescriptorJson)!))
+            .ToList()
+            .AsReadOnly();
     }
 
-    public void UpsertHandler(string workflowTypeName, StoredSignalHandlerConfiguration config)
-    {
-        _store.AddOrUpdate(
-            workflowTypeName,
-            _ => [config],
-            (_, existing) =>
-            {
-                lock (existing)
-                {
-                    var index = existing.FindIndex(c => c.SignalName == config.SignalName);
-                    if (index >= 0)
-                        existing[index] = config;
-                    else
-                        existing.Add(config);
-                    return existing;
-                }
-            });
-    }
-
-    public void MarkDirty(string workflowTypeName)
-    {
-        // Reserved for future schema invalidation; no-op equivalent (no Status field on the record).
-        _store.AddOrUpdate(
-            workflowTypeName,
-            _ => [],
-            (_, existing) => existing);
-    }
+    public Task UpsertHandlerAsync(
+        string workflowTypeName, StoredSignalHandlerConfiguration config, CancellationToken ct = default)
+        => dataAccess.SaveAsync(new SignalHandlerRecord
+        {
+            Id = SignalHandlerRecord.IdFor(workflowTypeName, config.SignalName),
+            WorkflowType = workflowTypeName,
+            SignalName = config.SignalName,
+            HandlerDescriptorJson = JsonSerializer.Serialize(config.HandlerDescriptor)
+        }, ct);
 }

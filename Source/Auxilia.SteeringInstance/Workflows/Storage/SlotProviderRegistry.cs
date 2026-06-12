@@ -1,17 +1,25 @@
-using System.Collections.Concurrent;
+using Auxilia.PlatformData.Entities;
+using Auxilia.UniversalDataAccess;
 
 namespace Auxilia.SteeringInstance.Workflows.Storage;
 
-public sealed class SlotProviderRegistry
+/// <summary>Durable slot-provider plugin registry; one record per provider type.</summary>
+public sealed class SlotProviderRegistry(IDataAccess<SlotProviderRecord> dataAccess)
 {
-    private readonly ConcurrentDictionary<string, string> _store = new();
+    public Task UpsertAsync(string providerType, string dllPath, CancellationToken ct = default)
+        => dataAccess.SaveAsync(new SlotProviderRecord
+        {
+            Id = SlotProviderRecord.IdFor(providerType),
+            ProviderType = providerType,
+            DllPath = dllPath
+        }, ct);
 
-    public void Upsert(string providerType, string dllPath)
-        => _store[providerType] = dllPath;
+    public async Task<string?> GetDllPathAsync(string providerType, CancellationToken ct = default)
+    {
+        var record = await dataAccess.ReadAsync(SlotProviderRecord.IdFor(providerType), ct);
+        return record?.DllPath;
+    }
 
-    public bool TryGet(string providerType, out string dllPath)
-        => _store.TryGetValue(providerType, out dllPath!);
-
-    public void Remove(string providerType)
-        => _store.TryRemove(providerType, out _);
+    public Task<bool> RemoveAsync(string providerType, CancellationToken ct = default)
+        => dataAccess.RemoveAsync(SlotProviderRecord.IdFor(providerType), ct);
 }

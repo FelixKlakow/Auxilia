@@ -23,6 +23,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Auxilia.Messaging\Auxilia.Messaging.csproj" />
+        <ProjectReference Include="..\..\Auxilia.PlatformData\Auxilia.PlatformData.csproj" />
         <ProjectReference Include="..\..\Auxilia.Workflows\Auxilia.Workflows.csproj" />
     </ItemGroup>
 

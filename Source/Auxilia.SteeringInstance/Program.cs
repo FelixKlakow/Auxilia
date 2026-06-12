@@ -1,5 +1,7 @@
 ﻿using System.Reflection;
 using Auxilia.Messaging;
+using Auxilia.PlatformData;
+using Auxilia.PlatformData.Entities;
 using Auxilia.SteeringInstance.Workflows;
 using Auxilia.SteeringInstance.Workflows.Storage;
 using Auxilia.Workflows;
@@ -54,6 +56,21 @@ try
 
     // --- Runner profile ---
     builder.Services.Configure<RunnerProfile>(builder.Configuration.GetSection("RunnerProfile"));
+
+    // --- Durable platform data ---
+    var platformDataSettings = new PlatformDataSettings();
+    builder.Configuration.GetSection("PlatformData").Bind(platformDataSettings);
+    builder.Services.AddSingleton(platformDataSettings);
+    builder.Services.AddSettingsProtection(platformDataSettings);
+    builder.Services.AddPlatformEntity<WorkflowSchemaRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<SlotConfigurationRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<SlotProviderRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<SignalHandlerRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<WorkflowInstanceRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<AuditRecord>(platformDataSettings);
+    builder.Services.AddSingleton<AuditLog>();
+    if (string.IsNullOrWhiteSpace(platformDataSettings.ProtectionKeyBase64))
+        Log.Warning("PlatformData:ProtectionKeyBase64 is not configured — slot settings are stored unprotected (dev only).");
 
     // --- Workflow services ---
     builder.Services.AddSingleton<WorkflowSchemaStore>();
@@ -139,13 +156,13 @@ try
     var launcherSettings = app.Services.GetRequiredService<IOptions<DockerWorkflowLauncherSettings>>().Value;
     var providerRegistry = app.Services.GetRequiredService<SlotProviderRegistry>();
     foreach (var (providerType, dllPath) in launcherSettings.SlotPackages)
-        providerRegistry.Upsert(providerType, dllPath);
+        await providerRegistry.UpsertAsync(providerType, dllPath);
 
     var slotConfigSettings = app.Services.GetRequiredService<IOptions<SlotConfigurationsSettings>>().Value;
     var slotStore = app.Services.GetRequiredService<SlotConfigurationStore>();
     foreach (var (workflowType, entries) in slotConfigSettings.Workflows)
         foreach (var entry in entries)
-            slotStore.UpsertConfiguration(workflowType,
+            await slotStore.UpsertConfigurationAsync(workflowType,
                 new StoredSlotConfiguration(entry.SlotName, entry.ProviderType, entry.Settings, ConfigurationStatus.Valid));
 
     var handler = app.Services.GetRequiredService<WorkflowRegistrationHandler>();

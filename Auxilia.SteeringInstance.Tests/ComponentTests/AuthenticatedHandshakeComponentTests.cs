@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 using Auxilia.Messaging;
+using Auxilia.PlatformData;
+using Auxilia.PlatformData.Entities;
 using Auxilia.SteeringInstance.Workflows;
 using Auxilia.SteeringInstance.Workflows.Storage;
 using Auxilia.Workflows;
@@ -56,6 +58,16 @@ public class AuthenticatedHandshakeComponentTests
                     p.OpenPorts = new HashSet<int>();
                 });
                 // RequireInstanceToken stays at its default (true).
+
+                var platformData = new PlatformDataSettings { Backend = PlatformDataBackend.InMemory };
+                services.AddPlatformEntity<WorkflowSchemaRecord>(platformData);
+                services.AddPlatformEntity<SlotConfigurationRecord>(platformData);
+                services.AddPlatformEntity<SlotProviderRecord>(platformData);
+                services.AddPlatformEntity<SignalHandlerRecord>(platformData);
+                services.AddPlatformEntity<WorkflowInstanceRecord>(platformData);
+                services.AddPlatformEntity<AuditRecord>(platformData);
+                services.AddSettingsProtection(platformData);
+                services.AddSingleton<AuditLog>();
 
                 services.AddSingleton(TimeProvider.System);
                 services.AddSingleton<WorkflowInstanceTokenRegistry>();

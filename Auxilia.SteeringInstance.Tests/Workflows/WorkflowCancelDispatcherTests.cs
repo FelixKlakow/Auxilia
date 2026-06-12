@@ -19,7 +19,7 @@ public class WorkflowCancelDispatcherTests
     public async Task SetUp()
     {
         _mockBus = new Mock<IMessageBusClient>(MockBehavior.Strict);
-        _registry = new WorkflowInstanceRegistry();
+        _registry = TestStores.NewWorkflowInstanceRegistry();
 
         var disposable = new Mock<IAsyncDisposable>();
         disposable.Setup(d => d.DisposeAsync()).Returns(ValueTask.CompletedTask);
@@ -71,7 +71,7 @@ public class WorkflowCancelDispatcherTests
     public async Task WhenKnownInstanceReceived_PublishesCancelCommandToPerInstanceTopic()
     {
         var instanceId = Guid.NewGuid();
-        _registry.Register(instanceId, "test-workflow");
+        await _registry.RegisterAsync(instanceId, "test-workflow");
 
         var command = new CancelWorkflowCommand(instanceId);
         var expectedTopic = $"workflow-cancel-{instanceId}";

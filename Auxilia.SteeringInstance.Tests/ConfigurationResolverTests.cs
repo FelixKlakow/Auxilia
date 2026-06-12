@@ -15,35 +15,35 @@ public class ConfigurationResolverTests
     [SetUp]
     public void SetUp()
     {
-        _store = new SlotConfigurationStore();
-        _resolver = new ConfigurationResolver(_store, new SignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance);
+        _store = TestStores.NewSlotConfigurationStore();
+        _resolver = new ConfigurationResolver(_store, TestStores.NewSignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance);
     }
 
     [Test]
-    public void Resolve_NoConfigurations_ReturnsFailure()
+    public async Task Resolve_NoConfigurations_ReturnsFailure()
     {
-        var result = _resolver.Resolve("TestWorkflow", ValidPublicKey());
+        var result = await _resolver.ResolveAsync("TestWorkflow", ValidPublicKey());
 
         Assert.That(result.IsSuccess, Is.False);
         Assert.That(result.FailureReason, Is.Not.Null);
     }
 
     [Test]
-    public void Resolve_DirtyConfiguration_ReturnsFailure()
+    public async Task Resolve_DirtyConfiguration_ReturnsFailure()
     {
-        _store.UpsertConfiguration("TestWorkflow",
+        await _store.UpsertConfigurationAsync("TestWorkflow",
             new StoredSlotConfiguration("slotA", "ProviderX",
                 new Dictionary<string, string> { ["key"] = "val" },
                 ConfigurationStatus.Dirty));
 
-        var result = _resolver.Resolve("TestWorkflow", ValidPublicKey());
+        var result = await _resolver.ResolveAsync("TestWorkflow", ValidPublicKey());
 
         Assert.That(result.IsSuccess, Is.False);
         Assert.That(result.FailureReason, Does.Contain("dirty"));
     }
 
     [Test]
-    public void Resolve_AllValidConfigurations_ReturnsSuccessWithEncryptedSlots()
+    public async Task Resolve_AllValidConfigurations_ReturnsSuccessWithEncryptedSlots()
     {
         using var rsa = RSA.Create(4096);
         var publicKey = Convert.ToBase64String(
@@ -51,14 +51,14 @@ public class ConfigurationResolverTests
 
         Dictionary<string, string> settingsA = new() { ["ApiKey"] = "secret1" };
         Dictionary<string, string> settingsB = new() { ["Token"] = "secret2" };
-        _store.UpsertConfiguration("TestWorkflow",
+        await _store.UpsertConfigurationAsync("TestWorkflow",
             new StoredSlotConfiguration("slotA", "ProviderA", settingsA,
                 ConfigurationStatus.Valid));
-        _store.UpsertConfiguration("TestWorkflow",
+        await _store.UpsertConfigurationAsync("TestWorkflow",
             new StoredSlotConfiguration("slotB", "ProviderB", settingsB,
                 ConfigurationStatus.Valid));
 
-        var result = _resolver.Resolve("TestWorkflow", publicKey);
+        var result = await _resolver.ResolveAsync("TestWorkflow", publicKey);
 
         Assert.That(result.IsSuccess, Is.True);
         Assert.That(result.Slots, Has.Count.EqualTo(2));
@@ -73,17 +73,17 @@ public class ConfigurationResolverTests
     }
 
     [Test]
-    public void Resolve_AllValidConfigurations_CipherCanBeDecryptedToOriginalSettings()
+    public async Task Resolve_AllValidConfigurations_CipherCanBeDecryptedToOriginalSettings()
     {
         using var rsa = RSA.Create(4096);
         var publicKey = Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
 
         Dictionary<string, string> settings = new() { ["ApiKey"] = "super-secret" };
-        _store.UpsertConfiguration("TestWorkflow",
+        await _store.UpsertConfigurationAsync("TestWorkflow",
             new StoredSlotConfiguration("slotA", "ProviderX", settings,
                 ConfigurationStatus.Valid));
 
-        var result = _resolver.Resolve("TestWorkflow", publicKey);
+        var result = await _resolver.ResolveAsync("TestWorkflow", publicKey);
         Assert.That(result.IsSuccess, Is.True);
 
         // Decrypt using the private key

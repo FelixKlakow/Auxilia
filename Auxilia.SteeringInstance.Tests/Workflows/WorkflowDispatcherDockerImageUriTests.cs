@@ -62,8 +62,8 @@ public class WorkflowDispatcherDockerImageUriTests
             httpFactory ?? _mockHttpFactory.Object,
             _mockVerifier.Object,
             _mockPendingPackages.Object,
-            slotStore ?? new SlotConfigurationStore(),
-            providerRegistry ?? new SlotProviderRegistry(),
+            slotStore ?? TestStores.NewSlotConfigurationStore(),
+            providerRegistry ?? TestStores.NewSlotProviderRegistry(),
             new WorkflowInstanceTokenRegistry(
                 Options.Create(new WorkflowDispatcherSettings()), TimeProvider.System),
             NullLogger<WorkflowDispatcher>.Instance);
@@ -119,13 +119,13 @@ public class WorkflowDispatcherDockerImageUriTests
     [Test]
     public async Task HandleAsync_DockerUri_SlotPluginFilesStillPopulated()
     {
-        var slotStore = new SlotConfigurationStore();
-        slotStore.UpsertConfiguration("my-workflow",
+        var slotStore = TestStores.NewSlotConfigurationStore();
+        await slotStore.UpsertConfigurationAsync("my-workflow",
             new StoredSlotConfiguration("slot1", "MyProvider",
                 new Dictionary<string, string>(), ConfigurationStatus.Valid));
 
-        var providerRegistry = new SlotProviderRegistry();
-        providerRegistry.Upsert("MyProvider", "/plugins/my-provider.slothandler.dll");
+        var providerRegistry = TestStores.NewSlotProviderRegistry();
+        await providerRegistry.UpsertAsync("MyProvider", "/plugins/my-provider.slothandler.dll");
 
         await _sut.StopAsync();
         _sut = BuildDispatcher(slotStore: slotStore, providerRegistry: providerRegistry);

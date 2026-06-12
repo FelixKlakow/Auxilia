@@ -44,38 +44,34 @@ public sealed class SlotConfigurationSeedHandler(
         logger.LogInformation("SlotConfigurationSeedHandler started — subscribed to slot-configurations exchange.");
     }
 
-    private Task HandleUpsertAsync(UpsertSlotConfigurationCommand cmd, CancellationToken ct)
+    private async Task HandleUpsertAsync(UpsertSlotConfigurationCommand cmd, CancellationToken ct)
     {
-        slotStore.UpsertConfiguration(cmd.WorkflowType,
-            new StoredSlotConfiguration(cmd.SlotName, cmd.ProviderType, cmd.Settings, ConfigurationStatus.Valid));
+        await slotStore.UpsertConfigurationAsync(cmd.WorkflowType,
+            new StoredSlotConfiguration(cmd.SlotName, cmd.ProviderType, cmd.Settings, ConfigurationStatus.Valid), ct);
         logger.LogInformation(
             "Upserted slot configuration. WorkflowType={WorkflowType} SlotName={SlotName} ProviderType={ProviderType}",
             cmd.WorkflowType, cmd.SlotName, cmd.ProviderType);
-        return Task.CompletedTask;
     }
 
-    private Task HandleRemoveSlotAsync(RemoveSlotConfigurationCommand cmd, CancellationToken ct)
+    private async Task HandleRemoveSlotAsync(RemoveSlotConfigurationCommand cmd, CancellationToken ct)
     {
-        slotStore.RemoveConfiguration(cmd.WorkflowType, cmd.SlotName);
+        await slotStore.RemoveConfigurationAsync(cmd.WorkflowType, cmd.SlotName, ct);
         logger.LogInformation(
             "Removed slot configuration. WorkflowType={WorkflowType} SlotName={SlotName}",
             cmd.WorkflowType, cmd.SlotName);
-        return Task.CompletedTask;
     }
 
-    private Task HandleRegisterProviderAsync(RegisterSlotProviderCommand cmd, CancellationToken ct)
+    private async Task HandleRegisterProviderAsync(RegisterSlotProviderCommand cmd, CancellationToken ct)
     {
-        providerRegistry.Upsert(cmd.ProviderType, cmd.DllPath);
+        await providerRegistry.UpsertAsync(cmd.ProviderType, cmd.DllPath, ct);
         logger.LogInformation(
             "Registered slot provider. ProviderType={ProviderType} DllPath={DllPath}",
             cmd.ProviderType, cmd.DllPath);
-        return Task.CompletedTask;
     }
 
-    private Task HandleRemoveProviderAsync(RemoveSlotProviderCommand cmd, CancellationToken ct)
+    private async Task HandleRemoveProviderAsync(RemoveSlotProviderCommand cmd, CancellationToken ct)
     {
-        providerRegistry.Remove(cmd.ProviderType);
+        await providerRegistry.RemoveAsync(cmd.ProviderType, ct);
         logger.LogInformation("Removed slot provider. ProviderType={ProviderType}", cmd.ProviderType);
-        return Task.CompletedTask;
     }
 }

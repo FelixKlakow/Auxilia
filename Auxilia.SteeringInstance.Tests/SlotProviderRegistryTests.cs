@@ -8,37 +8,36 @@ public class SlotProviderRegistryTests
     private SlotProviderRegistry _registry = null!;
 
     [SetUp]
-    public void SetUp() => _registry = new SlotProviderRegistry();
+    public void SetUp() => _registry = TestStores.NewSlotProviderRegistry();
 
     [Test]
-    public void Upsert_ThenTryGet_ReturnsDllPath()
+    public async Task Upsert_ThenGet_ReturnsDllPath()
     {
-        _registry.Upsert("MyProvider", "/fake/path.slothandler.dll");
+        await _registry.UpsertAsync("MyProvider", "/fake/path.slothandler.dll");
 
-        var found = _registry.TryGet("MyProvider", out var dllPath);
+        var dllPath = await _registry.GetDllPathAsync("MyProvider");
 
-        Assert.That(found, Is.True);
         Assert.That(dllPath, Is.EqualTo("/fake/path.slothandler.dll"));
     }
 
     [Test]
-    public void Remove_ThenTryGet_ReturnsFalse()
+    public async Task Remove_ThenGet_ReturnsNull()
     {
-        _registry.Upsert("MyProvider", "/fake/path.slothandler.dll");
-        _registry.Remove("MyProvider");
+        await _registry.UpsertAsync("MyProvider", "/fake/path.slothandler.dll");
+        await _registry.RemoveAsync("MyProvider");
 
-        var found = _registry.TryGet("MyProvider", out _);
+        var dllPath = await _registry.GetDllPathAsync("MyProvider");
 
-        Assert.That(found, Is.False);
+        Assert.That(dllPath, Is.Null);
     }
 
     [Test]
-    public void Upsert_Twice_OverwritesPreviousValue()
+    public async Task Upsert_Twice_OverwritesPreviousValue()
     {
-        _registry.Upsert("MyProvider", "/original/path.slothandler.dll");
-        _registry.Upsert("MyProvider", "/updated/path.slothandler.dll");
+        await _registry.UpsertAsync("MyProvider", "/original/path.slothandler.dll");
+        await _registry.UpsertAsync("MyProvider", "/updated/path.slothandler.dll");
 
-        _registry.TryGet("MyProvider", out var dllPath);
+        var dllPath = await _registry.GetDllPathAsync("MyProvider");
 
         Assert.That(dllPath, Is.EqualTo("/updated/path.slothandler.dll"));
     }

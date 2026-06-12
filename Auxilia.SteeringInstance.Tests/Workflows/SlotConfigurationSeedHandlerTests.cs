@@ -20,8 +20,8 @@ public class SlotConfigurationSeedHandlerTests
     public async Task SetUp()
     {
         _fakeBus = new FakeMessageBusClient();
-        _slotStore = new SlotConfigurationStore();
-        _providerRegistry = new SlotProviderRegistry();
+        _slotStore = TestStores.NewSlotConfigurationStore();
+        _providerRegistry = TestStores.NewSlotProviderRegistry();
         _sut = new SlotConfigurationSeedHandler(
             _fakeBus,
             _slotStore,
@@ -41,7 +41,7 @@ public class SlotConfigurationSeedHandlerTests
 
         await _fakeBus.SimulateReceivedAsync("slot-configurations", cmd);
 
-        var configs = _slotStore.GetConfigurations("implementation-workflow");
+        var configs = await _slotStore.GetConfigurationsAsync("implementation-workflow");
         Assert.That(configs, Has.Count.EqualTo(1));
         Assert.That(configs[0].SlotName, Is.EqualTo("repository"));
         Assert.That(configs[0].ProviderType, Is.EqualTo("fake-provider"));
@@ -51,13 +51,13 @@ public class SlotConfigurationSeedHandlerTests
     [Test]
     public async Task WhenRemoveCommandReceived_SlotIsRemovedFromStore()
     {
-        _slotStore.UpsertConfiguration("implementation-workflow",
+        await _slotStore.UpsertConfigurationAsync("implementation-workflow",
             new StoredSlotConfiguration("repository", "fake-provider", new Dictionary<string, string>(), ConfigurationStatus.Valid));
 
         await _fakeBus.SimulateReceivedAsync("slot-configurations",
             new RemoveSlotConfigurationCommand("implementation-workflow", "repository"));
 
-        var configs = _slotStore.GetConfigurations("implementation-workflow");
+        var configs = await _slotStore.GetConfigurationsAsync("implementation-workflow");
         Assert.That(configs, Is.Empty);
     }
 
@@ -67,36 +67,35 @@ public class SlotConfigurationSeedHandlerTests
         await _fakeBus.SimulateReceivedAsync("slot-configurations",
             new RegisterSlotProviderCommand("fake-provider", "/fake/path.slothandler.dll"));
 
-        var found = _providerRegistry.TryGet("fake-provider", out var dllPath);
-        Assert.That(found, Is.True);
+        var dllPath = await _providerRegistry.GetDllPathAsync("fake-provider");
         Assert.That(dllPath, Is.EqualTo("/fake/path.slothandler.dll"));
     }
 
     [Test]
     public async Task WhenRemoveProviderCommandReceived_ProviderIsRemoved()
     {
-        _providerRegistry.Upsert("fake-provider", "/fake/path.slothandler.dll");
+        await _providerRegistry.UpsertAsync("fake-provider", "/fake/path.slothandler.dll");
 
         await _fakeBus.SimulateReceivedAsync("slot-configurations",
             new RemoveSlotProviderCommand("fake-provider"));
 
-        var found = _providerRegistry.TryGet("fake-provider", out _);
-        Assert.That(found, Is.False);
+        var dllPath = await _providerRegistry.GetDllPathAsync("fake-provider");
+        Assert.That(dllPath, Is.Null);
     }
 
     [Test]
     public async Task WhenUpsertCommandReceivedForDifferentSlot_DirtySlotRemainsUnchanged()
     {
-        _slotStore.UpsertConfiguration("implementation-workflow",
+        await _slotStore.UpsertConfigurationAsync("implementation-workflow",
             new StoredSlotConfiguration("dirty-slot", "some-provider", new Dictionary<string, string>(), ConfigurationStatus.Valid));
-        _slotStore.MarkDirty("implementation-workflow");
+        await _slotStore.MarkDirtyAsync("implementation-workflow");
 
         await _fakeBus.SimulateReceivedAsync("slot-configurations",
             new UpsertSlotConfigurationCommand(
                 "implementation-workflow", "other-slot", "other-provider",
                 new Dictionary<string, string>()));
 
-        var configs = _slotStore.GetConfigurations("implementation-workflow");
+        var configs = await _slotStore.GetConfigurationsAsync("implementation-workflow");
         var dirtySlot = configs.First(c => c.SlotName == "dirty-slot");
         Assert.That(dirtySlot.Status, Is.EqualTo(ConfigurationStatus.Dirty));
     }
@@ -107,7 +106,7 @@ public class SlotConfigurationSeedHandlerTests
         await _fakeBus.SimulateReceivedAsync("test-queue-slot-seed.upsert",
             new UpsertSlotConfigurationCommand("wf", "slot-a", "provider-x", new Dictionary<string, string>()));
 
-        var configs = _slotStore.GetConfigurations("wf");
+        var configs = await _slotStore.GetConfigurationsAsync("wf");
         Assert.That(configs, Has.Count.EqualTo(1));
         Assert.That(configs[0].SlotName, Is.EqualTo("slot-a"));
         Assert.That(configs[0].Status, Is.EqualTo(ConfigurationStatus.Valid));

@@ -1,65 +1,60 @@
-using System.Collections.Concurrent;
+using System.Text.Json;
+using Auxilia.PlatformData.Entities;
+using Auxilia.PlatformData.Protection;
+using Auxilia.UniversalDataAccess;
 
 namespace Auxilia.SteeringInstance.Workflows.Storage;
 
-public sealed class SlotConfigurationStore
+/// <summary>
+/// Durable slot configuration repository; one record per (workflow type, slot name).
+/// Settings are run through the <see cref="ISettingsProtector"/> before persisting,
+/// so secrets are encrypted at rest whenever a protection key is configured.
+/// </summary>
+public sealed class SlotConfigurationStore(
+    IDataAccess<SlotConfigurationRecord> dataAccess,
+    ISettingsProtector protector)
 {
-    private readonly ConcurrentDictionary<string, List<StoredSlotConfiguration>> _store = new();
-
-    public IReadOnlyList<StoredSlotConfiguration> GetConfigurations(string workflowTypeName)
+    public async Task<IReadOnlyList<StoredSlotConfiguration>> GetConfigurationsAsync(
+        string workflowTypeName, CancellationToken ct = default)
     {
-        return _store.TryGetValue(workflowTypeName, out var list)
-            ? list.AsReadOnly()
-            : [];
+        var query = await dataAccess.ReadAsync(ct);
+        return query
+            .Where(r => r.WorkflowType == workflowTypeName)
+            .ToList()
+            .Select(FromRecord)
+            .ToList()
+            .AsReadOnly();
     }
 
-    public void UpsertConfiguration(string workflowTypeName, StoredSlotConfiguration config)
+    public Task UpsertConfigurationAsync(
+        string workflowTypeName, StoredSlotConfiguration config, CancellationToken ct = default)
+        => dataAccess.SaveAsync(ToRecord(workflowTypeName, config), ct);
+
+    public Task<bool> RemoveConfigurationAsync(
+        string workflowTypeName, string slotName, CancellationToken ct = default)
+        => dataAccess.RemoveAsync(SlotConfigurationRecord.IdFor(workflowTypeName, slotName), ct);
+
+    public async Task MarkDirtyAsync(string workflowTypeName, CancellationToken ct = default)
     {
-        _store.AddOrUpdate(
-            workflowTypeName,
-            _ => [config],
-            (_, existing) =>
-            {
-                lock (existing)
-                {
-                    var index = existing.FindIndex(c => c.SlotName == config.SlotName);
-                    if (index >= 0)
-                        existing[index] = config;
-                    else
-                        existing.Add(config);
-                    return existing;
-                }
-            });
+        var query = await dataAccess.ReadAsync(ct);
+        var records = query.Where(r => r.WorkflowType == workflowTypeName).ToList();
+        foreach (var record in records)
+            await dataAccess.SaveAsync(record with { Status = nameof(ConfigurationStatus.Dirty) }, ct);
     }
 
-    public void RemoveConfiguration(string workflowTypeName, string slotName)
+    private SlotConfigurationRecord ToRecord(string workflowTypeName, StoredSlotConfiguration config) => new()
     {
-        _store.AddOrUpdate(
-            workflowTypeName,
-            _ => [],
-            (_, existing) =>
-            {
-                lock (existing)
-                {
-                    existing.RemoveAll(c => c.SlotName == slotName);
-                    return existing;
-                }
-            });
-    }
+        Id = SlotConfigurationRecord.IdFor(workflowTypeName, config.SlotName),
+        WorkflowType = workflowTypeName,
+        SlotName = config.SlotName,
+        ProviderType = config.ProviderType,
+        ProtectedSettingsJson = protector.Protect(JsonSerializer.Serialize(config.Settings)),
+        Status = config.Status.ToString()
+    };
 
-    public void MarkDirty(string workflowTypeName)
-    {
-        _store.AddOrUpdate(
-            workflowTypeName,
-            _ => [],
-            (_, existing) =>
-            {
-                lock (existing)
-                {
-                    for (var i = 0; i < existing.Count; i++)
-                        existing[i] = existing[i] with { Status = ConfigurationStatus.Dirty };
-                    return existing;
-                }
-            });
-    }
+    private StoredSlotConfiguration FromRecord(SlotConfigurationRecord record) => new(
+        record.SlotName,
+        record.ProviderType,
+        JsonSerializer.Deserialize<Dictionary<string, string>>(protector.Unprotect(record.ProtectedSettingsJson))!,
+        Enum.Parse<ConfigurationStatus>(record.Status));
 }

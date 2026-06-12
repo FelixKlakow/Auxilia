@@ -82,13 +82,14 @@ public sealed class WorkflowDispatcher(
 
         // 5b. Resolve slot plugin files
         var pluginFiles = new List<SlotPluginFile>();
-        var providerTypes = slotStore.GetConfigurations(command.WorkflowType)
+        var providerTypes = (await slotStore.GetConfigurationsAsync(command.WorkflowType, ct))
             .Select(c => c.ProviderType)
             .Distinct();
 
         foreach (var providerType in providerTypes)
         {
-            if (!providerRegistry.TryGet(providerType, out var dllPath))
+            var dllPath = await providerRegistry.GetDllPathAsync(providerType, ct);
+            if (dllPath is null)
             {
                 logger.LogWarning(
                     "No SlotPackages entry for ProviderType={ProviderType} (WorkflowType={WorkflowType}). Skipping.",

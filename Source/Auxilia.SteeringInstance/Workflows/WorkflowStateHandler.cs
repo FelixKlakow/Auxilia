@@ -1,10 +1,13 @@
 using Auxilia.Messaging;
+using Auxilia.PlatformData;
 using Auxilia.Workflows.Messaging.Messages;
 
 namespace Auxilia.SteeringInstance.Workflows;
 
 public sealed class WorkflowStateHandler(
     IMessageBusClient messageBus,
+    WorkflowInstanceRegistry instanceRegistry,
+    AuditLog auditLog,
     ILogger<WorkflowStateHandler> logger)
 {
     private IAsyncDisposable? _subscription;
@@ -18,7 +21,7 @@ public sealed class WorkflowStateHandler(
         logger.LogInformation("WorkflowStateHandler started — listening on workflow.state.");
     }
 
-    private Task HandleAsync(WorkflowStateMessage message, CancellationToken ct)
+    private async Task HandleAsync(WorkflowStateMessage message, CancellationToken ct)
     {
         switch (message.State)
         {
@@ -44,7 +47,13 @@ public sealed class WorkflowStateHandler(
                 break;
         }
 
-        return Task.CompletedTask;
+        await instanceRegistry.SetStateAsync(
+            message.WorkflowInstanceId, message.State.ToString(), message.ErrorMessage, ct);
+        await auditLog.AppendAsync(
+            "steering-instance", "workflow.state-changed",
+            message.WorkflowInstanceId.ToString(), message.State.ToString(),
+            message.ErrorMessage is null ? null : $$"""{"error":{{System.Text.Json.JsonSerializer.Serialize(message.ErrorMessage)}}}""",
+            ct);
     }
 
     public async ValueTask StopAsync()
