@@ -10,6 +10,7 @@ var workflowName = Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__WORKFLO
 await (workflowName switch
 {
     SimpleGitCommitWorkflow.WorkflowName => SimpleGitCommitWorkflow.RunAsync(args),
+    SleepingWorkflow.WorkflowName => SleepingWorkflow.RunAsync(args),
     _ => throw new InvalidOperationException($"Unknown dummy workflow name: '{workflowName}'")
 });
 

@@ -10,6 +10,7 @@ using Auxilia.SteeringInstance.Workflows;
 using Auxilia.SteeringInstance.Workflows.Storage;
 using Auxilia.Workflows;
 using Auxilia.Workflows.Crypto;
+using Auxilia.Workflows.Messaging;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;

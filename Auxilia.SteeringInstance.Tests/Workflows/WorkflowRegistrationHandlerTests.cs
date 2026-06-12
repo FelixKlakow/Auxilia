@@ -191,8 +191,9 @@ public class WorkflowRegistrationHandlerTests
         await handler.StartAsync(CancellationToken.None);
         await bus.InvokeAsync(request, CancellationToken.None);
 
-        Assert.That(bus.Published, Has.Count.EqualTo(1));
-        var response = (WorkflowConfigurationResponse)bus.Published[0].Message;
+        var responses = bus.Published.Where(p => p.Message is WorkflowConfigurationResponse).ToList();
+        Assert.That(responses, Has.Count.EqualTo(1));
+        var response = (WorkflowConfigurationResponse)responses[0].Message;
         Assert.That(response.Success, Is.True);
         Assert.That(response.Slots, Is.Empty);
         Assert.That(response.ErrorMessage, Is.Null);
@@ -300,8 +301,9 @@ public class WorkflowRegistrationHandlerTests
             SlotlessRequest(issued.WorkflowInstanceId, issued.Token),
             CancellationToken.None);
 
-        Assert.That(bus.Published, Has.Count.EqualTo(1));
-        var (topic, msg) = bus.Published[0];
+        var responses = bus.Published.Where(p => p.Message is WorkflowConfigurationResponse).ToList();
+        Assert.That(responses, Has.Count.EqualTo(1));
+        var (topic, msg) = responses[0];
         Assert.That(topic, Is.EqualTo(Auxilia.Workflows.Messaging.WorkflowQueues.ResponseQueueFor(issued.WorkflowInstanceId)));
         Assert.That(((WorkflowConfigurationResponse)msg).Success, Is.True);
     }
@@ -319,7 +321,8 @@ public class WorkflowRegistrationHandlerTests
         await bus.InvokeAsync(SlotlessRequest(issued.WorkflowInstanceId, issued.Token), CancellationToken.None);
         await bus.InvokeAsync(SlotlessRequest(issued.WorkflowInstanceId, issued.Token), CancellationToken.None);
 
-        Assert.That(bus.Published, Has.Count.EqualTo(1), "Second registration with a consumed token must be rejected.");
+        Assert.That(bus.Published.Where(p => p.Message is WorkflowConfigurationResponse).Count(), Is.EqualTo(1),
+            "Second registration with a consumed token must be rejected.");
     }
 
     // A fake that captures the subscription callback so tests can invoke it directly.

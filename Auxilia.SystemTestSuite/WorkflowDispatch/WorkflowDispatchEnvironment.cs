@@ -114,6 +114,22 @@ public class WorkflowDispatchEnvironment
 
     internal static async Task BuildImageAsync(string tag, string dockerfilePath)
     {
+        // The Docker Desktop daemon occasionally wedges under suite load and a build then
+        // hangs forever at ~0 CPU. Bound each attempt and retry once instead of hanging.
+        try
+        {
+            await BuildImageOnceAsync(tag, dockerfilePath, TimeSpan.FromMinutes(8));
+        }
+        catch (TimeoutException)
+        {
+            await Console.Error.WriteLineAsync(
+                $"docker build for {tag} timed out — retrying once (daemon may have been wedged).");
+            await BuildImageOnceAsync(tag, dockerfilePath, TimeSpan.FromMinutes(8));
+        }
+    }
+
+    private static async Task BuildImageOnceAsync(string tag, string dockerfilePath, TimeSpan timeout)
+    {
         var psi = new ProcessStartInfo("docker",
             $"build -t {tag} -f {dockerfilePath} .")
         {
@@ -128,7 +144,18 @@ public class WorkflowDispatchEnvironment
 
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
         var stderrTask = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
+
+        using var cts = new CancellationTokenSource(timeout);
+        try
+        {
+            await process.WaitForExitAsync(cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            try { process.Kill(entireProcessTree: true); } catch { /* already gone */ }
+            throw new TimeoutException($"docker build for {tag} exceeded {timeout.TotalMinutes:0} minutes.");
+        }
+
         var stdout = await stdoutTask;
         var stderr = await stderrTask;
 

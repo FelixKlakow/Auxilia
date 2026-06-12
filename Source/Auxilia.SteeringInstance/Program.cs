@@ -197,6 +197,8 @@ try
     app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
     app.MapPrometheusScrapingEndpoint(); // GET /metrics
 
+    Log.Information("SteeringInstance ServiceId={ServiceId}", serviceId);
+
     app.Run();
 }
 finally

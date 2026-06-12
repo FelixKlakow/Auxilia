@@ -89,6 +89,8 @@ public sealed class WorkflowRegistrationHandler(
             _registeredInstances.TryAdd(request.WorkflowInstanceId, 0);
             await instanceRegistry.RegisterAsync(
                 request.WorkflowInstanceId, request.Manifest.WorkflowName, cancellationToken);
+            await statusPublisher.PublishAsync(
+                request.WorkflowInstanceId, request.Manifest.WorkflowName, "Running", ct: cancellationToken);
             await auditLog.AppendAsync(
                 "steering-instance", "workflow.registration.accepted",
                 request.WorkflowInstanceId.ToString(), "success", ct: cancellationToken);

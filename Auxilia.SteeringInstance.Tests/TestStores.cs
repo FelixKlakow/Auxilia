@@ -6,6 +6,7 @@ using Auxilia.PlatformData.Protection;
 using Auxilia.SteeringInstance.Workflows;
 using Auxilia.SteeringInstance.Workflows.Storage;
 using Auxilia.UniversalDataAccess.Implementations;
+using Auxilia.Workflows.Messaging;
 
 namespace Auxilia.SteeringInstance.Tests;
 

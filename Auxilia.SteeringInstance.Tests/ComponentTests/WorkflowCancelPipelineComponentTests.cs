@@ -2,6 +2,7 @@ using Auxilia.Messaging;
 using Auxilia.PlatformData;
 using Auxilia.PlatformData.Entities;
 using Auxilia.SteeringInstance.Workflows;
+using Auxilia.Workflows.Messaging;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
