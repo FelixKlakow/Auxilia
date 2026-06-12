@@ -172,6 +172,9 @@ public class EndToEndEnvironment
 
         Backend = new ContainerBuilder(BackendImageName)
             .WithNetwork(_network)
+            // The dashboard is host-reachable so an operator (or Scripts/Run-SystemTests.ps1)
+            // can watch a run live in the browser while the test executes.
+            .WithPortBinding(8080, assignRandomHostPort: true)
             .WithEnvironment("RabbitMq__Host",     RabbitMqAlias)
             .WithEnvironment("RabbitMq__Port",     "5672")
             .WithEnvironment("RabbitMq__UserName", "guest")

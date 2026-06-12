@@ -29,6 +29,9 @@
     <File Path="Hooks\pre-commit" />
     <File Path="Hooks\RegisterHooks.ps1" />
   </Folder>
+  <Folder Name="/Scripts/">
+    <File Path="Scripts\Run-SystemTests.ps1" />
+  </Folder>
   <Folder Name="/Overview/">
     <File Path="ARCHITECTURE.md" />
     <File Path="docs/workflow-sdk-design.md" />
