@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using Auxilia.Messaging;
 using Auxilia.SystemTestSuite.WorkflowDispatch;
 using Auxilia.Workflows.Messaging.Messages;
@@ -96,6 +96,7 @@ public class CodeReviewWorkflowEnvironment
             .WithEnvironment("WorkflowDispatcher__CommandQueueName",      HappyCommandQueue)
             .WithEnvironment("WorkflowDispatcher__RegistrationQueueName", "workflow-registration-crw-happy")
             .WithEnvironment("WorkflowDispatcher__AnnouncementQueueName", "workflow.announcements-crw-happy")
+            .WithEnvironment("WorkflowDispatcher__SlotActivationQueueName", "workflow-slot-activation-crw-happy")
             .WithEnvironment("WorkflowLauncher__ExtraEnvironmentVariables__AUXILIA_DEVELOPER_MODE", "1")
             .WithWaitStrategy(Wait.ForUnixContainer()
                 .UntilMessageIsLogged("WorkflowDispatcher started")
@@ -118,6 +119,7 @@ public class CodeReviewWorkflowEnvironment
             .WithEnvironment("WorkflowDispatcher__CommandQueueName",      EdgeCommandQueue)
             .WithEnvironment("WorkflowDispatcher__RegistrationQueueName", "workflow-registration-crw-edge")
             .WithEnvironment("WorkflowDispatcher__AnnouncementQueueName", "workflow.announcements-crw-edge")
+            .WithEnvironment("WorkflowDispatcher__SlotActivationQueueName", "workflow-slot-activation-crw-edge")
             .WithEnvironment("WorkflowLauncher__ExtraEnvironmentVariables__AUXILIA_DEVELOPER_MODE", "1")
             .WithWaitStrategy(Wait.ForUnixContainer()
                 .UntilMessageIsLogged("WorkflowDispatcher started")

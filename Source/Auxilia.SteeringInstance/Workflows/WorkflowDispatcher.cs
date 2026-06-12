@@ -111,6 +111,7 @@ public sealed class WorkflowDispatcher(
             ["RabbitMq__Password"]           = settings.RabbitMqPassword,
             [WorkflowEnvironmentVariables.RegistrationQueue] = dispatcherSettings.Value.RegistrationQueueName,
             [WorkflowEnvironmentVariables.AnnouncementQueue] = dispatcherSettings.Value.AnnouncementQueueName,
+            [WorkflowEnvironmentVariables.SlotActivationQueue] = dispatcherSettings.Value.SlotActivationQueueName,
             [WorkflowEnvironmentVariables.InstanceId]        = instanceId.ToString("D"),
             [WorkflowEnvironmentVariables.InstanceToken]     = issued.Token,
         };

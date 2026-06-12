@@ -90,26 +90,9 @@ public class SingleBackendServiceEnvironment
         }
     }
 
-    internal static async Task BuildDockerImageAsync()
-    {
-        var psi = new ProcessStartInfo("docker",
-            $"build -t {BackendImageName} -f Source/Auxilia.BackendService/Dockerfile .")
-        {
-            WorkingDirectory = RepoRoot,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
-        };
-
-        using var process = Process.Start(psi)
-                            ?? throw new InvalidOperationException("Failed to start docker build process.");
-
-        var stdout = await process.StandardOutput.ReadToEndAsync();
-        var stderr = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        if (process.ExitCode != 0)
-            throw new InvalidOperationException(
-                $"docker build failed (exit {process.ExitCode}):\n{stdout}\n{stderr}");
-    }
+    internal static Task BuildDockerImageAsync()
+        // Shared helper: prebuilt-images opt-out, bounded attempts, and retry —
+        // a hand-rolled docker build here hangs forever when the daemon wedges.
+        => WorkflowDispatch.WorkflowDispatchEnvironment.BuildImageAsync(
+            BackendImageName, "Source/Auxilia.BackendService/Dockerfile");
 }

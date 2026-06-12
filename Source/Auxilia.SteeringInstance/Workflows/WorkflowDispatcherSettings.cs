@@ -17,6 +17,15 @@ public sealed class WorkflowDispatcherSettings
     public string AnnouncementQueueName { get; set; } = "workflow.announcements";
 
     /// <summary>
+    /// Queue for just-in-time slot activation requests. Unique per Steering Instance when
+    /// several share a broker (same locality rule as the announcement queue).
+    /// </summary>
+    public string SlotActivationQueueName { get; set; } = "workflow-slot-activation";
+
+    /// <summary>Validity of a delivered slot credential; the SDK re-requests after expiry.</summary>
+    public TimeSpan SlotCredentialLifetime { get; set; } = TimeSpan.FromMinutes(30);
+
+    /// <summary>
     /// When true (default), announcements and registrations must carry the one-time instance
     /// token issued at launch, and responses go only to the platform-created response queue.
     /// Disable only for trusted-operator dev scenarios where workflows start outside the dispatcher.

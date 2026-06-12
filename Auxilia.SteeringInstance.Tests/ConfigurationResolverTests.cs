@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Auxilia.SteeringInstance.Tests;
 
 [TestFixture]
+[Category("Unit")]
 public class ConfigurationResolverTests
 {
     private SlotConfigurationStore _store = null!;
@@ -19,61 +20,101 @@ public class ConfigurationResolverTests
         _resolver = new ConfigurationResolver(_store, TestStores.NewSignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance);
     }
 
-    [Test]
-    public async Task Resolve_NoConfigurations_ReturnsFailure()
-    {
-        var result = await _resolver.ResolveAsync("TestWorkflow", ValidPublicKey());
+    // ------------------------------------------------------------------ ValidateConfiguredAsync
 
-        Assert.That(result.IsSuccess, Is.False);
-        Assert.That(result.FailureReason, Is.Not.Null);
+    [Test]
+    public async Task ValidateConfigured_NoConfigurations_ReturnsInvalid()
+    {
+        var (isValid, reason) = await _resolver.ValidateConfiguredAsync("TestWorkflow");
+
+        Assert.That(isValid, Is.False);
+        Assert.That(reason, Is.Not.Null);
     }
 
     [Test]
-    public async Task Resolve_DirtyConfiguration_ReturnsFailure()
+    public async Task ValidateConfigured_DirtyConfiguration_ReturnsInvalid()
     {
         await _store.UpsertConfigurationAsync("TestWorkflow",
             new StoredSlotConfiguration("slotA", "ProviderX",
                 new Dictionary<string, string> { ["key"] = "val" },
                 ConfigurationStatus.Dirty));
 
-        var result = await _resolver.ResolveAsync("TestWorkflow", ValidPublicKey());
+        var (isValid, reason) = await _resolver.ValidateConfiguredAsync("TestWorkflow");
 
-        Assert.That(result.IsSuccess, Is.False);
-        Assert.That(result.FailureReason, Does.Contain("dirty"));
+        Assert.That(isValid, Is.False);
+        Assert.That(reason, Does.Contain("dirty"));
     }
 
     [Test]
-    public async Task Resolve_AllValidConfigurations_ReturnsSuccessWithEncryptedSlots()
+    public async Task ValidateConfigured_AllValidConfigurations_ReturnsValid()
+    {
+        await _store.UpsertConfigurationAsync("TestWorkflow",
+            new StoredSlotConfiguration("slotA", "ProviderA",
+                new Dictionary<string, string> { ["ApiKey"] = "secret1" },
+                ConfigurationStatus.Valid));
+        await _store.UpsertConfigurationAsync("TestWorkflow",
+            new StoredSlotConfiguration("slotB", "ProviderB",
+                new Dictionary<string, string> { ["Token"] = "secret2" },
+                ConfigurationStatus.Valid));
+
+        var (isValid, reason) = await _resolver.ValidateConfiguredAsync("TestWorkflow");
+
+        Assert.That(isValid, Is.True);
+        Assert.That(reason, Is.Null);
+    }
+
+    // ------------------------------------------------------------------ ResolveSlotAsync
+
+    [Test]
+    public async Task ResolveSlot_UnknownSlot_ReturnsError()
+    {
+        var (success, error, slot) = await _resolver.ResolveSlotAsync(
+            "TestWorkflow", "slotA", ValidPublicKey());
+
+        Assert.That(success, Is.False);
+        Assert.That(error, Does.Contain("slotA"));
+        Assert.That(slot, Is.Null);
+    }
+
+    [Test]
+    public async Task ResolveSlot_DirtyConfiguration_ReturnsError()
+    {
+        await _store.UpsertConfigurationAsync("TestWorkflow",
+            new StoredSlotConfiguration("slotA", "ProviderX",
+                new Dictionary<string, string> { ["key"] = "val" },
+                ConfigurationStatus.Dirty));
+
+        var (success, error, slot) = await _resolver.ResolveSlotAsync(
+            "TestWorkflow", "slotA", ValidPublicKey());
+
+        Assert.That(success, Is.False);
+        Assert.That(error, Does.Contain("dirty"));
+        Assert.That(slot, Is.Null);
+    }
+
+    [Test]
+    public async Task ResolveSlot_HappyPath_ReturnsEncryptedSlotWithProviderType()
     {
         using var rsa = RSA.Create(4096);
-        var publicKey = Convert.ToBase64String(
-            rsa.ExportSubjectPublicKeyInfo());
+        var publicKey = Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
 
-        Dictionary<string, string> settingsA = new() { ["ApiKey"] = "secret1" };
-        Dictionary<string, string> settingsB = new() { ["Token"] = "secret2" };
         await _store.UpsertConfigurationAsync("TestWorkflow",
-            new StoredSlotConfiguration("slotA", "ProviderA", settingsA,
-                ConfigurationStatus.Valid));
-        await _store.UpsertConfigurationAsync("TestWorkflow",
-            new StoredSlotConfiguration("slotB", "ProviderB", settingsB,
+            new StoredSlotConfiguration("slotA", "ProviderA",
+                new Dictionary<string, string> { ["ApiKey"] = "secret1" },
                 ConfigurationStatus.Valid));
 
-        var result = await _resolver.ResolveAsync("TestWorkflow", publicKey);
+        var (success, error, slot) = await _resolver.ResolveSlotAsync(
+            "TestWorkflow", "slotA", publicKey);
 
-        Assert.That(result.IsSuccess, Is.True);
-        Assert.That(result.Slots, Has.Count.EqualTo(2));
-
-        // Ciphertext is non-empty
-        Assert.That(result.Slots["slotA"].EncryptedSettings, Is.Not.Empty);
-        Assert.That(result.Slots["slotB"].EncryptedSettings, Is.Not.Empty);
-
-        // Ciphertexts are distinct per slot
-        Assert.That(result.Slots["slotA"].EncryptedSettings,
-            Is.Not.EqualTo(result.Slots["slotB"].EncryptedSettings));
+        Assert.That(success, Is.True);
+        Assert.That(error, Is.Null);
+        Assert.That(slot, Is.Not.Null);
+        Assert.That(slot!.ProviderType, Is.EqualTo("ProviderA"));
+        Assert.That(slot.EncryptedSettings, Is.Not.Empty);
     }
 
     [Test]
-    public async Task Resolve_AllValidConfigurations_CipherCanBeDecryptedToOriginalSettings()
+    public async Task ResolveSlot_HappyPath_CipherCanBeDecryptedToOriginalSettings()
     {
         using var rsa = RSA.Create(4096);
         var publicKey = Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
@@ -83,17 +124,71 @@ public class ConfigurationResolverTests
             new StoredSlotConfiguration("slotA", "ProviderX", settings,
                 ConfigurationStatus.Valid));
 
-        var result = await _resolver.ResolveAsync("TestWorkflow", publicKey);
-        Assert.That(result.IsSuccess, Is.True);
+        var (success, _, slot) = await _resolver.ResolveSlotAsync(
+            "TestWorkflow", "slotA", publicKey);
+        Assert.That(success, Is.True);
 
         // Decrypt using the private key
-        var cipherBytes = Convert.FromBase64String(result.Slots["slotA"].EncryptedSettings);
+        var cipherBytes = Convert.FromBase64String(slot!.EncryptedSettings);
         var plainBytes = rsa.Decrypt(cipherBytes, RSAEncryptionPadding.OaepSHA256);
         var plainJson = System.Text.Encoding.UTF8.GetString(plainBytes);
 
         var decoded = JsonSerializer.Deserialize<Dictionary<string, string>>(plainJson);
         Assert.That(decoded, Is.Not.Null);
         Assert.That(decoded!["ApiKey"], Is.EqualTo("super-secret"));
+    }
+
+    [Test]
+    public async Task ResolveSlot_TwoSlots_ProduceDistinctCiphertexts()
+    {
+        using var rsa = RSA.Create(4096);
+        var publicKey = Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
+
+        await _store.UpsertConfigurationAsync("TestWorkflow",
+            new StoredSlotConfiguration("slotA", "ProviderA",
+                new Dictionary<string, string> { ["ApiKey"] = "secret1" },
+                ConfigurationStatus.Valid));
+        await _store.UpsertConfigurationAsync("TestWorkflow",
+            new StoredSlotConfiguration("slotB", "ProviderB",
+                new Dictionary<string, string> { ["Token"] = "secret2" },
+                ConfigurationStatus.Valid));
+
+        var (_, _, slotA) = await _resolver.ResolveSlotAsync("TestWorkflow", "slotA", publicKey);
+        var (_, _, slotB) = await _resolver.ResolveSlotAsync("TestWorkflow", "slotB", publicKey);
+
+        Assert.That(slotA!.EncryptedSettings, Is.Not.EqualTo(slotB!.EncryptedSettings));
+    }
+
+    [Test]
+    public async Task ResolveSlot_PublicKeyNotBase64_ReturnsError()
+    {
+        await _store.UpsertConfigurationAsync("TestWorkflow",
+            new StoredSlotConfiguration("slotA", "ProviderX",
+                new Dictionary<string, string> { ["key"] = "val" },
+                ConfigurationStatus.Valid));
+
+        var (success, error, slot) = await _resolver.ResolveSlotAsync(
+            "TestWorkflow", "slotA", "not-base64!!!");
+
+        Assert.That(success, Is.False);
+        Assert.That(error, Does.Contain("base-64"));
+        Assert.That(slot, Is.Null);
+    }
+
+    [Test]
+    public async Task ResolveSlot_PublicKeyNotValidDer_ReturnsError()
+    {
+        await _store.UpsertConfigurationAsync("TestWorkflow",
+            new StoredSlotConfiguration("slotA", "ProviderX",
+                new Dictionary<string, string> { ["key"] = "val" },
+                ConfigurationStatus.Valid));
+
+        var (success, error, slot) = await _resolver.ResolveSlotAsync(
+            "TestWorkflow", "slotA", Convert.ToBase64String([1, 2, 3, 4]));
+
+        Assert.That(success, Is.False);
+        Assert.That(error, Does.Contain("RSA public key"));
+        Assert.That(slot, Is.Null);
     }
 
     private static string ValidPublicKey()

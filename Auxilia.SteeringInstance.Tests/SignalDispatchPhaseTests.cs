@@ -47,50 +47,32 @@ public class SignalDispatchPhaseTests
     #region ConfigurationResolver tests
 
     [Test]
-    public async Task ConfigurationResolver_Resolve_IncludesSignalHandlers_WhenPresent()
+    public async Task ConfigurationResolver_ResolveSignalHandlers_IncludesSignalHandlers_WhenPresent()
     {
-        var slotStore = TestStores.NewSlotConfigurationStore();
-        await slotStore.UpsertConfigurationAsync("TestWorkflow",
-            new StoredSlotConfiguration("slotA", "ProviderX",
-                new Dictionary<string, string> { ["key"] = "val" },
-                ConfigurationStatus.Valid));
-
         var signalStore = TestStores.NewSignalHandlerStore();
         await signalStore.UpsertHandlerAsync("TestWorkflow",
             new StoredSignalHandlerConfiguration("signal-a", new InvokeWorkflowSignalHandler("target-wf")));
 
-        var resolver = new ConfigurationResolver(slotStore, signalStore, NullLogger<ConfigurationResolver>.Instance);
+        var resolver = new ConfigurationResolver(
+            TestStores.NewSlotConfigurationStore(), signalStore, NullLogger<ConfigurationResolver>.Instance);
 
-        using var rsa = RSA.Create(2048);
-        var publicKey = Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
+        var handlers = await resolver.ResolveSignalHandlersAsync("TestWorkflow");
 
-        var result = await resolver.ResolveAsync("TestWorkflow", publicKey);
-
-        Assert.That(result.IsSuccess, Is.True);
-        Assert.That(result.SignalHandlers, Contains.Key("signal-a"));
-        Assert.That(result.SignalHandlers["signal-a"], Is.InstanceOf<InvokeWorkflowSignalHandler>());
+        Assert.That(handlers, Contains.Key("signal-a"));
+        Assert.That(handlers["signal-a"], Is.InstanceOf<InvokeWorkflowSignalHandler>());
     }
 
     [Test]
-    public async Task ConfigurationResolver_Resolve_ReturnsEmptySignalHandlers_WhenNoneConfigured()
+    public async Task ConfigurationResolver_ResolveSignalHandlers_ReturnsEmpty_WhenNoneConfigured()
     {
-        var slotStore = TestStores.NewSlotConfigurationStore();
-        await slotStore.UpsertConfigurationAsync("TestWorkflow",
-            new StoredSlotConfiguration("slotA", "ProviderX",
-                new Dictionary<string, string> { ["key"] = "val" },
-                ConfigurationStatus.Valid));
-
         var signalStore = TestStores.NewSignalHandlerStore(); // empty — no handlers
 
-        var resolver = new ConfigurationResolver(slotStore, signalStore, NullLogger<ConfigurationResolver>.Instance);
+        var resolver = new ConfigurationResolver(
+            TestStores.NewSlotConfigurationStore(), signalStore, NullLogger<ConfigurationResolver>.Instance);
 
-        using var rsa = RSA.Create(2048);
-        var publicKey = Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
+        var handlers = await resolver.ResolveSignalHandlersAsync("TestWorkflow");
 
-        var result = await resolver.ResolveAsync("TestWorkflow", publicKey);
-
-        Assert.That(result.IsSuccess, Is.True);
-        Assert.That(result.SignalHandlers, Is.Empty);
+        Assert.That(handlers, Is.Empty);
     }
 
     #endregion

@@ -91,6 +91,7 @@ try
     builder.Services.AddSingleton<EnvironmentValidator>();
     builder.Services.AddSingleton<ConfigurationResolver>();
     builder.Services.AddSingleton<WorkflowRegistrationHandler>();
+    builder.Services.AddSingleton<SlotActivationHandler>();
     builder.Services.AddSingleton<SignalDispatcher>();
     builder.Services.AddSingleton<WorkflowAnnouncementHandler>();
     builder.Services.AddSingleton<WorkflowDispatcher>();
@@ -179,6 +180,9 @@ try
 
     var handler = app.Services.GetRequiredService<WorkflowRegistrationHandler>();
     await handler.StartAsync(app.Lifetime.ApplicationStopping);
+
+    var slotActivationHandler = app.Services.GetRequiredService<SlotActivationHandler>();
+    await slotActivationHandler.StartAsync(app.Lifetime.ApplicationStopping);
 
     var signalDispatcher = app.Services.GetRequiredService<SignalDispatcher>();
     await signalDispatcher.StartAsync(app.Lifetime.ApplicationStopping);

@@ -104,6 +104,7 @@ public class FailoverEnvironment
             .WithEnvironment("WorkflowDispatcher__CommandQueueName",      CommandQueue)
             .WithEnvironment("WorkflowDispatcher__RegistrationQueueName", $"workflow-registration-{suffix}")
             .WithEnvironment("WorkflowDispatcher__AnnouncementQueueName", $"workflow.announcements-{suffix}")
+            .WithEnvironment("WorkflowDispatcher__SlotActivationQueueName", $"workflow-slot-activation-{suffix}")
             .WithEnvironment("WorkflowDispatcher__HeartbeatIntervalSeconds", "2")
             .WithEnvironment("PlatformData__Backend",               "MongoDb")
             .WithEnvironment("PlatformData__MongoConnectionString", $"mongodb://{MongoAlias}:27017")

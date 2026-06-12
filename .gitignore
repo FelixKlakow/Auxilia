@@ -430,3 +430,5 @@ FodyWeavers.xsd
 .idea/
 /.workflow
 /.praetorium
+
+.prebuilt-images

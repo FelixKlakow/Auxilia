@@ -10,6 +10,7 @@ namespace Auxilia.SteeringInstance.Workflows;
 public sealed class WorkflowStateHandler(
     IMessageBusClient messageBus,
     WorkflowInstanceRegistry instanceRegistry,
+    Storage.WorkflowInstanceTokenRegistry tokenRegistry,
     AuditLog auditLog,
     WorkflowStatusPublisher statusPublisher,
     IOptions<WorkflowDispatcherSettings> dispatcherSettings,
@@ -53,6 +54,9 @@ public sealed class WorkflowStateHandler(
         }
 
         var record = await instanceRegistry.GetAsync(message.WorkflowInstanceId, ct);
+
+        // The instance credential dies with the run — no further slot activations.
+        tokenRegistry.Consume(message.WorkflowInstanceId);
 
         await instanceRegistry.SetStateAsync(
             message.WorkflowInstanceId, message.State.ToString(), message.ErrorMessage, ct);

@@ -197,14 +197,11 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                         drainQueueName, (_, _) => { drainSignal.SignalDrain(); return Task.CompletedTask; });
                 }
 
+                SlotActivator? slotActivator = null;
                 try
                 {
-                    var services = new ServiceCollection();
-                    services.AddSingleton(context.MessageBus);
-                    services.AddSingleton(drainSignal);
-                    if (TestSlotHandlerResolver is { } testResolver)
-                        new WorkflowBootstrapper(response, keyPair, testResolver, _slots.AsReadOnly(), instanceId).Apply(services);
-                    else if (TestContext == null)
+                    ISlotHandlerResolver? activeResolver = TestSlotHandlerResolver;
+                    if (activeResolver is null && TestContext == null)
                     {
                         var resolver = new SlotHandlerResolver();
                         var devMode = new EnvironmentDeveloperModeProvider();
@@ -214,7 +211,36 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                         var plugins = discovery.DiscoverPlugins(AppContext.BaseDirectory);
                         var loader = new PluginLoader(resolver, verifier);
                         loader.Load(plugins);
-                        new WorkflowBootstrapper(response, keyPair, resolver, _slots.AsReadOnly(), instanceId).Apply(services);
+                        activeResolver = resolver;
+                    }
+
+                    var services = new ServiceCollection();
+                    services.AddSingleton(context.MessageBus);
+                    services.AddSingleton(drainSignal);
+                    if (activeResolver is not null)
+                    {
+                        // Empty Slots on a successful response means just-in-time delivery:
+                        // each slot's configuration is fetched via an individual, audited
+                        // activation request — never as a bundle at registration.
+                        IReadOnlyDictionary<string, SlotConfiguration>? activatedConfigs = null;
+                        if (response.Slots.Count == 0 && _slots.Count > 0)
+                        {
+                            slotActivator = new SlotActivator(
+                                context.MessageBus, keyPair, instanceId, instanceToken,
+                                System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.SlotActivationQueue)
+                                    ?? "workflow-slot-activation",
+                                responseTopic);
+                            await slotActivator.StartAsync();
+
+                            var fetched = new Dictionary<string, SlotConfiguration>(_slots.Count);
+                            foreach (var slot in _slots)
+                                fetched[slot.SlotName] = await slotActivator.FetchAsync(slot.SlotName, cts.Token);
+                            activatedConfigs = fetched;
+                        }
+
+                        new WorkflowBootstrapper(
+                            response, keyPair, activeResolver, _slots.AsReadOnly(), instanceId, activatedConfigs)
+                            .Apply(services);
                     }
 
                     _configureServices?.Invoke(services);
@@ -248,6 +274,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                     await cancelSub.DisposeAsync();
                     if (drainSub is not null)
                         await drainSub.DisposeAsync();
+                    if (slotActivator is not null)
+                        await slotActivator.DisposeAsync();
                 }
                 return;
             }

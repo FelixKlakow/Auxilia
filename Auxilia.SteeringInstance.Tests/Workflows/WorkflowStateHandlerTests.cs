@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Auxilia.Messaging;
 using Auxilia.SteeringInstance.Workflows;
+using Auxilia.SteeringInstance.Workflows.Storage;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -17,6 +18,7 @@ public class WorkflowStateHandlerTests
     private Mock<IMessageBusClient> _mockBus = null!;
     private Func<WorkflowStateMessage, CancellationToken, Task>? _capturedHandler;
     private WorkflowInstanceRegistry _registry = null!;
+    private WorkflowInstanceTokenRegistry _tokenRegistry = null!;
     private WorkflowStateHandler _sut = null!;
 
     [SetUp]
@@ -50,9 +52,12 @@ public class WorkflowStateHandlerTests
             .ReturnsAsync(disposable.Object);
 
         _registry = TestStores.NewWorkflowInstanceRegistry();
+        _tokenRegistry = new WorkflowInstanceTokenRegistry(
+            Options.Create(new WorkflowDispatcherSettings()), TimeProvider.System);
         _sut = new WorkflowStateHandler(
             _mockBus.Object,
             _registry,
+            _tokenRegistry,
             TestStores.NewAuditLog(),
             TestStores.NewStatusPublisher(_mockBus.Object),
             Options.Create(new WorkflowDispatcherSettings { CommandQueueName = CommandQueue }),
@@ -105,6 +110,22 @@ public class WorkflowStateHandlerTests
         var message = new WorkflowStateMessage(Guid.NewGuid(), WorkflowState.Cancelled, null);
 
         Assert.DoesNotThrowAsync(() => _capturedHandler!(message, CancellationToken.None));
+    }
+
+    // ------------------------------------------------------------------ Instance token consumption
+
+    [Test]
+    public async Task WhenStateReceived_ConsumesInstanceToken()
+    {
+        var issued = _tokenRegistry.Issue("wf");
+        Assert.That(_tokenRegistry.Validate(issued.WorkflowInstanceId, issued.Token), Is.True);
+
+        await _capturedHandler!(
+            new WorkflowStateMessage(issued.WorkflowInstanceId, WorkflowState.Success, null),
+            CancellationToken.None);
+
+        Assert.That(_tokenRegistry.Validate(issued.WorkflowInstanceId, issued.Token), Is.False,
+            "The instance credential must die with the run.");
     }
 
     // ------------------------------------------------------------------ Drain-and-replace

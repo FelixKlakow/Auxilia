@@ -268,7 +268,7 @@ public class WorkflowDispatchPipelineComponentTests
     // ------------------------------------------------------------------ Slot config seeding tests
 
     [Test]
-    public async Task WhenSlotConfigSeeded_ConfigurationResponseContainsThatSlot()
+    public async Task WhenSlotConfigSeeded_RegistrationSucceedsWithEmptySlots()
     {
         // Seed the store directly (mirrors what Program.cs does from appsettings)
         await _slotStore.UpsertConfigurationAsync("seeded-workflow",
@@ -302,8 +302,8 @@ public class WorkflowDispatchPipelineComponentTests
         var response = msg as WorkflowConfigurationResponse;
         Assert.That(response, Is.Not.Null);
         Assert.That(response!.Success, Is.True);
-        Assert.That(response.Slots.ContainsKey("source-control"), Is.True);
-        Assert.That(response.Slots["source-control"].ProviderType, Is.EqualTo("LocalGit"));
+        // Credentials no longer ship at registration — the slot activates just-in-time.
+        Assert.That(response.Slots, Is.Empty);
     }
 
     [Test]

@@ -36,6 +36,7 @@ public class WorkflowCancelPipelineComponentTests
                 services.AddSingleton(TimeProvider.System);
                 services.AddSingleton<WorkflowStatusPublisher>();
                 services.AddSingleton<WorkflowInstanceRegistry>();
+                services.AddSingleton<Auxilia.SteeringInstance.Workflows.Storage.WorkflowInstanceTokenRegistry>();
                 services.AddSingleton<WorkflowStateHandler>();
                 services.AddSingleton<WorkflowCancelDispatcher>();
             })

@@ -139,7 +139,7 @@ public class WorkflowRegistrationHandlerTests
     }
 
     [Test]
-    public async Task HandleAsync_HappyPath_PublishesSuccessResponseToCorrectTopic()
+    public async Task HandleAsync_SlottedHappyPath_PublishesSuccessResponseWithEmptySlotsToCorrectTopic()
     {
         using var rsa = RSA.Create(2048);
         var publicKey = Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
@@ -151,7 +151,7 @@ public class WorkflowRegistrationHandlerTests
                 ConfigurationStatus.Valid));
         var resolver = new ConfigurationResolver(store, TestStores.NewSignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance);
 
-        // Manifest must declare the slot so the config is resolved.
+        // Manifest must declare the slot so the configuration pre-flight runs.
         var manifest = new WorkflowManifest(
             "TestWorkflow", Guid.NewGuid().ToString(),
             [new SlotDefinition("slotA", null) { ServiceType = typeof(object) }],
@@ -172,8 +172,9 @@ public class WorkflowRegistrationHandlerTests
         Assert.That(topic, Is.EqualTo("my-response-topic"));
         var response = (WorkflowConfigurationResponse)msg;
         Assert.That(response.Success, Is.True);
-        Assert.That(response.Slots, Has.Count.EqualTo(1));
-        Assert.That(response.Slots.ContainsKey("slotA"), Is.True);
+        // Credentials no longer ship at registration — slots activate just-in-time.
+        Assert.That(response.Slots, Is.Empty);
+        Assert.That(response.ErrorMessage, Is.Null);
     }
 
     [Test]

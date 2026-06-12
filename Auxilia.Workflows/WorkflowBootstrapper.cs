@@ -10,18 +10,38 @@ public sealed class WorkflowBootstrapper(
     EphemeralKeyPair keyPair,
     ISlotHandlerResolver resolver,
     IReadOnlyList<SlotDefinition> slotDefinitions,
-    Guid instanceId = default)
+    Guid instanceId = default,
+    IReadOnlyDictionary<string, SlotConfiguration>? activatedConfigurations = null)
 {
     public void Apply(IServiceCollection services)
     {
-        foreach (var (slotName, encryptedSlot) in response.Slots)
+        if (response.Slots.Count > 0)
         {
-            var definition = slotDefinitions.FirstOrDefault(d => d.SlotName == slotName);
-            var serviceType = definition?.ServiceType ?? typeof(object);
+            // Eager delivery: all slot configurations arrived with the registration response
+            // (test harness / dev mode without a Steering Instance activation handler).
+            foreach (var (slotName, encryptedSlot) in response.Slots)
+            {
+                var definition = slotDefinitions.FirstOrDefault(d => d.SlotName == slotName);
+                var serviceType = definition?.ServiceType ?? typeof(object);
 
-            var config = SlotConfigurationCrypto.Decrypt(encryptedSlot, keyPair);
-            var handler = resolver.Resolve(config.ProviderType);
-            handler.Register(services, slotName, serviceType, config);
+                var config = SlotConfigurationCrypto.Decrypt(encryptedSlot, keyPair);
+                var handler = resolver.Resolve(config.ProviderType);
+                handler.Register(services, slotName, serviceType, config);
+            }
+        }
+        else if (activatedConfigurations is not null)
+        {
+            // Just-in-time delivery: each configuration was fetched via an individual,
+            // audited SlotActivationRequest — never as a bundle at registration.
+            foreach (var definition in slotDefinitions)
+            {
+                if (!activatedConfigurations.TryGetValue(definition.SlotName, out var config))
+                    throw new InvalidOperationException(
+                        $"No activated configuration for slot '{definition.SlotName}'.");
+
+                var handler = resolver.Resolve(config.ProviderType);
+                handler.Register(services, definition.SlotName, definition.ServiceType, config);
+            }
         }
 
         var contextId = instanceId == default ? Guid.NewGuid() : instanceId;

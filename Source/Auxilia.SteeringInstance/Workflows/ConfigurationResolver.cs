@@ -11,8 +11,12 @@ public sealed class ConfigurationResolver(
     SignalHandlerStore signalHandlerStore,
     ILogger<ConfigurationResolver> logger)
 {
-    public async Task<ResolverResult> ResolveAsync(
-        string workflowTypeName, string publicKeyBase64, CancellationToken ct = default)
+    /// <summary>
+    /// Registration-time pre-flight: all slot configurations for the type must exist and be
+    /// valid. No secrets are resolved here — credentials are delivered just-in-time per slot.
+    /// </summary>
+    public async Task<(bool IsValid, string? Reason)> ValidateConfiguredAsync(
+        string workflowTypeName, CancellationToken ct = default)
     {
         var configurations = await store.GetConfigurationsAsync(workflowTypeName, ct);
 
@@ -21,7 +25,7 @@ public sealed class ConfigurationResolver(
             logger.LogWarning(
                 "No slot configurations found for workflow type '{WorkflowType}'.",
                 workflowTypeName);
-            return ResolverResult.Fail("No slot configurations found for workflow type");
+            return (false, "No slot configurations found for workflow type");
         }
 
         if (configurations.Any(c => c.Status == ConfigurationStatus.Dirty))
@@ -29,9 +33,29 @@ public sealed class ConfigurationResolver(
             logger.LogWarning(
                 "One or more slot configurations for '{WorkflowType}' are dirty.",
                 workflowTypeName);
-            return ResolverResult.Fail(
-                "One or more slot configurations are dirty and must be reconfigured");
+            return (false, "One or more slot configurations are dirty and must be reconfigured");
         }
+
+        return (true, null);
+    }
+
+    /// <summary>Resolves and encrypts a single slot's configuration at activation time.</summary>
+    public async Task<(bool Success, string? Error, EncryptedSlotConfiguration? Slot)> ResolveSlotAsync(
+        string workflowTypeName, string slotName, string publicKeyBase64, CancellationToken ct = default)
+    {
+        var configurations = await store.GetConfigurationsAsync(workflowTypeName, ct);
+        var config = configurations.FirstOrDefault(c => c.SlotName == slotName);
+
+        if (config is null)
+        {
+            logger.LogWarning(
+                "No configuration for slot '{SlotName}' of workflow type '{WorkflowType}'.",
+                slotName, workflowTypeName);
+            return (false, $"No configuration for slot '{slotName}'", null);
+        }
+
+        if (config.Status == ConfigurationStatus.Dirty)
+            return (false, $"Configuration for slot '{slotName}' is dirty and must be reconfigured", null);
 
         byte[] publicKeyDer;
         try
@@ -41,7 +65,7 @@ public sealed class ConfigurationResolver(
         catch (FormatException ex)
         {
             logger.LogError(ex, "Public key is not valid base-64.");
-            return ResolverResult.Fail("Public key is not valid base-64");
+            return (false, "Public key is not valid base-64", null);
         }
 
         using var rsa = RSA.Create();
@@ -52,24 +76,18 @@ public sealed class ConfigurationResolver(
         catch (CryptographicException ex)
         {
             logger.LogError(ex, "Failed to import RSA public key.");
-            return ResolverResult.Fail("Failed to import RSA public key");
+            return (false, "Failed to import RSA public key", null);
         }
 
-        var encrypted = new Dictionary<string, EncryptedSlotConfiguration>(configurations.Count);
-        foreach (var config in configurations)
-        {
-            var settingsJson = JsonSerializer.Serialize(config.Settings);
-            var cipherBytes = rsa.Encrypt(
-                System.Text.Encoding.UTF8.GetBytes(settingsJson),
-                RSAEncryptionPadding.OaepSHA256);
-            encrypted[config.SlotName] = new EncryptedSlotConfiguration(
-                config.ProviderType,
-                Convert.ToBase64String(cipherBytes));
-        }
+        var settingsJson = JsonSerializer.Serialize(config.Settings);
+        var cipherBytes = rsa.Encrypt(
+            System.Text.Encoding.UTF8.GetBytes(settingsJson),
+            RSAEncryptionPadding.OaepSHA256);
+        var encrypted = new EncryptedSlotConfiguration(
+            config.ProviderType,
+            Convert.ToBase64String(cipherBytes));
 
-        var handlerMap = await ResolveSignalHandlersAsync(workflowTypeName, ct);
-
-        return ResolverResult.Ok(encrypted, handlerMap);
+        return (true, null, encrypted);
     }
 
     /// <summary>

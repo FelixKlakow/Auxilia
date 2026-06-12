@@ -114,13 +114,14 @@ public class WorkflowDispatchEnvironment
 
     internal static async Task BuildImageAsync(string tag, string dockerfilePath)
     {
-        // Local opt-out: with AUXILIA_PREBUILT_IMAGES=1 the runner has already built all
-        // system-test images from current source (docker builds spawned from the test
-        // process can hang on a wedged Docker Desktop daemon). CI leaves this unset so
-        // images are always rebuilt from local source before containers start.
-        if (System.Environment.GetEnvironmentVariable("AUXILIA_PREBUILT_IMAGES") == "1")
+        // Local opt-out: when the runner has already built all system-test images from
+        // current source (docker builds spawned from the test process can hang on a wedged
+        // Docker Desktop daemon), it signals that via the env var or a marker file in the
+        // repo root. CI leaves both unset so images are always rebuilt from local source.
+        if (System.Environment.GetEnvironmentVariable("AUXILIA_PREBUILT_IMAGES") == "1" ||
+            File.Exists(Path.Combine(RepoRoot, ".prebuilt-images")))
         {
-            await Console.Out.WriteLineAsync($"AUXILIA_PREBUILT_IMAGES=1 — skipping docker build for {tag}.");
+            await Console.Out.WriteLineAsync($"Prebuilt-images opt-out active — skipping docker build for {tag}.");
             return;
         }
 

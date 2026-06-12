@@ -50,9 +50,19 @@ public sealed class WorkflowRegistrationHandler(
                 return;
             }
 
-            // One registration per launch: the token is consumed regardless of the outcome,
-            // and the response goes only to the queue the platform pre-created at launch.
-            tokenRegistry.Consume(request.WorkflowInstanceId);
+            // One registration per launch; the token then stays valid as the instance
+            // credential for just-in-time slot activations until the run terminates.
+            // The response goes only to the queue the platform pre-created at launch.
+            if (!tokenRegistry.TryBeginRegistration(request.WorkflowInstanceId, request.InstanceToken))
+            {
+                logger.LogWarning(
+                    "Rejected duplicate WorkflowRegistrationRequest. Workflow={WorkflowName} InstanceId={InstanceId}",
+                    request.Manifest.WorkflowName, request.WorkflowInstanceId);
+                await auditLog.AppendAsync(
+                    "steering-instance", "workflow.registration.rejected",
+                    request.WorkflowInstanceId.ToString(), "duplicate-registration", ct: cancellationToken);
+                return;
+            }
             responseTopic = WorkflowQueues.ResponseQueueFor(request.WorkflowInstanceId);
         }
 
@@ -117,19 +127,21 @@ public sealed class WorkflowRegistrationHandler(
             return;
         }
 
-        var resolverResult = await configResolver.ResolveAsync(
-            request.Manifest.WorkflowName, request.PublicKey, cancellationToken);
-        if (!resolverResult.IsSuccess)
+        // Pre-flight only: verify every slot is configured and valid. No credentials are
+        // delivered at registration — slots activate just-in-time (ARCHITECTURE §4/§7).
+        var (configsValid, invalidReason) = await configResolver.ValidateConfiguredAsync(
+            request.Manifest.WorkflowName, cancellationToken);
+        if (!configsValid)
         {
             logger.LogInformation(
-                "Workflow registration rejected for instance {WorkflowInstanceId}: configuration resolution failed — {Reason}.",
+                "Workflow registration rejected for instance {WorkflowInstanceId}: configuration validation failed — {Reason}.",
                 request.WorkflowInstanceId,
-                resolverResult.FailureReason);
+                invalidReason);
 
             await messageBus.PublishAsync(responseTopic, new WorkflowConfigurationResponse(
                 request.WorkflowInstanceId,
                 false,
-                resolverResult.FailureReason,
+                invalidReason,
                 new Dictionary<string, EncryptedSlotConfiguration>()),
                 cancellationToken);
             return;
@@ -139,12 +151,14 @@ public sealed class WorkflowRegistrationHandler(
             "Workflow registration succeeded for instance {WorkflowInstanceId}.",
             request.WorkflowInstanceId);
 
+        var slottedSignalHandlers = await configResolver.ResolveSignalHandlersAsync(
+            request.Manifest.WorkflowName, cancellationToken);
         await messageBus.PublishAsync(responseTopic, new WorkflowConfigurationResponse(
             request.WorkflowInstanceId,
             true,
             null,
-            resolverResult.Slots,
-            resolverResult.SignalHandlers),
+            new Dictionary<string, EncryptedSlotConfiguration>(),
+            slottedSignalHandlers),
             cancellationToken);
 
         _registeredInstances.TryAdd(request.WorkflowInstanceId, 0);
