@@ -66,6 +66,7 @@ public class WorkflowDispatcherDockerImageUriTests
             providerRegistry ?? TestStores.NewSlotProviderRegistry(),
             new WorkflowInstanceTokenRegistry(
                 Options.Create(new WorkflowDispatcherSettings()), TimeProvider.System),
+            TestStores.NewPolicyEngine(),
             NullLogger<WorkflowDispatcher>.Instance);
     }
 

@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Auxilia.Governance;
 using Auxilia.Messaging;
 using Auxilia.PlatformData;
 using Auxilia.PlatformData.Entities;
@@ -119,6 +120,7 @@ public class WorkflowDispatchPipelineComponentTests
                 services.AddPlatformEntity<AuditRecord>(platformData);
                 services.AddSettingsProtection(platformData);
                 services.AddSingleton<AuditLog>();
+                services.AddGovernance(platformData, new Auxilia.Governance.GovernanceSettings());
 
                 services.AddSingleton(TimeProvider.System);
                 services.AddSingleton<WorkflowInstanceTokenRegistry>();
@@ -338,6 +340,48 @@ public class WorkflowDispatchPipelineComponentTests
     }
 
     // ------------------------------------------------------------------ SlotPluginFiles component test
+
+    // ------------------------------------------------------------------ Dispatch authorization
+
+    [Test]
+    public async Task WhenRunCommandCarriesPrincipalWithTriggerPermission_LaunchProceeds()
+    {
+        var directory = _host.Services.GetRequiredService<Auxilia.Governance.PrincipalDirectory>();
+        var user = await directory.CreateHumanAsync("Triggerer", $"u-{Guid.NewGuid():N}", "pw");
+        await directory.AssignRoleAsync(user.Id, Auxilia.Governance.BuiltInRoles.User);
+
+        var command = new RunWorkflowCommand(
+            Guid.NewGuid(), "my-workflow", "https://example.com/my-workflow.zip",
+            new Dictionary<string, string>(), RequestedBy: user.Id);
+
+        await _bus.SimulateReceivedAsync("workflow.run-commands", command);
+
+        var launched = await _bus.WaitForConditionAsync(() => _launcher.Calls.Count > 0, Timeout);
+        Assert.That(launched, Is.True, "Authorized principal must be able to dispatch.");
+    }
+
+    [Test]
+    public async Task WhenRunCommandCarriesPrincipalWithoutPermission_LaunchIsDeniedAndAudited()
+    {
+        var directory = _host.Services.GetRequiredService<Auxilia.Governance.PrincipalDirectory>();
+        var nobody = await directory.CreateHumanAsync("No Roles", $"u-{Guid.NewGuid():N}", "pw");
+
+        var command = new RunWorkflowCommand(
+            Guid.NewGuid(), "my-workflow", "https://example.com/my-workflow.zip",
+            new Dictionary<string, string>(), RequestedBy: nobody.Id);
+
+        await _bus.SimulateReceivedAsync("workflow.run-commands", command);
+
+        var launched = await _bus.WaitForConditionAsync(
+            () => _launcher.Calls.Count > 0, TimeSpan.FromMilliseconds(500));
+        Assert.That(launched, Is.False, "Unauthorized principal must not dispatch.");
+
+        var audit = _host.Services.GetRequiredService<
+            Auxilia.UniversalDataAccess.IDataAccess<Auxilia.PlatformData.Entities.AuditRecord>>();
+        var query = await audit.ReadAsync();
+        Assert.That(query.Any(r => r.Action == "policy.denied" && r.Actor == nobody.Id.ToString()),
+            Is.True, "The denial must be audited.");
+    }
 
     [Test]
     public async Task WhenRunCommandPublished_AndSlotPackagesSeeded_LauncherReceivesSlotPluginFiles()

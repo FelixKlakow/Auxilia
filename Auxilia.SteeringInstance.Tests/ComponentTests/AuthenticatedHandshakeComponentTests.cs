@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Auxilia.Governance;
 using Auxilia.Messaging;
 using Auxilia.PlatformData;
 using Auxilia.PlatformData.Entities;
@@ -68,6 +69,7 @@ public class AuthenticatedHandshakeComponentTests
                 services.AddPlatformEntity<AuditRecord>(platformData);
                 services.AddSettingsProtection(platformData);
                 services.AddSingleton<AuditLog>();
+                services.AddGovernance(platformData, new Auxilia.Governance.GovernanceSettings());
 
                 services.AddSingleton(TimeProvider.System);
                 services.AddSingleton<WorkflowInstanceTokenRegistry>();

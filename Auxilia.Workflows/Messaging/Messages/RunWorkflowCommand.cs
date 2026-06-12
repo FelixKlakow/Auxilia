@@ -15,5 +15,11 @@ public sealed record RunWorkflowCommand(
     /// Arbitrary key/value context forwarded to the workflow container as
     /// <c>WORKFLOW_CONTEXT__&lt;KEY&gt;</c> environment variables.
     /// </summary>
-    IReadOnlyDictionary<string, string> Context);
+    IReadOnlyDictionary<string, string> Context,
+    /// <summary>
+    /// Principal requesting the dispatch. The Policy Engine checks <c>workflow.trigger</c>
+    /// for it during pre-flight. Null is accepted only while no authenticated entry points
+    /// exist yet and when <c>WorkflowDispatcherSettings.RequirePrincipal</c> is false.
+    /// </summary>
+    Guid? RequestedBy = null);
 

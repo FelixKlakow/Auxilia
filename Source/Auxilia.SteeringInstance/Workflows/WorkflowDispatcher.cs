@@ -1,4 +1,6 @@
 using System.IO.Compression;
+using Auxilia.Governance;
+using Auxilia.Governance.Policy;
 using Auxilia.Messaging;
 using Auxilia.SteeringInstance.Workflows.Storage;
 using Auxilia.Workflows;
@@ -32,6 +34,7 @@ public sealed class WorkflowDispatcher(
     SlotConfigurationStore slotStore,
     SlotProviderRegistry providerRegistry,
     WorkflowInstanceTokenRegistry tokenRegistry,
+    IPolicyEngine policyEngine,
     ILogger<WorkflowDispatcher> logger)
 {
     private IAsyncDisposable? _subscription;
@@ -51,6 +54,30 @@ public sealed class WorkflowDispatcher(
         logger.LogInformation(
             "Received RunWorkflowCommand. CommandId={CommandId} WorkflowType={WorkflowType} PackageUri={PackageUri}",
             command.CommandId, command.WorkflowType, command.WorkflowPackageUri);
+
+        // Pre-flight authorization: the trigger permission of the requesting principal.
+        if (command.RequestedBy is { } principalId)
+        {
+            var decision = await policyEngine.EvaluateAsync(
+                new PolicyContext(principalId, PermissionActions.WorkflowTrigger, command.CommandId.ToString())
+                {
+                    WorkflowType = command.WorkflowType
+                }, ct);
+            if (!decision.Allowed)
+            {
+                logger.LogWarning(
+                    "Dispatch denied by policy. CommandId={CommandId} WorkflowType={WorkflowType} Principal={Principal} Reason={Reason}",
+                    command.CommandId, command.WorkflowType, principalId, decision.Reason);
+                return;
+            }
+        }
+        else if (dispatcherSettings.Value.RequirePrincipal)
+        {
+            logger.LogWarning(
+                "Dispatch rejected: RunWorkflowCommand without RequestedBy principal while RequirePrincipal is enabled. CommandId={CommandId}",
+                command.CommandId);
+            return;
+        }
 
         var settings = launcherSettings.Value;
 

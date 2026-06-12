@@ -125,6 +125,7 @@ public class WorkflowDispatcherTests
             TestStores.NewSlotConfigurationStore(),
             TestStores.NewSlotProviderRegistry(),
             _tokenRegistry,
+            TestStores.NewPolicyEngine(),
             NullLogger<WorkflowDispatcher>.Instance);
 
         await _sut.StartAsync(CancellationToken.None);
@@ -335,6 +336,7 @@ public class WorkflowDispatcherTests
             slotStore,
             providerRegistry,
             _tokenRegistry,
+            TestStores.NewPolicyEngine(),
             NullLogger<WorkflowDispatcher>.Instance);
         await _sut.StartAsync(CancellationToken.None);
 
@@ -392,6 +394,7 @@ public class WorkflowDispatcherTests
             slotStore,
             TestStores.NewSlotProviderRegistry(),
             _tokenRegistry,
+            TestStores.NewPolicyEngine(),
             NullLogger<WorkflowDispatcher>.Instance);
         await _sut.StartAsync(CancellationToken.None);
 
@@ -437,6 +440,7 @@ public class WorkflowDispatcherTests
             slotStore,
             providerRegistry,
             _tokenRegistry,
+            TestStores.NewPolicyEngine(),
             NullLogger<WorkflowDispatcher>.Instance);
         await _sut.StartAsync(CancellationToken.None);
 

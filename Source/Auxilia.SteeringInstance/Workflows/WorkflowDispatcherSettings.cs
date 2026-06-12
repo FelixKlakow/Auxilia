@@ -25,4 +25,11 @@ public sealed class WorkflowDispatcherSettings
 
     /// <summary>Maximum age of an issued instance token before registration is rejected.</summary>
     public TimeSpan InstanceTokenLifetime { get; set; } = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// When true, RunWorkflowCommands without a <c>RequestedBy</c> principal are rejected.
+    /// Default false until all entry points (dashboard, MCP, adapters) attach principals;
+    /// commands that do carry a principal are always policy-checked regardless of this flag.
+    /// </summary>
+    public bool RequirePrincipal { get; set; }
 }

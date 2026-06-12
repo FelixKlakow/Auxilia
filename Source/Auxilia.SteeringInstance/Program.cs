@@ -1,4 +1,5 @@
 ﻿using System.Reflection;
+using Auxilia.Governance;
 using Auxilia.Messaging;
 using Auxilia.PlatformData;
 using Auxilia.PlatformData.Entities;
@@ -71,6 +72,11 @@ try
     builder.Services.AddSingleton<AuditLog>();
     if (string.IsNullOrWhiteSpace(platformDataSettings.ProtectionKeyBase64))
         Log.Warning("PlatformData:ProtectionKeyBase64 is not configured — slot settings are stored unprotected (dev only).");
+
+    // --- Governance (identity, accounts, Policy Engine) ---
+    var governanceSettings = new GovernanceSettings();
+    builder.Configuration.GetSection("Governance").Bind(governanceSettings);
+    builder.Services.AddGovernance(platformDataSettings, governanceSettings);
 
     // --- Workflow services ---
     builder.Services.AddSingleton<WorkflowSchemaStore>();
@@ -148,6 +154,8 @@ try
         });
 
     var app = builder.Build();
+
+    await app.Services.GetRequiredService<GovernanceSeeder>().SeedAsync(app.Lifetime.ApplicationStopping);
 
     var configSeedHandler = app.Services.GetRequiredService<SlotConfigurationSeedHandler>();
     await configSeedHandler.StartAsync(app.Lifetime.ApplicationStopping);
