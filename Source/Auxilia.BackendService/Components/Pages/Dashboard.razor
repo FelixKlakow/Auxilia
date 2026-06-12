@@ -1,0 +1,249 @@
+@page "/"
+@page "/dashboard"
+@attribute [Authorize]
+@using System.Text.Json
+@using Auxilia.Workflows.Messaging.Messages
+@using Auxilia.Workflows.Views
+@implements IDisposable
+@inject DashboardComposer Composer
+@inject IDataAccess<WorkflowInstanceRecord> Instances
+@inject IDataAccess<ViewDataRecord> ViewData
+@inject IPolicyEngine PolicyEngine
+@inject LiveViewBroker Broker
+
+<PageTitle>Dashboard — Auxilia</PageTitle>
+
+<h1>Dashboard</h1>
+
+@if (!_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else if (_principalId is null)
+{
+    <div class="panel denied">Access denied: no platform principal in session.</div>
+}
+else if (_panels.Count == 0)
+{
+    <p class="muted">Nothing pinned yet — open a <a href="runs">run</a> and pin one of its views.</p>
+}
+else
+{
+    @if (_error is not null)
+    {
+        <div class="panel denied">@_error</div>
+    }
+
+    @foreach (var panel in _panels)
+    {
+        <section class="dashboard-panel">
+            <h2>
+                @panel.Pin.DisplayTitle
+                @if (panel.Run is not null)
+                {
+                    <span class="badge badge-@panel.Run.State.ToLowerInvariant()">@panel.Run.State</span>
+                }
+                <a href="runs/@panel.Pin.InstanceId">open run</a>
+                <button class="link-button" @onclick="() => UnpinAsync(panel.Pin)">Unpin</button>
+            </h2>
+            @if (!panel.Allowed)
+            {
+                <div class="panel denied">Access denied: @panel.DenyReason</div>
+            }
+            else if (panel.Descriptor is null)
+            {
+                <div class="panel denied">View '@panel.Pin.ViewName' is no longer declared by this run.</div>
+            }
+            else
+            {
+                <ViewRenderer Descriptor="panel.Descriptor" Items="panel.Buffer.Items"/>
+            }
+        </section>
+    }
+}
+
+@code {
+
+    private sealed class PinnedPanel
+    {
+        public required DashboardPin Pin { get; init; }
+        public WorkflowInstanceRecord? Run { get; set; }
+        public ViewDescriptor? Descriptor { get; set; }
+        public bool Allowed { get; set; }
+        public string DenyReason { get; set; } = "";
+        public ViewItemBuffer Buffer { get; } = new();
+    }
+
+    [CascadingParameter]
+    public Task<AuthenticationState>? AuthState { get; set; }
+
+    private readonly CancellationTokenSource _cts = new();
+    private PeriodicTimer? _timer;
+    private IDisposable? _liveSubscription;
+    private bool _loaded;
+    private string? _error;
+    private Guid? _principalId;
+    private List<PinnedPanel> _panels = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await (AuthState ?? Task.FromResult(new AuthenticationState(new())))).User;
+        _principalId = DashboardAuthEndpoints.PrincipalIdOf(user);
+        if (_principalId is not null)
+        {
+            await LoadPanelsAsync();
+            // Live path: in-process fan-out from the bus handlers (LiveViewBroker).
+            _liveSubscription = Broker.Subscribe(OnLiveViewData, OnLiveStatus);
+        }
+
+        _loaded = true;
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender || _timer is not null || _principalId is null)
+            return;
+        // Degraded-mode fallback: reconcile against the persisted store in case a push was missed.
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
+        _ = PollAsync();
+    }
+
+    private async Task LoadPanelsAsync()
+    {
+        var pins = await Composer.GetPinsAsync(_principalId!.Value, _cts.Token);
+        var panels = new List<PinnedPanel>();
+        foreach (var pin in pins)
+        {
+            var existing = _panels.FirstOrDefault(p =>
+                p.Pin.InstanceId == pin.InstanceId && p.Pin.ViewName == pin.ViewName);
+            var panel = existing ?? new PinnedPanel { Pin = pin };
+            panel.Run = await Instances.ReadAsync(pin.InstanceId, _cts.Token);
+            if (panel.Run is null)
+            {
+                panel.Allowed = false;
+                panel.DenyReason = "run no longer exists";
+                panels.Add(panel);
+                continue;
+            }
+
+            if (existing is null)
+            {
+                // Access to a pinned view follows the workflow it belongs to. Evaluated once
+                // per panel and circuit (not on every poll) so reconciliation does not flood
+                // the audit log — every evaluation is an audited policy decision.
+                var decision = await PolicyEngine.EvaluateAsync(
+                    new PolicyContext(_principalId.Value, PermissionActions.ViewSubscribe,
+                        $"{pin.InstanceId}:{pin.ViewName}") { WorkflowType = panel.Run.WorkflowType },
+                    _cts.Token);
+                panel.Allowed = decision.Allowed;
+                panel.DenyReason = decision.Reason;
+            }
+
+            panel.Descriptor = ParseDescriptors(panel.Run.ViewsJson)
+                .FirstOrDefault(v => v.Name == pin.ViewName);
+            panels.Add(panel);
+        }
+
+        var allItems = await ViewData.ReadAsync(_cts.Token);
+        foreach (var panel in panels.Where(p => p.Allowed && p.Descriptor is not null))
+        {
+            panel.Buffer.Merge(allItems
+                .Where(i => i.WorkflowInstanceId == panel.Pin.InstanceId && i.ViewName == panel.Pin.ViewName)
+                .ToList());
+        }
+
+        _panels = panels;
+    }
+
+    private static IReadOnlyList<ViewDescriptor> ParseDescriptors(string? viewsJson)
+    {
+        if (string.IsNullOrWhiteSpace(viewsJson))
+            return [];
+        try
+        {
+            return JsonSerializer.Deserialize<List<ViewDescriptor>>(viewsJson) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private void OnLiveViewData(ViewDataMessage message)
+    {
+        _ = InvokeAsync(() =>
+        {
+            var panel = _panels.FirstOrDefault(p =>
+                p.Allowed &&
+                p.Pin.InstanceId == message.WorkflowInstanceId &&
+                p.Pin.ViewName == message.ViewName);
+            if (panel is null)
+                return;
+
+            var record = new ViewDataRecord
+            {
+                Id = ViewDataRecord.IdFor(message.WorkflowInstanceId, message.ViewName, message.Sequence),
+                WorkflowInstanceId = message.WorkflowInstanceId,
+                ViewName = message.ViewName,
+                Sequence = message.Sequence,
+                PayloadJson = message.PayloadJson,
+                TimestampUtc = DateTimeOffset.UtcNow
+            };
+            if (panel.Buffer.Add(record))
+                StateHasChanged();
+        });
+    }
+
+    private void OnLiveStatus(WorkflowStatusEvent statusEvent)
+    {
+        if (_panels.All(p => p.Pin.InstanceId != statusEvent.WorkflowInstanceId))
+            return;
+
+        _ = InvokeAsync(async () =>
+        {
+            foreach (var panel in _panels.Where(p => p.Pin.InstanceId == statusEvent.WorkflowInstanceId))
+                panel.Run = await Instances.ReadAsync(panel.Pin.InstanceId, _cts.Token) ?? panel.Run;
+            StateHasChanged();
+        });
+    }
+
+    private async Task UnpinAsync(DashboardPin pin)
+    {
+        _error = null;
+        try
+        {
+            await Composer.UnpinAsync(_principalId!.Value, _principalId.Value,
+                pin.InstanceId, pin.ViewName, _cts.Token);
+            await LoadPanelsAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task PollAsync()
+    {
+        try
+        {
+            while (await _timer!.WaitForNextTickAsync(_cts.Token))
+            {
+                await LoadPanelsAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Component disposed — polling ends.
+        }
+    }
+
+    public void Dispose()
+    {
+        _liveSubscription?.Dispose();
+        _cts.Cancel();
+        _cts.Dispose();
+        _timer?.Dispose();
+    }
+
+}

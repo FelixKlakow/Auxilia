@@ -1,0 +1,181 @@
+@page "/operator/artifact-triggers"
+@attribute [Authorize]
+@inject TriggerAdministration Triggers
+@inject IDataAccess<PrincipalRecord> Principals
+@inject IPolicyEngine PolicyEngine
+
+<PageTitle>Artifact triggers — Auxilia</PageTitle>
+
+<h1>Artifact triggers</h1>
+<p class="muted">Workflow chaining: when an artifact of the given type is persisted, the configured follow-up workflow is dispatched.</p>
+
+@if (!_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else if (!_allowed)
+{
+    <div class="panel denied">Access denied: @_denyReason</div>
+}
+else
+{
+    @if (_error is not null)
+    {
+        <div class="panel denied">@_error</div>
+    }
+
+    <section class="admin-section">
+        <h2>Create chaining rule</h2>
+        <div class="form-grid">
+            <label>Artifact type <input @bind="_artifactType" placeholder="e.g. code-review-report"/></label>
+            <label>Follow-up workflow type <input @bind="_workflowType"/></label>
+            <label>Package URI <input @bind="_packageUri"/></label>
+            <label>
+                Run as principal
+                <select @bind="_runAsPrincipalId">
+                    <option value="">(none)</option>
+                    @foreach (var principal in _principals)
+                    {
+                        <option value="@principal.Id">@principal.DisplayName</option>
+                    }
+                </select>
+            </label>
+            <label><input type="checkbox" @bind="_enabled"/> Enabled</label>
+            <button @onclick="SaveAsync" disabled="@_busy">Save rule</button>
+        </div>
+    </section>
+
+    <section class="admin-section">
+        <h2>Chaining rules</h2>
+        @if (_triggers.Count == 0)
+        {
+            <p class="muted">No artifact triggers configured.</p>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                <tr>
+                    <th>Artifact type</th>
+                    <th>Workflow type</th>
+                    <th>Enabled</th>
+                    <th>Run as</th>
+                    <th>Actions</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var trigger in _triggers)
+                {
+                    <tr>
+                        <td>@trigger.ArtifactType</td>
+                        <td>@trigger.WorkflowType</td>
+                        <td>@(trigger.Enabled ? "Yes" : "No")</td>
+                        <td>@PrincipalName(trigger.RunAsPrincipalId)</td>
+                        <td>
+                            <button @onclick="() => ToggleAsync(trigger)" disabled="@_busy">
+                                @(trigger.Enabled ? "Disable" : "Enable")
+                            </button>
+                            <button @onclick="() => DeleteAsync(trigger.Id)" disabled="@_busy">Delete</button>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </section>
+}
+
+@code {
+
+    [CascadingParameter]
+    public Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool _loaded;
+    private bool _allowed;
+    private bool _busy;
+    private string _denyReason = "";
+    private string? _error;
+    private Guid? _principalId;
+
+    private string _artifactType = "";
+    private string _workflowType = "";
+    private string _packageUri = "";
+    private string _runAsPrincipalId = "";
+    private bool _enabled = true;
+
+    private IReadOnlyList<ArtifactTriggerRecord> _triggers = [];
+    private IReadOnlyList<PrincipalRecord> _principals = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState!).User;
+        _principalId = DashboardAuthEndpoints.PrincipalIdOf(user);
+        if (_principalId is not null)
+        {
+            var decision = await PolicyEngine.EvaluateAsync(
+                new PolicyContext(_principalId.Value, PermissionActions.TriggerConfigure, "artifact-triggers"));
+            _allowed = decision.Allowed;
+            _denyReason = decision.Reason;
+        }
+        else
+        {
+            _denyReason = "no platform principal in session";
+        }
+
+        if (_allowed)
+            await LoadAsync();
+        _loaded = true;
+    }
+
+    private async Task LoadAsync()
+    {
+        _triggers = await Triggers.ListArtifactAsync();
+        var principals = await Principals.ReadAsync();
+        _principals = principals.ToList().OrderBy(p => p.DisplayName).ToList();
+    }
+
+    private string PrincipalName(Guid? id)
+        => id is null ? "—" : _principals.FirstOrDefault(p => p.Id == id)?.DisplayName ?? id.Value.ToString();
+
+    private Task SaveAsync()
+        => RunAsync(async () =>
+        {
+            await Triggers.SaveArtifactAsync(_principalId!.Value.ToString("D"), new ArtifactTriggerRecord
+            {
+                ArtifactType = _artifactType.Trim(),
+                WorkflowType = _workflowType.Trim(),
+                WorkflowPackageUri = _packageUri.Trim(),
+                RunAsPrincipalId = Guid.TryParse(_runAsPrincipalId, out var runAs) ? runAs : null,
+                Enabled = _enabled
+            });
+            _artifactType = _workflowType = _packageUri = _runAsPrincipalId = "";
+            _enabled = true;
+        });
+
+    private Task ToggleAsync(ArtifactTriggerRecord trigger)
+        => RunAsync(() => Triggers.SaveArtifactAsync(
+            _principalId!.Value.ToString("D"), trigger with { Enabled = !trigger.Enabled }));
+
+    private Task DeleteAsync(Guid id)
+        => RunAsync(() => Triggers.DeleteArtifactAsync(_principalId!.Value.ToString("D"), id));
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        _error = null;
+        _busy = true;
+        try
+        {
+            await action();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+}

@@ -12,6 +12,7 @@ namespace Auxilia.BackendService.Dashboard;
 public sealed class ViewDataFanOutHandler(
     IMessageBusClient messageBus,
     IHubContext<ViewDataHub> hub,
+    LiveViewBroker broker,
     ILogger<ViewDataFanOutHandler> logger) : IHostedService
 {
     private IAsyncDisposable? _subscription;
@@ -27,9 +28,13 @@ public sealed class ViewDataFanOutHandler(
     }
 
     private Task HandleAsync(ViewDataMessage message, CancellationToken ct)
-        => hub.Clients
+    {
+        // In-process circuits first (no backplane), then the hub for external clients.
+        broker.Publish(message);
+        return hub.Clients
             .Group(ViewDataHub.ViewGroup(message.WorkflowInstanceId, message.ViewName))
             .SendAsync("ViewData", message, ct);
+    }
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {

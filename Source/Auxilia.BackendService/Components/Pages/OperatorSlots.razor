@@ -1,0 +1,134 @@
+@page "/operator/slots"
+@attribute [Authorize]
+@using Auxilia.PlatformData.Protection
+@inject IDataAccess<SlotProviderRecord> Providers
+@inject IDataAccess<SlotConfigurationRecord> SlotConfigurations
+@inject ISettingsProtector Protector
+@inject IPolicyEngine PolicyEngine
+
+<PageTitle>Slots — Auxilia</PageTitle>
+
+<h1>Slot configuration</h1>
+
+@if (!_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else if (!_allowed)
+{
+    <div class="panel denied">Access denied: @_denyReason</div>
+}
+else
+{
+    <section class="admin-section">
+        <h2>Registered slot providers</h2>
+        @if (_providers.Count == 0)
+        {
+            <p class="muted">No slot providers registered.</p>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                <tr>
+                    <th>Provider type</th>
+                    <th>Plugin DLL</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var provider in _providers)
+                {
+                    <tr>
+                        <td>@provider.ProviderType</td>
+                        <td>@provider.DllPath</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </section>
+
+    <section class="admin-section">
+        <h2>Slot configurations</h2>
+        <p class="muted">Settings are encrypted at rest — only key names are shown, values stay opaque.</p>
+        @if (_configurations.Count == 0)
+        {
+            <p class="muted">No slot configurations stored.</p>
+        }
+        @foreach (var group in _configurations.GroupBy(c => c.WorkflowType).OrderBy(g => g.Key))
+        {
+            <h3>@group.Key</h3>
+            <table class="data-table">
+                <thead>
+                <tr>
+                    <th>Slot</th>
+                    <th>Provider type</th>
+                    <th>Status</th>
+                    <th>Settings</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var configuration in group.OrderBy(c => c.SlotName))
+                {
+                    <tr>
+                        <td>@configuration.SlotName</td>
+                        <td>@configuration.ProviderType</td>
+                        <td>@configuration.Status</td>
+                        <td>
+                            @{ var keys = ProtectedSettingsInspector.SettingKeys(Protector, configuration.ProtectedSettingsJson); }
+                            @if (keys.Count == 0)
+                            {
+                                <span class="muted">(opaque)</span>
+                            }
+                            @foreach (var key in keys)
+                            {
+                                <span class="badge">@key = •••</span>
+                            }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </section>
+}
+
+@code {
+
+    [CascadingParameter]
+    public Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool _loaded;
+    private bool _allowed;
+    private string _denyReason = "";
+    private IReadOnlyList<SlotProviderRecord> _providers = [];
+    private IReadOnlyList<SlotConfigurationRecord> _configurations = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState!).User;
+        var principalId = DashboardAuthEndpoints.PrincipalIdOf(user);
+        if (principalId is not null)
+        {
+            var decision = await PolicyEngine.EvaluateAsync(
+                new PolicyContext(principalId.Value, PermissionActions.SlotConfigWrite, "slot-configurations"));
+            _allowed = decision.Allowed;
+            _denyReason = decision.Reason;
+        }
+        else
+        {
+            _denyReason = "no platform principal in session";
+        }
+
+        if (_allowed)
+        {
+            var providers = await Providers.ReadAsync();
+            _providers = providers.ToList().OrderBy(p => p.ProviderType).ToList();
+            var configurations = await SlotConfigurations.ReadAsync();
+            _configurations = configurations.ToList();
+        }
+
+        _loaded = true;
+    }
+
+}

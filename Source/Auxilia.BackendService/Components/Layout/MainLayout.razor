@@ -4,9 +4,16 @@
     <header class="topbar">
         <span class="brand">Auxilia</span>
         <nav>
+            <NavLink href="" Match="NavLinkMatch.All">Dashboard</NavLink>
             <NavLink href="runs">Runs</NavLink>
             <NavLink href="trigger">Trigger</NavLink>
-            <NavLink href="admin">Admin</NavLink>
+            <span class="nav-section">Operator</span>
+            <NavLink href="operator/slots">Slots</NavLink>
+            <NavLink href="operator/schedules">Schedules</NavLink>
+            <NavLink href="operator/artifact-triggers">Chaining</NavLink>
+            <span class="nav-section">Admin</span>
+            <NavLink href="admin">Principals</NavLink>
+            <NavLink href="admin/bundles">Bundles</NavLink>
             <NavLink href="audit">Audit</NavLink>
         </nav>
         <div class="session">

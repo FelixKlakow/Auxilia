@@ -22,8 +22,10 @@ public static class DependencyInjectionExtensions
         services.AddPlatformEntity<GroupMappingRecord>(dataSettings);
         services.AddPlatformEntity<WorkflowTypeAccessRecord>(dataSettings);
         services.AddPlatformEntity<CredentialRecord>(dataSettings);
+        services.AddPlatformEntity<AccountBundleRecord>(dataSettings);
 
         services.AddSingleton<PrincipalDirectory>();
+        services.AddSingleton<AccountBundleStore>();
         services.AddSingleton<WorkflowTypeAccessStore>();
         services.AddSingleton<GroupMappingResolver>();
         services.AddSingleton<IIdentityProvider, LocalIdentityProvider>();

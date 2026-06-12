@@ -1,0 +1,234 @@
+@page "/admin/bundles"
+@attribute [Authorize]
+@inject AccountBundleStore BundleStore
+@inject IDataAccess<PrincipalRecord> Principals
+@inject IPolicyEngine PolicyEngine
+
+<PageTitle>Account bundles — Auxilia</PageTitle>
+
+<h1>Account bundles</h1>
+<p class="muted">Secret values are write-only: they are encrypted at rest and never displayed back.</p>
+
+@if (!_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else if (!_allowed)
+{
+    <div class="panel denied">Access denied: @_denyReason</div>
+}
+else
+{
+    @if (_error is not null)
+    {
+        <div class="panel denied">@_error</div>
+    }
+
+    <section class="admin-section">
+        <h2>Create bundle</h2>
+        <div class="form-grid">
+            <label>Name <input @bind="_name"/></label>
+            <label>
+                Bundle type
+                <select @bind="_bundleType">
+                    <option value="SourceControl">SourceControl</option>
+                    <option value="TaskSource">TaskSource</option>
+                    <option value="Ai">Ai</option>
+                    <option value="Resource">Resource</option>
+                </select>
+            </label>
+            <label>
+                Owner principal
+                <select @bind="_ownerPrincipalId">
+                    @foreach (var principal in _principals)
+                    {
+                        <option value="@principal.Id">@principal.DisplayName</option>
+                    }
+                </select>
+            </label>
+            <label>Secret key <input @bind="_newSecretKey" placeholder="e.g. pat"/></label>
+            <label>Secret value <input type="password" @bind="_newSecretValue"/></label>
+            <button @onclick="CreateAsync" disabled="@_busy">Create bundle</button>
+        </div>
+    </section>
+
+    <section class="admin-section">
+        <h2>Bundles</h2>
+        @if (_bundles.Count == 0)
+        {
+            <p class="muted">No account bundles configured.</p>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Owner</th>
+                    <th>Secrets</th>
+                    <th>Actions</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var bundle in _bundles)
+                {
+                    <tr>
+                        <td>@bundle.Name</td>
+                        <td>@bundle.BundleType</td>
+                        <td>@PrincipalName(bundle.OwnerPrincipalId)</td>
+                        <td>
+                            @foreach (var key in bundle.SecretKeys)
+                            {
+                                <span class="badge">
+                                    @key = •••
+                                    <button class="link-button" title="Remove secret"
+                                            @onclick="() => RemoveSecretAsync(bundle.Id, key)">✕</button>
+                                </span>
+                            }
+                        </td>
+                        <td>
+                            <input placeholder="key" @bind="_updateKeys[bundle.Id]"/>
+                            <input type="password" placeholder="value" @bind="_updateValues[bundle.Id]"/>
+                            <button @onclick="() => SetSecretAsync(bundle.Id)" disabled="@_busy">Set secret</button>
+                            <button @onclick="() => DeleteAsync(bundle.Id)" disabled="@_busy">Delete</button>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </section>
+}
+
+@code {
+
+    [CascadingParameter]
+    public Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool _loaded;
+    private bool _allowed;
+    private bool _busy;
+    private string _denyReason = "";
+    private string? _error;
+    private Guid? _principalId;
+
+    private string _name = "";
+    private string _bundleType = "SourceControl";
+    private string _ownerPrincipalId = "";
+    private string _newSecretKey = "";
+    private string _newSecretValue = "";
+
+    private IReadOnlyList<AccountBundleSummary> _bundles = [];
+    private IReadOnlyList<PrincipalRecord> _principals = [];
+    private readonly Dictionary<Guid, string> _updateKeys = new();
+    private readonly Dictionary<Guid, string> _updateValues = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState!).User;
+        _principalId = DashboardAuthEndpoints.PrincipalIdOf(user);
+        if (_principalId is not null)
+        {
+            var decision = await PolicyEngine.EvaluateAsync(
+                new PolicyContext(_principalId.Value, PermissionActions.BundleManage, "account-bundles"));
+            _allowed = decision.Allowed;
+            _denyReason = decision.Reason;
+        }
+        else
+        {
+            _denyReason = "no platform principal in session";
+        }
+
+        if (_allowed)
+            await LoadAsync();
+        _loaded = true;
+    }
+
+    private async Task LoadAsync()
+    {
+        _bundles = await BundleStore.ListAsync();
+        var principals = await Principals.ReadAsync();
+        _principals = principals.ToList().OrderBy(p => p.DisplayName).ToList();
+        if (string.IsNullOrEmpty(_ownerPrincipalId) && _principals.Count > 0)
+            _ownerPrincipalId = _principals[0].Id.ToString("D");
+        foreach (var bundle in _bundles)
+        {
+            _updateKeys.TryAdd(bundle.Id, "");
+            _updateValues.TryAdd(bundle.Id, "");
+        }
+    }
+
+    private string PrincipalName(Guid id)
+        => _principals.FirstOrDefault(p => p.Id == id)?.DisplayName ?? id.ToString();
+
+    private async Task CreateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_name) ||
+            string.IsNullOrWhiteSpace(_newSecretKey) ||
+            string.IsNullOrEmpty(_newSecretValue))
+        {
+            _error = "Name, secret key, and secret value are required.";
+            return;
+        }
+        if (!Guid.TryParse(_ownerPrincipalId, out var owner))
+        {
+            _error = "An owner principal is required.";
+            return;
+        }
+
+        await RunAsync(async () =>
+        {
+            await BundleStore.CreateAsync(_principalId!.Value.ToString("D"), _name.Trim(), _bundleType, owner,
+                new Dictionary<string, string> { [_newSecretKey.Trim()] = _newSecretValue });
+            _name = _newSecretKey = _newSecretValue = "";
+        });
+    }
+
+    private async Task SetSecretAsync(Guid bundleId)
+    {
+        var key = _updateKeys.GetValueOrDefault(bundleId, "").Trim();
+        var value = _updateValues.GetValueOrDefault(bundleId, "");
+        if (key.Length == 0 || value.Length == 0)
+        {
+            _error = "Secret key and value are required.";
+            return;
+        }
+
+        await RunAsync(async () =>
+        {
+            await BundleStore.UpdateSecretsAsync(_principalId!.Value.ToString("D"), bundleId,
+                new Dictionary<string, string> { [key] = value }, []);
+            _updateKeys[bundleId] = "";
+            _updateValues[bundleId] = "";
+        });
+    }
+
+    private Task RemoveSecretAsync(Guid bundleId, string key)
+        => RunAsync(() => BundleStore.UpdateSecretsAsync(
+            _principalId!.Value.ToString("D"), bundleId,
+            new Dictionary<string, string>(), [key]));
+
+    private Task DeleteAsync(Guid bundleId)
+        => RunAsync(() => BundleStore.DeleteAsync(_principalId!.Value.ToString("D"), bundleId));
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        _error = null;
+        _busy = true;
+        try
+        {
+            await action();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+}

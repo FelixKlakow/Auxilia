@@ -13,6 +13,7 @@ namespace Auxilia.BackendService.PlatformHost;
 public sealed class WorkflowStatusEventHandler(
     IMessageBusClient messageBus,
     IHubContext<ViewDataHub> hub,
+    LiveViewBroker broker,
     ILogger<WorkflowStatusEventHandler> logger) : IHostedService
 {
     private IAsyncDisposable? _subscription;
@@ -34,6 +35,7 @@ public sealed class WorkflowStatusEventHandler(
             statusEvent.WorkflowInstanceId, statusEvent.WorkflowType,
             statusEvent.State, statusEvent.ErrorMessage ?? "<none>");
 
+        broker.Publish(statusEvent);
         await hub.Clients.Group(ViewDataHub.AllRunsGroup).SendAsync("RunStatus", statusEvent, ct);
         await hub.Clients.Group(ViewDataHub.RunGroup(statusEvent.WorkflowInstanceId))
             .SendAsync("RunStatus", statusEvent, ct);

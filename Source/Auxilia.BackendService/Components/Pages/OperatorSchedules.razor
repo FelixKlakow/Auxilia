@@ -1,0 +1,220 @@
+@page "/operator/schedules"
+@attribute [Authorize]
+@inject TriggerAdministration Triggers
+@inject IDataAccess<PrincipalRecord> Principals
+@inject IPolicyEngine PolicyEngine
+
+<PageTitle>Schedules — Auxilia</PageTitle>
+
+<h1>Scheduled triggers</h1>
+
+@if (!_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else if (!_allowed)
+{
+    <div class="panel denied">Access denied: @_denyReason</div>
+}
+else
+{
+    @if (_error is not null)
+    {
+        <div class="panel denied">@_error</div>
+    }
+
+    <section class="admin-section">
+        <h2>@(_editingId is null ? "Create schedule" : "Edit schedule")</h2>
+        <div class="form-grid">
+            <label>Workflow type <input @bind="_workflowType"/></label>
+            <label>Package URI <input @bind="_packageUri"/></label>
+            <label>Interval (seconds) <input type="number" @bind="_intervalSeconds"/></label>
+            <label>Context JSON (optional, string map) <input @bind="_contextJson" placeholder='{"Key":"Value"}'/></label>
+            <label>
+                Run as principal
+                <select @bind="_runAsPrincipalId">
+                    <option value="">(none)</option>
+                    @foreach (var principal in _principals)
+                    {
+                        <option value="@principal.Id">@principal.DisplayName</option>
+                    }
+                </select>
+            </label>
+            <label><input type="checkbox" @bind="_enabled"/> Enabled</label>
+            <button @onclick="SaveAsync" disabled="@_busy">@(_editingId is null ? "Create" : "Save")</button>
+            @if (_editingId is not null)
+            {
+                <button @onclick="ResetForm" disabled="@_busy">Cancel edit</button>
+            }
+        </div>
+    </section>
+
+    <section class="admin-section">
+        <h2>Schedules</h2>
+        @if (_triggers.Count == 0)
+        {
+            <p class="muted">No scheduled triggers configured.</p>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                <tr>
+                    <th>Workflow type</th>
+                    <th>Interval</th>
+                    <th>Enabled</th>
+                    <th>Run as</th>
+                    <th>Last dispatched (UTC)</th>
+                    <th>Actions</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var trigger in _triggers)
+                {
+                    <tr>
+                        <td>@trigger.WorkflowType</td>
+                        <td>@trigger.IntervalSeconds s</td>
+                        <td>@(trigger.Enabled ? "Yes" : "No")</td>
+                        <td>@PrincipalName(trigger.RunAsPrincipalId)</td>
+                        <td>@(trigger.LastDispatchedUtc?.ToString("yyyy-MM-dd HH:mm:ss") ?? "—")</td>
+                        <td>
+                            <button @onclick="() => Edit(trigger)" disabled="@_busy">Edit</button>
+                            <button @onclick="() => ToggleAsync(trigger)" disabled="@_busy">
+                                @(trigger.Enabled ? "Disable" : "Enable")
+                            </button>
+                            <button @onclick="() => DeleteAsync(trigger.Id)" disabled="@_busy">Delete</button>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </section>
+}
+
+@code {
+
+    [CascadingParameter]
+    public Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool _loaded;
+    private bool _allowed;
+    private bool _busy;
+    private string _denyReason = "";
+    private string? _error;
+    private Guid? _principalId;
+
+    private Guid? _editingId;
+    private string _workflowType = "";
+    private string _packageUri = "";
+    private int _intervalSeconds = 3600;
+    private string _contextJson = "";
+    private string _runAsPrincipalId = "";
+    private bool _enabled = true;
+
+    private IReadOnlyList<ScheduledTriggerRecord> _triggers = [];
+    private IReadOnlyList<PrincipalRecord> _principals = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState!).User;
+        _principalId = DashboardAuthEndpoints.PrincipalIdOf(user);
+        if (_principalId is not null)
+        {
+            var decision = await PolicyEngine.EvaluateAsync(
+                new PolicyContext(_principalId.Value, PermissionActions.TriggerConfigure, "scheduled-triggers"));
+            _allowed = decision.Allowed;
+            _denyReason = decision.Reason;
+        }
+        else
+        {
+            _denyReason = "no platform principal in session";
+        }
+
+        if (_allowed)
+            await LoadAsync();
+        _loaded = true;
+    }
+
+    private async Task LoadAsync()
+    {
+        _triggers = await Triggers.ListScheduledAsync();
+        var principals = await Principals.ReadAsync();
+        _principals = principals.ToList().OrderBy(p => p.DisplayName).ToList();
+    }
+
+    private string PrincipalName(Guid? id)
+        => id is null ? "—" : _principals.FirstOrDefault(p => p.Id == id)?.DisplayName ?? id.Value.ToString();
+
+    private void Edit(ScheduledTriggerRecord trigger)
+    {
+        _editingId = trigger.Id;
+        _workflowType = trigger.WorkflowType;
+        _packageUri = trigger.WorkflowPackageUri;
+        _intervalSeconds = trigger.IntervalSeconds;
+        _contextJson = trigger.ContextJson ?? "";
+        _runAsPrincipalId = trigger.RunAsPrincipalId?.ToString("D") ?? "";
+        _enabled = trigger.Enabled;
+    }
+
+    private void ResetForm()
+    {
+        _editingId = null;
+        _workflowType = "";
+        _packageUri = "";
+        _intervalSeconds = 3600;
+        _contextJson = "";
+        _runAsPrincipalId = "";
+        _enabled = true;
+    }
+
+    private Task SaveAsync()
+        => RunAsync(async () =>
+        {
+            var existing = _editingId is null ? null : _triggers.FirstOrDefault(t => t.Id == _editingId);
+            await Triggers.SaveScheduledAsync(_principalId!.Value.ToString("D"), new ScheduledTriggerRecord
+            {
+                Id = _editingId ?? Guid.Empty,
+                WorkflowType = _workflowType.Trim(),
+                WorkflowPackageUri = _packageUri.Trim(),
+                IntervalSeconds = _intervalSeconds,
+                ContextJson = string.IsNullOrWhiteSpace(_contextJson) ? null : _contextJson.Trim(),
+                RunAsPrincipalId = Guid.TryParse(_runAsPrincipalId, out var runAs) ? runAs : null,
+                Enabled = _enabled,
+                LastDispatchedUtc = existing?.LastDispatchedUtc
+            });
+            ResetForm();
+        });
+
+    private Task ToggleAsync(ScheduledTriggerRecord trigger)
+        => RunAsync(() => Triggers.SaveScheduledAsync(
+            _principalId!.Value.ToString("D"), trigger with { Enabled = !trigger.Enabled }));
+
+    private Task DeleteAsync(Guid id)
+        => RunAsync(async () =>
+        {
+            await Triggers.DeleteScheduledAsync(_principalId!.Value.ToString("D"), id);
+            if (_editingId == id)
+                ResetForm();
+        });
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        _error = null;
+        _busy = true;
+        try
+        {
+            await action();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+}

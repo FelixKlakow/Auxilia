@@ -1,11 +1,14 @@
 @page "/runs/{InstanceId:guid}"
 @attribute [Authorize]
 @using System.Text.Json
+@using Auxilia.Workflows.Messaging.Messages
 @using Auxilia.Workflows.Views
 @implements IDisposable
 @inject IDataAccess<WorkflowInstanceRecord> Instances
 @inject IDataAccess<ViewDataRecord> ViewData
 @inject IPolicyEngine PolicyEngine
+@inject LiveViewBroker Broker
+@inject DashboardComposer Composer
 
 <PageTitle>Run @InstanceId — Auxilia</PageTitle>
 
@@ -25,6 +28,11 @@ else if (!_allowed)
 }
 else
 {
+    @if (_error is not null)
+    {
+        <div class="panel denied">@_error</div>
+    }
+
     <dl class="lifecycle">
         <dt>State</dt>
         <dd><span class="badge badge-@_run.State.ToLowerInvariant()">@_run.State</span></dd>
@@ -49,8 +57,18 @@ else
     }
     @foreach (var view in _views)
     {
+        <div class="pin-bar">
+            @if (IsPinned(view.Name))
+            {
+                <button class="link-button" @onclick="() => UnpinAsync(view.Name)">Unpin from dashboard</button>
+            }
+            else
+            {
+                <button class="link-button" @onclick="() => PinAsync(view.Name)">Pin to dashboard</button>
+            }
+        </div>
         <ViewRenderer Descriptor="view"
-                      Items="_viewItems.GetValueOrDefault(view.Name, [])"/>
+                      Items="ItemsOf(view.Name)"/>
     }
 }
 
@@ -63,13 +81,17 @@ else
     public Task<AuthenticationState>? AuthState { get; set; }
 
     private readonly CancellationTokenSource _cts = new();
+    private readonly Dictionary<string, ViewItemBuffer> _buffers = new();
     private PeriodicTimer? _timer;
+    private IDisposable? _liveSubscription;
     private bool _loaded;
     private bool _allowed;
     private string _denyReason = "";
+    private string? _error;
+    private Guid? _principalId;
     private WorkflowInstanceRecord? _run;
     private IReadOnlyList<ViewDescriptor> _views = [];
-    private Dictionary<string, IReadOnlyList<ViewDataRecord>> _viewItems = new();
+    private IReadOnlyList<DashboardPin> _pins = [];
 
     private bool IsTerminal =>
         _run is null || _run.CompletedUtc is not null ||
@@ -82,7 +104,12 @@ else
         {
             await EvaluateAccessAsync();
             if (_allowed)
+            {
                 await LoadViewsAsync();
+                await LoadPinsAsync();
+                // Live path: in-process fan-out from the bus handlers (LiveViewBroker).
+                _liveSubscription = Broker.Subscribe(OnLiveViewData, OnLiveStatus);
+            }
         }
 
         _loaded = true;
@@ -92,22 +119,24 @@ else
     {
         if (!firstRender || _timer is not null || !_allowed || IsTerminal)
             return;
-        _timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+        // Degraded-mode fallback: live items arrive through the broker; the poll only
+        // reconciles against the persisted store in case a push was missed.
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
         _ = PollAsync();
     }
 
     private async Task EvaluateAccessAsync()
     {
         var user = (await (AuthState ?? Task.FromResult(new AuthenticationState(new())))).User;
-        var principalId = DashboardAuthEndpoints.PrincipalIdOf(user);
-        if (principalId is null)
+        _principalId = DashboardAuthEndpoints.PrincipalIdOf(user);
+        if (_principalId is null)
         {
             _denyReason = "no platform principal in session";
             return;
         }
 
         var decision = await PolicyEngine.EvaluateAsync(
-            new PolicyContext(principalId.Value, PermissionActions.RunObserve, InstanceId.ToString())
+            new PolicyContext(_principalId.Value, PermissionActions.RunObserve, InstanceId.ToString())
                 { WorkflowType = _run!.WorkflowType },
             _cts.Token);
         _allowed = decision.Allowed;
@@ -120,13 +149,24 @@ else
 
         _views = ParseDescriptors(_run?.ViewsJson);
         var allItems = await ViewData.ReadAsync(_cts.Token);
-        _viewItems = _views.ToDictionary(
-            v => v.Name,
-            v => (IReadOnlyList<ViewDataRecord>)allItems
-                .Where(i => i.WorkflowInstanceId == InstanceId && i.ViewName == v.Name)
-                .OrderBy(i => i.Sequence)
+        foreach (var view in _views)
+        {
+            var buffer = BufferOf(view.Name);
+            buffer.Merge(allItems
+                .Where(i => i.WorkflowInstanceId == InstanceId && i.ViewName == view.Name)
                 .ToList());
+        }
     }
+
+    private ViewItemBuffer BufferOf(string viewName)
+    {
+        if (!_buffers.TryGetValue(viewName, out var buffer))
+            _buffers[viewName] = buffer = new ViewItemBuffer();
+        return buffer;
+    }
+
+    private IReadOnlyList<ViewDataRecord> ItemsOf(string viewName)
+        => _buffers.TryGetValue(viewName, out var buffer) ? buffer.Items : [];
 
     private static IReadOnlyList<ViewDescriptor> ParseDescriptors(string? viewsJson)
     {
@@ -142,7 +182,82 @@ else
         }
     }
 
-    // Backplane-less v1: poll the persisted records every 2 s while the run is live.
+    private void OnLiveViewData(ViewDataMessage message)
+    {
+        if (message.WorkflowInstanceId != InstanceId)
+            return;
+
+        _ = InvokeAsync(() =>
+        {
+            var record = new ViewDataRecord
+            {
+                Id = ViewDataRecord.IdFor(message.WorkflowInstanceId, message.ViewName, message.Sequence),
+                WorkflowInstanceId = message.WorkflowInstanceId,
+                ViewName = message.ViewName,
+                Sequence = message.Sequence,
+                PayloadJson = message.PayloadJson,
+                TimestampUtc = DateTimeOffset.UtcNow
+            };
+            if (BufferOf(message.ViewName).Add(record))
+                StateHasChanged();
+        });
+    }
+
+    private void OnLiveStatus(WorkflowStatusEvent statusEvent)
+    {
+        if (statusEvent.WorkflowInstanceId != InstanceId)
+            return;
+
+        _ = InvokeAsync(async () =>
+        {
+            await LoadViewsAsync();
+            StateHasChanged();
+        });
+    }
+
+    private bool IsPinned(string viewName)
+        => _pins.Any(p => p.InstanceId == InstanceId && p.ViewName == viewName);
+
+    private async Task LoadPinsAsync()
+    {
+        if (_principalId is not null)
+            _pins = await Composer.GetPinsAsync(_principalId.Value, _cts.Token);
+    }
+
+    private async Task PinAsync(string viewName)
+    {
+        if (_principalId is null)
+            return;
+        _error = null;
+        try
+        {
+            await Composer.PinAsync(_principalId.Value, _principalId.Value,
+                new DashboardPin(InstanceId, viewName, $"{_run!.WorkflowType} — {viewName}"), _cts.Token);
+            await LoadPinsAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task UnpinAsync(string viewName)
+    {
+        if (_principalId is null)
+            return;
+        _error = null;
+        try
+        {
+            await Composer.UnpinAsync(_principalId.Value, _principalId.Value, InstanceId, viewName, _cts.Token);
+            await LoadPinsAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    // Degraded-mode fallback: reconcile from the persisted records while the run is live.
     private async Task PollAsync()
     {
         try
@@ -161,6 +276,7 @@ else
 
     public void Dispose()
     {
+        _liveSubscription?.Dispose();
         _cts.Cancel();
         _cts.Dispose();
         _timer?.Dispose();
