@@ -1,6 +1,7 @@
 ﻿using System.Reflection;
 using Auxilia.BackendService;
 using Auxilia.BackendService.PlatformHost;
+using Auxilia.Governance;
 using Auxilia.Messaging;
 using Auxilia.PlatformData;
 using Auxilia.PlatformData.Entities;
@@ -101,10 +102,17 @@ try
     builder.Services.AddPlatformEntity<ServiceHeartbeatRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<ScheduledTriggerRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<ArtifactTriggerRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<ViewDataRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<ArtifactRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<AuditRecord>(platformDataSettings);
     builder.Services.AddSingleton(TimeProvider.System);
     builder.Services.AddSingleton<AuditLog>();
     builder.Services.AddSingleton<WorkflowStatusPublisher>();
+
+    // --- Governance (identity, accounts, Policy Engine) ---
+    var governanceSettings = new Auxilia.Governance.GovernanceSettings();
+    builder.Configuration.GetSection("Governance").Bind(governanceSettings);
+    builder.Services.AddGovernance(platformDataSettings, governanceSettings);
 
     // --- Platform host (status fan-out, heartbeat monitor, scheduler) ---
     builder.Services.Configure<PlatformHostSettings>(
@@ -126,6 +134,8 @@ try
     builder.Services.AddHostedService<IdentificationRequestHandler>();
 
     var app = builder.Build();
+
+    await app.Services.GetRequiredService<GovernanceSeeder>().SeedAsync(app.Lifetime.ApplicationStopping);
 
     app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
     app.MapPrometheusScrapingEndpoint(); // GET /metrics
