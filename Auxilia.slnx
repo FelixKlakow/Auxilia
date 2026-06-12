@@ -59,6 +59,8 @@
     <Project Path="Auxilia.FakeSlots.Implementation.Happy\Auxilia.FakeSlots.Implementation.Happy.csproj" />
     <Project Path="Auxilia.FakeSlots.Tests\Auxilia.FakeSlots.Tests.csproj" />
     <Project Path="Auxilia.ImplementationWorkflow.Tests/Auxilia.ImplementationWorkflow.Tests.csproj" />
+    <Project Path="Auxilia.Slots.Email.Tests\Auxilia.Slots.Email.Tests.csproj" />
+    <Project Path="Auxilia.Slots.Email\Auxilia.Slots.Email.csproj" />
     <Project Path="Source/Auxilia.ImplementationWorkflow/Auxilia.ImplementationWorkflow.csproj" />
     <Project Path="Source\Auxilia.CodeReview.Workflow\Auxilia.CodeReview.Workflow.csproj" />
   </Folder>

@@ -5,6 +5,7 @@ using Auxilia.CodeReview.Workflow.Mcp;
 using Auxilia.CodeReview.Workflow.Verdicts;
 using Auxilia.Workflows.AiAgent;
 using Auxilia.Workflows.Mcp;
+using Auxilia.Workflows.Views;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -15,6 +16,7 @@ public sealed class PrimaryReviewOrchestrator(
     IStagedFindingsStore findingsStore,
     ContextCompactionService compactionService,
     VerdictMap verdictMap,
+    IViewPublisher? viewPublisher = null,
     ILoggerFactory? loggerFactory = null)
 {
     private long _currentTokenCount = 0;
@@ -80,10 +82,12 @@ public sealed class PrimaryReviewOrchestrator(
             verdict = FileVerdict.Reviewed;
         }
 
-        ApplyVerdict(file, verdict.Value, findings);
+        await ApplyVerdictAsync(file, verdict.Value, findings, cancellationToken);
     }
 
-    private void ApplyVerdict(ReviewableFile file, FileVerdict verdict, IReadOnlyList<StagedFinding> findings)
+    private async Task ApplyVerdictAsync(
+        ReviewableFile file, FileVerdict verdict, IReadOnlyList<StagedFinding> findings,
+        CancellationToken cancellationToken)
     {
         if (verdict == FileVerdict.Skipped)
         {
@@ -101,7 +105,11 @@ public sealed class PrimaryReviewOrchestrator(
         else
         {
             foreach (var f in findings)
+            {
                 findingsStore.Append(f);
+                if (viewPublisher is not null)
+                    await viewPublisher.PublishAsync("review-findings", f, cancellationToken);
+            }
             verdictMap.Record(file.FilePath, FileVerdict.Reviewed);
         }
     }

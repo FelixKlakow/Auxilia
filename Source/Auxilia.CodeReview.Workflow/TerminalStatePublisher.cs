@@ -9,7 +9,8 @@ public sealed class TerminalStatePublisher(string outputDirectory = "output")
 
     /// <summary>
     /// Serialises <paramref name="result"/> to <c>code-review-result.json</c> in the output directory
-    /// and logs <paramref name="metrics"/> as a structured entry.
+    /// and logs <paramref name="metrics"/> as a structured entry. When the platform output directory
+    /// (<c>Workflow__OutputDirectory</c>) is set, the same files are written there for artifact persistence.
     /// </summary>
     /// <returns>
     /// <c>WorkflowState.Success</c> on success; throws on exception (caller may publish
@@ -17,17 +18,28 @@ public sealed class TerminalStatePublisher(string outputDirectory = "output")
     /// </returns>
     public async Task<string> PublishAsync(CodeReviewResult result, CoverageMetrics metrics)
     {
-        Directory.CreateDirectory(outputDirectory);
-
-        var outputPath = Path.Combine(outputDirectory, "code-review-result.json");
         var json = JsonSerializer.Serialize(result, JsonOptions);
-        await File.WriteAllTextAsync(outputPath, json);
-
-        // Log coverage metrics as structured entry (written alongside the result)
-        var metricsPath = Path.Combine(outputDirectory, "coverage-metrics.json");
         var metricsJson = JsonSerializer.Serialize(metrics, JsonOptions);
-        await File.WriteAllTextAsync(metricsPath, metricsJson);
+
+        await WriteAsync(outputDirectory, json, metricsJson);
+
+        var platformOutputDirectory = Environment.GetEnvironmentVariable(
+            Auxilia.Workflows.WorkflowEnvironmentVariables.OutputDirectory);
+        if (!string.IsNullOrEmpty(platformOutputDirectory) && !SameDirectory(platformOutputDirectory, outputDirectory))
+            await WriteAsync(platformOutputDirectory, json, metricsJson);
 
         return "Success";
     }
+
+    private static async Task WriteAsync(string directory, string resultJson, string metricsJson)
+    {
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(Path.Combine(directory, "code-review-result.json"), resultJson);
+
+        // Log coverage metrics as structured entry (written alongside the result)
+        await File.WriteAllTextAsync(Path.Combine(directory, "coverage-metrics.json"), metricsJson);
+    }
+
+    private static bool SameDirectory(string left, string right)
+        => string.Equals(Path.GetFullPath(left), Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase);
 }
