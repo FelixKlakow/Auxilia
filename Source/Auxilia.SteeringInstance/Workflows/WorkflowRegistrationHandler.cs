@@ -119,7 +119,8 @@ public sealed class WorkflowRegistrationHandler(
             await instanceRegistry.RegisterAsync(
                 request.WorkflowInstanceId, request.Manifest.WorkflowName,
                 request.Manifest.Lifetime.ToString(),
-                System.Text.Json.JsonSerializer.Serialize(request.Manifest.Outputs), cancellationToken);
+                System.Text.Json.JsonSerializer.Serialize(request.Manifest.Outputs),
+                System.Text.Json.JsonSerializer.Serialize(request.Manifest.Views), cancellationToken);
             await statusPublisher.PublishAsync(
                 request.WorkflowInstanceId, request.Manifest.WorkflowName, "Running", ct: cancellationToken);
             await auditLog.AppendAsync(
@@ -166,7 +167,8 @@ public sealed class WorkflowRegistrationHandler(
         await instanceRegistry.RegisterAsync(
             request.WorkflowInstanceId, request.Manifest.WorkflowName,
             request.Manifest.Lifetime.ToString(),
-            System.Text.Json.JsonSerializer.Serialize(request.Manifest.Outputs), cancellationToken);
+            System.Text.Json.JsonSerializer.Serialize(request.Manifest.Outputs),
+                System.Text.Json.JsonSerializer.Serialize(request.Manifest.Views), cancellationToken);
         await statusPublisher.PublishAsync(
             request.WorkflowInstanceId, request.Manifest.WorkflowName, "Running", ct: cancellationToken);
         await auditLog.AppendAsync(

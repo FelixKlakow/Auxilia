@@ -275,6 +275,74 @@ public class WorkflowBuilderTests
         Assert.That(manifest.Outputs[1].Name, Is.EqualTo("b"));
     }
 
+    private sealed record ViewItem(string Message, int Value);
+
+    [Test]
+    public void DeclaresView_NoCall_BothArtifactsHaveEmptyViews()
+    {
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+
+        Assert.That(wb.BuildSchema().Views, Is.Empty);
+        Assert.That(wb.BuildManifest().Views, Is.Empty);
+    }
+
+    [Test]
+    public void DeclaresView_OneCall_LandsInSchemaWithRenderingAndLifecycle()
+    {
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+        wb.DeclaresView<ViewItem>("progress", Views.ViewRendering.Table, Views.ViewLifecycle.Persisted);
+
+        var schema = wb.BuildSchema();
+
+        Assert.That(schema.Views, Has.Count.EqualTo(1));
+        Assert.That(schema.Views[0].Name, Is.EqualTo("progress"));
+        Assert.That(schema.Views[0].Rendering, Is.EqualTo(Views.ViewRendering.Table));
+        Assert.That(schema.Views[0].Lifecycle, Is.EqualTo(Views.ViewLifecycle.Persisted));
+    }
+
+    [Test]
+    public void DeclaresView_OneCall_ItemSchemaJsonIsNonEmpty()
+    {
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+        wb.DeclaresView<ViewItem>("progress", Views.ViewRendering.Stream, Views.ViewLifecycle.Live);
+
+        var schema = wb.BuildSchema();
+
+        Assert.That(schema.Views[0].ItemSchemaJson, Is.Not.Null.And.Not.Empty);
+    }
+
+    [Test]
+    public void DeclaresView_OneCall_LandsInManifest()
+    {
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+        wb.DeclaresView<ViewItem>("progress", Views.ViewRendering.Chart, Views.ViewLifecycle.LiveAndPersisted);
+
+        var manifest = wb.BuildManifest();
+
+        Assert.That(manifest.Views, Has.Count.EqualTo(1));
+        Assert.That(manifest.Views[0].Name, Is.EqualTo("progress"));
+        Assert.That(manifest.Views[0].Rendering, Is.EqualTo(Views.ViewRendering.Chart));
+        Assert.That(manifest.Views[0].Lifecycle, Is.EqualTo(Views.ViewLifecycle.LiveAndPersisted));
+    }
+
+    [Test]
+    public void DeclaresView_DuplicateName_ThrowsInvalidOperationException()
+    {
+        var builder = WorkflowBuilder.Create("test");
+        builder.DeclaresView<ViewItem>("progress", Views.ViewRendering.Stream, Views.ViewLifecycle.Live);
+
+        Assert.Throws<InvalidOperationException>(
+            () => builder.DeclaresView<ViewItem>("progress", Views.ViewRendering.Log, Views.ViewLifecycle.Persisted));
+    }
+
+    [Test]
+    public void DeclaresView_FluentChain_ReturnsSameBuilderInstance()
+    {
+        var builder = WorkflowBuilder.Create("test");
+        var result = builder.DeclaresView<ViewItem>("a", Views.ViewRendering.Stream, Views.ViewLifecycle.Live);
+        Assert.That(result, Is.SameAs(builder));
+    }
+
     [Test]
     public void BuildSchema_ViaInterface_ReturnsWorkflowSchema()
     {

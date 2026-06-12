@@ -17,6 +17,8 @@ public sealed record WorkflowInstanceRecord : IEntity
     public string Lifetime { get; init; } = "OneShot";
     /// <summary>The manifest's declared outputs as JSON, recorded at registration for artifact persistence.</summary>
     public string? OutputsJson { get; init; }
+    /// <summary>The manifest's declared views as JSON, recorded at registration for view persistence and replay.</summary>
+    public string? ViewsJson { get; init; }
     /// <summary>The originating dispatch command as JSON, kept for policy-driven re-dispatch.</summary>
     public string? DispatchCommandJson { get; init; }
 }

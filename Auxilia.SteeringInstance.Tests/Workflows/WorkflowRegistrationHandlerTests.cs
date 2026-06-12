@@ -250,6 +250,69 @@ public class WorkflowRegistrationHandlerTests
         Assert.That(handler.RegisteredCount, Is.EqualTo(1));
     }
 
+    [Test]
+    public async Task HandleAsync_NoSlots_ManifestWithViews_RecordsViewsJsonOnInstanceRecord()
+    {
+        var instanceId = Guid.NewGuid();
+        var request = new WorkflowRegistrationRequest(
+            instanceId,
+            new WorkflowManifest("SlotlessWorkflow", instanceId.ToString(),
+                [], [], string.Empty, [], [])
+            {
+                Views = [new Auxilia.Workflows.Views.ViewDescriptor(
+                    "progress", "{}",
+                    Auxilia.Workflows.Views.ViewRendering.Stream,
+                    Auxilia.Workflows.Views.ViewLifecycle.LiveAndPersisted)]
+            },
+            ValidPublicKey(), "reply");
+
+        var bus = new CapturingFakeMessageBusClient();
+        var registry = TestStores.NewWorkflowInstanceRegistry();
+        var handler = MakeHandler(bus, instanceRegistry: registry);
+        await handler.StartAsync(CancellationToken.None);
+        await bus.InvokeAsync(request, CancellationToken.None);
+
+        var record = await registry.GetAsync(instanceId);
+        Assert.That(record, Is.Not.Null);
+        Assert.That(record!.ViewsJson, Does.Contain("progress"),
+            "Registration must persist the manifest's view descriptors for later replay.");
+    }
+
+    [Test]
+    public async Task HandleAsync_Slotted_ManifestWithViews_RecordsViewsJsonOnInstanceRecord()
+    {
+        var store = TestStores.NewSlotConfigurationStore();
+        await store.UpsertConfigurationAsync("TestWorkflow",
+            new StoredSlotConfiguration("slotA", "ProviderX",
+                new Dictionary<string, string> { ["key"] = "val" },
+                ConfigurationStatus.Valid));
+        var resolver = new ConfigurationResolver(store, TestStores.NewSignalHandlerStore(), NullLogger<ConfigurationResolver>.Instance);
+
+        var instanceId = Guid.NewGuid();
+        var request = new WorkflowRegistrationRequest(
+            instanceId,
+            new WorkflowManifest("TestWorkflow", instanceId.ToString(),
+                [new SlotDefinition("slotA", null) { ServiceType = typeof(object) }],
+                [], string.Empty, [], [])
+            {
+                Views = [new Auxilia.Workflows.Views.ViewDescriptor(
+                    "log", "{}",
+                    Auxilia.Workflows.Views.ViewRendering.Log,
+                    Auxilia.Workflows.Views.ViewLifecycle.Persisted)]
+            },
+            ValidPublicKey(), "reply");
+
+        var bus = new CapturingFakeMessageBusClient();
+        var registry = TestStores.NewWorkflowInstanceRegistry();
+        var handler = MakeHandler(bus, configResolver: resolver, instanceRegistry: registry);
+        await handler.StartAsync(CancellationToken.None);
+        await bus.InvokeAsync(request, CancellationToken.None);
+
+        var record = await registry.GetAsync(instanceId);
+        Assert.That(record, Is.Not.Null);
+        Assert.That(record!.ViewsJson, Does.Contain("log"));
+    }
+
     // ------------------------------------------------------------------ Long-living lifetime approval
 
     private static WorkflowRegistrationRequest LongLivingSlotlessRequest(string workflowName)

@@ -28,7 +28,7 @@ public sealed class WorkflowInstanceRegistry(
     /// </summary>
     public async Task RegisterAsync(
         Guid instanceId, string workflowTypeName, string lifetime = "OneShot",
-        string? outputsJson = null, CancellationToken ct = default)
+        string? outputsJson = null, string? viewsJson = null, CancellationToken ct = default)
     {
         var existing = await dataAccess.ReadAsync(instanceId, ct);
         if (existing is not null)
@@ -37,7 +37,8 @@ public sealed class WorkflowInstanceRegistry(
             {
                 State = "Running",
                 Lifetime = lifetime,
-                OutputsJson = outputsJson ?? existing.OutputsJson
+                OutputsJson = outputsJson ?? existing.OutputsJson,
+                ViewsJson = viewsJson ?? existing.ViewsJson
             }, ct);
             return;
         }
@@ -49,6 +50,7 @@ public sealed class WorkflowInstanceRegistry(
             State = "Running",
             Lifetime = lifetime,
             OutputsJson = outputsJson,
+            ViewsJson = viewsJson,
             CreatedUtc = timeProvider.GetUtcNow()
         }, ct);
     }

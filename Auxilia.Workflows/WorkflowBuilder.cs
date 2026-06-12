@@ -20,6 +20,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     private readonly List<IEnvironmentRequirement> _environmentRequirements = new();
     private readonly List<WorkflowOutputDescriptor> _outputs = new();
     private readonly List<SignalDescriptor> _signals = new();
+    private readonly List<Views.ViewDescriptor> _views = new();
     private readonly WorkflowMetadata _metadata = new();
     private Action<IServiceCollection>? _configureServices;
     private Func<IServiceProvider, CancellationToken, Task>? _application;
@@ -84,6 +85,16 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             throw new InvalidOperationException($"A signal with name '{name}' has already been declared.");
         var schema = JsonSchemaExporter.GetJsonSchemaAsNode(JsonSerializerOptions.Default, typeof(TPayload));
         _signals.Add(new SignalDescriptor(name, typeof(TPayload).FullName ?? typeof(TPayload).Name, schema.ToJsonString(), description));
+        return this;
+    }
+
+    public IWorkflowBuilder DeclaresView<TItem>(
+        string name, Views.ViewRendering rendering, Views.ViewLifecycle lifecycle)
+    {
+        if (_views.Any(v => v.Name == name))
+            throw new InvalidOperationException($"A view with name '{name}' has already been declared.");
+        var schema = JsonSchemaExporter.GetJsonSchemaAsNode(JsonSerializerOptions.Default, typeof(TItem));
+        _views.Add(new Views.ViewDescriptor(name, schema.ToJsonString(), rendering, lifecycle));
         return this;
     }
 
@@ -217,6 +228,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                     var services = new ServiceCollection();
                     services.AddSingleton(context.MessageBus);
                     services.AddSingleton(drainSignal);
+                    services.AddSingleton<Views.IViewPublisher>(
+                        new Views.DefaultViewPublisher(context.MessageBus, instanceId, _views.AsReadOnly()));
                     if (activeResolver is not null)
                     {
                         // Empty Slots on a successful response means just-in-time delivery:
@@ -294,7 +307,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             Tags = _metadata.Tags.ToList().AsReadOnly(),
             Outputs = _outputs.AsReadOnly(),
             Signals = _signals.AsReadOnly(),
-            Lifetime = _lifetime
+            Lifetime = _lifetime,
+            Views = _views.AsReadOnly()
         };
 
     internal WorkflowManifest BuildManifest(Guid instanceId = default)
@@ -302,6 +316,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             _metadata.Version, _metadata.Tags.ToList().AsReadOnly(), _outputs.AsReadOnly())
         {
             Signals = _signals.AsReadOnly(),
-            Lifetime = _lifetime
+            Lifetime = _lifetime,
+            Views = _views.AsReadOnly()
         };
 }

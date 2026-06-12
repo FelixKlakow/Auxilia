@@ -22,6 +22,13 @@ public interface IWorkflowBuilder
 
     IWorkflowBuilder DeclaresSignal<TPayload>(string name, string? description = null);
 
+    /// <summary>
+    /// Declares a named, schema-declared view (ARCHITECTURE §15). Items published via
+    /// <see cref="Views.IViewPublisher"/> must conform to <typeparamref name="TItem"/>.
+    /// </summary>
+    IWorkflowBuilder DeclaresView<TItem>(
+        string name, Views.ViewRendering rendering, Views.ViewLifecycle lifecycle);
+
     IWorkflowBuilder ConfigureServices(Action<IServiceCollection> configure);
 
     IWorkflowBuilder WithApplication(Func<IServiceProvider, CancellationToken, Task> run);

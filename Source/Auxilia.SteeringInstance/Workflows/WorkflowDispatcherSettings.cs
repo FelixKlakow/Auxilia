@@ -34,6 +34,9 @@ public sealed class WorkflowDispatcherSettings
     public string RunOutputDirectory { get; set; } =
         Path.Combine(Path.GetTempPath(), "auxilia-run-output");
 
+    /// <summary>Per-(run, view) persisted item cap; items beyond it are dropped and logged.</summary>
+    public long MaxViewItemsPerView { get; set; } = 10_000;
+
     /// <summary>
     /// When true (default), announcements and registrations must carry the one-time instance
     /// token issued at launch, and responses go only to the platform-created response queue.

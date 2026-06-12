@@ -71,6 +71,8 @@ try
     builder.Services.AddPlatformEntity<AuditRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<ServiceHeartbeatRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<ArtifactRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<ViewDataRecord>(platformDataSettings);
+    builder.Services.AddSingleton<ViewDataHandler>();
     builder.Services.AddSingleton<Auxilia.PlatformData.Artifacts.IArtifactStore,
         Auxilia.PlatformData.Artifacts.FileSystemArtifactStore>();
     builder.Services.AddSingleton<ArtifactPersister>();
@@ -187,6 +189,9 @@ try
 
     var slotActivationHandler = app.Services.GetRequiredService<SlotActivationHandler>();
     await slotActivationHandler.StartAsync(app.Lifetime.ApplicationStopping);
+
+    var viewDataHandler = app.Services.GetRequiredService<ViewDataHandler>();
+    await viewDataHandler.StartAsync(app.Lifetime.ApplicationStopping);
 
     var signalDispatcher = app.Services.GetRequiredService<SignalDispatcher>();
     await signalDispatcher.StartAsync(app.Lifetime.ApplicationStopping);

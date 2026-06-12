@@ -107,6 +107,47 @@ public class WorkflowBuilderHandshakeTests
         Assert.That(req.PublicKey, Is.Not.Empty);
     }
 
+    private sealed record ProgressItem(string Step, int Percent);
+
+    [Test]
+    public async Task Run_WithDeclaredViews_RegistrationRequestManifestCarriesViewDescriptors()
+    {
+        var bus = new RecordingBus();
+        var mockExit = new Mock<IProcessExitService>();
+        var context = new FakeWorkflowRunContext(bus, mockExit.Object);
+
+        bus.OnPublish = (topic, message) =>
+        {
+            if (topic == "workflow.announcements" && message is WorkflowAnnouncementMessage ann)
+            {
+                bus.DeliverAsync(ann.ResponseTopic,
+                    new WorkflowDirective(ann.WorkflowInstanceId, WorkflowDirectiveKind.Run));
+            }
+            else if (topic == "workflow-registration" && message is WorkflowRegistrationRequest req)
+            {
+                bus.DeliverAsync(req.ResponseTopic,
+                    new WorkflowConfigurationResponse(req.WorkflowInstanceId, false, "rejected",
+                        new Dictionary<string, EncryptedSlotConfiguration>()));
+            }
+        };
+
+        var builder = (WorkflowBuilder)WorkflowBuilder.Create("test-workflow")
+            .DeclaresView<ProgressItem>("progress",
+                Views.ViewRendering.Stream, Views.ViewLifecycle.LiveAndPersisted);
+        builder._directiveTimeout = TimeSpan.FromSeconds(5);
+
+        await builder.Run([], context);
+
+        var registrations = bus.Published("workflow-registration");
+        Assert.That(registrations, Has.Count.EqualTo(1));
+        var req = (WorkflowRegistrationRequest)registrations[0];
+        Assert.That(req.Manifest.Views, Has.Count.EqualTo(1));
+        Assert.That(req.Manifest.Views[0].Name, Is.EqualTo("progress"));
+        Assert.That(req.Manifest.Views[0].Rendering, Is.EqualTo(Views.ViewRendering.Stream));
+        Assert.That(req.Manifest.Views[0].Lifecycle, Is.EqualTo(Views.ViewLifecycle.LiveAndPersisted));
+        Assert.That(req.Manifest.Views[0].ItemSchemaJson, Is.Not.Empty);
+    }
+
     [Test]
     public async Task Run_WhenNoDirectiveReceived_LogsErrorAndExits1()
     {
