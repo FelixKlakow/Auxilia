@@ -69,6 +69,7 @@ try
     builder.Services.AddPlatformEntity<SignalHandlerRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<WorkflowInstanceRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<AuditRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<ServiceHeartbeatRecord>(platformDataSettings);
     builder.Services.AddSingleton<AuditLog>();
     if (string.IsNullOrWhiteSpace(platformDataSettings.ProtectionKeyBase64))
         Log.Warning("PlatformData:ProtectionKeyBase64 is not configured — slot settings are stored unprotected (dev only).");
@@ -95,7 +96,8 @@ try
     builder.Services.AddSingleton<WorkflowDispatcher>();
     builder.Services.AddSingleton<WorkflowCancelDispatcher>();
     builder.Services.AddSingleton<WorkflowStateHandler>();
-    builder.Services.AddSingleton<WorkflowStatusPublisher>();
+    builder.Services.AddSingleton<Auxilia.Workflows.Messaging.WorkflowStatusPublisher>();
+    builder.Services.AddHostedService<SteeringHeartbeatService>();
     builder.Services.AddSingleton<IWorkflowLauncher, DockerWorkflowLauncher>();
     builder.Services.AddSingleton<IDockerClientFactory, DefaultDockerClientFactory>();
     builder.Services.AddSingleton<IDeveloperModeProvider, EnvironmentDeveloperModeProvider>();

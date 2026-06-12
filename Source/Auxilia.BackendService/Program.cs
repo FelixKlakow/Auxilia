@@ -1,6 +1,10 @@
 ﻿using System.Reflection;
 using Auxilia.BackendService;
+using Auxilia.BackendService.PlatformHost;
 using Auxilia.Messaging;
+using Auxilia.PlatformData;
+using Auxilia.PlatformData.Entities;
+using Auxilia.Workflows.Messaging;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -87,6 +91,26 @@ try
                     r.PeriodicExportingMetricReaderOptions.ExportIntervalMilliseconds = 5_000;
                 });
         });
+
+    // --- Durable platform data ---
+    var platformDataSettings = new PlatformDataSettings();
+    builder.Configuration.GetSection("PlatformData").Bind(platformDataSettings);
+    builder.Services.AddSingleton(platformDataSettings);
+    builder.Services.AddSettingsProtection(platformDataSettings);
+    builder.Services.AddPlatformEntity<WorkflowInstanceRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<ServiceHeartbeatRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<ScheduledTriggerRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<AuditRecord>(platformDataSettings);
+    builder.Services.AddSingleton(TimeProvider.System);
+    builder.Services.AddSingleton<AuditLog>();
+    builder.Services.AddSingleton<WorkflowStatusPublisher>();
+
+    // --- Platform host (status fan-out, heartbeat monitor, scheduler) ---
+    builder.Services.Configure<PlatformHostSettings>(
+        builder.Configuration.GetSection("PlatformHost"));
+    builder.Services.AddHostedService<WorkflowStatusEventHandler>();
+    builder.Services.AddHostedService<HeartbeatMonitor>();
+    builder.Services.AddHostedService<TriggerScheduler>();
 
     // --- Hosted services ---
     builder.Services.AddHostedService<QueueInitializer>();

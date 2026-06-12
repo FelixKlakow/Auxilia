@@ -1,5 +1,6 @@
 using Auxilia.Messaging;
 using Auxilia.PlatformData;
+using Auxilia.Workflows.Messaging;
 using Auxilia.Workflows.Messaging.Messages;
 
 namespace Auxilia.SteeringInstance.Workflows;

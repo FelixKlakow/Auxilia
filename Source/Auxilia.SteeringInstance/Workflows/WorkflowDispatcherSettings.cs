@@ -32,4 +32,7 @@ public sealed class WorkflowDispatcherSettings
     /// commands that do carry a principal are always policy-checked regardless of this flag.
     /// </summary>
     public bool RequirePrincipal { get; set; }
+
+    /// <summary>Interval for this instance's liveness heartbeat in the platform data layer.</summary>
+    public int HeartbeatIntervalSeconds { get; set; } = 5;
 }

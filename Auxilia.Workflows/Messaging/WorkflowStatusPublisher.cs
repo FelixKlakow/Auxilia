@@ -1,7 +1,7 @@
 using Auxilia.Messaging;
 using Auxilia.Workflows.Messaging.Messages;
 
-namespace Auxilia.SteeringInstance.Workflows;
+namespace Auxilia.Workflows.Messaging;
 
 /// <summary>
 /// Publishes lifecycle transitions to the <see cref="WorkflowStatusEvent.ExchangeName"/> fanout
