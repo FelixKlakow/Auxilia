@@ -1,7 +1,9 @@
 using System.IO.Compression;
 using Auxilia.Messaging;
 using Auxilia.SteeringInstance.Workflows.Storage;
+using Auxilia.Workflows;
 using Auxilia.Workflows.Crypto;
+using Auxilia.Workflows.Messaging;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.Options;
 
@@ -29,6 +31,7 @@ public sealed class WorkflowDispatcher(
     PendingWorkflowPackageStore pendingPackages,
     SlotConfigurationStore slotStore,
     SlotProviderRegistry providerRegistry,
+    WorkflowInstanceTokenRegistry tokenRegistry,
     ILogger<WorkflowDispatcher> logger)
 {
     private IAsyncDisposable? _subscription;
@@ -51,6 +54,11 @@ public sealed class WorkflowDispatcher(
 
         var settings = launcherSettings.Value;
 
+        // Issue the per-launch identity and one-time token, and pre-create the instance's
+        // exclusive response queue so configuration is never delivered to a self-declared topic.
+        var issued = tokenRegistry.Issue(command.WorkflowType);
+        await messageBus.DeclareQueueAsync(WorkflowQueues.ResponseQueueFor(issued.WorkflowInstanceId), ct);
+
         // 5. Build env vars
         var env = new Dictionary<string, string>
         {
@@ -58,7 +66,10 @@ public sealed class WorkflowDispatcher(
             ["RabbitMq__Port"]               = settings.RabbitMqPort.ToString(),
             ["RabbitMq__UserName"]           = settings.RabbitMqUserName,
             ["RabbitMq__Password"]           = settings.RabbitMqPassword,
-            ["Workflow__RegistrationQueue"]  = dispatcherSettings.Value.RegistrationQueueName,
+            [WorkflowEnvironmentVariables.RegistrationQueue] = dispatcherSettings.Value.RegistrationQueueName,
+            [WorkflowEnvironmentVariables.AnnouncementQueue] = dispatcherSettings.Value.AnnouncementQueueName,
+            [WorkflowEnvironmentVariables.InstanceId]        = issued.WorkflowInstanceId.ToString("D"),
+            [WorkflowEnvironmentVariables.InstanceToken]     = issued.Token,
         };
 
         foreach (var (key, value) in command.Context)

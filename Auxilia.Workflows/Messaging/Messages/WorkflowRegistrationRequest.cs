@@ -4,4 +4,5 @@ public record WorkflowRegistrationRequest(
     Guid WorkflowInstanceId,
     WorkflowManifest Manifest,
     string PublicKey,
-    string ResponseTopic);
+    string ResponseTopic,
+    string? InstanceToken = null);

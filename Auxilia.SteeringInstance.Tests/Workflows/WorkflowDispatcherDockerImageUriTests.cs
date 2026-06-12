@@ -64,6 +64,8 @@ public class WorkflowDispatcherDockerImageUriTests
             _mockPendingPackages.Object,
             slotStore ?? new SlotConfigurationStore(),
             providerRegistry ?? new SlotProviderRegistry(),
+            new WorkflowInstanceTokenRegistry(
+                Options.Create(new WorkflowDispatcherSettings()), TimeProvider.System),
             NullLogger<WorkflowDispatcher>.Instance);
     }
 

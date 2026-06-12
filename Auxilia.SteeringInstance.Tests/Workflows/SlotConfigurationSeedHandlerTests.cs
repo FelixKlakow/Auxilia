@@ -104,7 +104,7 @@ public class SlotConfigurationSeedHandlerTests
     [Test]
     public async Task WhenSeedQueueMessageReceived_UpsertCommandIsApplied()
     {
-        await _fakeBus.SimulateReceivedAsync("test-queue-slot-seed",
+        await _fakeBus.SimulateReceivedAsync("test-queue-slot-seed.upsert",
             new UpsertSlotConfigurationCommand("wf", "slot-a", "provider-x", new Dictionary<string, string>()));
 
         var configs = _slotStore.GetConfigurations("wf");

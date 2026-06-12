@@ -18,7 +18,9 @@ public class WorkflowRegistrationHandlerTests
         CapturingFakeMessageBusClient messageBus,
         EnvironmentValidator? envValidator = null,
         ConfigurationResolver? configResolver = null,
-        WorkflowInstanceRegistry? instanceRegistry = null)
+        WorkflowInstanceRegistry? instanceRegistry = null,
+        WorkflowInstanceTokenRegistry? tokenRegistry = null,
+        bool requireInstanceToken = false)
     {
         var profile = new RunnerProfile
         {
@@ -36,12 +38,18 @@ public class WorkflowRegistrationHandlerTests
             signalStore,
             NullLogger<ConfigurationResolver>.Instance);
 
+        var settings = Options.Create(new WorkflowDispatcherSettings
+        {
+            RequireInstanceToken = requireInstanceToken
+        });
+
         return new WorkflowRegistrationHandler(
             messageBus,
             validator,
             resolver,
             instanceRegistry ?? new WorkflowInstanceRegistry(),
-            Options.Create(new WorkflowDispatcherSettings()),
+            tokenRegistry ?? new WorkflowInstanceTokenRegistry(settings, TimeProvider.System),
+            settings,
             NullLogger<WorkflowRegistrationHandler>.Instance);
     }
 
@@ -231,6 +239,82 @@ public class WorkflowRegistrationHandlerTests
         await bus.InvokeAsync(request, CancellationToken.None);
 
         Assert.That(handler.RegisteredCount, Is.EqualTo(1));
+    }
+
+    // ------------------------------------------------------------------ Instance token authentication
+
+    private static WorkflowInstanceTokenRegistry MakeTokenRegistry() =>
+        new(Options.Create(new WorkflowDispatcherSettings()), TimeProvider.System);
+
+    private static WorkflowRegistrationRequest SlotlessRequest(Guid instanceId, string? token) =>
+        new(instanceId,
+            new WorkflowManifest("SlotlessWorkflow", instanceId.ToString(), [], [], string.Empty, [], []),
+            ValidPublicKey(), "self-declared-topic", token);
+
+    [Test]
+    public async Task HandleAsync_TokenRequired_MissingToken_PublishesNothing()
+    {
+        var bus = new CapturingFakeMessageBusClient();
+        var handler = MakeHandler(bus, tokenRegistry: MakeTokenRegistry(), requireInstanceToken: true);
+        await handler.StartAsync(CancellationToken.None);
+
+        await bus.InvokeAsync(SlotlessRequest(Guid.NewGuid(), token: null), CancellationToken.None);
+
+        Assert.That(bus.Published, Is.Empty);
+        Assert.That(handler.RegisteredCount, Is.Zero);
+    }
+
+    [Test]
+    public async Task HandleAsync_TokenRequired_WrongToken_PublishesNothing()
+    {
+        var registry = MakeTokenRegistry();
+        var issued = registry.Issue("SlotlessWorkflow");
+
+        var bus = new CapturingFakeMessageBusClient();
+        var handler = MakeHandler(bus, tokenRegistry: registry, requireInstanceToken: true);
+        await handler.StartAsync(CancellationToken.None);
+
+        await bus.InvokeAsync(
+            SlotlessRequest(issued.WorkflowInstanceId, token: "not-the-issued-token"),
+            CancellationToken.None);
+
+        Assert.That(bus.Published, Is.Empty);
+    }
+
+    [Test]
+    public async Task HandleAsync_TokenRequired_ValidToken_RespondsOnCanonicalQueueIgnoringSelfDeclaredTopic()
+    {
+        var registry = MakeTokenRegistry();
+        var issued = registry.Issue("SlotlessWorkflow");
+
+        var bus = new CapturingFakeMessageBusClient();
+        var handler = MakeHandler(bus, tokenRegistry: registry, requireInstanceToken: true);
+        await handler.StartAsync(CancellationToken.None);
+
+        await bus.InvokeAsync(
+            SlotlessRequest(issued.WorkflowInstanceId, issued.Token),
+            CancellationToken.None);
+
+        Assert.That(bus.Published, Has.Count.EqualTo(1));
+        var (topic, msg) = bus.Published[0];
+        Assert.That(topic, Is.EqualTo(Auxilia.Workflows.Messaging.WorkflowQueues.ResponseQueueFor(issued.WorkflowInstanceId)));
+        Assert.That(((WorkflowConfigurationResponse)msg).Success, Is.True);
+    }
+
+    [Test]
+    public async Task HandleAsync_TokenRequired_TokenIsSingleUse_SecondRegistrationRejected()
+    {
+        var registry = MakeTokenRegistry();
+        var issued = registry.Issue("SlotlessWorkflow");
+
+        var bus = new CapturingFakeMessageBusClient();
+        var handler = MakeHandler(bus, tokenRegistry: registry, requireInstanceToken: true);
+        await handler.StartAsync(CancellationToken.None);
+
+        await bus.InvokeAsync(SlotlessRequest(issued.WorkflowInstanceId, issued.Token), CancellationToken.None);
+        await bus.InvokeAsync(SlotlessRequest(issued.WorkflowInstanceId, issued.Token), CancellationToken.None);
+
+        Assert.That(bus.Published, Has.Count.EqualTo(1), "Second registration with a consumed token must be rejected.");
     }
 
     // A fake that captures the subscription callback so tests can invoke it directly.

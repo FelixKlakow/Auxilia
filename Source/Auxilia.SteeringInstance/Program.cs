@@ -61,6 +61,8 @@ try
     builder.Services.AddSingleton<SlotConfigurationStore>();
     builder.Services.AddSingleton<SignalHandlerStore>();
     builder.Services.AddSingleton<WorkflowInstanceRegistry>();
+    builder.Services.AddSingleton(TimeProvider.System);
+    builder.Services.AddSingleton<WorkflowInstanceTokenRegistry>();
     builder.Services.AddSingleton<DirtyConfigurationDetector>();
     builder.Services.AddSingleton<EnvironmentValidator>();
     builder.Services.AddSingleton<ConfigurationResolver>();

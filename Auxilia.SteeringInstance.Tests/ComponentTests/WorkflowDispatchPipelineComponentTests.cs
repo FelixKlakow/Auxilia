@@ -103,6 +103,13 @@ public class WorkflowDispatchPipelineComponentTests
                     p.OpenPorts = new HashSet<int>();
                 });
 
+                // These tests publish announcements/registrations directly (no dispatcher launch),
+                // so they run in the unauthenticated dev mode. The authenticated handshake is
+                // covered by AuthenticatedHandshakeComponentTests.
+                services.Configure<WorkflowDispatcherSettings>(s => s.RequireInstanceToken = false);
+
+                services.AddSingleton(TimeProvider.System);
+                services.AddSingleton<WorkflowInstanceTokenRegistry>();
                 services.AddSingleton<SlotConfigurationStore>();
                 services.AddSingleton<SlotProviderRegistry>();
                 services.AddSingleton<SignalHandlerStore>();

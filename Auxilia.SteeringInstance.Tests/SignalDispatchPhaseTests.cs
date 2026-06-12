@@ -118,7 +118,10 @@ public class SignalDispatchPhaseTests
         var bus = new CapturingBus();
         var profile = new RunnerProfile { AvailableTools = new HashSet<string>(), OpenPorts = new HashSet<int>() };
         var validator = new EnvironmentValidator(Options.Create(profile), NullLogger<EnvironmentValidator>.Instance);
-        var handler = new WorkflowRegistrationHandler(bus, validator, resolver, registry, Options.Create(new WorkflowDispatcherSettings()), NullLogger<WorkflowRegistrationHandler>.Instance);
+        var settings = Options.Create(new WorkflowDispatcherSettings { RequireInstanceToken = false });
+        var handler = new WorkflowRegistrationHandler(bus, validator, resolver, registry,
+            new WorkflowInstanceTokenRegistry(settings, TimeProvider.System), settings,
+            NullLogger<WorkflowRegistrationHandler>.Instance);
 
         await handler.StartAsync(CancellationToken.None);
 

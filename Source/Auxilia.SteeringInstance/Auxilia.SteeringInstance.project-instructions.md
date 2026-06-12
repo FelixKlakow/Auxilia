@@ -22,7 +22,9 @@ Schema drift: `DirtyConfigurationDetector` JSON-diffs an incoming `WorkflowSchem
 
 `WorkflowRegistrationHandler` is started manually in `ApplicationStarted`, not as an `IHostedService`.
 
-Slot configurations and slot-provider plugin registrations are seeded at runtime via the `slot-configurations` fanout exchange (messages: `UpsertSlotConfigurationCommand`, `RemoveSlotConfigurationCommand`, `RegisterSlotProviderCommand`, `RemoveSlotProviderCommand`). A `SlotConfigurationSeedHandler` subscribes to this exchange on startup. Multiple Steering Instance replicas each receive their own copy of every broadcast. Each instance also exposes a per-instance seed queue (`{CommandQueueName}-slot-seed`) for targeted configuration delivery that bypasses the fanout.
+Slot configurations and slot-provider plugin registrations are seeded at runtime via the `slot-configurations` fanout exchange (messages: `UpsertSlotConfigurationCommand`, `RemoveSlotConfigurationCommand`, `RegisterSlotProviderCommand`, `RemoveSlotProviderCommand`). A `SlotConfigurationSeedHandler` subscribes to this exchange on startup. Multiple Steering Instance replicas each receive their own copy of every broadcast. Each instance also exposes per-instance typed seed queues (`{CommandQueueName}-slot-seed.upsert|.remove|.register|.remove-provider`) for targeted configuration delivery that bypasses the fanout.
+
+The registration handshake is **authenticated by default** (`WorkflowDispatcherSettings.RequireInstanceToken`): the dispatcher issues a one-time instance token per launch (`WorkflowInstanceTokenRegistry`), injects it via `Workflow__InstanceId`/`Workflow__InstanceToken` env vars, and pre-creates the per-instance response queue. Announcement and registration handlers validate the token and answer only on that canonical queue, ignoring the message's self-declared response topic. When several instances share a broker, `AnnouncementQueueName` (and `RegistrationQueueName`) must be unique per instance — the launching instance holds the token, the pending package, and the slot configs.
 
 ## File / Folder Map
 ```
@@ -37,6 +39,7 @@ Source/Auxilia.SteeringInstance/
     ├── RunnerProfile.cs                 # Config POCO: AvailableTools, OperatingSystem, OpenPorts
     ├── ResolverResult.cs / ValidationResult.cs / SchemaDiffResult.cs  # Result types
     └── Storage/
+        ├── WorkflowInstanceTokenRegistry.cs  # One-time launch tokens: issue / validate / consume
         ├── WorkflowSchemaStore.cs        # ConcurrentDictionary: workflowType → WorkflowSchema
         ├── SlotConfigurationStore.cs     # ConcurrentDictionary: workflowType → List<StoredSlotConfiguration>
         ├── SlotProviderRegistry.cs       # ConcurrentDictionary: providerType → DLL path

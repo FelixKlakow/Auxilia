@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using Auxilia.Messaging;
+using Auxilia.SteeringInstance.Workflows.Storage;
+using Auxilia.Workflows.Messaging;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -11,6 +13,7 @@ public sealed class WorkflowRegistrationHandler(
     EnvironmentValidator environmentValidator,
     ConfigurationResolver configResolver,
     WorkflowInstanceRegistry instanceRegistry,
+    WorkflowInstanceTokenRegistry tokenRegistry,
     IOptions<WorkflowDispatcherSettings> dispatcherSettings,
     ILogger<WorkflowRegistrationHandler> logger)
 {
@@ -29,6 +32,23 @@ public sealed class WorkflowRegistrationHandler(
 
     private async Task HandleAsync(WorkflowRegistrationRequest request, CancellationToken cancellationToken)
     {
+        var responseTopic = request.ResponseTopic;
+        if (dispatcherSettings.Value.RequireInstanceToken)
+        {
+            if (!tokenRegistry.Validate(request.WorkflowInstanceId, request.InstanceToken))
+            {
+                logger.LogWarning(
+                    "Rejected WorkflowRegistrationRequest with missing or invalid instance token. Workflow={WorkflowName} InstanceId={InstanceId}",
+                    request.Manifest.WorkflowName, request.WorkflowInstanceId);
+                return;
+            }
+
+            // One registration per launch: the token is consumed regardless of the outcome,
+            // and the response goes only to the queue the platform pre-created at launch.
+            tokenRegistry.Consume(request.WorkflowInstanceId);
+            responseTopic = WorkflowQueues.ResponseQueueFor(request.WorkflowInstanceId);
+        }
+
         var envResult = environmentValidator.Validate(request.Manifest);
         if (!envResult.IsValid)
         {
@@ -37,7 +57,7 @@ public sealed class WorkflowRegistrationHandler(
                 request.WorkflowInstanceId,
                 string.Join("; ", envResult.UnsatisfiedRequirements));
 
-            await messageBus.PublishAsync(request.ResponseTopic, new WorkflowConfigurationResponse(
+            await messageBus.PublishAsync(responseTopic, new WorkflowConfigurationResponse(
                 request.WorkflowInstanceId,
                 false,
                 string.Join("; ", envResult.UnsatisfiedRequirements),
@@ -53,7 +73,7 @@ public sealed class WorkflowRegistrationHandler(
                 "Workflow {WorkflowInstanceId} declares no slots — responding with empty configuration.",
                 request.WorkflowInstanceId);
             var signalHandlers = configResolver.ResolveSignalHandlers(request.Manifest.WorkflowName);
-            await messageBus.PublishAsync(request.ResponseTopic, new WorkflowConfigurationResponse(
+            await messageBus.PublishAsync(responseTopic, new WorkflowConfigurationResponse(
                 request.WorkflowInstanceId, true, null,
                 new Dictionary<string, EncryptedSlotConfiguration>(),
                 signalHandlers),
@@ -70,7 +90,7 @@ public sealed class WorkflowRegistrationHandler(
                 request.WorkflowInstanceId,
                 resolverResult.FailureReason);
 
-            await messageBus.PublishAsync(request.ResponseTopic, new WorkflowConfigurationResponse(
+            await messageBus.PublishAsync(responseTopic, new WorkflowConfigurationResponse(
                 request.WorkflowInstanceId,
                 false,
                 resolverResult.FailureReason,
@@ -83,7 +103,7 @@ public sealed class WorkflowRegistrationHandler(
             "Workflow registration succeeded for instance {WorkflowInstanceId}.",
             request.WorkflowInstanceId);
 
-        await messageBus.PublishAsync(request.ResponseTopic, new WorkflowConfigurationResponse(
+        await messageBus.PublishAsync(responseTopic, new WorkflowConfigurationResponse(
             request.WorkflowInstanceId,
             true,
             null,

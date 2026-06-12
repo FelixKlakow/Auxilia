@@ -3,6 +3,7 @@ using Auxilia.Workflows.Capabilities;
 using Auxilia.Workflows.Crypto;
 using Auxilia.Workflows.Environment;
 using Auxilia.Workflows.Internal;
+using Auxilia.Workflows.Messaging;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -108,8 +109,14 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     public async Task Run(string[] args, IWorkflowRunContext context)
     {
         using var keyPair = new EphemeralKeyPair();
-        var instanceId = Guid.NewGuid();
-        var responseTopic = $"workflow-response-{instanceId}";
+
+        // Platform-launched instances receive their identity and a one-time token at launch;
+        // a self-generated identity is the unauthenticated dev fallback.
+        var instanceId = Guid.TryParse(
+            System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.InstanceId),
+            out var assignedId) ? assignedId : Guid.NewGuid();
+        var instanceToken = System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.InstanceToken);
+        var responseTopic = WorkflowQueues.ResponseQueueFor(instanceId);
 
         await context.MessageBus.DeclareQueueAsync(responseTopic);
 
@@ -117,8 +124,9 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
         var directiveSub = await context.MessageBus.SubscribeAsync<WorkflowDirective>(
             responseTopic, (msg, _) => { directiveTcs.TrySetResult(msg); return Task.CompletedTask; });
 
-        await context.MessageBus.PublishAsync("workflow.announcements",
-            new WorkflowAnnouncementMessage(instanceId, _workflowName, keyPair.PublicKeyBase64, responseTopic));
+        await context.MessageBus.PublishAsync(
+            System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.AnnouncementQueue) ?? "workflow.announcements",
+            new WorkflowAnnouncementMessage(instanceId, _workflowName, keyPair.PublicKeyBase64, responseTopic, instanceToken));
 
         var completed = await Task.WhenAny(directiveTcs.Task, Task.Delay(_directiveTimeout));
         await directiveSub.DisposeAsync();
@@ -141,9 +149,9 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                     responseTopic, (msg, _) => { configTcs.TrySetResult(msg); return Task.CompletedTask; });
 
                 await context.MessageBus.PublishAsync(
-                    System.Environment.GetEnvironmentVariable("Workflow__RegistrationQueue") ?? "workflow-registration",
+                    System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.RegistrationQueue) ?? "workflow-registration",
                     new WorkflowRegistrationRequest(instanceId, BuildManifest(instanceId),
-                        keyPair.PublicKeyBase64, responseTopic));
+                        keyPair.PublicKeyBase64, responseTopic, instanceToken));
 
                 var configCompleted = await Task.WhenAny(configTcs.Task, Task.Delay(_directiveTimeout));
                 await configSub.DisposeAsync();

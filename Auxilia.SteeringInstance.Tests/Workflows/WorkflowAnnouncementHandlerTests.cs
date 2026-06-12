@@ -1,8 +1,10 @@
 using Auxilia.Messaging;
 using Auxilia.SteeringInstance.Workflows;
 using Auxilia.SteeringInstance.Workflows.Storage;
+using Auxilia.Workflows.Messaging;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 
 namespace Auxilia.SteeringInstance.Tests.Workflows;
@@ -16,6 +18,7 @@ public class WorkflowAnnouncementHandlerTests
     private WorkflowSchemaStore _schemaStore = null!;
     private Func<WorkflowAnnouncementMessage, CancellationToken, Task>? _capturedHandler;
     private WorkflowAnnouncementHandler _sut = null!;
+    private WorkflowInstanceTokenRegistry _tokenRegistry = null!;
 
     [SetUp]
     public async Task SetUp()
@@ -52,13 +55,33 @@ public class WorkflowAnnouncementHandlerTests
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
+        var settings = Options.Create(new WorkflowDispatcherSettings { RequireInstanceToken = false });
+        _tokenRegistry = new WorkflowInstanceTokenRegistry(settings, TimeProvider.System);
         _sut = new WorkflowAnnouncementHandler(
             _mockBus.Object,
             NullLogger<WorkflowAnnouncementHandler>.Instance,
             _schemaStore,
-            _mockPendingPackages.Object);
+            _mockPendingPackages.Object,
+            _tokenRegistry,
+            settings);
 
         await _sut.StartAsync(CancellationToken.None);
+    }
+
+    private async Task<WorkflowAnnouncementHandler> MakeTokenRequiringHandlerAsync()
+    {
+        await _sut.StopAsync();
+        var settings = Options.Create(new WorkflowDispatcherSettings { RequireInstanceToken = true });
+        var sut = new WorkflowAnnouncementHandler(
+            _mockBus.Object,
+            NullLogger<WorkflowAnnouncementHandler>.Instance,
+            _schemaStore,
+            _mockPendingPackages.Object,
+            _tokenRegistry,
+            settings);
+        await sut.StartAsync(CancellationToken.None);
+        _sut = sut;
+        return sut;
     }
 
     [TearDown]
@@ -204,6 +227,58 @@ public class WorkflowAnnouncementHandlerTests
         {
             Directory.Delete(tempDir, recursive: true);
         }
+    }
+
+    // ------------------------------------------------------------------ Instance token authentication
+
+    [Test]
+    public async Task WhenTokenRequired_AndTokenMissing_NoDirectiveIsPublished()
+    {
+        await MakeTokenRequiringHandlerAsync();
+
+        var message = new WorkflowAnnouncementMessage(Guid.NewGuid(), "wf", "pk", "self-declared");
+        await _capturedHandler!(message, CancellationToken.None);
+
+        _mockBus.Verify(
+            b => b.PublishAsync(It.IsAny<string>(), It.IsAny<WorkflowDirective>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Test]
+    public async Task WhenTokenRequired_AndTokenInvalid_NoDirectiveIsPublished()
+    {
+        var issued = _tokenRegistry.Issue("wf");
+        await MakeTokenRequiringHandlerAsync();
+
+        var message = new WorkflowAnnouncementMessage(
+            issued.WorkflowInstanceId, "wf", "pk", "self-declared", "wrong-token");
+        await _capturedHandler!(message, CancellationToken.None);
+
+        _mockBus.Verify(
+            b => b.PublishAsync(It.IsAny<string>(), It.IsAny<WorkflowDirective>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Test]
+    public async Task WhenTokenRequired_AndTokenValid_DirectiveGoesToCanonicalQueueNotSelfDeclaredTopic()
+    {
+        var issued = _tokenRegistry.Issue("wf");
+        await MakeTokenRequiringHandlerAsync();
+
+        var message = new WorkflowAnnouncementMessage(
+            issued.WorkflowInstanceId, "wf", "pk", "self-declared-attacker-topic", issued.Token);
+        await _capturedHandler!(message, CancellationToken.None);
+
+        _mockBus.Verify(
+            b => b.PublishAsync(
+                WorkflowQueues.ResponseQueueFor(issued.WorkflowInstanceId),
+                It.Is<WorkflowDirective>(d => d.Directive == WorkflowDirectiveKind.Run),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        _mockBus.Verify(
+            b => b.PublishAsync(
+                "self-declared-attacker-topic", It.IsAny<WorkflowDirective>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Test]

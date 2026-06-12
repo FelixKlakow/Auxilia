@@ -2,7 +2,9 @@ using System.Text.Json;
 using Auxilia.Messaging;
 using Auxilia.SteeringInstance.Workflows.Storage;
 using Auxilia.Workflows;
+using Auxilia.Workflows.Messaging;
 using Auxilia.Workflows.Messaging.Messages;
+using Microsoft.Extensions.Options;
 
 namespace Auxilia.SteeringInstance.Workflows;
 
@@ -19,21 +21,40 @@ public sealed class WorkflowAnnouncementHandler(
     IMessageBusClient messageBus,
     ILogger<WorkflowAnnouncementHandler> logger,
     WorkflowSchemaStore schemaStore,
-    PendingWorkflowPackageStore pendingPackages)
+    PendingWorkflowPackageStore pendingPackages,
+    WorkflowInstanceTokenRegistry tokenRegistry,
+    IOptions<WorkflowDispatcherSettings> dispatcherSettings)
 {
     private IAsyncDisposable? _subscription;
 
     public async Task StartAsync(CancellationToken ct = default)
     {
-        await messageBus.DeclareQueueAsync("workflow.announcements", ct);
+        var queueName = dispatcherSettings.Value.AnnouncementQueueName;
+        await messageBus.DeclareQueueAsync(queueName, ct);
         _subscription = await messageBus.SubscribeAsync<WorkflowAnnouncementMessage>(
-            "workflow.announcements", HandleAsync, ct);
+            queueName, HandleAsync, ct);
 
-        logger.LogInformation("WorkflowAnnouncementHandler started — listening on workflow.announcements.");
+        logger.LogInformation("WorkflowAnnouncementHandler started — listening on {QueueName}.", queueName);
     }
 
     private async Task HandleAsync(WorkflowAnnouncementMessage message, CancellationToken ct)
     {
+        var responseTopic = message.ResponseTopic;
+        if (dispatcherSettings.Value.RequireInstanceToken)
+        {
+            if (!tokenRegistry.Validate(message.WorkflowInstanceId, message.InstanceToken))
+            {
+                logger.LogWarning(
+                    "Rejected WorkflowAnnouncement with missing or invalid instance token. Workflow={WorkflowName} InstanceId={InstanceId}",
+                    message.WorkflowName, message.WorkflowInstanceId);
+                return;
+            }
+
+            // Authenticated instances are only ever answered on the queue the platform
+            // pre-created at launch — the self-declared ResponseTopic is ignored.
+            responseTopic = WorkflowQueues.ResponseQueueFor(message.WorkflowInstanceId);
+        }
+
         logger.LogInformation(
             "Received WorkflowAnnouncement: Workflow={WorkflowName} InstanceId={InstanceId}. Sending Run directive.",
             message.WorkflowName, message.WorkflowInstanceId);
@@ -54,7 +75,7 @@ public sealed class WorkflowAnnouncementHandler(
         }
 
         await messageBus.PublishAsync(
-            message.ResponseTopic,
+            responseTopic,
             new WorkflowDirective(message.WorkflowInstanceId, WorkflowDirectiveKind.Run),
             ct);
     }

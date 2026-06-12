@@ -45,19 +45,24 @@ public class CodeReviewWorkflowEnvironment
         Directory.CreateDirectory(_happyPublishDir);
         Directory.CreateDirectory(_edgePublishDir);
 
-        await Task.WhenAll(
-            PublishProjectAsync(
-                "Auxilia.FakeSlots.CodeReview.Happy/Auxilia.FakeSlots.CodeReview.Happy.csproj",
-                _happyPublishDir),
-            PublishProjectAsync(
-                "Auxilia.FakeSlots.CodeReview.WriteBackFailure/Auxilia.FakeSlots.CodeReview.WriteBackFailure.csproj",
-                _edgePublishDir),
+        // The two fake-slot projects share their dependency graph (both transitively build
+        // Auxilia.CodeReview.Workflow) — parallel `dotnet publish` races on the same obj/
+        // directory (CS2012). Host-side publishes must run sequentially; the Docker image
+        // builds compile inside containers and can stay parallel.
+        var imageBuilds = Task.WhenAll(
             WorkflowDispatchEnvironment.BuildImageAsync(
                 WorkflowDispatchEnvironment.SteeringImageName,
                 "Source/Auxilia.SteeringInstance/Dockerfile"),
             WorkflowDispatchEnvironment.BuildImageAsync(
                 ProductionImageName,
                 "Source/Auxilia.CodeReview.Workflow/Dockerfile"));
+        await PublishProjectAsync(
+            "Auxilia.FakeSlots.CodeReview.Happy/Auxilia.FakeSlots.CodeReview.Happy.csproj",
+            _happyPublishDir);
+        await PublishProjectAsync(
+            "Auxilia.FakeSlots.CodeReview.WriteBackFailure/Auxilia.FakeSlots.CodeReview.WriteBackFailure.csproj",
+            _edgePublishDir);
+        await imageBuilds;
 
         _network = new NetworkBuilder()
             .WithName(NetworkName)
@@ -90,6 +95,7 @@ public class CodeReviewWorkflowEnvironment
             .WithEnvironment("WorkflowLauncher__RabbitMqPassword", "guest")
             .WithEnvironment("WorkflowDispatcher__CommandQueueName",      HappyCommandQueue)
             .WithEnvironment("WorkflowDispatcher__RegistrationQueueName", "workflow-registration-crw-happy")
+            .WithEnvironment("WorkflowDispatcher__AnnouncementQueueName", "workflow.announcements-crw-happy")
             .WithEnvironment("WorkflowLauncher__ExtraEnvironmentVariables__AUXILIA_DEVELOPER_MODE", "1")
             .WithWaitStrategy(Wait.ForUnixContainer()
                 .UntilMessageIsLogged("WorkflowDispatcher started")
@@ -111,6 +117,7 @@ public class CodeReviewWorkflowEnvironment
             .WithEnvironment("WorkflowLauncher__RabbitMqPassword", "guest")
             .WithEnvironment("WorkflowDispatcher__CommandQueueName",      EdgeCommandQueue)
             .WithEnvironment("WorkflowDispatcher__RegistrationQueueName", "workflow-registration-crw-edge")
+            .WithEnvironment("WorkflowDispatcher__AnnouncementQueueName", "workflow.announcements-crw-edge")
             .WithEnvironment("WorkflowLauncher__ExtraEnvironmentVariables__AUXILIA_DEVELOPER_MODE", "1")
             .WithWaitStrategy(Wait.ForUnixContainer()
                 .UntilMessageIsLogged("WorkflowDispatcher started")

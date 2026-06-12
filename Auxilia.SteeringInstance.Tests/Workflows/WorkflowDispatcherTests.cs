@@ -4,7 +4,9 @@ using System.Text.Json;
 using Auxilia.Messaging;
 using Auxilia.SteeringInstance.Workflows;
 using Auxilia.SteeringInstance.Workflows.Storage;
+using Auxilia.Workflows;
 using Auxilia.Workflows.Crypto;
+using Auxilia.Workflows.Messaging;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -23,6 +25,7 @@ public class WorkflowDispatcherTests
     private Func<RunWorkflowCommand, CancellationToken, Task>? _capturedHandler;
     private WorkflowDispatcher _sut = null!;
     private byte[] _validPackageZip = null!;
+    private WorkflowInstanceTokenRegistry _tokenRegistry = null!;
 
     private static DockerWorkflowLauncherSettings DefaultSettings() => new()
     {
@@ -74,6 +77,8 @@ public class WorkflowDispatcherTests
     public async Task SetUp()
     {
         _validPackageZip = CreateMinimalPackageZip();
+        _tokenRegistry = new WorkflowInstanceTokenRegistry(
+            Options.Create(new WorkflowDispatcherSettings()), TimeProvider.System);
 
         _mockBus = new Mock<IMessageBusClient>(MockBehavior.Strict);
         _mockLauncher = new Mock<IWorkflowLauncher>(MockBehavior.Strict);
@@ -88,6 +93,12 @@ public class WorkflowDispatcherTests
 
         _mockBus
             .Setup(b => b.DeclareQueueAsync("workflow.run-commands", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // The dispatcher pre-creates the per-instance response queue at launch.
+        _mockBus
+            .Setup(b => b.DeclareQueueAsync(
+                It.Is<string>(q => q.StartsWith("workflow-response-")), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         _mockBus
@@ -113,6 +124,7 @@ public class WorkflowDispatcherTests
             _mockPendingPackages.Object,
             new SlotConfigurationStore(),
             new SlotProviderRegistry(),
+            _tokenRegistry,
             NullLogger<WorkflowDispatcher>.Instance);
 
         await _sut.StartAsync(CancellationToken.None);
@@ -322,6 +334,7 @@ public class WorkflowDispatcherTests
             _mockPendingPackages.Object,
             slotStore,
             providerRegistry,
+            _tokenRegistry,
             NullLogger<WorkflowDispatcher>.Instance);
         await _sut.StartAsync(CancellationToken.None);
 
@@ -378,6 +391,7 @@ public class WorkflowDispatcherTests
             _mockPendingPackages.Object,
             slotStore,
             new SlotProviderRegistry(),
+            _tokenRegistry,
             NullLogger<WorkflowDispatcher>.Instance);
         await _sut.StartAsync(CancellationToken.None);
 
@@ -422,6 +436,7 @@ public class WorkflowDispatcherTests
             _mockPendingPackages.Object,
             slotStore,
             providerRegistry,
+            _tokenRegistry,
             NullLogger<WorkflowDispatcher>.Instance);
         await _sut.StartAsync(CancellationToken.None);
 
@@ -432,5 +447,73 @@ public class WorkflowDispatcherTests
 
         Assert.That(captured, Is.Not.Null);
         Assert.That(captured!.SlotPluginFiles, Has.Count.EqualTo(1));
+    }
+
+    // ------------------------------------------------------------------ Instance token issuance
+
+    [Test]
+    public async Task WhenRunCommandReceived_InjectsInstanceIdAndTokenEnvVars()
+    {
+        WorkflowLaunchRequest? captured = null;
+        _mockLauncher
+            .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
+            .Returns(Task.CompletedTask);
+
+        var command = new RunWorkflowCommand(
+            Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
+            new Dictionary<string, string>());
+
+        await _capturedHandler!(command, CancellationToken.None);
+
+        Assert.That(captured, Is.Not.Null);
+        var env = captured!.EnvironmentVariables;
+        Assert.That(env.ContainsKey(WorkflowEnvironmentVariables.InstanceId), Is.True);
+        Assert.That(env.ContainsKey(WorkflowEnvironmentVariables.InstanceToken), Is.True);
+        Assert.That(Guid.TryParse(env[WorkflowEnvironmentVariables.InstanceId], out _), Is.True);
+        Assert.That(env[WorkflowEnvironmentVariables.InstanceToken], Is.Not.Empty);
+        Assert.That(env[WorkflowEnvironmentVariables.AnnouncementQueue], Is.EqualTo("workflow.announcements"));
+    }
+
+    [Test]
+    public async Task WhenRunCommandReceived_IssuedTokenValidatesInRegistry()
+    {
+        WorkflowLaunchRequest? captured = null;
+        _mockLauncher
+            .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
+            .Returns(Task.CompletedTask);
+
+        var command = new RunWorkflowCommand(
+            Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
+            new Dictionary<string, string>());
+
+        await _capturedHandler!(command, CancellationToken.None);
+
+        var env = captured!.EnvironmentVariables;
+        var instanceId = Guid.Parse(env[WorkflowEnvironmentVariables.InstanceId]);
+        var token = env[WorkflowEnvironmentVariables.InstanceToken];
+        Assert.That(_tokenRegistry.Validate(instanceId, token), Is.True);
+    }
+
+    [Test]
+    public async Task WhenRunCommandReceived_PreDeclaresInstanceResponseQueue()
+    {
+        WorkflowLaunchRequest? captured = null;
+        _mockLauncher
+            .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
+            .Returns(Task.CompletedTask);
+
+        var command = new RunWorkflowCommand(
+            Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
+            new Dictionary<string, string>());
+
+        await _capturedHandler!(command, CancellationToken.None);
+
+        var instanceId = Guid.Parse(captured!.EnvironmentVariables[WorkflowEnvironmentVariables.InstanceId]);
+        _mockBus.Verify(
+            b => b.DeclareQueueAsync(WorkflowQueues.ResponseQueueFor(instanceId), It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 }

@@ -45,19 +45,22 @@ public class ImplementationWorkflowEnvironment
         Directory.CreateDirectory(_happyPublishDir);
         Directory.CreateDirectory(_edgePublishDir);
 
-        await Task.WhenAll(
-            PublishProjectAsync(
-                "Auxilia.FakeSlots.Implementation.Happy/Auxilia.FakeSlots.Implementation.Happy.csproj",
-                _happyPublishDir),
-            PublishProjectAsync(
-                "Auxilia.FakeSlots.Implementation.AgentFailure/Auxilia.FakeSlots.Implementation.AgentFailure.csproj",
-                _edgePublishDir),
+        // Host-side publishes share a dependency graph — run sequentially to avoid obj/
+        // contention (CS2012); the Docker builds compile inside containers and stay parallel.
+        var imageBuilds = Task.WhenAll(
             WorkflowDispatchEnvironment.BuildImageAsync(
                 WorkflowDispatchEnvironment.SteeringImageName,
                 "Source/Auxilia.SteeringInstance/Dockerfile"),
             WorkflowDispatchEnvironment.BuildImageAsync(
                 ProductionImageName,
                 "Source/Auxilia.ImplementationWorkflow/Dockerfile"));
+        await PublishProjectAsync(
+            "Auxilia.FakeSlots.Implementation.Happy/Auxilia.FakeSlots.Implementation.Happy.csproj",
+            _happyPublishDir);
+        await PublishProjectAsync(
+            "Auxilia.FakeSlots.Implementation.AgentFailure/Auxilia.FakeSlots.Implementation.AgentFailure.csproj",
+            _edgePublishDir);
+        await imageBuilds;
 
         _network = new NetworkBuilder()
             .WithName(NetworkName)
@@ -90,6 +93,7 @@ public class ImplementationWorkflowEnvironment
             .WithEnvironment("WorkflowLauncher__RabbitMqPassword", "guest")
             .WithEnvironment("WorkflowDispatcher__CommandQueueName",      HappyCommandQueue)
             .WithEnvironment("WorkflowDispatcher__RegistrationQueueName", "workflow-registration-impl-happy")
+            .WithEnvironment("WorkflowDispatcher__AnnouncementQueueName", "workflow.announcements-impl-happy")
             .WithEnvironment("WorkflowLauncher__ExtraEnvironmentVariables__AUXILIA_DEVELOPER_MODE", "1")
             .WithWaitStrategy(Wait.ForUnixContainer()
                 .UntilMessageIsLogged("WorkflowDispatcher started")
@@ -111,6 +115,7 @@ public class ImplementationWorkflowEnvironment
             .WithEnvironment("WorkflowLauncher__RabbitMqPassword", "guest")
             .WithEnvironment("WorkflowDispatcher__CommandQueueName",      EdgeCommandQueue)
             .WithEnvironment("WorkflowDispatcher__RegistrationQueueName", "workflow-registration-impl-edge")
+            .WithEnvironment("WorkflowDispatcher__AnnouncementQueueName", "workflow.announcements-impl-edge")
             .WithEnvironment("WorkflowLauncher__ExtraEnvironmentVariables__AUXILIA_DEVELOPER_MODE", "1")
             .WithWaitStrategy(Wait.ForUnixContainer()
                 .UntilMessageIsLogged("WorkflowDispatcher started")

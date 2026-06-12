@@ -130,6 +130,77 @@ public class WorkflowBuilderHandshakeTests
             It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.AtLeastOnce);
     }
 
+    [Test]
+    public async Task Run_WhenPlatformAssignedIdentityPresent_UsesItAndForwardsTokenInBothMessages()
+    {
+        var assignedId = Guid.NewGuid();
+        const string assignedToken = "one-time-token-123";
+        System.Environment.SetEnvironmentVariable(WorkflowEnvironmentVariables.InstanceId, assignedId.ToString("D"));
+        System.Environment.SetEnvironmentVariable(WorkflowEnvironmentVariables.InstanceToken, assignedToken);
+        try
+        {
+            var bus = new RecordingBus();
+            var mockExit = new Mock<IProcessExitService>();
+            var context = new FakeWorkflowRunContext(bus, mockExit.Object);
+
+            bus.OnPublish = (topic, message) =>
+            {
+                if (topic == "workflow.announcements" && message is WorkflowAnnouncementMessage ann)
+                    bus.DeliverAsync(ann.ResponseTopic,
+                        new WorkflowDirective(ann.WorkflowInstanceId, WorkflowDirectiveKind.Run));
+                else if (topic == "workflow-registration" && message is WorkflowRegistrationRequest req)
+                    bus.DeliverAsync(req.ResponseTopic,
+                        new WorkflowConfigurationResponse(req.WorkflowInstanceId, false, "rejected",
+                            new Dictionary<string, EncryptedSlotConfiguration>()));
+            };
+
+            var builder = (WorkflowBuilder)WorkflowBuilder.Create("test-workflow")
+                .Requires<IStubService>("slot1", new NoCapabilities());
+            builder._directiveTimeout = TimeSpan.FromSeconds(5);
+
+            await builder.Run([], context);
+
+            var ann = (WorkflowAnnouncementMessage)bus.Published("workflow.announcements")[0];
+            var req = (WorkflowRegistrationRequest)bus.Published("workflow-registration")[0];
+            Assert.Multiple(() =>
+            {
+                Assert.That(ann.WorkflowInstanceId, Is.EqualTo(assignedId));
+                Assert.That(ann.InstanceToken, Is.EqualTo(assignedToken));
+                Assert.That(ann.ResponseTopic, Is.EqualTo(Auxilia.Workflows.Messaging.WorkflowQueues.ResponseQueueFor(assignedId)));
+                Assert.That(req.WorkflowInstanceId, Is.EqualTo(assignedId));
+                Assert.That(req.InstanceToken, Is.EqualTo(assignedToken));
+            });
+        }
+        finally
+        {
+            System.Environment.SetEnvironmentVariable(WorkflowEnvironmentVariables.InstanceId, null);
+            System.Environment.SetEnvironmentVariable(WorkflowEnvironmentVariables.InstanceToken, null);
+        }
+    }
+
+    [Test]
+    public async Task Run_WithoutPlatformAssignedIdentity_AnnouncesWithoutToken()
+    {
+        var bus = new RecordingBus();
+        var mockExit = new Mock<IProcessExitService>();
+        var context = new FakeWorkflowRunContext(bus, mockExit.Object);
+
+        bus.OnPublish = (topic, message) =>
+        {
+            if (topic == "workflow.announcements" && message is WorkflowAnnouncementMessage ann)
+                bus.DeliverAsync(ann.ResponseTopic,
+                    new WorkflowDirective(ann.WorkflowInstanceId, (WorkflowDirectiveKind)99));
+        };
+
+        var builder = (WorkflowBuilder)WorkflowBuilder.Create("test-workflow");
+        builder._directiveTimeout = TimeSpan.FromSeconds(5);
+
+        await builder.Run([], context);
+
+        var ann = (WorkflowAnnouncementMessage)bus.Published("workflow.announcements")[0];
+        Assert.That(ann.InstanceToken, Is.Null);
+    }
+
     // ── Shared fake infrastructure ─────────────────────────────────────────────
 
     private sealed class FakeWorkflowRunContext(

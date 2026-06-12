@@ -221,7 +221,7 @@ sequenceDiagram
 - The workflow is **trusted by signature** — the signing authority is responsible for verifying that the workflow is correct and trustworthy before signing. A signature-verified workflow is therefore permitted to hold the scoped credentials its slots resolve to; the SDK keeping decrypted settings out of application code is defence in depth, not the trust boundary.
 - The invariant is **just-in-time delivery**: a workflow holds *no* credentials prior to configuration, and the target model delivers each slot's configuration only when the workflow first activates that slot — not all slots upfront. The current single `WorkflowConfigurationResponse` carrying every slot at registration is an interim simplification; moving to per-slot activation requests is a planned evolution of this handshake.
 - Operator-configured operation limits (e.g. allowed branch patterns, PR-only, no force-push for source control) are enforced in **two layers**: the credential delivered in the `SlotConfiguration` is scoped to the limits wherever the provider supports it, and the slot handler enforces the same limits uniformly before executing any operation. The credential scope is the hard backstop; the handler check provides provider-independent behaviour and clear errors.
-- The handshake must be **authenticated**, not just encrypted — an ephemeral public key proves nothing about who is asking. Target model: the platform injects a **one-time instance token** at launch and pre-creates an **exclusive response queue** per instance; `WorkflowRegistrationRequest` (and future slot-activation requests) must carry the token, and the Steering Instance delivers configurations only to that instance's pre-created queue, ignoring the request's self-declared `ResponseTopic`. The current token-less handshake is an interim dev simplification (tracked as an implementation task).
+- The handshake is **authenticated**, not just encrypted — an ephemeral public key proves nothing about who is asking. The dispatcher issues a **one-time instance token** per launch (env vars `Workflow__InstanceId` / `Workflow__InstanceToken`) and pre-creates the instance's **exclusive response queue** (`workflow-response-{instanceId}`); `WorkflowAnnouncementMessage` and `WorkflowRegistrationRequest` carry the token, the Steering Instance validates it (single-use, time-limited, constant-time comparison) and delivers directives/configurations only to the pre-created queue, ignoring the self-declared `ResponseTopic`. When the env vars are absent the SDK self-generates an identity — accepted only by a Steering Instance configured with `RequireInstanceToken=false` (trusted-operator dev mode).
 
 ### Schema flow (packaging time)
 
@@ -242,10 +242,11 @@ sequenceDiagram
 ```csharp
 // Workflow → Steering (run mode)
 public record WorkflowRegistrationRequest(
-    Guid WorkflowInstanceId,
+    Guid WorkflowInstanceId,   // platform-assigned at launch (env), self-generated only in dev
     WorkflowManifest Manifest,
-    string PublicKey,      // Base64 DER – ephemeral per instance
-    string ResponseTopic); // one-time reply queue
+    string PublicKey,          // Base64 DER – ephemeral per instance
+    string ResponseTopic,      // ignored in authenticated mode — the pre-created queue is used
+    string? InstanceToken = null); // one-time launch token; required unless RequireInstanceToken=false
 
 // Steering → Workflow (run mode)
 public record WorkflowConfigurationResponse(
