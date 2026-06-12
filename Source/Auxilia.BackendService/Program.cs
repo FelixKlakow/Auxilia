@@ -107,6 +107,7 @@ try
     builder.Services.AddPlatformEntity<AuditRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<SlotProviderRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<SlotConfigurationRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<ProviderCatalogRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<DashboardRecord>(platformDataSettings);
     builder.Services.AddSingleton(TimeProvider.System);
     builder.Services.AddSingleton<AuditLog>();
@@ -148,6 +149,7 @@ try
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.LiveViewBroker>();
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.DashboardComposer>();
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.TriggerAdministration>();
+    builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.ProviderCatalogService>();
     builder.Services.AddHostedService<Auxilia.BackendService.Dashboard.ViewDataFanOutHandler>();
 
     // --- Dashboard UI (interactive-server Blazor) ---

@@ -11,6 +11,7 @@ public static class PermissionActions
     public const string ViewSubscribe = "view.subscribe";
     public const string ArtifactConsume = "artifact.consume";
     public const string SlotConfigWrite = "slot-config.write";
+    public const string ProviderCatalogManage = "provider-catalog.manage";
     public const string WorkflowConfigurationManage = "workflow-configuration.manage";
     public const string WorkflowTypeManage = "workflow-type.manage";
     public const string TriggerConfigure = "trigger.configure";

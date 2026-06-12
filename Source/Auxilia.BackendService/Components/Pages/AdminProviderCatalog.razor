@@ -1,0 +1,249 @@
+@page "/admin/provider-catalog"
+@attribute [Authorize]
+@using Auxilia.Workflows
+@inject ProviderCatalogService Catalog
+@inject IPolicyEngine PolicyEngine
+
+<PageTitle>Provider catalog — Auxilia</PageTitle>
+
+<PageHeader Title="Provider catalog"
+            Subtitle="Which registered slot providers users may pick when configuring workflows. Setting keys and kinds come from the signed plugin manifest; only labels, help texts, and defaults can be overridden here."/>
+
+@if (!_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else if (!_allowed)
+{
+    <div class="panel denied">Access denied: @_denyReason</div>
+}
+else
+{
+    @if (_error is not null)
+    {
+        <div class="panel denied">@_error</div>
+    }
+
+    <section class="card">
+        <div class="card-header">
+            <h2>Registered providers</h2>
+            <p class="card-subtitle">Availability is deny-by-default: a provider is offered in the configuration editor only after it is made available. The category groups providers by slot kind (e.g. task-source, repository, ai-agent).</p>
+        </div>
+        @if (_entries.Count == 0)
+        {
+            <div class="card-body"><p class="muted view-empty">No slot-handler plugins registered.</p></div>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                <tr>
+                    <th>Provider type</th>
+                    <th>Category</th>
+                    <th>Settings</th>
+                    <th>Availability</th>
+                    <th>Actions</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var entry in _entries)
+                {
+                    <tr>
+                        <td class="cell-strong">@entry.ProviderType</td>
+                        <td>
+                            <div class="cell-actions">
+                                <input class="input-inline" placeholder="e.g. task-source"
+                                       @bind="_categoryEdits[entry.ProviderType]"/>
+                                <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                        @onclick="() => SaveCategoryAsync(entry.ProviderType)">Save</button>
+                            </div>
+                        </td>
+                        <td>
+                            @if (entry.Descriptors.Count == 0)
+                            {
+                                <span class="muted">(none declared)</span>
+                            }
+                            @foreach (var descriptor in entry.Descriptors)
+                            {
+                                <span class="badge badge-secret" title="@descriptor.Label">@descriptor.Key · @descriptor.Kind@(descriptor.Required ? " *" : "")</span>
+                            }
+                        </td>
+                        <td>
+                            @if (entry.Available)
+                            {
+                                <span class="badge badge-state badge-valid">available</span>
+                            }
+                            else
+                            {
+                                <span class="badge badge-state">hidden</span>
+                            }
+                        </td>
+                        <td>
+                            <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                    @onclick="() => ToggleAvailabilityAsync(entry)">
+                                @(entry.Available ? "Make unavailable" : "Make available")
+                            </button>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </section>
+
+    @foreach (var entry in _entries.Where(e => e.Descriptors.Count > 0))
+    {
+        <details class="advanced-section">
+            <summary>Descriptor overrides — @entry.ProviderType</summary>
+            <div class="advanced-body">
+                <p class="muted">
+                    Leave a field empty to keep the manifest value (shown as placeholder).
+                    Keys and kinds are manifest-owned and cannot be changed here.
+                </p>
+                <table class="data-table">
+                    <thead>
+                    <tr>
+                        <th>Setting</th>
+                        <th>Kind</th>
+                        <th>Label</th>
+                        <th>Help text</th>
+                        <th>Default</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var descriptor in entry.Descriptors)
+                    {
+                        var edit = _overrideEdits[entry.ProviderType][descriptor.Key];
+                        <tr>
+                            <td class="cell-strong">@descriptor.Key@(descriptor.Required ? " *" : "")</td>
+                            <td><span class="type-chip">@descriptor.Kind</span></td>
+                            <td><input class="input-inline" placeholder="@descriptor.Label" @bind="edit.Label"/></td>
+                            <td><input class="input-inline" placeholder="@(descriptor.HelpText ?? "—")" @bind="edit.HelpText"/></td>
+                            <td><input class="input-inline" placeholder="@(descriptor.DefaultValue ?? "—")" @bind="edit.DefaultValue"/></td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+                <div class="button-row">
+                    <button class="btn btn-primary btn-sm" disabled="@_busy"
+                            @onclick="() => SaveOverridesAsync(entry.ProviderType)">Save overrides</button>
+                </div>
+            </div>
+        </details>
+    }
+}
+
+@code {
+
+    [CascadingParameter]
+    public Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool _loaded;
+    private bool _allowed;
+    private bool _busy;
+    private string _denyReason = "";
+    private string? _error;
+    private Guid? _principalId;
+
+    private IReadOnlyList<ProviderCatalogEntry> _entries = [];
+    private readonly Dictionary<string, string> _categoryEdits = new();
+    private readonly Dictionary<string, Dictionary<string, OverrideEdit>> _overrideEdits = new();
+
+    private sealed class OverrideEdit
+    {
+        public string Label { get; set; } = "";
+        public string HelpText { get; set; } = "";
+        public string DefaultValue { get; set; } = "";
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState!).User;
+        _principalId = DashboardAuthEndpoints.PrincipalIdOf(user);
+        if (_principalId is not null)
+        {
+            var decision = await PolicyEngine.EvaluateAsync(
+                new PolicyContext(_principalId.Value, PermissionActions.ProviderCatalogManage, "provider-catalog"));
+            _allowed = decision.Allowed;
+            _denyReason = decision.Reason;
+        }
+        else
+        {
+            _denyReason = "no platform principal in session";
+        }
+
+        if (_allowed)
+            await LoadAsync();
+        _loaded = true;
+    }
+
+    private async Task LoadAsync()
+    {
+        _entries = await Catalog.ListAsync();
+        foreach (var entry in _entries)
+        {
+            _categoryEdits[entry.ProviderType] = entry.Category;
+
+            var edits = _overrideEdits.TryGetValue(entry.ProviderType, out var existing)
+                ? existing
+                : _overrideEdits[entry.ProviderType] = new Dictionary<string, OverrideEdit>();
+            foreach (var descriptor in entry.Descriptors)
+            {
+                var current = entry.Overrides.FirstOrDefault(o => o.Key == descriptor.Key);
+                edits[descriptor.Key] = new OverrideEdit
+                {
+                    Label = current?.Label ?? "",
+                    HelpText = current?.HelpText ?? "",
+                    DefaultValue = current?.DefaultValue ?? ""
+                };
+            }
+        }
+    }
+
+    private Task ToggleAvailabilityAsync(ProviderCatalogEntry entry)
+        => RunAsync(() => Catalog.SetAvailabilityAsync(Actor, entry.ProviderType, !entry.Available));
+
+    private Task SaveCategoryAsync(string providerType)
+        => RunAsync(() => Catalog.SetCategoryAsync(
+            Actor, providerType, _categoryEdits.GetValueOrDefault(providerType, "")));
+
+    private Task SaveOverridesAsync(string providerType)
+    {
+        var overrides = _overrideEdits[providerType]
+            .Where(e => e.Value.Label.Trim().Length > 0
+                        || e.Value.HelpText.Trim().Length > 0
+                        || e.Value.DefaultValue.Trim().Length > 0)
+            .Select(e => new SettingDescriptorOverride(
+                e.Key,
+                NullIfEmpty(e.Value.Label),
+                NullIfEmpty(e.Value.HelpText),
+                NullIfEmpty(e.Value.DefaultValue)))
+            .ToList();
+        return RunAsync(() => Catalog.SetOverridesAsync(Actor, providerType, overrides));
+    }
+
+    private static string? NullIfEmpty(string value)
+        => value.Trim().Length == 0 ? null : value.Trim();
+
+    private string Actor => _principalId!.Value.ToString("D");
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        _error = null;
+        _busy = true;
+        try
+        {
+            await action();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+}

@@ -215,10 +215,15 @@ public class EndToEndEnvironment
             new RegisterSlotProviderCommand(
                 "fake-code-review-happy",
                 $"{ContainerPluginsDir}/Auxilia.FakeSlots.CodeReview.Happy.slothandler.dll"));
+        // The published manifest sidecar is the source of truth for the email provider's
+        // setting descriptors — registration carries them into the provider record (#19).
+        var emailManifest = System.Text.Json.JsonSerializer.Deserialize<Auxilia.Workflows.PluginManifest>(
+            await File.ReadAllTextAsync(Path.Combine(_publishDir, "Auxilia.Slots.Email.slothandler.manifest.json")))!;
         await MessageBusClient.PublishAsync(seedBase + ".register",
             new RegisterSlotProviderCommand(
                 "email-work-items",
-                $"{ContainerPluginsDir}/Auxilia.Slots.Email.slothandler.dll"));
+                $"{ContainerPluginsDir}/Auxilia.Slots.Email.slothandler.dll",
+                emailManifest.Settings));
 
         foreach (var slotName in new[] { "repository", "pull-request", "primary-reviewer",
                                           "secondary-reviewer", "workflow-bootstrap" })
@@ -307,6 +312,7 @@ public class EndToEndEnvironment
         AddEntity<ArtifactRecord>(services);
         AddEntity<ViewDataRecord>(services);
         AddEntity<WorkflowInstanceRecord>(services);
+        AddEntity<SlotProviderRecord>(services);
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<AuditLog>();
         services.AddSingleton<PrincipalDirectory>();

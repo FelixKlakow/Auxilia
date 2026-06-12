@@ -199,6 +199,50 @@ public sealed class EndToEndSystemTests
             Is.True, "The policy denial for the unprivileged principal must be audited.");
     }
 
+    [Test]
+    [CancelAfter(60_000)]
+    public async Task AfterSeeding_EmailProviderRecordCarriesItsSettingDescriptors(
+        CancellationToken cancellationToken)
+    {
+        await using var provider = EndToEndEnvironment.BuildPlatformDataProvider();
+        var providers = provider.GetRequiredService<IDataAccess<SlotProviderRecord>>();
+
+        // The seed commands are applied asynchronously by the SI — poll the shared store.
+        SlotProviderRecord? record = null;
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        while (DateTime.UtcNow < deadline)
+        {
+            record = await providers.ReadAsync(SlotProviderRecord.IdFor("email-work-items"), cancellationToken);
+            if (record?.SettingDescriptorsJson is not null)
+                break;
+            await Task.Delay(500, cancellationToken);
+        }
+
+        Assert.That(record, Is.Not.Null, "The email slot provider must be registered.");
+        Assert.That(record!.SettingDescriptorsJson, Is.Not.Null,
+            "The registration must carry the manifest's setting descriptors into the record.");
+
+        var descriptors = System.Text.Json.JsonSerializer
+            .Deserialize<List<Auxilia.Workflows.SettingDescriptor>>(record.SettingDescriptorsJson!)!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(descriptors.Select(d => d.Key), Is.EquivalentTo(new[]
+            {
+                "ImapHost", "ImapPort", "UseSsl", "Username",
+                "Password", "SmtpHost", "SmtpPort", "Folder"
+            }), "All eight email settings must be described.");
+            Assert.That(descriptors.Single(d => d.Key == "Password").Kind,
+                Is.EqualTo(Auxilia.Workflows.SettingKind.Secret), "The password must be a secret.");
+            Assert.That(descriptors.Single(d => d.Key == "UseSsl").Kind,
+                Is.EqualTo(Auxilia.Workflows.SettingKind.Boolean));
+            Assert.That(descriptors.Single(d => d.Key == "ImapPort").Kind,
+                Is.EqualTo(Auxilia.Workflows.SettingKind.Number));
+            Assert.That(descriptors.Single(d => d.Key == "SmtpPort").Kind,
+                Is.EqualTo(Auxilia.Workflows.SettingKind.Number));
+            Assert.That(descriptors.Single(d => d.Key == "Folder").DefaultValue, Is.EqualTo("INBOX"));
+        });
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private static async Task SendMailAsync(

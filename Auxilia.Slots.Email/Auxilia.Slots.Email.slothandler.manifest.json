@@ -2,5 +2,65 @@
   "ProviderType": "email-work-items",
   "ContentHashBase64": "",
   "SignatureBase64": "",
-  "PublicKeyBase64": ""
+  "PublicKeyBase64": "",
+  "Settings": [
+    {
+      "Key": "ImapHost",
+      "Label": "IMAP host",
+      "Kind": "Text",
+      "Required": true,
+      "HelpText": "Hostname of the IMAP server the work-item mailbox is read from."
+    },
+    {
+      "Key": "ImapPort",
+      "Label": "IMAP port",
+      "Kind": "Number",
+      "Required": false,
+      "DefaultValue": "3143"
+    },
+    {
+      "Key": "UseSsl",
+      "Label": "Use SSL/TLS",
+      "Kind": "Boolean",
+      "Required": false,
+      "HelpText": "Encrypt the IMAP and SMTP connections.",
+      "DefaultValue": "true"
+    },
+    {
+      "Key": "Username",
+      "Label": "Username",
+      "Kind": "Text",
+      "Required": true,
+      "HelpText": "Login of the watched mailbox."
+    },
+    {
+      "Key": "Password",
+      "Label": "Password",
+      "Kind": "Secret",
+      "Required": true,
+      "HelpText": "Mailbox password; stored encrypted at rest and never displayed back."
+    },
+    {
+      "Key": "SmtpHost",
+      "Label": "SMTP host",
+      "Kind": "Text",
+      "Required": true,
+      "HelpText": "Hostname of the SMTP server replies are sent through."
+    },
+    {
+      "Key": "SmtpPort",
+      "Label": "SMTP port",
+      "Kind": "Number",
+      "Required": false,
+      "DefaultValue": "3025"
+    },
+    {
+      "Key": "Folder",
+      "Label": "Mail folder",
+      "Kind": "Text",
+      "Required": false,
+      "HelpText": "IMAP folder that is polled for work-item mails.",
+      "DefaultValue": "INBOX"
+    }
+  ]
 }

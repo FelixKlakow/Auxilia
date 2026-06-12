@@ -1,6 +1,10 @@
+using System.Text.Json;
+using Auxilia.PlatformData.Entities;
 using Auxilia.SteeringInstance.Tests.ComponentTests;
 using Auxilia.SteeringInstance.Workflows;
 using Auxilia.SteeringInstance.Workflows.Storage;
+using Auxilia.UniversalDataAccess.Implementations;
+using Auxilia.Workflows;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -13,6 +17,7 @@ public class SlotConfigurationSeedHandlerTests
 {
     private FakeMessageBusClient _fakeBus = null!;
     private SlotConfigurationStore _slotStore = null!;
+    private InMemoryDataAccess<SlotProviderRecord> _providerRecords = null!;
     private SlotProviderRegistry _providerRegistry = null!;
     private WorkflowConfigurationStore _configurationStore = null!;
     private SlotConfigurationSeedHandler _sut = null!;
@@ -22,7 +27,8 @@ public class SlotConfigurationSeedHandlerTests
     {
         _fakeBus = new FakeMessageBusClient();
         _slotStore = TestStores.NewSlotConfigurationStore();
-        _providerRegistry = TestStores.NewSlotProviderRegistry();
+        _providerRecords = new InMemoryDataAccess<SlotProviderRecord>();
+        _providerRegistry = new SlotProviderRegistry(_providerRecords);
         _configurationStore = TestStores.NewWorkflowConfigurationStore();
         _sut = new SlotConfigurationSeedHandler(
             _fakeBus,
@@ -35,6 +41,9 @@ public class SlotConfigurationSeedHandlerTests
 
         await _sut.StartAsync(CancellationToken.None);
     }
+
+    [TearDown]
+    public void TearDown() => _providerRecords.Dispose();
 
     [Test]
     public async Task WhenUpsertCommandReceived_SlotIsStoredWithValidStatus()
@@ -73,6 +82,35 @@ public class SlotConfigurationSeedHandlerTests
 
         var dllPath = await _providerRegistry.GetDllPathAsync("fake-provider");
         Assert.That(dllPath, Is.EqualTo("/fake/path.slothandler.dll"));
+    }
+
+    [Test]
+    public async Task WhenRegisterProviderCommandCarriesSettingDescriptors_TheyLandOnTheRecord()
+    {
+        await _fakeBus.SimulateReceivedAsync("slot-configurations",
+            new RegisterSlotProviderCommand("email-work-items", "/plugins/email.slothandler.dll",
+            [
+                new SettingDescriptor("ImapHost", "IMAP host", SettingKind.Text, Required: true),
+                new SettingDescriptor("Password", "Password", SettingKind.Secret, Required: true)
+            ]));
+
+        var record = (await _providerRecords.ReadAsync(SlotProviderRecord.IdFor("email-work-items")))!;
+        var descriptors = JsonSerializer.Deserialize<List<SettingDescriptor>>(record.SettingDescriptorsJson!)!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(descriptors.Select(d => d.Key), Is.EqualTo(new[] { "ImapHost", "Password" }));
+            Assert.That(descriptors[1].Kind, Is.EqualTo(SettingKind.Secret));
+        });
+    }
+
+    [Test]
+    public async Task WhenRegisterProviderCommandCarriesNoDescriptors_RecordDescriptorsStayNull()
+    {
+        await _fakeBus.SimulateReceivedAsync("slot-configurations",
+            new RegisterSlotProviderCommand("legacy-provider", "/plugins/legacy.slothandler.dll"));
+
+        var record = (await _providerRecords.ReadAsync(SlotProviderRecord.IdFor("legacy-provider")))!;
+        Assert.That(record.SettingDescriptorsJson, Is.Null);
     }
 
     [Test]

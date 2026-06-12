@@ -67,6 +67,23 @@ public class FileSystemPluginDiscoveryTests
     }
 
     [Test]
+    public void Discover_ManifestWithSettings_SurfacesDescriptors()
+    {
+        WriteDll("plugin-b");
+        var manifest = new PluginManifest("provider-b", "aGFzaA==", "c2ln", "cHVi",
+            [new SettingDescriptor("Password", "Password", SettingKind.Secret, Required: true)]);
+        File.WriteAllText(
+            Path.Combine(_tempDir, "plugin-b.slothandler.manifest.json"),
+            JsonSerializer.Serialize(manifest));
+
+        var result = _sut.DiscoverPlugins(_tempDir);
+
+        Assert.That(result, Has.Count.EqualTo(1));
+        Assert.That(result[0].Manifest.Settings, Has.Count.EqualTo(1));
+        Assert.That(result[0].Manifest.Settings![0].Kind, Is.EqualTo(SettingKind.Secret));
+    }
+
+    [Test]
     public void Discover_JsonOnlyNodll_ReturnsEmpty()
     {
         WriteManifest("json-only", "provider-x");

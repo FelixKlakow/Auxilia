@@ -8,6 +8,8 @@ public sealed record SlotProviderRecord : IEntity
     public Guid Id { get; init; }
     public required string ProviderType { get; init; }
     public required string DllPath { get; init; }
+    /// <summary>Serialized setting-descriptor list from the plugin manifest; null when the provider ships none.</summary>
+    public string? SettingDescriptorsJson { get; init; }
 
     public static Guid IdFor(string providerType) => DeterministicGuid.For("slot-provider", providerType);
 }

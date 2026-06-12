@@ -2,5 +2,6 @@
   "ProviderType": "fake-implementation-agent-failure",
   "ContentHashBase64": "",
   "SignatureBase64": "",
-  "PublicKeyBase64": ""
+  "PublicKeyBase64": "",
+  "Settings": []
 }

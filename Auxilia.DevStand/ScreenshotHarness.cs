@@ -130,7 +130,8 @@ internal static class ScreenshotHarness
             ("/operator/artifact-triggers", "08-operator-artifact-triggers.png"),
             ("/admin",                      "09-admin.png"),
             ("/admin/bundles",              "10-admin-bundles.png"),
-            ("/audit",                      "11-audit.png")
+            ("/admin/provider-catalog",     "11-admin-provider-catalog.png"),
+            ("/audit",                      "12-audit.png")
         ];
         foreach (var (route, fileName) in pages)
             await CapturePageAsync(page, dashboardUrl, route, fileName, outputDir, captured);

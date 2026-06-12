@@ -173,6 +173,29 @@ public class WorkflowConfigurationDispatchComponentTests
     }
 
     [Test]
+    public async Task RegisterProvider_WithSettingDescriptors_LandsThemOnTheProviderRecord()
+    {
+        await _bus.SimulateReceivedAsync(RegisterProviderQueue,
+            new RegisterSlotProviderCommand("email-work-items", "/plugins/email.slothandler.dll",
+            [
+                new SettingDescriptor("ImapHost", "IMAP host", SettingKind.Text, Required: true),
+                new SettingDescriptor("Password", "Password", SettingKind.Secret, Required: true,
+                    HelpText: "Stored encrypted at rest.")
+            ]));
+
+        var records = _host.Services.GetRequiredService<IDataAccess<SlotProviderRecord>>();
+        var record = await records.ReadAsync(SlotProviderRecord.IdFor("email-work-items"));
+        Assert.That(record, Is.Not.Null);
+        var descriptors = JsonSerializer.Deserialize<List<SettingDescriptor>>(record!.SettingDescriptorsJson!)!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(descriptors.Select(d => d.Key), Is.EqualTo(new[] { "ImapHost", "Password" }));
+            Assert.That(descriptors[1].Kind, Is.EqualTo(SettingKind.Secret));
+            Assert.That(descriptors[1].HelpText, Is.EqualTo("Stored encrypted at rest."));
+        });
+    }
+
+    [Test]
     public async Task DispatchByConfigurationId_LaunchesConfiguredImage_AndRecordsConfigurationOnInstance()
     {
         await SeedConfigurationAsync();

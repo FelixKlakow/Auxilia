@@ -180,7 +180,24 @@ try
     var launcherSettings = app.Services.GetRequiredService<IOptions<DockerWorkflowLauncherSettings>>().Value;
     var providerRegistry = app.Services.GetRequiredService<SlotProviderRegistry>();
     foreach (var (providerType, dllPath) in launcherSettings.SlotPackages)
-        await providerRegistry.UpsertAsync(providerType, dllPath);
+    {
+        // The plugin's manifest sidecar is the source of truth for its setting descriptors.
+        IReadOnlyList<SettingDescriptor>? descriptorSettings = null;
+        var manifestPath = Path.ChangeExtension(dllPath, null) + ".manifest.json";
+        if (File.Exists(manifestPath))
+        {
+            try
+            {
+                descriptorSettings = System.Text.Json.JsonSerializer.Deserialize<PluginManifest>(
+                    await File.ReadAllTextAsync(manifestPath))?.Settings;
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                // Malformed sidecar — register the provider without descriptors.
+            }
+        }
+        await providerRegistry.UpsertAsync(providerType, dllPath, descriptorSettings);
+    }
 
     var slotConfigSettings = app.Services.GetRequiredService<IOptions<SlotConfigurationsSettings>>().Value;
     var slotStore = app.Services.GetRequiredService<SlotConfigurationStore>();
