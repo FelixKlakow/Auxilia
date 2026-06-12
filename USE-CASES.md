@@ -429,7 +429,7 @@ The following gaps were identified across the use cases above. Each requires a c
 
 **Introduced by:** workspace isolation and large-repo design decisions (post use-case analysis)
 
-**Summary:** Workflows need persistent local access to repositories without re-downloading on every run, with strict isolation between concurrent runs and between repos with different access rights. The Workspace Manager provides warm caches, CoW snapshots, mount namespace isolation, multi-source repo support, a `no-cache` flag per repo, and post-run output collection via the Resource Proxy. See ARCHITECTURE.md §8.
+**Summary:** Workflows need persistent local access to repositories without re-downloading on every run, with strict isolation between concurrent runs and between repos with different access rights. The Workspace Manager provides warm caches, CoW snapshots, mount namespace isolation, multi-source repo support, and a `no-cache` flag per repo. Write-back is not collected post-run: workflows push directly mid-run through their source-control slots, limited by declared slot capabilities and operator configuration. See ARCHITECTURE.md §8.
 
 ---
 
@@ -470,7 +470,7 @@ The following must be reflected in ARCHITECTURE.md:
 | 5 | Optional Work Item Index service added to the component map (deferred) | ✅ Resolved (deferred) |
 | 6 | Multi-repo WorkflowContext — manifest declares single or multi-repo; WorkspaceManager mounts all | ✅ Resolved |
 | 7 | Work Item Similarity Search — deferred to a future Work Item Index service | ✅ Resolved (deferred) |
-| 8 | Workspace Manager — warm cache, CoW snapshots, mount namespace isolation, multi-source, no-cache, output collection | ✅ Resolved — ARCHITECTURE.md §8 |
+| 8 | Workspace Manager — warm cache, CoW snapshots, mount namespace isolation, multi-source, no-cache; capability-limited mid-run write-back | ✅ Resolved — ARCHITECTURE.md §8 |
 | 9 | Network Egress Layer — layered policy (manifest + run config + platform ceiling), default-deny, allow-all opt-in | ✅ Resolved — ARCHITECTURE.md §9 |
 | 10 | Package Proxy — optional registry mirror, caching, scanning, air-gap support | ✅ Resolved — ARCHITECTURE.md §4 & §9 |
 | 11 | Bounded revision/retry loops — max-attempts policy in manifest, enforced by Steering Instance, escalates via RequestInput | ✅ Resolved — UC6 & UC8 key points |

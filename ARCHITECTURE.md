@@ -21,6 +21,7 @@
 12. Deployment Modes
 13. Open Questions and Concerns
 14. Scaling
+15. Live View Data and Pluggable Dashboards
 
 ---
 
@@ -47,6 +48,7 @@ Auxilia is a **workflow-driven distributed system** where:
 | **Resource Proxy** | A platform-managed, audited access point through which workflows reach external APIs and databases |
 | **Trust Chain** | Signature chain ensuring a workflow is authorized to run in this environment |
 | **Artifact Input** | A named artifact from a prior workflow run injected into a new WorkflowContext as input |
+| **Artifact Store** | Pluggable persistent store (`IArtifactStore`) where named artifacts survive between runs — payloads plus a metadata index for lineage, versioning, and dispatch-time resolution |
 | **Workspace Manager** | Platform component that manages persistent per-repo warm caches and per-run isolated CoW snapshots |
 | **Network Policy** | Per-workflow declarative allowlist of permitted outbound endpoints, enforced at the kernel network namespace level |
 | **Package Proxy** | Optional platform-managed mirror of public package registries (NuGet, npm, PyPI, etc.) providing caching and security scanning |
@@ -72,7 +74,6 @@ graph TB
     subgraph Backend["Backend Platform (ASP.NET Core)"]
         GW["API Gateway"]
         MCP["MCP Server"]
-        ORCH["Orchestration Service"]
         SEC["Security and Policy Service"]
         ACCT["Account Manager"]
         SIGNING["Workflow Trust Service (ISigningProvider)"]
@@ -91,15 +92,15 @@ graph TB
     end
     UI <-->|HTTPS / SignalR| GW
     AI <-->|MCP Protocol| MCP
-    MCP --> ORCH
-    GW --> ORCH
+    MCP --> SEC
     GW --> SEC
-    ORCH --> SEC
-    ORCH --> ACCT
-    ORCH --> SIGNING
-    ORCH --> ADAPTERS
-    ORCH --> BUS
+    MCP -->|Dispatch commands| BUS
+    GW -->|Dispatch commands| BUS
+    ADAPTERS -->|Work item events| BUS
     BUS <--> SI
+    SI --> SEC
+    SI --> ACCT
+    SI --> SIGNING
     SI --> WM
     WM -->|CoW snapshot mounted| WF
     WF -->|Resource requests via bus| PROXY
@@ -132,11 +133,11 @@ graph TB
 - Token validation delegated to the Security Service
 - WebSocket / SignalR upgrade for real-time event streams
 
-### Orchestration Service
-- Receives work items from adapters and selects the appropriate workflow
-- Pre-flight checks before dispatch: verifies signature, required account bundles, resource proxy availability, and resolves named artifact inputs
-- Manages the full workflow instance lifecycle (see section 6)
-- Publishes commands and consumes status updates via IMessageBus
+### Backend Service - Platform Host
+- Hosts the API Gateway, the MCP Server, and the dashboard backend (SignalR fan-out via the Redis backplane)
+- Hosts the **platform scheduler** for time-based workflow triggers
+- Runs the **heartbeat monitor**: watches Steering Instance heartbeats in the ownership store, detects orphaned workflow instances, marks them Failed, and triggers cleanup and fresh re-dispatch per retry policy (see section 14.2)
+- There is **no separate Orchestration Service**: earlier drafts showed one, but its responsibilities (work-item intake, pre-flight, dispatch, lifecycle management) belong to the Steering Instance — a standalone orchestrator would only forward decisions and add a failure mode without an isolation benefit
 
 ### Message Bus - IMessageBus
 - **Default: RabbitMQ** (runs locally in Docker, zero-config)
@@ -144,8 +145,8 @@ graph TB
 - All communication between Steering Instances and Workflow programs passes exclusively through here
 
 ### Steering Instance
-- Bridges the message bus and the workflow runtime
-- Injects scoped credentials and resource proxy endpoints at workflow startup
+- Bridges the message bus and the workflow runtime — and owns dispatch: consumes work-item events and dispatch commands (competing consumers), selects the appropriate workflow, runs the **pre-flight checks** (signature, required account bundles, resource availability, named artifact input resolution), and manages the full workflow instance lifecycle (see section 6)
+- Delivers scoped credentials and resource endpoints **just-in-time per slot activation** — a workflow receives a slot's configuration (encrypted for that instance) only when it first needs the slot, never as an upfront bundle at startup
 - Forwards AI assistance requests to the AI Integration Layer
 - Streams live status to the frontend
 - Notifies human / AI when a workflow is waiting for input due to resource unavailability
@@ -154,12 +155,30 @@ graph TB
 - Manages **warm cache** entries for each repository — cloned once, kept current via background fetches via the Resource Proxy
 - On workflow dispatch: checks repository access rights per repo per source system, then creates an **isolated CoW snapshot** per repository for that run
 - Mounts all declared repository snapshots into the container under `/workspace/repos/<id>/` using Linux mount namespaces — the container sees only its own snapshots
+- Mounts resolved artifact inputs read-only under `/workspace/artifacts/<input-name>/` and provides the declared artifact output location, persisted to the Artifact Store on run completion
 - Supports **multiple repositories from different source systems** in a single workflow run (Git, TFVC, GitHub, ADO — each using the correct Account Bundle)
-- After container exit: collects outputs (commits, generated files) and pushes them back via the Resource Proxy using scoped credentials — the container never pushes directly
+- Source-control writes (commits, pushes, PR creation) happen **mid-run, directly from the workflow** through its source-control slots with just-in-time scoped credentials. Post-exit output collection by the platform was rejected: it would duplicate traffic and block legitimate in-run operations such as reviewing git history. What a workflow may do is bounded by its **declared slot capabilities** (e.g. read-only vs. write) clamped by the **operator configuration** (e.g. allowed branch patterns, PR-only, no force-push). Enforcement is layered: the issued credential is scoped to the configured limits wherever the provider supports it (the hard backstop, valid even against a compromised process), and the slot handler enforces the same limits uniformly for all providers before executing an operation
 - Enforces per-repo and per-tenant storage quotas
 - Sensitive repositories can be marked `no-cache` in the workflow manifest — these are fetched fresh per run and deleted immediately after
 
-### Workflow Trust Service - ISigningProvider
+### Artifact Store - IArtifactStore
+- Persistent, pluggable store where named artifacts survive between runs — the producing run's CoW snapshot is destroyed at exit, so artifacts must be persisted by the platform
+- **Production:** the workflow writes its declared artifacts to a dedicated output location in its workspace; on run completion the platform persists them into the store. What a workflow may produce is limited by its manifest declarations clamped by operator configuration
+- **Consumption:** declared artifact inputs are resolved at dispatch time and mounted **read-only** into the container under `/workspace/artifacts/<input-name>/` — consumption is direct from the workflow's point of view, exactly like repository snapshots
+- **References, not payloads, on the bus:** messages carry only artifact references (ID + content hash); payloads never travel through the message bus
+- **Identity and lineage:** an artifact is identified by artifact type + producing workflow + work item + run + version. Versions of the same lineage are ordered, enabling "latest CodeReviewResult for work item X" resolution and trend comparison against prior versions (UC7)
+- **Two concerns behind one interface:** the metadata index (lineage, versions, dispatch-time queries) and payload storage are separate concerns. Backends are pluggable per deployment: local filesystem (dev), Azure Blob / S3-compatible (cloud), or a database — a database backend can hold both payload and metadata for small structured artifacts, while blob backends pair with the platform database for metadata
+- Retention periods and consumption access (which workflows/identities may read which artifact types) are operator configuration, enforced at dispatch-time resolution
+
+### Platform Data Layer - Auxilia.UniversalDataAccess
+- Durable storage for all platform state: workflow registry and schemas, slot configurations and account bundles (encrypted at rest), run lifecycle records, persisted view data, the artifact metadata index, and the audit log
+- The Steering Instance's current in-memory stores (schema store, slot-configuration store, provider registry, seeded via the slot-configurations exchange) are an **interim dev simplification** — production platform state must survive restarts and be shared consistently across Steering Instance replicas
+- Storage backend is pluggable behind the universal data access abstraction; Redis remains a separate concern (ephemeral ownership/heartbeat and SignalR backplane only, see section 14)
+
+### Audit Log
+- Immutable, append-only record of every action: human and AI operations, policy decisions (allow **and** deny), credential deliveries per slot activation, Resource Proxy calls, network traffic (allowed and blocked), and workflow lifecycle transitions including retries and failovers
+- Written by platform components only — workflows can neither write nor read it directly
+- Stored via the Platform Data Layer; retention period and read access are operator configuration
 - Verifies every workflow artifact before execution - no unsigned execution path exists
 - In dev mode signing can be disabled entirely; no dev CA ceremony required locally
 - Three production implementations depending on deployment mode (see section 12)
@@ -186,7 +205,8 @@ graph TB
 ### Resource Proxy
 - Platform-managed gateway through which workflows access external APIs, databases, build systems, and scan tools
 - Workflow declares named dependencies (e.g. "github-api", "customer-db", "ci-runner") at authoring time
-- At runtime the Steering Instance resolves, scopes, and injects proxy endpoints - the workflow never holds raw credentials
+- Workflows are **trusted by signature**: the signing authority is responsible for verifying that a workflow is correct and trustworthy before signing it. A verified workflow is therefore permitted to hold scoped credentials directly — the protection model is *who gets credentials and when*, not hiding credentials from the workflow process
+- Credentials are delivered **just-in-time**: a workflow receives a slot's credentials only at the moment it activates that slot, encrypted for that specific workflow instance — never as a blanket grant at startup, and never for slots it does not use in that run
 - Supports two call patterns: **synchronous** (request/response) and **async long-running** (submit job, receive handle, poll or await callback via message bus)
 - All proxy calls are audited; rate limiting and access policy enforced per workflow identity
 
@@ -288,6 +308,38 @@ stateDiagram-v2
 - If pre-flight fails the work item is held and the user/AI is notified; it can be requeued automatically when the condition resolves (configurable)
 - **Schema pre-loading**: the `WorkflowAnnouncementHandler` reads `workflow-schema.json` from the extracted ZIP package and populates `WorkflowSchemaStore` before sending the `Run` directive — no `EmitSchema` round-trip is required
 - **Workflow artifacts** are declared by the workflow and configured by the user - where they are stored and how they are linked back to the work item is a per-workflow configuration
+- **Workflows are not resumable (v1)**: there is no checkpointing — a retry after `Failed`, and failover after an orphaned Steering Instance, always means *kill and restart from scratch*. Because a failed run may already have performed external writes, every external write a workflow performs must be **idempotent or guarded** (branch-exists check, find-or-create PR, deduplicated comments) — this is part of the workflow SDK contract
+- **Failures and restarts are never silent**: every failure, retry, and orphan reassignment is published as a status event and shown in the dashboard (and via MCP), so the user always sees that a run was restarted and why
+
+### Trigger model
+
+A dispatch originates from one of four trigger sources; all of them converge on the same dispatch command queue consumed by the Steering Instance pool:
+
+| Trigger | Source |
+|---|---|
+| **Work item event** | Integration Adapters detect work item changes (created, moved to a configured state) and publish dispatch commands |
+| **Manual** | A human via the dashboard or an AI agent via the MCP `trigger_workflow` tool |
+| **Schedule** | The platform scheduler (hosted in the Backend Service) for recurring runs, e.g. nightly security scans |
+| **Artifact completion** | A finished run's persisted artifact triggers a configured follow-up workflow (e.g. CodeReviewResult → Selective Fixing) — workflow chaining without coupling the workflows to each other |
+
+Which triggers are active for a workflow is operator configuration, subject to the Policy Engine.
+
+### Workflow lifetime: one-shot vs. long-living
+
+Workflows declare their **lifetime** in the manifest:
+
+| Lifetime | Behaviour |
+|---|---|
+| **one-shot** (default) | Runs exactly once for a single trigger and always shuts down afterwards — minimises credential exposure and data retention |
+| **long-living** | A service-style workflow that stays running and processes many work items / events over time (e.g. a standing review agent, a queue monitor) |
+
+Long-living workflows keep every invariant of the platform, with these adaptations:
+
+- **Credentials still arrive just-in-time per slot activation, but carry an expiry** — the SDK transparently re-requests a slot's configuration from the Steering Instance when it expires; long-lived processes never hold indefinitely valid secrets
+- **Dirty-configuration handling**: when a stored configuration is changed or marked dirty, the Steering Instance signals the instance to **drain and shut down**; the replacement starts with the new configuration. Upgrade to a new workflow version works the same way (drain + replace)
+- **Draining is a visible lifecycle state**: a draining instance finishes in-flight work but accepts no new triggers, and is shown as `Draining` in the dashboard until it exits
+- **Still not resumable**: a crash or failover is a fresh restart that re-subscribes to its triggers; the idempotency obligations of section 6 apply unchanged
+- **Operator opt-in**: because one-shot is the security default, deploying a long-living workflow requires explicit operator approval in the platform configuration
 
 ---
 
@@ -308,7 +360,7 @@ graph TD
         REQUEST["Any request - UI or MCP"] --> SEC["Security Service"]
         SEC --> IDP["Identity Provider (AAD / LDAP / OIDC / Local)"]
         IDP --> POLICY["Policy Engine"]
-        POLICY -->|Allowed| ORCH["Orchestration"]
+        POLICY -->|Allowed| DISPATCH["Dispatch (Steering Instance)"]
         POLICY -->|Denied| BLOCK["Blocked"]
     end
 ```
@@ -316,6 +368,8 @@ graph TD
 **Key principles:**
 - Signing can be **fully disabled in dev mode** - there is no ceremony, no dev CA required locally
 - In all non-dev modes signing is mandatory with no bypass; the signed artifact records what the workflow *is* — permissions and network policy are resolved at runtime, not locked into the artifact
+- **The signature is the basis for credential delivery**: the signing authority is responsible for ensuring a workflow is correct and trustworthy. Only a signature-verified workflow may receive credentials, and it receives them just-in-time per slot activation — encrypted for the specific instance, scoped to the slot's declared capabilities, and never before the slot is actually needed
+- **The registration handshake is authenticated**: channel encryption alone does not authenticate the requester. The platform injects a **one-time instance token** into the container/process at launch and pre-creates an **exclusive response queue** per instance; a registration or slot-activation request must present the token, and configurations are only ever delivered to that instance's queue. The current token-less handshake is an interim dev simplification (tracked as an implementation task)
 - Workflows have **no arbitrary outbound network access** — effective network policy is resolved at dispatch from three layers (manifest baseline, run configuration, platform policy ceiling) and enforced at the kernel level; see section 10
 - Structured API calls (task sources, source control, databases) go through the Resource Proxy; build toolchain calls (package restore, etc.) go through the Network Egress Layer
 - Every action (human or AI) is written to an immutable audit log
@@ -370,7 +424,7 @@ graph TB
 - Used for all calls where the platform mediates credentials: task sources, source control push, databases, CI triggers
 - Workflow declares named dependencies in its manifest; at runtime the platform resolves the correct Account Bundle
 - Supports synchronous and async long-running patterns (trigger + poll/callback via message bus)
-- The workflow never holds raw credentials — it sends a request message and receives a response
+- The workflow holds no credentials **prior to slot activation**. Because every workflow is signature-verified before launch, it is trusted to receive scoped credentials — but only just-in-time, per slot, encrypted for that workflow instance, and only for the slots it actually activates during the run
 
 **Network Egress Layer (toolchain and direct calls):**
 - Used for build tools, package managers, and any other direct network calls the workflow needs
@@ -449,7 +503,7 @@ graph TB
 | Cross-run filesystem | Linux mount namespaces — a container can only see its own mounted snapshots |
 | UID isolation | Each container runs as a distinct unprivileged UID; snapshot ownership prevents cross-run reads even if namespace fails |
 | Warm cache protection | Cache directory is host-only, owned by the Workspace Manager, never bind-mounted into any container |
-| Output collection | Container writes locally; Workspace Manager collects and pushes outputs after exit via Resource Proxy using scoped credentials |
+| Write-back control | Workflow pushes directly via its source-control slot mid-run; permitted operations are limited by the slot's declared capabilities (read/write) clamped by operator configuration (branch patterns, PR-only, no force-push) |
 
 **Warm cache behaviour:**
 - Cache entries are populated on first fetch and kept current by background `git fetch` / equivalent per source system
@@ -553,7 +607,7 @@ graph LR
 ```
 
 - Workflows declare *which bundle types* they need - never specific credentials
-- Bundles are encrypted at rest, decrypted only when injected into a workflow run via the Resource Proxy or Steering Instance
+- Bundles are encrypted at rest; the Steering Instance decrypts and re-encrypts the relevant scoped subset for a specific workflow instance only at slot activation time — never earlier, and never more than the activated slot requires
 - AI bundles carry usage quotas and purpose restrictions
 - Multiple bundles of the same type are supported (e.g. two ADO instances, a GitHub and a Jira account)
 
@@ -569,8 +623,10 @@ All modes share the same codebase. Runtime behaviour is driven entirely by confi
 | **On-premise** | RabbitMQ cluster | Docker / k3s — signed `*.workflow.zip` extracted and bind-mounted | HashiCorp Vault Transit | LDAP / AD / OIDC |
 | **Cloud (Azure)** | Azure Service Bus | AKS — signed `*.workflow.zip` extracted and bind-mounted | Azure Key Vault | Entra ID |
 
-Pluggable interfaces: **IMessageBus**, **IWorkflowRunner**, **ISigningProvider**, **IIdentityProvider**, **IResourceProxy**
-The core platform has no hard dependency on RabbitMQ, Docker, Vault, or AAD.
+Pluggable interfaces: **IMessageBus**, **IWorkflowRunner**, **ISigningProvider**, **IIdentityProvider**, **IResourceProxy**, **IArtifactStore**
+The core platform has no hard dependency on RabbitMQ, Docker, Vault, AAD, or a specific artifact storage backend.
+
+**Isolation guarantees are container-only.** The workspace isolation (mount namespaces, UID isolation, CoW snapshots — section 9) and kernel-level network policy enforcement (section 10) exist only in the container runtimes (Docker / k3s / AKS). In **Local / Dev** mode the workflow runs as a plain OS process — typically on the developer's own machine, including Windows — with **no isolation and no network enforcement**. Dev mode is therefore **trusted-operator-only**: it must never be exposed to untrusted workflows, untrusted users, or production credentials. The security guarantees this document describes apply to the container-based modes.
 
 ---
 
@@ -585,7 +641,7 @@ The core platform has no hard dependency on RabbitMQ, Docker, Vault, or AAD.
 | 3 | ISourceControlAdapter extended with ListDirectory, GetFileContent, DetectFrameworks for lightweight introspection |
 | 4 | Resource Proxy supports both synchronous and async long-running call patterns (trigger + poll/callback) |
 | 5 | WorkflowContext supports single or multi-repository references declared in the workflow manifest |
-| 6 | Workspace Manager added: warm cache per repo, CoW snapshots per run, mount namespace isolation, multi-source repo support, no-cache flag, output collection via Resource Proxy |
+| 6 | Workspace Manager added: warm cache per repo, CoW snapshots per run, mount namespace isolation, multi-source repo support, no-cache flag; write-back happens mid-run via capability-limited source-control slots |
 | 7 | Network Egress Layer added: layered policy resolution (manifest baseline + run config + platform ceiling), default-deny, allow-all opt-in, build tool transparency, full audit |
 | 8 | Package Proxy added: optional platform mirror for package registries, caching, security scanning, air-gap support |
 
@@ -593,10 +649,10 @@ The core platform has no hard dependency on RabbitMQ, Docker, Vault, or AAD.
 
 | # | Question | Impact |
 |---|---|---|
-| 6 | **Artifact storage backend** - Where are workflow artifacts physically stored? Blob storage (Azure Blob, S3-compatible, local filesystem), configurable per deployment mode. | Workflow contract, ops |
 | 7 | **Pre-flight retry granularity** - Is retry-on-availability configured globally, per workflow type, or per work item? | UX, reliability |
 | 8 | **TFVC version scope** - TFS 2015/2017 in scope or only TFS 2019+ / Azure DevOps Server? | Adapter effort |
 | 9 | **Work Item Index (deferred)** - Optional similarity search service for refinement quality. Not required for v1. | Future use case quality |
+| 10 | **Governance & RBAC model** — concrete account/role model (administrators, operators, users, AI principals), permission scheme unifying the Policy Engine, and dashboard/configuration administration. This is the declared **next implementation phase**: the platform foundation (governance, permissions, dashboard, accounts) is built before further use-case workflows. | Security, platform foundation |
 
 ### Intentional design decisions
 
@@ -606,6 +662,9 @@ The core platform has no hard dependency on RabbitMQ, Docker, Vault, or AAD.
 | 11 | **AI has full parity with the human UI** - MCP tools are generated from the same API layer, not maintained separately |
 | 12 | **Signing is mandatory with no bypass in non-dev modes** - dev mode can disable signing entirely |
 | 13 | IMessageBus, IWorkflowRunner, ISigningProvider, IIdentityProvider, and IResourceProxy are all pluggable - no hard dependency on any specific technology |
+| 14 | **Workflows are trusted via signature, credentials are delivered just-in-time** — the signing authority vouches for the workflow's correctness; a verified workflow may hold scoped credentials directly, but receives each slot's credentials only at slot activation, encrypted per instance, never as an upfront bundle |
+| 15 | **Artifact persistence via pluggable `IArtifactStore`** — production is direct but manifest/config-limited; consumption is resolved at dispatch and mounted read-only into the container; the bus carries references (ID + hash), never payloads; backends (filesystem, blob, database) are a deployment choice |
+| 16 | **No separate Orchestration Service** — dispatch, pre-flight, and lifecycle management live in the Steering Instance; the Backend Service hosts the API Gateway, MCP Server, dashboard fan-out, platform scheduler, and the heartbeat monitor for Steering Instance failover |
 
 ---
 
@@ -637,13 +696,13 @@ graph LR
         BS2[Blazor Instance 2 owns circuits B and C]
     end
     BACKPLANE[Redis SignalR Backplane]
-    ORCH[Orchestration Service]
+    BE[Backend Service]
     B1 -->|Sticky| LB
     B2 -->|Sticky| LB
     B3 -->|Sticky| LB
     LB --> BS1
     LB --> BS2
-    ORCH -->|Workflow event| BACKPLANE
+    BE -->|Workflow event| BACKPLANE
     BACKPLANE --> BS1
     BACKPLANE --> BS2
     BS1 -->|Only to circuit A| B1
@@ -660,7 +719,7 @@ Steering instances scale via **competing consumers** on the RabbitMQ command que
 Once a steering instance picks up a workflow it becomes the **owner** for its lifetime (it holds the container/process handle). Two concerns follow:
 
 - **Ownership tracking** - Redis records which steering instance owns which workflow instance
-- **Failover** - each steering instance emits a heartbeat; if it stops, the Orchestrator detects orphaned instances and reassigns them or marks them Failed with retry
+- **Failover** - each steering instance emits a heartbeat; if it stops, the **Backend Service heartbeat monitor** detects the orphaned workflow instances, terminates them via `IWorkflowRunner`, and marks them Failed. Recovery is always a fresh restart from scratch (workflows are not resumable, see section 6) issued as a new dispatch command per retry policy; the failover event is surfaced in the dashboard so the user sees the run was restarted
 
 ```mermaid
 graph TB
@@ -679,8 +738,9 @@ graph TB
         WF103[Workflow WF-103]
     end
     REDIS[Redis Ownership Store and Heartbeat]
-    ORCH[Orchestration Service]
-    ORCH -->|Dispatch command| CMD
+    TRIG[Trigger sources: Adapters, UI / MCP, Scheduler]
+    BE[Backend Service heartbeat monitor]
+    TRIG -->|Dispatch command| CMD
     CMD -->|Competing consume| SI1
     CMD -->|Competing consume| SI2
     CMD -->|Competing consume| SI3
@@ -690,10 +750,11 @@ graph TB
     SI1 -->|Heartbeat and ownership| REDIS
     SI2 -->|Heartbeat and ownership| REDIS
     SI3 -->|Heartbeat| REDIS
-    ORCH -->|Monitor heartbeats detect orphans| REDIS
+    BE -->|Monitor heartbeats detect orphans| REDIS
+    BE -->|Re-dispatch per retry policy| CMD
     SI1 -->|Status events| EVT
     SI2 -->|Status events| EVT
-    EVT --> ORCH
+    EVT --> BE
 ```
 
 ---
@@ -707,7 +768,7 @@ sequenceDiagram
     participant WF as Workflow Container
     participant BUS as RabbitMQ
     participant SI as Steering Instance owner
-    participant ORCH as Orchestration Service
+    participant BE as Backend Service
     participant REDIS as Redis Backplane
     participant BS1 as Blazor Instance 1
     participant BS2 as Blazor Instance 2
@@ -715,8 +776,8 @@ sequenceDiagram
     WF->>BUS: StepCompleted message
     BUS->>SI: Delivered to owning Steering Instance
     SI->>BUS: Publish WorkflowStatusUpdated event
-    BUS->>ORCH: Event consumed
-    ORCH->>REDIS: Publish to SignalR backplane
+    BUS->>BE: Event consumed
+    BE->>REDIS: Publish to SignalR backplane
     REDIS->>BS1: Fan out to all Blazor instances
     REDIS->>BS2: Fan out to all Blazor instances
     BS1->>UA: Push to subscribed circuit only
@@ -736,6 +797,51 @@ sequenceDiagram
 | Workflow runtime | OS Process | Docker / k3s | AKS node pool |
 
 Redis serves a dual purpose in non-dev modes: **SignalR backplane** and **steering ownership store**. A single Redis instance or cluster covers both.
+
+---
+
+## 15. Live View Data and Pluggable Dashboards
+
+Workflows expose data to the frontend through a single general mechanism: **named, schema-declared views**. A live agent conversation, a progress log, a findings table, and a finished run's result page are all the same concept — only the rendering hint and the data lifecycle differ.
+
+### View declaration
+
+The workflow schema (embedded in the signed package) declares the views a workflow provides:
+
+```yaml
+views:
+  - name: agent-conversation
+    schema: AgentMessage          # JSON schema of one data item
+    rendering: stream             # hint: stream | log | table | chart | markdown | custom
+    lifecycle: live+persisted     # live, persisted, or both
+  - name: review-findings
+    schema: CodeReviewFinding
+    rendering: table
+    lifecycle: persisted
+```
+
+### Data flow
+
+```mermaid
+graph LR
+    WF["Workflow"] -->|"ViewData message<br/>(instanceId, viewName, sequence, payload)"| BUS["Message Bus"]
+    BUS --> SI["Steering Instance"]
+    SI -->|live fan-out| BACKPLANE["SignalR backplane (Redis)"]
+    BACKPLANE --> FE["Frontend: renders view from descriptor"]
+    SI -->|"lifecycle includes persisted"| STORE["View Store (platform DB / IArtifactStore)"]
+    STORE --> FE2["Frontend: re-opens views of finished runs"]
+    SI --> MCP["MCP Server — same view data exposed to AI agents"]
+```
+
+- Workflows publish `ViewData` messages: an envelope of `(instanceId, viewName, sequence, payload)` where the payload conforms to the declared view schema. The bus carries only view data items — large blobs belong in the Artifact Store, referenced from the payload
+- **Live**: the Steering Instance fans view data out to subscribed frontend circuits via the existing SignalR backplane (section 14) — a live agent view is simply a view with `rendering: stream`
+- **Persisted**: view data is stored so the dashboard can re-open the views of completed runs — viewing finished workflow results uses the identical rendering path as live data, replayed from the store
+- **Generic rendering**: the frontend renders views purely from the descriptor (schema + rendering hint); adding a new workflow with new views requires **no frontend changes**. A `custom` rendering hint allows future pluggable visual components
+- **AI parity**: the MCP server exposes the same views to AI agents — no hidden data channel
+
+### Dashboard composition
+
+Dashboards are composed of views: per-run dashboards come from the run's workflow schema automatically; operators can pin views from multiple workflows into shared dashboards. Access to a view follows the same permission model as the workflow it belongs to.
 
 ---
 

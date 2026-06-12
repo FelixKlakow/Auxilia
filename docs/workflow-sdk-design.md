@@ -11,8 +11,8 @@
 - On startup the workflow node sends its requirements to the **Steering Instance** via RabbitMQ.
 - The Steering Instance resolves which concrete providers satisfy each requirement, pushes back an encrypted **configuration envelope**, and the workflow boots with fully-resolved dependencies.
 - New workflow types can be added without touching the Steering Instance core – it only needs to know about capability contracts, not concrete workflow logic.
-- Each workflow is **one-shot**: it runs exactly once and always shuts down afterwards to prevent data leaks and maximise security.
-- Workflows operate in two modes driven by **command-line arguments**: `run` (execute business logic) and `schema` (emit a JSON schema so the Steering Instance always holds a current schema and the frontend can render a typed configuration UI).
+- Workflows are **one-shot by default**: they run exactly once and always shut down afterwards to prevent data leaks and maximise security. A manifest-declared **long-living** lifetime exists for service-style workflows (standing agents, monitors) — see ARCHITECTURE.md §6 for the lifetime model (credential expiry + re-request, drain-and-replace on config change or upgrade, operator opt-in).
+- Workflows operate in two modes driven by **command-line arguments**: `run` (execute business logic) and `schema` (emit a JSON schema — invoked by the Packer at packaging time so the signed package always carries a current schema and the frontend can render a typed configuration UI).
 - **Environment requirements** are first-class – a workflow can declare what must be present in its execution environment (tools, ports, OS). Multi-container orchestration is deferred to a future iteration.
 
 ---
@@ -184,7 +184,7 @@ The mode is not declared in code – it is derived from the command-line argumen
 | Argument | Mode | Behaviour |
 |---|---|---|
 | `run` | **Run** | Performs the full registration handshake, receives encrypted configuration, boots DI, executes business logic, exits. |
-| `schema` | **Schema** | Serialises the builder state to a `WorkflowSchema` (JSON), prints it to stdout or pushes it to the Steering Instance, then exits. No secrets involved. |
+| `schema` | **Schema** | Serialises the builder state to a `WorkflowSchema` (JSON) and prints it to stdout for the Packer to embed in the signed package, then exits. No secrets involved. |
 
 ```csharp
 // Entrypoint – the SDK reads args[0]
@@ -193,7 +193,7 @@ await WorkflowBuilder.Create("code-review-workflow")
     .Run(args);
 ```
 
-The Steering Instance invokes the workflow container with `schema` during registration of a new workflow type. Whenever a new version is deployed, `schema` is called again and the Steering Instance diffs the new schema against the stored one to detect dirty configurations.
+Schema mode is invoked at **packaging time** by `Auxilia.Workflows.Packer`: the emitted `workflow-schema.json` is embedded in the signed `*.workflow.zip`. At registration the Steering Instance (`WorkflowAnnouncementHandler`) reads the schema directly from the extracted package — there is **no runtime schema round-trip** against a running container. When a new version is registered, the Steering Instance diffs the embedded schema against the stored one to detect dirty configurations.
 
 ---
 
@@ -213,19 +213,28 @@ sequenceDiagram
 - The workflow generates an **ephemeral asymmetric key pair** on each startup.
 - The public key is included in `WorkflowRegistrationRequest`.
 - The Steering Instance validates `EnvironmentRequirements` against the registered runner profile, then encrypts each `SlotConfiguration` payload with the public key.
-- The workflow decrypts with its private key inside the SDK – secret values are **never visible to workflow application code**.
+- The workflow decrypts with its private key inside the SDK.
 - Once the workflow exits the private key is discarded.
 
-### Schema mode flow
+**Trust and credential-delivery model:**
+
+- The workflow is **trusted by signature** — the signing authority is responsible for verifying that the workflow is correct and trustworthy before signing. A signature-verified workflow is therefore permitted to hold the scoped credentials its slots resolve to; the SDK keeping decrypted settings out of application code is defence in depth, not the trust boundary.
+- The invariant is **just-in-time delivery**: a workflow holds *no* credentials prior to configuration, and the target model delivers each slot's configuration only when the workflow first activates that slot — not all slots upfront. The current single `WorkflowConfigurationResponse` carrying every slot at registration is an interim simplification; moving to per-slot activation requests is a planned evolution of this handshake.
+- Operator-configured operation limits (e.g. allowed branch patterns, PR-only, no force-push for source control) are enforced in **two layers**: the credential delivered in the `SlotConfiguration` is scoped to the limits wherever the provider supports it, and the slot handler enforces the same limits uniformly before executing any operation. The credential scope is the hard backstop; the handler check provides provider-independent behaviour and clear errors.
+- The handshake must be **authenticated**, not just encrypted — an ephemeral public key proves nothing about who is asking. Target model: the platform injects a **one-time instance token** at launch and pre-creates an **exclusive response queue** per instance; `WorkflowRegistrationRequest` (and future slot-activation requests) must carry the token, and the Steering Instance delivers configurations only to that instance's pre-created queue, ignoring the request's self-declared `ResponseTopic`. The current token-less handshake is an interim dev simplification (tracked as an implementation task).
+
+### Schema flow (packaging time)
 
 ```mermaid
 sequenceDiagram
+    participant P as Packer
+    participant W as Workflow binary
     participant SI as Steering Instance
-    participant W as Workflow container
 
-    SI->>W: docker run <image> schema
-    W->>SI: WorkflowSchema (JSON via stdout or dedicated queue)
-    Note over SI: Diff against stored schema\nMark dirty configurations\nUpdate frontend UI descriptor
+    P->>W: invoke with "schema"
+    W->>P: WorkflowSchema (workflow-schema.json)
+    Note over P: Embed schema in signed *.workflow.zip
+    Note over SI: On registration: read schema from extracted package\nDiff against stored schema\nMark dirty configurations\nUpdate frontend UI descriptor
 ```
 
 ### Message shapes
@@ -345,16 +354,18 @@ Each `ISlotHandler` implementation already knows its target service interface an
 ## 9. Timeout / Failure
 
 - The workflow waits for `WorkflowConfigurationResponse` with a configurable timeout (default 30 s).
-- If the timeout expires or `Success == false`, the workflow logs the error and exits – the orchestrator (Kubernetes / Docker Compose) will restart it, giving the Steering Instance time to catch up.
-- No complex retry logic needed in v1; the restart loop is sufficient.
+- If the timeout expires or `Success == false`, the workflow logs the error and exits with a failure status. The Steering Instance — which launched the instance and owns its lifecycle — marks the run `Failed` (or `PreFlightFailed`) and surfaces it in the dashboard. Re-dispatch is an explicit dispatcher decision per retry policy, **not** an external container restart loop: uncontrolled restarts would produce duplicate announcements and untracked instances.
+- No complex retry logic needed in v1 beyond this; failures are visible, restarts are deliberate.
 - Because each workflow is one-shot, there is no concept of dynamic reconfiguration after boot.
+- **No resumability (v1):** a restart is always from scratch — there is no checkpointing. Workflows must therefore make every external write **idempotent or guarded** (branch-exists check, find-or-create PR, deduplicated comments); a restarted run must converge to the same outcome, not duplicate side effects.
+- Every failure and restart is published as a status event so the Steering Instance can surface it in the dashboard — restarts are never silent.
 
 ---
 
 ## 10. Steering Instance responsibilities
 
-1. On new workflow type registration: invoke the container in `schema` mode, store the emitted `WorkflowSchema`.
-2. On each new deployment: re-invoke `schema`, diff against stored schema, mark affected configurations dirty.
+1. On new workflow type registration: read the embedded `workflow-schema.json` from the verified package, store the `WorkflowSchema`.
+2. On each new deployment: diff the newly embedded schema against the stored one, mark affected configurations dirty.
 3. On `WorkflowRegistrationRequest` (`run` mode):
    - Validate `EnvironmentRequirements` against the runner's registered profile; reject if unsatisfied.
    - Look up the stored configuration for the workflow type; reject if dirty.
