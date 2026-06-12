@@ -27,6 +27,8 @@ public static class PullRequestReviewWorkflow
                 new AiCapabilities { MinContextWindow = 128_000, SupportedModalities = [Modality.Text] })
             .DeclaresView<StagedFinding>("review-findings", ViewRendering.Table, ViewLifecycle.LiveAndPersisted)
             .DeclaresView<ReviewProgressEntry>("progress", ViewRendering.Log, ViewLifecycle.LiveAndPersisted)
+            .DeclaresView<AgentChatEntry>("agent-conversation", ViewRendering.Custom, ViewLifecycle.LiveAndPersisted,
+                AgentChatEntry.RendererKey)
             .DeclaresOutput("code-review-result", "code-review-result.json", "Structured code review findings")
             .ConfigureServices(services => services.AddCodeReviewWorkflow())
             .WithApplication(ExecuteWorkflowAsync)

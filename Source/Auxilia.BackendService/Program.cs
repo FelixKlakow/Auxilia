@@ -1,6 +1,8 @@
 ﻿using System.Reflection;
 using Auxilia.BackendService;
+using Auxilia.BackendService.Dashboard;
 using Auxilia.BackendService.PlatformHost;
+using BlazorAgentView.Services;
 using Auxilia.Governance;
 using Auxilia.Messaging;
 using Auxilia.PlatformData;
@@ -154,6 +156,10 @@ try
 
     // --- Dashboard UI (interactive-server Blazor) ---
     builder.Services.AddRazorComponents().AddInteractiveServerComponents();
+    builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.ViewRendererRegistry>();
+    builder.Services.AddBlazorAgentView();
+    builder.Services.AddViewRenderer<Auxilia.BackendService.Components.AgentChatRenderer>(
+        Auxilia.Workflows.Views.AgentChatEntry.RendererKey);
     builder.Services.AddCascadingAuthenticationState();
     var dashboardSettings = new Auxilia.BackendService.Dashboard.DashboardSettings();
     builder.Configuration.GetSection("Dashboard").Bind(dashboardSettings);

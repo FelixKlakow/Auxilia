@@ -78,6 +78,22 @@ else
             <pre class="view-markdown">@string.Join("\n", Items.Select(i => MarkdownText(i.PayloadJson)))</pre>
             break;
 
+        case ViewRendering.Custom when Registry.Resolve(Descriptor.RendererKey) is { } rendererType:
+            <DynamicComponent Type="rendererType" Parameters="RendererParameters()"/>
+            break;
+
+        case ViewRendering.Custom:
+            <p class="muted custom-renderer-missing">
+                Custom renderer '@(Descriptor.RendererKey ?? "(none)")' is not installed — showing raw items.
+            </p>
+            <div class="log-view">
+                @foreach (var item in Items)
+                {
+                    <div class="log-raw">@item.PayloadJson</div>
+                }
+            </div>
+            break;
+
         default:
             <div class="view-placeholder">
                 '@Descriptor.Rendering' rendering is not supported yet — @Items.Count item(s) recorded.
@@ -90,11 +106,21 @@ else
 
     private static readonly string[] TimePropertyNames = ["timestamp", "timestamputc", "time", "at"];
 
+    [Inject]
+    public required ViewRendererRegistry Registry { get; set; }
+
     [Parameter, EditorRequired]
     public required ViewDescriptor Descriptor { get; set; }
 
     [Parameter]
     public IReadOnlyList<ViewDataRecord> Items { get; set; } = [];
+
+    [Parameter]
+    public bool IsLive { get; set; }
+
+    /// <summary>The custom-renderer component contract: ordered raw items plus liveness.</summary>
+    private Dictionary<string, object?> RendererParameters()
+        => new() { ["Items"] = Items, ["IsLive"] = IsLive };
 
     private sealed record LogRow(string Time, IReadOnlyList<KeyValuePair<string, string>>? Fields, string Raw);
 

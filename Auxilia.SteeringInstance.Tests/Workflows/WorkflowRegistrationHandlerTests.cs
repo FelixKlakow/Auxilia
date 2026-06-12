@@ -280,6 +280,37 @@ public class WorkflowRegistrationHandlerTests
     }
 
     [Test]
+    public async Task HandleAsync_ManifestWithCustomView_CarriesRendererKeyIntoViewsJson()
+    {
+        var instanceId = Guid.NewGuid();
+        var request = new WorkflowRegistrationRequest(
+            instanceId,
+            new WorkflowManifest("AgentWorkflow", instanceId.ToString(),
+                [], [], string.Empty, [], [])
+            {
+                Views = [new Auxilia.Workflows.Views.ViewDescriptor(
+                    "agent-conversation", "{}",
+                    Auxilia.Workflows.Views.ViewRendering.Custom,
+                    Auxilia.Workflows.Views.ViewLifecycle.LiveAndPersisted,
+                    "agent-chat")]
+            },
+            ValidPublicKey(), "reply");
+
+        var bus = new CapturingFakeMessageBusClient();
+        var registry = TestStores.NewWorkflowInstanceRegistry();
+        var handler = MakeHandler(bus, instanceRegistry: registry);
+        await handler.StartAsync(CancellationToken.None);
+        await bus.InvokeAsync(request, CancellationToken.None);
+
+        var record = await registry.GetAsync(instanceId);
+        Assert.That(record, Is.Not.Null);
+        var views = System.Text.Json.JsonSerializer
+            .Deserialize<List<Auxilia.Workflows.Views.ViewDescriptor>>(record!.ViewsJson!)!;
+        Assert.That(views.Single().RendererKey, Is.EqualTo("agent-chat"),
+            "The renderer key must round-trip through the stored ViewsJson.");
+    }
+
+    [Test]
     public async Task HandleAsync_Slotted_ManifestWithViews_RecordsViewsJsonOnInstanceRecord()
     {
         var store = TestStores.NewSlotConfigurationStore();

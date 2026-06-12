@@ -13,4 +13,6 @@ public sealed record ViewDescriptor(
     /// <summary>JSON schema of one view item.</summary>
     string ItemSchemaJson,
     ViewRendering Rendering,
-    ViewLifecycle Lifecycle);
+    ViewLifecycle Lifecycle,
+    /// <summary>Dashboard renderer plug-in key; only meaningful for <see cref="ViewRendering.Custom"/>.</summary>
+    string? RendererKey = null);

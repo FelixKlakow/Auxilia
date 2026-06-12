@@ -99,7 +99,8 @@ else
             </div>
             <div class="card-body">
                 <ViewRenderer Descriptor="view"
-                              Items="ItemsOf(view.Name)"/>
+                              Items="ItemsOf(view.Name)"
+                              IsLive="!IsTerminal"/>
             </div>
         </section>
     }

@@ -1,0 +1,85 @@
+@using System.Text.Json
+@using Auxilia.Workflows.Views
+@using BlazorAgentView.Components
+@using BlazorAgentView.Models
+
+@* Reference custom view renderer (key "agent-chat"): renders AgentChatEntry items as a
+   live left/right chat conversation via the BlazorAgentView package. *@
+
+<div class="agent-chat-host" style="height: 480px;">
+    <AgentChatView Messages="_messages" Options="ChatOptions"/>
+</div>
+
+@code {
+
+    private static readonly AgentChatOptions ChatOptions = new()
+    {
+        ShowTimestamps = true,
+        EnableMarkdown = true,
+        AutoScroll = true,
+        ToolCallDisplay = ToolCallDisplayMode.Collapsible
+    };
+
+    private List<ChatMessage> _messages = [];
+
+    [Parameter, EditorRequired]
+    public required IReadOnlyList<ViewDataRecord> Items { get; set; }
+
+    [Parameter]
+    public bool IsLive { get; set; }
+
+    protected override void OnParametersSet()
+        => _messages = Items.Select(ToChatMessage).Where(m => m is not null).Select(m => m!).ToList();
+
+    private static ChatMessage? ToChatMessage(ViewDataRecord item)
+    {
+        AgentChatEntry? entry;
+        try
+        {
+            entry = JsonSerializer.Deserialize<AgentChatEntry>(item.PayloadJson);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        if (entry is null)
+            return null;
+
+        var message = new ChatMessage
+        {
+            Id = item.Sequence.ToString(),
+            Role = RoleOf(entry.Role),
+            Content = entry.Role == AgentChatRole.Tool ? "" : entry.Content,
+            Timestamp = entry.TimestampUtc,
+            RoleLabel = entry.Label
+        };
+        if (entry.Role == AgentChatRole.Tool)
+            message.ToolCalls.Add(new ToolCall
+            {
+                Id = item.Sequence.ToString(),
+                ToolName = entry.ToolName ?? "tool",
+                Subtitle = entry.Label ?? "",
+                Output = entry.Content,
+                State = ToolStateOf(entry.ToolState)
+            });
+        return message;
+    }
+
+    private static MessageRole RoleOf(AgentChatRole role) => role switch
+    {
+        AgentChatRole.User => MessageRole.User,
+        AgentChatRole.System => MessageRole.System,
+        AgentChatRole.Tool => MessageRole.Tool,
+        _ => MessageRole.Assistant
+    };
+
+    private static ToolState ToolStateOf(string? state) => state?.ToLowerInvariant() switch
+    {
+        "running" => ToolState.Running,
+        "success" => ToolState.Success,
+        "error" or "failed" => ToolState.Failed,
+        "cancelled" => ToolState.Cancelled,
+        _ => ToolState.Pending
+    };
+
+}

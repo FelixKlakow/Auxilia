@@ -42,6 +42,13 @@ public interface IWorkflowBuilder
     IWorkflowBuilder DeclaresView<TItem>(
         string name, Views.ViewRendering rendering, Views.ViewLifecycle lifecycle);
 
+    /// <summary>
+    /// Declares a view rendered by a named dashboard renderer plug-in
+    /// (<paramref name="rendererKey"/>; implies <see cref="Views.ViewRendering.Custom"/> semantics).
+    /// </summary>
+    IWorkflowBuilder DeclaresView<TItem>(
+        string name, Views.ViewRendering rendering, Views.ViewLifecycle lifecycle, string? rendererKey);
+
     IWorkflowBuilder ConfigureServices(Action<IServiceCollection> configure);
 
     IWorkflowBuilder WithApplication(Func<IServiceProvider, CancellationToken, Task> run);

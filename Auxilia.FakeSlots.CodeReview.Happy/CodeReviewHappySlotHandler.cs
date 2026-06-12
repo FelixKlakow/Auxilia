@@ -38,7 +38,8 @@ public sealed class CodeReviewHappySlotHandler : ISlotHandler
                 break;
 
             case "primary-reviewer":
-                services.AddKeyedScoped<IAiAgent>(slotName, (_, _) => new PrimaryReviewerAgent());
+                services.AddKeyedScoped<IAiAgent>(slotName, (sp, _) =>
+                    new PrimaryReviewerAgent(AgentChatPublisher.Create(sp)));
                 break;
 
             case "secondary-reviewer":
@@ -127,23 +128,39 @@ public sealed class CodeReviewHappySlotHandler : ISlotHandler
             => Task.CompletedTask;
     }
 
-    private sealed class PrimaryReviewerAgent : IAiAgent
+    private sealed class PrimaryReviewerAgent(AgentChatPublisher chat) : IAiAgent
     {
         public Task<IAiSession> OpenSessionAsync(AiSessionOptions? options = null, CancellationToken cancellationToken = default)
-            => Task.FromResult<IAiSession>(new PrimaryReviewerSession(options));
+            => Task.FromResult<IAiSession>(new PrimaryReviewerSession(options, chat));
     }
 
-    private sealed class PrimaryReviewerSession(AiSessionOptions? options) : IAiSession
+    private sealed class PrimaryReviewerSession(AiSessionOptions? options, AgentChatPublisher chat) : IAiSession
     {
-        public Task<string> ExecuteAsync(string prompt, CancellationToken cancellationToken = default)
+        public async Task<string> ExecuteAsync(string prompt, CancellationToken cancellationToken = default)
         {
+            // Demo conversation for the dashboard's "agent-chat" renderer: a real agent
+            // provider would publish its actual session turns the same way.
+            await chat.PublishUserAsync(
+                "Review the changes in **src/Widget.cs** of fake-pr-1 and report findings via the result sink.",
+                cancellationToken);
+            await chat.PublishAssistantAsync(
+                "Looking at the diff of `src/Widget.cs` now — the change modifies lines 1-10. " +
+                "Let me read the surrounding file content to judge the style impact.",
+                ct: cancellationToken);
+            await chat.PublishToolAsync(
+                "read_file", "Success", "// fake content", "src/Widget.cs", cancellationToken);
+            await chat.PublishAssistantAsync(
+                "Done. I found one **medium style finding** on lines 1-2 and recorded it through the " +
+                "result sink; the file verdict is *Reviewed*.",
+                ct: cancellationToken);
+
             var sink = options?.CapabilityTools?.OfType<CodeReviewResultSinkMcpTools>().FirstOrDefault();
             if (sink is not null)
             {
                 sink.RecordFinding("src/Widget.cs", 1, 2, FindingSeverity.Medium, "Style", "Review finding", "Fix it");
                 sink.RecordFileVerdict(FileVerdict.Reviewed);
             }
-            return Task.FromResult("");
+            return "";
         }
 
         public Task CompactAsync(string focusDescription, CancellationToken cancellationToken = default)

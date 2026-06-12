@@ -110,11 +110,15 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
 
     public IWorkflowBuilder DeclaresView<TItem>(
         string name, Views.ViewRendering rendering, Views.ViewLifecycle lifecycle)
+        => DeclaresView<TItem>(name, rendering, lifecycle, rendererKey: null);
+
+    public IWorkflowBuilder DeclaresView<TItem>(
+        string name, Views.ViewRendering rendering, Views.ViewLifecycle lifecycle, string? rendererKey)
     {
         if (_views.Any(v => v.Name == name))
             throw new InvalidOperationException($"A view with name '{name}' has already been declared.");
         var schema = JsonSchemaExporter.GetJsonSchemaAsNode(JsonSerializerOptions.Default, typeof(TItem));
-        _views.Add(new Views.ViewDescriptor(name, schema.ToJsonString(), rendering, lifecycle));
+        _views.Add(new Views.ViewDescriptor(name, schema.ToJsonString(), rendering, lifecycle, rendererKey));
         return this;
     }
 
@@ -257,6 +261,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                     services.AddSingleton(context.MessageBus);
                     services.AddSingleton(drainSignal);
                     services.AddSingleton(resourceProxyClient);
+                    services.AddSingleton(new Views.DeclaredViews(_views.AsReadOnly()));
                     services.AddSingleton<Views.IViewPublisher>(
                         new Views.DefaultViewPublisher(context.MessageBus, instanceId, _views.AsReadOnly()));
                     if (activeResolver is not null)

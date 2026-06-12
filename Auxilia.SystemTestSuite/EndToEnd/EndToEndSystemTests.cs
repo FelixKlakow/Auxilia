@@ -115,6 +115,8 @@ public sealed class EndToEndSystemTests
                 "The 'progress' view must be persisted for replay.");
             Assert.That(viewData.Where(v => v.ViewName == "review-findings"), Is.Not.Empty,
                 "The 'review-findings' view must be persisted for replay.");
+            Assert.That(viewData.Where(v => v.ViewName == "agent-conversation"), Is.Not.Empty,
+                "The fake reviewer's published 'agent-conversation' chat view must be persisted for replay.");
         });
 
         var auditRecords = await provider.GetRequiredService<IDataAccess<AuditRecord>>()

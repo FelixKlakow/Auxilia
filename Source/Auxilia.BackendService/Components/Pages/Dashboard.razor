@@ -67,7 +67,8 @@ else
                     }
                     else
                     {
-                        <ViewRenderer Descriptor="panel.Descriptor" Items="panel.Buffer.Items"/>
+                        <ViewRenderer Descriptor="panel.Descriptor" Items="panel.Buffer.Items"
+                                      IsLive="panel.Run?.CompletedUtc is null"/>
                     }
                 </div>
             </section>

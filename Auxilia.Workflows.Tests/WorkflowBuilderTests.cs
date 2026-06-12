@@ -326,6 +326,37 @@ public class WorkflowBuilderTests
     }
 
     [Test]
+    public void DeclaresView_WithoutRendererKey_RendererKeyIsNull()
+    {
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+        wb.DeclaresView<ViewItem>("progress", Views.ViewRendering.Log, Views.ViewLifecycle.Live);
+
+        Assert.That(wb.BuildSchema().Views[0].RendererKey, Is.Null);
+        Assert.That(wb.BuildManifest().Views[0].RendererKey, Is.Null);
+    }
+
+    [Test]
+    public void DeclaresView_WithRendererKey_LandsInSchemaAndManifest()
+    {
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+        wb.DeclaresView<ViewItem>(
+            "conversation", Views.ViewRendering.Custom, Views.ViewLifecycle.LiveAndPersisted, "agent-chat");
+
+        Assert.That(wb.BuildSchema().Views[0].RendererKey, Is.EqualTo("agent-chat"));
+        Assert.That(wb.BuildManifest().Views[0].RendererKey, Is.EqualTo("agent-chat"));
+    }
+
+    [Test]
+    public void DeclaresView_RendererKeyOverload_DuplicateName_ThrowsInvalidOperationException()
+    {
+        var builder = WorkflowBuilder.Create("test");
+        builder.DeclaresView<ViewItem>("conversation", Views.ViewRendering.Custom, Views.ViewLifecycle.Live, "agent-chat");
+
+        Assert.Throws<InvalidOperationException>(() => builder.DeclaresView<ViewItem>(
+            "conversation", Views.ViewRendering.Custom, Views.ViewLifecycle.Live, "agent-chat"));
+    }
+
+    [Test]
     public void DeclaresView_DuplicateName_ThrowsInvalidOperationException()
     {
         var builder = WorkflowBuilder.Create("test");
