@@ -15,5 +15,11 @@ public sealed record WorkflowLaunchRequest(
         string extractedContentDirectory,
         IReadOnlyDictionary<string, string> environmentVariables)
         : this(extractedContentDirectory, environmentVariables, []) { }
+
+    /// <summary>
+    /// Host directory mounted read-write at <c>/workflow-output</c> in the container;
+    /// declared outputs written there are persisted to the artifact store after success.
+    /// </summary>
+    public string? OutputDirectoryBind { get; init; }
 }
 

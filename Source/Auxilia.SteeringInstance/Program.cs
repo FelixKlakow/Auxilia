@@ -70,6 +70,10 @@ try
     builder.Services.AddPlatformEntity<WorkflowInstanceRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<AuditRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<ServiceHeartbeatRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<ArtifactRecord>(platformDataSettings);
+    builder.Services.AddSingleton<Auxilia.PlatformData.Artifacts.IArtifactStore,
+        Auxilia.PlatformData.Artifacts.FileSystemArtifactStore>();
+    builder.Services.AddSingleton<ArtifactPersister>();
     builder.Services.AddSingleton<AuditLog>();
     if (string.IsNullOrWhiteSpace(platformDataSettings.ProtectionKeyBase64))
         Log.Warning("PlatformData:ProtectionKeyBase64 is not configured — slot settings are stored unprotected (dev only).");

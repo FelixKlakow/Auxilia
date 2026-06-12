@@ -26,6 +26,15 @@ public sealed class WorkflowDispatcherSettings
     public TimeSpan SlotCredentialLifetime { get; set; } = TimeSpan.FromMinutes(30);
 
     /// <summary>
+    /// Directory under which each run gets its output folder ({dir}/{instanceId}). Mounted
+    /// into workflow containers at /workflow-output; declared outputs found there are
+    /// persisted to the artifact store when the run succeeds. Must be a path the Docker
+    /// daemon can bind-mount (host path) in container mode.
+    /// </summary>
+    public string RunOutputDirectory { get; set; } =
+        Path.Combine(Path.GetTempPath(), "auxilia-run-output");
+
+    /// <summary>
     /// When true (default), announcements and registrations must carry the one-time instance
     /// token issued at launch, and responses go only to the platform-created response queue.
     /// Disable only for trusted-operator dev scenarios where workflows start outside the dispatcher.

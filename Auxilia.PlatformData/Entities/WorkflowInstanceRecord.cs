@@ -15,6 +15,8 @@ public sealed record WorkflowInstanceRecord : IEntity
     public Guid? OwnerServiceId { get; init; }
     /// <summary>"OneShot" or "LongLiving" — drives drain-and-replace behaviour.</summary>
     public string Lifetime { get; init; } = "OneShot";
+    /// <summary>The manifest's declared outputs as JSON, recorded at registration for artifact persistence.</summary>
+    public string? OutputsJson { get; init; }
     /// <summary>The originating dispatch command as JSON, kept for policy-driven re-dispatch.</summary>
     public string? DispatchCommandJson { get; init; }
 }

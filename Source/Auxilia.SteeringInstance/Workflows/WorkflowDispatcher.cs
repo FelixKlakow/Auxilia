@@ -114,7 +114,14 @@ public sealed class WorkflowDispatcher(
             [WorkflowEnvironmentVariables.SlotActivationQueue] = dispatcherSettings.Value.SlotActivationQueueName,
             [WorkflowEnvironmentVariables.InstanceId]        = instanceId.ToString("D"),
             [WorkflowEnvironmentVariables.InstanceToken]     = issued.Token,
+            [WorkflowEnvironmentVariables.OutputDirectory]   = "/workflow-output",
         };
+
+        // Per-run output directory: mounted into the container; declared outputs found
+        // there are persisted to the artifact store when the run succeeds.
+        var outputDirectory = Path.Combine(
+            dispatcherSettings.Value.RunOutputDirectory, instanceId.ToString("N"));
+        Directory.CreateDirectory(outputDirectory);
 
         foreach (var (key, value) in command.Context)
             env[$"WORKFLOW_CONTEXT__{key.ToUpperInvariant()}"] = value;
@@ -156,7 +163,11 @@ public sealed class WorkflowDispatcher(
         {
             var imageName = command.WorkflowPackageUri.Substring("docker://".Length);
             await launcher.LaunchAsync(
-                new WorkflowLaunchRequest(string.Empty, env, pluginFiles) { DockerImageUri = imageName },
+                new WorkflowLaunchRequest(string.Empty, env, pluginFiles)
+                {
+                    DockerImageUri = imageName,
+                    OutputDirectoryBind = outputDirectory
+                },
                 ct);
             await MarkQueuedAsync(instanceId, command.WorkflowType, ct);
             return;
@@ -203,7 +214,10 @@ public sealed class WorkflowDispatcher(
         pendingPackages.Store(command.WorkflowType, extractedPath);
 
         // 6. Launch
-        await launcher.LaunchAsync(new WorkflowLaunchRequest(extractedPath, env, pluginFiles), ct);
+        await launcher.LaunchAsync(new WorkflowLaunchRequest(extractedPath, env, pluginFiles)
+        {
+            OutputDirectoryBind = outputDirectory
+        }, ct);
         await MarkQueuedAsync(instanceId, command.WorkflowType, ct);
     }
 

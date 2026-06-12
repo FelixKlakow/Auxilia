@@ -1,12 +1,14 @@
 using Auxilia.Governance;
 using Auxilia.Governance.Policy;
 using Auxilia.PlatformData;
+using Auxilia.PlatformData.Artifacts;
 using Auxilia.PlatformData.Entities;
 using Auxilia.PlatformData.Protection;
 using Auxilia.SteeringInstance.Workflows;
 using Auxilia.SteeringInstance.Workflows.Storage;
 using Auxilia.UniversalDataAccess.Implementations;
 using Auxilia.Workflows.Messaging;
+using Microsoft.Extensions.Options;
 
 namespace Auxilia.SteeringInstance.Tests;
 
@@ -45,6 +47,17 @@ internal static class TestStores
         Auxilia.Messaging.IMessageBusClient bus, WorkflowInstanceRegistry? instanceRegistry = null)
         => new(bus, instanceRegistry ?? NewWorkflowInstanceRegistry(), NewStatusPublisher(bus), NewAuditLog(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<LongLivingDrainCoordinator>.Instance);
+
+    public static FileSystemArtifactStore NewArtifactStore(string jsonDirectory)
+        => new(new InMemoryDataAccess<ArtifactRecord>(), TimeProvider.System,
+            new PlatformDataSettings { JsonDirectory = jsonDirectory });
+
+    public static ArtifactPersister NewArtifactPersister(
+        Auxilia.Messaging.IMessageBusClient bus, IArtifactStore artifactStore,
+        WorkflowDispatcherSettings settings, AuditLog? auditLog = null)
+        => new(artifactStore, bus, auditLog ?? NewAuditLog(), TimeProvider.System,
+            Options.Create(settings),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ArtifactPersister>.Instance);
 
     public static SteeringInstanceInfo NewInstanceInfo()
         => new(Guid.NewGuid(), DateTime.UtcNow);

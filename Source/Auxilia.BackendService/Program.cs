@@ -100,6 +100,7 @@ try
     builder.Services.AddPlatformEntity<WorkflowInstanceRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<ServiceHeartbeatRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<ScheduledTriggerRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<ArtifactTriggerRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<AuditRecord>(platformDataSettings);
     builder.Services.AddSingleton(TimeProvider.System);
     builder.Services.AddSingleton<AuditLog>();
@@ -111,6 +112,7 @@ try
     builder.Services.AddHostedService<WorkflowStatusEventHandler>();
     builder.Services.AddHostedService<HeartbeatMonitor>();
     builder.Services.AddHostedService<TriggerScheduler>();
+    builder.Services.AddHostedService<ArtifactTriggerHandler>();
 
     // --- Hosted services ---
     builder.Services.AddHostedService<QueueInitializer>();

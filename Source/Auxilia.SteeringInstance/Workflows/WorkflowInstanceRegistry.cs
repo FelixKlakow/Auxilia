@@ -27,12 +27,18 @@ public sealed class WorkflowInstanceRegistry(
     /// present; creates a fresh one for instances launched outside the dispatcher (dev mode).
     /// </summary>
     public async Task RegisterAsync(
-        Guid instanceId, string workflowTypeName, string lifetime = "OneShot", CancellationToken ct = default)
+        Guid instanceId, string workflowTypeName, string lifetime = "OneShot",
+        string? outputsJson = null, CancellationToken ct = default)
     {
         var existing = await dataAccess.ReadAsync(instanceId, ct);
         if (existing is not null)
         {
-            await dataAccess.SaveAsync(existing with { State = "Running", Lifetime = lifetime }, ct);
+            await dataAccess.SaveAsync(existing with
+            {
+                State = "Running",
+                Lifetime = lifetime,
+                OutputsJson = outputsJson ?? existing.OutputsJson
+            }, ct);
             return;
         }
 
@@ -42,6 +48,7 @@ public sealed class WorkflowInstanceRegistry(
             WorkflowType = workflowTypeName,
             State = "Running",
             Lifetime = lifetime,
+            OutputsJson = outputsJson,
             CreatedUtc = timeProvider.GetUtcNow()
         }, ct);
     }

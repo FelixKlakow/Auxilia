@@ -1,7 +1,9 @@
 using System.Text.Json;
 using Auxilia.Messaging;
+using Auxilia.PlatformData.Artifacts;
 using Auxilia.SteeringInstance.Workflows;
 using Auxilia.SteeringInstance.Workflows.Storage;
+using Auxilia.Workflows;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -19,6 +21,9 @@ public class WorkflowStateHandlerTests
     private Func<WorkflowStateMessage, CancellationToken, Task>? _capturedHandler;
     private WorkflowInstanceRegistry _registry = null!;
     private WorkflowInstanceTokenRegistry _tokenRegistry = null!;
+    private string _tempRoot = null!;
+    private WorkflowDispatcherSettings _settings = null!;
+    private IArtifactStore _artifactStore = null!;
     private WorkflowStateHandler _sut = null!;
 
     [SetUp]
@@ -54,20 +59,33 @@ public class WorkflowStateHandlerTests
         _registry = TestStores.NewWorkflowInstanceRegistry();
         _tokenRegistry = new WorkflowInstanceTokenRegistry(
             Options.Create(new WorkflowDispatcherSettings()), TimeProvider.System);
+        _tempRoot = Path.Combine(Path.GetTempPath(), $"auxilia-state-handler-{Guid.NewGuid():N}");
+        _settings = new WorkflowDispatcherSettings
+        {
+            CommandQueueName = CommandQueue,
+            RunOutputDirectory = Path.Combine(_tempRoot, "run-output")
+        };
+        _artifactStore = TestStores.NewArtifactStore(Path.Combine(_tempRoot, "platform-data"));
         _sut = new WorkflowStateHandler(
             _mockBus.Object,
             _registry,
             _tokenRegistry,
             TestStores.NewAuditLog(),
             TestStores.NewStatusPublisher(_mockBus.Object),
-            Options.Create(new WorkflowDispatcherSettings { CommandQueueName = CommandQueue }),
+            TestStores.NewArtifactPersister(_mockBus.Object, _artifactStore, _settings),
+            Options.Create(_settings),
             NullLogger<WorkflowStateHandler>.Instance);
 
         await _sut.StartAsync(CancellationToken.None);
     }
 
     [TearDown]
-    public async Task TearDown() => await _sut.StopAsync();
+    public async Task TearDown()
+    {
+        await _sut.StopAsync();
+        if (Directory.Exists(_tempRoot))
+            Directory.Delete(_tempRoot, recursive: true);
+    }
 
     [Test]
     public void WhenStartCalled_DeclaresWorkflowStateQueue()
@@ -177,5 +195,47 @@ public class WorkflowStateHandlerTests
         _mockBus.Verify(
             b => b.PublishAsync(CommandQueue, It.IsAny<RunWorkflowCommand>(), It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    // ------------------------------------------------------------------ Artifact persistence
+
+    [Test]
+    public async Task WhenSuccessWithDeclaredOutputs_PersistsArtifactWithWorkItemIdFromDispatchContext()
+    {
+        var instanceId = Guid.NewGuid();
+        var command = new RunWorkflowCommand(
+            Guid.NewGuid(), "review-workflow", "docker://review-workflow:test",
+            new Dictionary<string, string> { ["WorkItemId"] = "WI-1" });
+        await _registry.CreateAsync(
+            instanceId, "review-workflow", "Running",
+            dispatchCommandJson: JsonSerializer.Serialize(command));
+        await _registry.RegisterAsync(
+            instanceId, "review-workflow",
+            outputsJson: JsonSerializer.Serialize(new List<WorkflowOutputDescriptor>
+            {
+                new("review-result", "result.json", null)
+            }));
+
+        var outputDir = Path.Combine(_settings.RunOutputDirectory, instanceId.ToString("N"));
+        Directory.CreateDirectory(outputDir);
+        await File.WriteAllTextAsync(Path.Combine(outputDir, "result.json"), """{"verdict":"approve"}""");
+
+        _mockBus
+            .Setup(b => b.DeclareExchangeAsync(
+                ArtifactPersistedEvent.ExchangeName, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _mockBus
+            .Setup(b => b.PublishToExchangeAsync(
+                ArtifactPersistedEvent.ExchangeName, It.IsAny<ArtifactPersistedEvent>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        await _capturedHandler!(
+            new WorkflowStateMessage(instanceId, WorkflowState.Success, null), CancellationToken.None);
+
+        var lineage = await _artifactStore.GetLineageAsync("review-result", "WI-1");
+        Assert.That(lineage, Has.Count.EqualTo(1), "The declared output must be persisted for the dispatch's work item.");
+        Assert.That(lineage[0].WorkItemId, Is.EqualTo("WI-1"));
+        Assert.That(lineage[0].RunInstanceId, Is.EqualTo(instanceId));
+        Assert.That(lineage[0].WorkflowType, Is.EqualTo("review-workflow"));
     }
 }

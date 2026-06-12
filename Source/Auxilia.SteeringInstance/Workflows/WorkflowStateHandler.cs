@@ -13,6 +13,7 @@ public sealed class WorkflowStateHandler(
     Storage.WorkflowInstanceTokenRegistry tokenRegistry,
     AuditLog auditLog,
     WorkflowStatusPublisher statusPublisher,
+    ArtifactPersister artifactPersister,
     IOptions<WorkflowDispatcherSettings> dispatcherSettings,
     ILogger<WorkflowStateHandler> logger)
 {
@@ -68,6 +69,21 @@ public sealed class WorkflowStateHandler(
             message.WorkflowInstanceId.ToString(), message.State.ToString(),
             message.ErrorMessage is null ? null : $$"""{"error":{{JsonSerializer.Serialize(message.ErrorMessage)}}}""",
             ct);
+
+        // Declared outputs of a successful run are persisted to the artifact store.
+        if (message.State == WorkflowState.Success && record is not null)
+        {
+            var workItemId = string.Empty;
+            if (record.DispatchCommandJson is not null)
+            {
+                var command = JsonSerializer.Deserialize<RunWorkflowCommand>(record.DispatchCommandJson);
+                command?.Context.TryGetValue("WorkItemId", out workItemId!);
+            }
+
+            await artifactPersister.PersistOutputsAsync(
+                message.WorkflowInstanceId, record.WorkflowType, record.OutputsJson,
+                workItemId ?? string.Empty, ct);
+        }
 
         // Drain-and-replace: a drained long-living instance is replaced with a fresh run
         // that boots with the updated configuration (ARCHITECTURE §6).

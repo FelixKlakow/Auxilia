@@ -12,4 +12,6 @@ public static class WorkflowEnvironmentVariables
     public const string SlotActivationQueue = "Workflow__SlotActivationQueue";
     public const string InstanceId = "Workflow__InstanceId";
     public const string InstanceToken = "Workflow__InstanceToken";
+    /// <summary>Directory where the workflow writes its declared outputs for persistence.</summary>
+    public const string OutputDirectory = "Workflow__OutputDirectory";
 }

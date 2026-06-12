@@ -1,5 +1,6 @@
 using Auxilia.Messaging;
 using Auxilia.PlatformData;
+using Auxilia.PlatformData.Artifacts;
 using Auxilia.PlatformData.Entities;
 using Auxilia.SteeringInstance.Workflows;
 using Auxilia.Workflows.Messaging;
@@ -17,26 +18,36 @@ public class WorkflowCancelPipelineComponentTests
 
     private IHost _host = null!;
     private FakeMessageBusClient _bus = null!;
+    private string _tempDir = null!;
 
     [SetUp]
     public async Task SetUp()
     {
         _bus = new FakeMessageBusClient();
+        _tempDir = Path.Combine(Path.GetTempPath(), $"auxilia-cancel-pipeline-{Guid.NewGuid():N}");
 
         _host = Host.CreateDefaultBuilder()
             .ConfigureServices(services =>
             {
                 services.AddSingleton<IMessageBusClient>(_bus);
 
-                var platformData = new PlatformDataSettings { Backend = PlatformDataBackend.InMemory };
+                var platformData = new PlatformDataSettings
+                {
+                    Backend = PlatformDataBackend.InMemory,
+                    JsonDirectory = _tempDir
+                };
                 services.AddPlatformEntity<WorkflowInstanceRecord>(platformData);
                 services.AddPlatformEntity<AuditRecord>(platformData);
+                services.AddPlatformEntity<ArtifactRecord>(platformData);
+                services.AddSingleton(platformData);
                 services.AddSingleton<AuditLog>();
 
                 services.AddSingleton(TimeProvider.System);
                 services.AddSingleton<WorkflowStatusPublisher>();
                 services.AddSingleton<WorkflowInstanceRegistry>();
                 services.AddSingleton<Auxilia.SteeringInstance.Workflows.Storage.WorkflowInstanceTokenRegistry>();
+                services.AddSingleton<IArtifactStore, FileSystemArtifactStore>();
+                services.AddSingleton<ArtifactPersister>();
                 services.AddSingleton<WorkflowStateHandler>();
                 services.AddSingleton<WorkflowCancelDispatcher>();
             })
@@ -50,6 +61,8 @@ public class WorkflowCancelPipelineComponentTests
     public void TearDown()
     {
         _host.Dispose();
+        if (Directory.Exists(_tempDir))
+            Directory.Delete(_tempDir, recursive: true);
     }
 
     [Test]

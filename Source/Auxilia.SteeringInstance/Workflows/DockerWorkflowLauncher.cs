@@ -99,6 +99,10 @@ public sealed class DockerWorkflowLauncher(
             .Select(kv => $"{kv.Key}={kv.Value}")
             .ToList();
 
+        var binds = new List<string> { $"{request.ExtractedContentDirectory}:/workflow:ro" };
+        if (request.OutputDirectoryBind is not null)
+            binds.Add($"{request.OutputDirectoryBind}:/workflow-output");
+
         var parameters = new CreateContainerParameters
         {
             Image = settings.RuntimeImage,
@@ -107,7 +111,7 @@ public sealed class DockerWorkflowLauncher(
             HostConfig = new HostConfig
             {
                 AutoRemove = true,
-                Binds = [$"{request.ExtractedContentDirectory}:/workflow:ro"]
+                Binds = binds
             }
         };
 
@@ -139,6 +143,10 @@ public sealed class DockerWorkflowLauncher(
             .Select(kv => $"{kv.Key}={kv.Value}")
             .ToList();
 
+        var binds = new List<string>();
+        if (request.OutputDirectoryBind is not null)
+            binds.Add($"{request.OutputDirectoryBind}:/workflow-output");
+
         var parameters = new CreateContainerParameters
         {
             Image = request.DockerImageUri,
@@ -147,7 +155,7 @@ public sealed class DockerWorkflowLauncher(
             HostConfig = new HostConfig
             {
                 AutoRemove = true,
-                Binds      = []
+                Binds      = binds
             }
         };
 
