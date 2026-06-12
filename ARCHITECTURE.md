@@ -22,6 +22,7 @@
 13. Open Questions and Concerns
 14. Scaling
 15. Live View Data and Pluggable Dashboards
+16. Governance and RBAC
 
 ---
 
@@ -652,7 +653,6 @@ The core platform has no hard dependency on RabbitMQ, Docker, Vault, AAD, or a s
 | 7 | **Pre-flight retry granularity** - Is retry-on-availability configured globally, per workflow type, or per work item? | UX, reliability |
 | 8 | **TFVC version scope** - TFS 2015/2017 in scope or only TFS 2019+ / Azure DevOps Server? | Adapter effort |
 | 9 | **Work Item Index (deferred)** - Optional similarity search service for refinement quality. Not required for v1. | Future use case quality |
-| 10 | **Governance & RBAC model** — concrete account/role model (administrators, operators, users, AI principals), permission scheme unifying the Policy Engine, and dashboard/configuration administration. This is the declared **next implementation phase**: the platform foundation (governance, permissions, dashboard, accounts) is built before further use-case workflows. | Security, platform foundation |
 
 ### Intentional design decisions
 
@@ -665,6 +665,7 @@ The core platform has no hard dependency on RabbitMQ, Docker, Vault, AAD, or a s
 | 14 | **Workflows are trusted via signature, credentials are delivered just-in-time** — the signing authority vouches for the workflow's correctness; a verified workflow may hold scoped credentials directly, but receives each slot's credentials only at slot activation, encrypted per instance, never as an upfront bundle |
 | 15 | **Artifact persistence via pluggable `IArtifactStore`** — production is direct but manifest/config-limited; consumption is resolved at dispatch and mounted read-only into the container; the bus carries references (ID + hash), never payloads; backends (filesystem, blob, database) are a deployment choice |
 | 16 | **No separate Orchestration Service** — dispatch, pre-flight, and lifecycle management live in the Steering Instance; the Backend Service hosts the API Gateway, MCP Server, dashboard fan-out, platform scheduler, and the heartbeat monitor for Steering Instance failover |
+| 17 | **Unified principal model with deny-by-default RBAC** — humans, AI agents, and services are all principals through the same Policy Engine; four built-in roles (Administrator, Operator, User, Auditor); workflow-type access lists as the primary instrument; single-tenant v1 with `TenantId` on every resource (see section 16) |
 
 ---
 
@@ -842,6 +843,65 @@ graph LR
 ### Dashboard composition
 
 Dashboards are composed of views: per-run dashboards come from the run's workflow schema automatically; operators can pin views from multiple workflows into shared dashboards. Access to a view follows the same permission model as the workflow it belongs to.
+
+---
+
+## 16. Governance and RBAC
+
+Every operation in Auxilia — human, AI, or service — is performed by an authenticated **principal** and authorized by the **Policy Engine**. There are no anonymous operations and no unaudited decisions. See `docs/governance-rbac-design.md` for the implementation plan.
+
+### Principals
+
+| Principal kind | Authenticates via | Notes |
+|---|---|---|
+| **Human user** | Identity Provider (Local, OIDC/AAD/LDAP) | Interactive dashboard sessions |
+| **AI principal** | Its own Account Bundle (API key / token) via MCP | Full UI parity; additionally constrained by the AI bundle's purpose restrictions and usage quotas |
+| **Service principal** | Platform-issued credentials | Integration adapters, schedulers, platform components acting on their own behalf |
+
+All three kinds flow through the same role, permission, and audit machinery — an AI principal is not a special case, it is a principal with extra bundle-level constraints.
+
+### Built-in roles
+
+| Role | May |
+|---|---|
+| **Administrator** | Configure identity providers and group mappings, platform policy ceilings, tenants, retention, signing configuration; assign roles; manage all principals |
+| **Operator** | Install/enable workflow types, manage slot configurations and operator clamps (branch patterns, PR-only, network endpoints), approve long-living workflow deployment, configure task sources and triggers, manage shared dashboards |
+| **User** | Trigger permitted workflow types, observe permitted runs and views, answer RequestInput / approval steps routed to them, use per-run dashboards |
+| **Auditor** | Read-only access to the audit log and run history — no operational permissions |
+
+Roles are **permission sets**, not flags: v1 ships these four fixed roles; custom roles are a schema-compatible later step. A principal can hold multiple roles.
+
+### Permission model
+
+An authorization check is the triple **(principal, action, resource)** evaluated **deny-by-default**:
+
+- **Actions** are fine-grained verbs per resource type: `workflow.trigger`, `workflow.cancel`, `run.observe`, `run.provide-input`, `view.subscribe`, `artifact.consume`, `slot-config.write`, `bundle.manage`, `policy.administer`, `audit.read`, …
+- **Resources** carry a scope chain: `tenant → workflow-type → run/view/artifact`. A grant at an outer scope implies the inner ones unless explicitly narrowed
+- **Workflow-type access lists** are the primary day-to-day instrument: operators declare per workflow type which roles or individual principals may trigger, observe, and approve it
+- v1 is **single-tenant**, but every resource and grant carries a `TenantId` (default tenant) so multi-tenancy is a data migration, not a schema break
+
+### Policy Engine evaluation
+
+```mermaid
+flowchart LR
+    REQ["Request (UI / MCP / dispatch)"] --> AUTHN["Authenticate via IIdentityProvider"]
+    AUTHN --> RESOLVE["Resolve principal + roles<br/>(direct assignments + IdP group mappings)"]
+    RESOLVE --> RBAC["RBAC check: (principal, action, resource)<br/>deny by default"]
+    RBAC -->|denied| AUDIT_D["Audit: deny"] --> BLOCK["Blocked"]
+    RBAC -->|allowed| RESPOL["Resource policy checks:<br/>approval requirements, AI purpose restrictions,<br/>quotas, operator clamps"]
+    RESPOL -->|violated| AUDIT_D
+    RESPOL -->|passed| AUDIT_A["Audit: allow"] --> EXEC["Operation proceeds"]
+```
+
+Both outcomes are always audited. The Policy Engine is a library used at every enforcement point — API Gateway, MCP Server, dispatch pre-flight (trigger permission), view subscription, artifact consumption resolution, and administration operations — so UI and MCP cannot diverge.
+
+### Identity provider group mapping
+
+Role assignment is either **direct** (local accounts, administered in the dashboard) or **mapped**: an administrator maintains `(identity provider, group) → role(s)` mappings, so corporate directory groups (AAD/LDAP/OIDC claims) translate to Auxilia roles at sign-in without per-user administration. Mappings are evaluated at session start and cached for the session lifetime.
+
+### Administration in the dashboard
+
+The dashboard's admin area (Administrator role) covers: principal management, role assignments, group mappings, workflow-type access lists, platform policy ceilings, retention configuration, and the audit log viewer. Operator-level configuration (slot configs, clamps, triggers, shared dashboards) lives in the operator area. Everything is equally available via MCP, subject to the same permissions.
 
 ---
 
