@@ -1,0 +1,29 @@
+@inherits LayoutComponentBase
+
+<div class="page">
+    <header class="topbar">
+        <span class="brand">Auxilia</span>
+        <nav>
+            <NavLink href="runs">Runs</NavLink>
+            <NavLink href="trigger">Trigger</NavLink>
+            <NavLink href="admin">Admin</NavLink>
+            <NavLink href="audit">Audit</NavLink>
+        </nav>
+        <div class="session">
+            <AuthorizeView>
+                <Authorized>
+                    <span class="user">@context.User.Identity?.Name</span>
+                    <form method="post" action="auth/logout-form" class="inline-form">
+                        <button type="submit" class="link-button">Logout</button>
+                    </form>
+                </Authorized>
+                <NotAuthorized>
+                    <a href="login">Login</a>
+                </NotAuthorized>
+            </AuthorizeView>
+        </div>
+    </header>
+    <main class="content">
+        @Body
+    </main>
+</div>

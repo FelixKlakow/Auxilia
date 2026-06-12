@@ -1,0 +1,89 @@
+@page "/"
+@page "/runs"
+@attribute [Authorize]
+@implements IDisposable
+@inject IDataAccess<WorkflowInstanceRecord> Instances
+
+<PageTitle>Runs — Auxilia</PageTitle>
+
+<h1>Runs</h1>
+
+@if (_runs.Count == 0)
+{
+    <p class="muted">No workflow runs yet.</p>
+}
+else
+{
+    <table class="data-table">
+        <thead>
+        <tr>
+            <th>State</th>
+            <th>Type</th>
+            <th>Created (UTC)</th>
+            <th>Completed (UTC)</th>
+            <th>Error</th>
+        </tr>
+        </thead>
+        <tbody>
+        @foreach (var run in _runs)
+        {
+            <tr>
+                <td><span class="badge badge-@run.State.ToLowerInvariant()">@run.State</span></td>
+                <td><a href="runs/@run.Id">@run.WorkflowType</a></td>
+                <td>@run.CreatedUtc.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                <td>@(run.CompletedUtc?.ToString("yyyy-MM-dd HH:mm:ss") ?? "—")</td>
+                <td class="error-cell">@run.ErrorMessage</td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}
+
+@code {
+
+    // Backplane-less v1: the component polls the data layer every 2 s instead of
+    // subscribing to the SignalR fan-out hub from its own circuit.
+    private IReadOnlyList<WorkflowInstanceRecord> _runs = [];
+    private readonly CancellationTokenSource _cts = new();
+    private PeriodicTimer? _timer;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender || _timer is not null)
+            return;
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+        _ = PollAsync();
+    }
+
+    private async Task PollAsync()
+    {
+        try
+        {
+            while (await _timer!.WaitForNextTickAsync(_cts.Token))
+            {
+                await LoadAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Component disposed — polling ends.
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        var all = await Instances.ReadAsync(_cts.Token);
+        _runs = all.OrderByDescending(r => r.CreatedUtc).Take(200).ToList();
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+        _timer?.Dispose();
+    }
+
+}

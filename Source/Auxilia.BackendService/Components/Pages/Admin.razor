@@ -1,0 +1,222 @@
+@page "/admin"
+@attribute [Authorize]
+@inject IDataAccess<PrincipalRecord> Principals
+@inject IDataAccess<RoleAssignmentRecord> RoleAssignments
+@inject PrincipalDirectory Directory
+@inject IPolicyEngine PolicyEngine
+
+<PageTitle>Admin — Auxilia</PageTitle>
+
+<h1>Administration</h1>
+
+@if (!_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else if (!_allowed)
+{
+    <div class="panel denied">Access denied: @_denyReason</div>
+}
+else
+{
+    @if (_error is not null)
+    {
+        <div class="panel denied">@_error</div>
+    }
+    @if (_createdApiKey is not null)
+    {
+        <div class="panel success">
+            API key for the new principal — shown once, copy it now:
+            <code class="api-key">@_createdApiKey</code>
+        </div>
+    }
+
+    <section class="admin-section">
+        <h2>Create human principal</h2>
+        <div class="form-grid">
+            <label>Display name <input @bind="_humanDisplayName"/></label>
+            <label>Username <input @bind="_humanUsername"/></label>
+            <label>Password <input type="password" @bind="_humanPassword"/></label>
+            <button @onclick="CreateHumanAsync" disabled="@_busy">Create human</button>
+        </div>
+    </section>
+
+    <section class="admin-section">
+        <h2>Create AI principal</h2>
+        <div class="form-grid">
+            <label>Display name <input @bind="_aiDisplayName"/></label>
+            <button @onclick="CreateAiAsync" disabled="@_busy">Create AI principal</button>
+        </div>
+    </section>
+
+    <section class="admin-section">
+        <h2>Principals</h2>
+        <table class="data-table">
+            <thead>
+            <tr>
+                <th>Name</th>
+                <th>Kind</th>
+                <th>Status</th>
+                <th>Roles</th>
+                <th>Actions</th>
+            </tr>
+            </thead>
+            <tbody>
+            @foreach (var principal in _principals)
+            {
+                var roles = RolesOf(principal.Id);
+                <tr>
+                    <td>@principal.DisplayName</td>
+                    <td>@principal.Kind</td>
+                    <td>@principal.Status</td>
+                    <td>
+                        @foreach (var role in roles)
+                        {
+                            <span class="badge badge-role">
+                                @role
+                                <button class="link-button" title="Revoke role"
+                                        @onclick="() => RevokeRoleAsync(principal.Id, role)">✕</button>
+                            </span>
+                        }
+                    </td>
+                    <td>
+                        <select @bind="_roleSelections[principal.Id]">
+                            @foreach (var role in BuiltInRoles.AllRoleNames.Except(roles))
+                            {
+                                <option value="@role">@role</option>
+                            }
+                        </select>
+                        <button @onclick="() => AssignRoleAsync(principal.Id)" disabled="@_busy">Assign</button>
+                        @if (principal.Status == "Active")
+                        {
+                            <button @onclick="() => DisableAsync(principal.Id)" disabled="@_busy">Disable</button>
+                        }
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </section>
+}
+
+@code {
+
+    [CascadingParameter]
+    public Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool _loaded;
+    private bool _allowed;
+    private bool _busy;
+    private string _denyReason = "";
+    private string? _error;
+    private string? _createdApiKey;
+
+    private string _humanDisplayName = "";
+    private string _humanUsername = "";
+    private string _humanPassword = "";
+    private string _aiDisplayName = "";
+
+    private IReadOnlyList<PrincipalRecord> _principals = [];
+    private IReadOnlyList<RoleAssignmentRecord> _assignments = [];
+    private readonly Dictionary<Guid, string> _roleSelections = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState!).User;
+        var principalId = DashboardAuthEndpoints.PrincipalIdOf(user);
+        if (principalId is not null)
+        {
+            var decision = await PolicyEngine.EvaluateAsync(
+                new PolicyContext(principalId.Value, PermissionActions.PrincipalAdminister, "principals"));
+            _allowed = decision.Allowed;
+            _denyReason = decision.Reason;
+        }
+        else
+        {
+            _denyReason = "no platform principal in session";
+        }
+
+        if (_allowed)
+            await LoadAsync();
+        _loaded = true;
+    }
+
+    private async Task LoadAsync()
+    {
+        var principals = await Principals.ReadAsync();
+        _principals = principals.OrderBy(p => p.DisplayName).ToList();
+        var assignments = await RoleAssignments.ReadAsync();
+        _assignments = assignments.ToList();
+        foreach (var principal in _principals)
+            _roleSelections.TryAdd(principal.Id, BuiltInRoles.AllRoleNames.First());
+    }
+
+    private IReadOnlyList<string> RolesOf(Guid principalId)
+        => _assignments.Where(a => a.PrincipalId == principalId).Select(a => a.RoleName).OrderBy(r => r).ToList();
+
+    private async Task CreateHumanAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_humanDisplayName) ||
+            string.IsNullOrWhiteSpace(_humanUsername) ||
+            string.IsNullOrWhiteSpace(_humanPassword))
+        {
+            _error = "Display name, username, and password are required.";
+            return;
+        }
+
+        await RunAsync(async () =>
+        {
+            await Directory.CreateHumanAsync(_humanDisplayName.Trim(), _humanUsername.Trim(), _humanPassword);
+            _humanDisplayName = _humanUsername = _humanPassword = "";
+        });
+    }
+
+    private async Task CreateAiAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_aiDisplayName))
+        {
+            _error = "Display name is required.";
+            return;
+        }
+
+        await RunAsync(async () =>
+        {
+            var (_, apiKey) = await Directory.CreateApiKeyPrincipalAsync(_aiDisplayName.Trim(), "AiAgent");
+            _createdApiKey = apiKey;
+            _aiDisplayName = "";
+        });
+    }
+
+    private Task AssignRoleAsync(Guid principalId)
+        => RunAsync(async () =>
+        {
+            if (_roleSelections.TryGetValue(principalId, out var role) && !string.IsNullOrEmpty(role))
+                await Directory.AssignRoleAsync(principalId, role);
+        });
+
+    private Task RevokeRoleAsync(Guid principalId, string role)
+        => RunAsync(() => Directory.RevokeRoleAsync(principalId, role));
+
+    private Task DisableAsync(Guid principalId)
+        => RunAsync(() => Directory.DisableAsync(principalId));
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        _error = null;
+        _busy = true;
+        try
+        {
+            await action();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+}

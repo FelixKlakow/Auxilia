@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Auxilia.Governance.Identity;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Auxilia.BackendService.Dashboard;
 
@@ -36,6 +37,28 @@ public static class DashboardAuthEndpoints
             await http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
             return Results.Ok();
         });
+
+        // Form-encoded variants for the Blazor login page: plain HTML form POSTs with
+        // redirect responses, so the cookie is persisted by a regular browser navigation.
+        app.MapPost("/auth/login-form", async (
+            [FromForm] string username, [FromForm] string password,
+            IIdentityProvider identity, HttpContext http) =>
+        {
+            var session = await identity.AuthenticatePasswordAsync(username, password);
+            if (session is null)
+                return Results.Redirect("/login?error=1");
+
+            await http.SignInAsync(
+                CookieAuthenticationDefaults.AuthenticationScheme,
+                ToClaimsPrincipal(session));
+            return Results.Redirect("/");
+        }).DisableAntiforgery();
+
+        app.MapPost("/auth/logout-form", async (HttpContext http) =>
+        {
+            await http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            return Results.Redirect("/login");
+        }).DisableAntiforgery();
     }
 
     public static ClaimsPrincipal ToClaimsPrincipal(IdentitySession session)

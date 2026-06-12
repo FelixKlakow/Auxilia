@@ -131,6 +131,13 @@ try
     builder.Services.AddSignalR();
     builder.Services.AddHostedService<Auxilia.BackendService.Dashboard.ViewDataFanOutHandler>();
 
+    // --- Dashboard UI (interactive-server Blazor) ---
+    builder.Services.AddRazorComponents().AddInteractiveServerComponents();
+    builder.Services.AddCascadingAuthenticationState();
+    var dashboardSettings = new Auxilia.BackendService.Dashboard.DashboardSettings();
+    builder.Configuration.GetSection("Dashboard").Bind(dashboardSettings);
+    builder.Services.AddSingleton(dashboardSettings);
+
     // --- Platform host (status fan-out, heartbeat monitor, scheduler) ---
     builder.Services.Configure<PlatformHostSettings>(
         builder.Configuration.GetSection("PlatformHost"));
@@ -154,10 +161,14 @@ try
 
     await app.Services.GetRequiredService<GovernanceSeeder>().SeedAsync(app.Lifetime.ApplicationStopping);
 
+    app.UseStaticFiles();
     app.UseAuthentication();
     app.UseAuthorization();
+    app.UseAntiforgery();
     Auxilia.BackendService.Dashboard.DashboardAuthEndpoints.MapDashboardAuth(app);
     app.MapHub<Auxilia.BackendService.Dashboard.ViewDataHub>("/hubs/views");
+    app.MapRazorComponents<Auxilia.BackendService.Components.App>()
+        .AddInteractiveServerRenderMode();
 
     app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
     app.MapPrometheusScrapingEndpoint(); // GET /metrics

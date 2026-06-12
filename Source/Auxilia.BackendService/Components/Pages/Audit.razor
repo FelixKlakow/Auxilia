@@ -1,0 +1,102 @@
+@page "/audit"
+@attribute [Authorize]
+@inject IDataAccess<AuditRecord> AuditRecords
+@inject IPolicyEngine PolicyEngine
+
+<PageTitle>Audit — Auxilia</PageTitle>
+
+<h1>Audit log</h1>
+
+@if (!_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else if (!_allowed)
+{
+    <div class="panel denied">Access denied: @_denyReason</div>
+}
+else
+{
+    <div class="form-grid">
+        <label>
+            Filter (action / actor)
+            <input @bind="_filter" @bind:event="oninput"/>
+        </label>
+        <button @onclick="LoadAsync">Apply</button>
+    </div>
+
+    <table class="data-table">
+        <thead>
+        <tr>
+            <th>Timestamp (UTC)</th>
+            <th>Actor</th>
+            <th>Action</th>
+            <th>Subject</th>
+            <th>Outcome</th>
+        </tr>
+        </thead>
+        <tbody>
+        @foreach (var entry in _entries)
+        {
+            <tr>
+                <td>@entry.TimestampUtc.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                <td>@entry.Actor</td>
+                <td>@entry.Action</td>
+                <td>@entry.Subject</td>
+                <td>@entry.Outcome</td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}
+
+@code {
+
+    private const int MaxRows = 500;
+
+    [CascadingParameter]
+    public Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool _loaded;
+    private bool _allowed;
+    private string _denyReason = "";
+    private string _filter = "";
+    private IReadOnlyList<AuditRecord> _entries = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState!).User;
+        var principalId = DashboardAuthEndpoints.PrincipalIdOf(user);
+        if (principalId is not null)
+        {
+            var decision = await PolicyEngine.EvaluateAsync(
+                new PolicyContext(principalId.Value, PermissionActions.AuditRead, "audit-log"));
+            _allowed = decision.Allowed;
+            _denyReason = decision.Reason;
+        }
+        else
+        {
+            _denyReason = "no platform principal in session";
+        }
+
+        if (_allowed)
+            await LoadAsync();
+        _loaded = true;
+    }
+
+    private async Task LoadAsync()
+    {
+        var all = await AuditRecords.ReadAsync();
+        var query = all.OrderByDescending(a => a.TimestampUtc).AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(_filter))
+        {
+            var needle = _filter.Trim();
+            query = query.Where(a =>
+                a.Action.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                a.Actor.Contains(needle, StringComparison.OrdinalIgnoreCase));
+        }
+
+        _entries = query.Take(MaxRows).ToList();
+    }
+
+}

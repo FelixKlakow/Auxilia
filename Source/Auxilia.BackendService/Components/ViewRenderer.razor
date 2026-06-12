@@ -1,0 +1,119 @@
+@using System.Text.Json
+@using Auxilia.Workflows.Views
+
+<section class="view-panel">
+    <h3>@Descriptor.Name <span class="rendering-hint">@Descriptor.Rendering</span></h3>
+
+    @if (Items.Count == 0)
+    {
+        <p class="muted">No data yet.</p>
+    }
+    else
+    {
+        switch (Descriptor.Rendering)
+        {
+            case ViewRendering.Stream:
+            case ViewRendering.Log:
+                <div class="view-log">
+                    @foreach (var item in Items)
+                    {
+                        <div class="log-line">@CompactJson(item.PayloadJson)</div>
+                    }
+                </div>
+                break;
+
+            case ViewRendering.Table:
+                var rows = Items
+                    .Select(i => TryParse(i.PayloadJson))
+                    .Where(e => e is { ValueKind: JsonValueKind.Object })
+                    .Select(e => e!.Value)
+                    .ToList();
+                var columns = rows
+                    .SelectMany(r => r.EnumerateObject().Select(p => p.Name))
+                    .Distinct()
+                    .ToList();
+                <table class="data-table">
+                    <thead>
+                    <tr>
+                        @foreach (var column in columns)
+                        {
+                            <th>@column</th>
+                        }
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var row in rows)
+                    {
+                        <tr>
+                            @foreach (var column in columns)
+                            {
+                                <td>@CellText(row, column)</td>
+                            }
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+                break;
+
+            case ViewRendering.Markdown:
+                <pre class="view-markdown">@string.Join("\n", Items.Select(i => MarkdownText(i.PayloadJson)))</pre>
+                break;
+
+            default:
+                <div class="view-placeholder">
+                    '@Descriptor.Rendering' rendering is not supported yet — @Items.Count item(s) recorded.
+                </div>
+                break;
+        }
+    }
+</section>
+
+@code {
+
+    [Parameter, EditorRequired]
+    public required ViewDescriptor Descriptor { get; set; }
+
+    [Parameter]
+    public IReadOnlyList<ViewDataRecord> Items { get; set; } = [];
+
+    private static JsonElement? TryParse(string payloadJson)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<JsonElement>(payloadJson);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>One normalized JSON line per item; non-JSON payloads pass through verbatim.</summary>
+    private static string CompactJson(string payloadJson)
+    {
+        var element = TryParse(payloadJson);
+        return element is null ? payloadJson : JsonSerializer.Serialize(element.Value);
+    }
+
+    private static string CellText(JsonElement row, string column)
+    {
+        if (!row.TryGetProperty(column, out var value))
+            return "";
+        return value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : value.GetRawText();
+    }
+
+    /// <summary>Concatenates the payload's top-level string properties (or a bare JSON string).</summary>
+    private static string MarkdownText(string payloadJson)
+    {
+        var element = TryParse(payloadJson);
+        return element?.ValueKind switch
+        {
+            JsonValueKind.String => element.Value.GetString() ?? "",
+            JsonValueKind.Object => string.Join("\n", element.Value.EnumerateObject()
+                .Where(p => p.Value.ValueKind == JsonValueKind.String)
+                .Select(p => p.Value.GetString())),
+            _ => payloadJson
+        };
+    }
+
+}

@@ -1,0 +1,31 @@
+@page "/login"
+
+<PageTitle>Login — Auxilia</PageTitle>
+
+<h1>Login</h1>
+
+@if (!string.IsNullOrEmpty(Error))
+{
+    <div class="panel denied">Invalid username or password.</div>
+}
+
+@* Plain HTML form: the browser POSTs to the form-encoded auth endpoint, which sets the
+   session cookie and redirects — no JS interop or circuit involvement required. *@
+<form method="post" action="auth/login-form" class="login-form">
+    <label>
+        Username
+        <input name="username" autocomplete="username" required/>
+    </label>
+    <label>
+        Password
+        <input type="password" name="password" autocomplete="current-password" required/>
+    </label>
+    <button type="submit">Login</button>
+</form>
+
+@code {
+
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+}

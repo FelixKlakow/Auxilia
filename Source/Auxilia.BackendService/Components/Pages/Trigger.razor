@@ -1,0 +1,97 @@
+@page "/trigger"
+@attribute [Authorize]
+@using Auxilia.Messaging
+@using Auxilia.Workflows.Messaging.Messages
+@inject IPolicyEngine PolicyEngine
+@inject IMessageBusClient MessageBus
+@inject DashboardSettings Settings
+
+<PageTitle>Trigger — Auxilia</PageTitle>
+
+<h1>Trigger a workflow</h1>
+
+@if (_error is not null)
+{
+    <div class="panel denied">@_error</div>
+}
+@if (_success is not null)
+{
+    <div class="panel success">@_success</div>
+}
+
+<div class="form-grid">
+    <label>
+        Workflow type
+        <input @bind="_workflowType" placeholder="e.g. CodeReviewWorkflow"/>
+    </label>
+    <label>
+        Package URI
+        <input @bind="_packageUri" placeholder="https://packages.example.com/my.workflow.zip"/>
+    </label>
+    <label>
+        Work item ID (optional)
+        <input @bind="_workItemId"/>
+    </label>
+    <button @onclick="SubmitAsync" disabled="@_busy">Trigger</button>
+</div>
+
+@code {
+
+    [CascadingParameter]
+    public Task<AuthenticationState>? AuthState { get; set; }
+
+    private string _workflowType = "";
+    private string _packageUri = "";
+    private string _workItemId = "";
+    private string? _error;
+    private string? _success;
+    private bool _busy;
+
+    private async Task SubmitAsync()
+    {
+        _error = null;
+        _success = null;
+
+        if (string.IsNullOrWhiteSpace(_workflowType) || string.IsNullOrWhiteSpace(_packageUri))
+        {
+            _error = "Workflow type and package URI are required.";
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var user = (await AuthState!).User;
+            var principalId = DashboardAuthEndpoints.PrincipalIdOf(user);
+            if (principalId is null)
+            {
+                _error = "No platform principal in session.";
+                return;
+            }
+
+            var decision = await PolicyEngine.EvaluateAsync(
+                new PolicyContext(principalId.Value, PermissionActions.WorkflowTrigger, _workflowType)
+                    { WorkflowType = _workflowType });
+            if (!decision.Allowed)
+            {
+                _error = $"workflow.trigger denied: {decision.Reason}";
+                return;
+            }
+
+            var context = new Dictionary<string, string>();
+            if (!string.IsNullOrWhiteSpace(_workItemId))
+                context["WorkItemId"] = _workItemId.Trim();
+
+            var command = new RunWorkflowCommand(
+                Guid.NewGuid(), _workflowType.Trim(), _packageUri.Trim(), context, principalId.Value);
+            await MessageBus.PublishAsync(Settings.CommandQueueName, command);
+
+            _success = $"Run command {command.CommandId} published to '{Settings.CommandQueueName}'.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+}

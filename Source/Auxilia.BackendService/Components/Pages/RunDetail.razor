@@ -1,0 +1,169 @@
+@page "/runs/{InstanceId:guid}"
+@attribute [Authorize]
+@using System.Text.Json
+@using Auxilia.Workflows.Views
+@implements IDisposable
+@inject IDataAccess<WorkflowInstanceRecord> Instances
+@inject IDataAccess<ViewDataRecord> ViewData
+@inject IPolicyEngine PolicyEngine
+
+<PageTitle>Run @InstanceId — Auxilia</PageTitle>
+
+<h1>Run @InstanceId</h1>
+
+@if (!_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else if (_run is null)
+{
+    <div class="panel denied">Run not found.</div>
+}
+else if (!_allowed)
+{
+    <div class="panel denied">Access denied: @_denyReason</div>
+}
+else
+{
+    <dl class="lifecycle">
+        <dt>State</dt>
+        <dd><span class="badge badge-@_run.State.ToLowerInvariant()">@_run.State</span></dd>
+        <dt>Type</dt>
+        <dd>@_run.WorkflowType</dd>
+        <dt>Lifetime</dt>
+        <dd>@_run.Lifetime</dd>
+        <dt>Created (UTC)</dt>
+        <dd>@_run.CreatedUtc.ToString("yyyy-MM-dd HH:mm:ss")</dd>
+        <dt>Completed (UTC)</dt>
+        <dd>@(_run.CompletedUtc?.ToString("yyyy-MM-dd HH:mm:ss") ?? "—")</dd>
+        @if (_run.ErrorMessage is not null)
+        {
+            <dt>Error</dt>
+            <dd class="error-cell">@_run.ErrorMessage</dd>
+        }
+    </dl>
+
+    @if (_views.Count == 0)
+    {
+        <p class="muted">This run declares no views.</p>
+    }
+    @foreach (var view in _views)
+    {
+        <ViewRenderer Descriptor="view"
+                      Items="_viewItems.GetValueOrDefault(view.Name, [])"/>
+    }
+}
+
+@code {
+
+    [Parameter]
+    public Guid InstanceId { get; set; }
+
+    [CascadingParameter]
+    public Task<AuthenticationState>? AuthState { get; set; }
+
+    private readonly CancellationTokenSource _cts = new();
+    private PeriodicTimer? _timer;
+    private bool _loaded;
+    private bool _allowed;
+    private string _denyReason = "";
+    private WorkflowInstanceRecord? _run;
+    private IReadOnlyList<ViewDescriptor> _views = [];
+    private Dictionary<string, IReadOnlyList<ViewDataRecord>> _viewItems = new();
+
+    private bool IsTerminal =>
+        _run is null || _run.CompletedUtc is not null ||
+        _run.State is "Success" or "Failed" or "Cancelled" or "PreFlightFailed";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _run = await Instances.ReadAsync(InstanceId, _cts.Token);
+        if (_run is not null)
+        {
+            await EvaluateAccessAsync();
+            if (_allowed)
+                await LoadViewsAsync();
+        }
+
+        _loaded = true;
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender || _timer is not null || !_allowed || IsTerminal)
+            return;
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+        _ = PollAsync();
+    }
+
+    private async Task EvaluateAccessAsync()
+    {
+        var user = (await (AuthState ?? Task.FromResult(new AuthenticationState(new())))).User;
+        var principalId = DashboardAuthEndpoints.PrincipalIdOf(user);
+        if (principalId is null)
+        {
+            _denyReason = "no platform principal in session";
+            return;
+        }
+
+        var decision = await PolicyEngine.EvaluateAsync(
+            new PolicyContext(principalId.Value, PermissionActions.RunObserve, InstanceId.ToString())
+                { WorkflowType = _run!.WorkflowType },
+            _cts.Token);
+        _allowed = decision.Allowed;
+        _denyReason = decision.Reason;
+    }
+
+    private async Task LoadViewsAsync()
+    {
+        _run = await Instances.ReadAsync(InstanceId, _cts.Token) ?? _run;
+
+        _views = ParseDescriptors(_run?.ViewsJson);
+        var allItems = await ViewData.ReadAsync(_cts.Token);
+        _viewItems = _views.ToDictionary(
+            v => v.Name,
+            v => (IReadOnlyList<ViewDataRecord>)allItems
+                .Where(i => i.WorkflowInstanceId == InstanceId && i.ViewName == v.Name)
+                .OrderBy(i => i.Sequence)
+                .ToList());
+    }
+
+    private static IReadOnlyList<ViewDescriptor> ParseDescriptors(string? viewsJson)
+    {
+        if (string.IsNullOrWhiteSpace(viewsJson))
+            return [];
+        try
+        {
+            return JsonSerializer.Deserialize<List<ViewDescriptor>>(viewsJson) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    // Backplane-less v1: poll the persisted records every 2 s while the run is live.
+    private async Task PollAsync()
+    {
+        try
+        {
+            while (!IsTerminal && await _timer!.WaitForNextTickAsync(_cts.Token))
+            {
+                await LoadViewsAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Component disposed — polling ends.
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+        _timer?.Dispose();
+    }
+
+}
