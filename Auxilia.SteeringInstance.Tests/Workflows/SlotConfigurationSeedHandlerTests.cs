@@ -26,6 +26,7 @@ public class SlotConfigurationSeedHandlerTests
             _fakeBus,
             _slotStore,
             _providerRegistry,
+            TestStores.NewDrainCoordinator(_fakeBus),
             Options.Create(new WorkflowDispatcherSettings { CommandQueueName = "test-queue" }),
             NullLogger<SlotConfigurationSeedHandler>.Instance);
 

@@ -114,6 +114,16 @@ public class WorkflowDispatchEnvironment
 
     internal static async Task BuildImageAsync(string tag, string dockerfilePath)
     {
+        // Local opt-out: with AUXILIA_PREBUILT_IMAGES=1 the runner has already built all
+        // system-test images from current source (docker builds spawned from the test
+        // process can hang on a wedged Docker Desktop daemon). CI leaves this unset so
+        // images are always rebuilt from local source before containers start.
+        if (System.Environment.GetEnvironmentVariable("AUXILIA_PREBUILT_IMAGES") == "1")
+        {
+            await Console.Out.WriteLineAsync($"AUXILIA_PREBUILT_IMAGES=1 — skipping docker build for {tag}.");
+            return;
+        }
+
         // The Docker Desktop daemon occasionally wedges under suite load and a build then
         // hangs forever at ~0 CPU. Bound each attempt and retry once instead of hanging.
         try

@@ -11,6 +11,13 @@ public interface IWorkflowBuilder
 
     IWorkflowBuilder WithMetadata(Action<WorkflowMetadata> configure);
 
+    /// <summary>
+    /// Declares the workflow's lifetime. Long-living workflows receive a
+    /// <see cref="WorkflowDrainSignal"/> via DI and must honour it; deployment additionally
+    /// requires operator approval on the Steering Instance.
+    /// </summary>
+    IWorkflowBuilder WithLifetime(WorkflowLifetime lifetime);
+
     IWorkflowBuilder DeclaresOutput(string name, string relativePath, string? description = null);
 
     IWorkflowBuilder DeclaresSignal<TPayload>(string name, string? description = null);

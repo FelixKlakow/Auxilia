@@ -23,6 +23,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     private readonly WorkflowMetadata _metadata = new();
     private Action<IServiceCollection>? _configureServices;
     private Func<IServiceProvider, CancellationToken, Task>? _application;
+    private WorkflowLifetime _lifetime = WorkflowLifetime.OneShot;
 
     private const string StateQueueName = "workflow.state";
     private const string StateExchangeName = "workflow.state";
@@ -62,6 +63,12 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     public IWorkflowBuilder WithMetadata(Action<WorkflowMetadata> configure)
     {
         configure(_metadata);
+        return this;
+    }
+
+    public IWorkflowBuilder WithLifetime(WorkflowLifetime lifetime)
+    {
+        _lifetime = lifetime;
         return this;
     }
 
@@ -180,10 +187,21 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 var cancelSub = await context.MessageBus.SubscribeAsync<CancelWorkflowCommand>(
                     cancelQueueName, (_, _) => { cts.Cancel(); return Task.CompletedTask; });
 
+                using var drainSignal = new WorkflowDrainSignal();
+                IAsyncDisposable? drainSub = null;
+                if (_lifetime == WorkflowLifetime.LongLiving)
+                {
+                    var drainQueueName = $"workflow-drain-{instanceId}";
+                    await context.MessageBus.DeclareQueueAsync(drainQueueName);
+                    drainSub = await context.MessageBus.SubscribeAsync<DrainWorkflowCommand>(
+                        drainQueueName, (_, _) => { drainSignal.SignalDrain(); return Task.CompletedTask; });
+                }
+
                 try
                 {
                     var services = new ServiceCollection();
                     services.AddSingleton(context.MessageBus);
+                    services.AddSingleton(drainSignal);
                     if (TestSlotHandlerResolver is { } testResolver)
                         new WorkflowBootstrapper(response, keyPair, testResolver, _slots.AsReadOnly(), instanceId).Apply(services);
                     else if (TestContext == null)
@@ -228,6 +246,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 finally
                 {
                     await cancelSub.DisposeAsync();
+                    if (drainSub is not null)
+                        await drainSub.DisposeAsync();
                 }
                 return;
             }
@@ -245,13 +265,15 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             Version = _metadata.Version,
             Tags = _metadata.Tags.ToList().AsReadOnly(),
             Outputs = _outputs.AsReadOnly(),
-            Signals = _signals.AsReadOnly()
+            Signals = _signals.AsReadOnly(),
+            Lifetime = _lifetime
         };
 
     internal WorkflowManifest BuildManifest(Guid instanceId = default)
         => new(_workflowName, instanceId.ToString("D"), _slots.AsReadOnly(), _environmentRequirements.AsReadOnly(),
             _metadata.Version, _metadata.Tags.ToList().AsReadOnly(), _outputs.AsReadOnly())
         {
-            Signals = _signals.AsReadOnly()
+            Signals = _signals.AsReadOnly(),
+            Lifetime = _lifetime
         };
 }

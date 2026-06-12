@@ -1,7 +1,9 @@
+using System.Text.Json;
 using Auxilia.Messaging;
 using Auxilia.PlatformData;
 using Auxilia.Workflows.Messaging;
 using Auxilia.Workflows.Messaging.Messages;
+using Microsoft.Extensions.Options;
 
 namespace Auxilia.SteeringInstance.Workflows;
 
@@ -10,6 +12,7 @@ public sealed class WorkflowStateHandler(
     WorkflowInstanceRegistry instanceRegistry,
     AuditLog auditLog,
     WorkflowStatusPublisher statusPublisher,
+    IOptions<WorkflowDispatcherSettings> dispatcherSettings,
     ILogger<WorkflowStateHandler> logger)
 {
     private IAsyncDisposable? _subscription;
@@ -49,17 +52,37 @@ public sealed class WorkflowStateHandler(
                 break;
         }
 
+        var record = await instanceRegistry.GetAsync(message.WorkflowInstanceId, ct);
+
         await instanceRegistry.SetStateAsync(
             message.WorkflowInstanceId, message.State.ToString(), message.ErrorMessage, ct);
-        var workflowType = await instanceRegistry.GetWorkflowTypeAsync(message.WorkflowInstanceId, ct);
         await statusPublisher.PublishAsync(
-            message.WorkflowInstanceId, workflowType ?? "unknown",
+            message.WorkflowInstanceId, record?.WorkflowType ?? "unknown",
             message.State.ToString(), message.ErrorMessage, ct);
         await auditLog.AppendAsync(
             "steering-instance", "workflow.state-changed",
             message.WorkflowInstanceId.ToString(), message.State.ToString(),
-            message.ErrorMessage is null ? null : $$"""{"error":{{System.Text.Json.JsonSerializer.Serialize(message.ErrorMessage)}}}""",
+            message.ErrorMessage is null ? null : $$"""{"error":{{JsonSerializer.Serialize(message.ErrorMessage)}}}""",
             ct);
+
+        // Drain-and-replace: a drained long-living instance is replaced with a fresh run
+        // that boots with the updated configuration (ARCHITECTURE §6).
+        if (record is { State: "Draining", DispatchCommandJson: not null })
+        {
+            var original = JsonSerializer.Deserialize<RunWorkflowCommand>(record.DispatchCommandJson);
+            if (original is not null)
+            {
+                var replacement = original with { CommandId = Guid.NewGuid() };
+                await messageBus.PublishAsync(
+                    dispatcherSettings.Value.CommandQueueName, replacement, ct);
+                await auditLog.AppendAsync(
+                    "steering-instance", "workflow.drain-replaced",
+                    message.WorkflowInstanceId.ToString(), replacement.CommandId.ToString(), ct: ct);
+                logger.LogInformation(
+                    "Drained instance {InstanceId} replaced — new dispatch {CommandId}.",
+                    message.WorkflowInstanceId, replacement.CommandId);
+            }
+        }
     }
 
     public async ValueTask StopAsync()

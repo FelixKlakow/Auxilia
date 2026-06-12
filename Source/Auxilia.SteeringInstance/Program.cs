@@ -97,6 +97,7 @@ try
     builder.Services.AddSingleton<WorkflowCancelDispatcher>();
     builder.Services.AddSingleton<WorkflowStateHandler>();
     builder.Services.AddSingleton<Auxilia.Workflows.Messaging.WorkflowStatusPublisher>();
+    builder.Services.AddSingleton<LongLivingDrainCoordinator>();
     builder.Services.AddHostedService<SteeringHeartbeatService>();
     builder.Services.AddSingleton<IWorkflowLauncher, DockerWorkflowLauncher>();
     builder.Services.AddSingleton<IDockerClientFactory, DefaultDockerClientFactory>();

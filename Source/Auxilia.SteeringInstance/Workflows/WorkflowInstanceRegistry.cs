@@ -26,12 +26,13 @@ public sealed class WorkflowInstanceRegistry(
     /// Marks an instance Running at registration. Preserves the dispatcher-created record when
     /// present; creates a fresh one for instances launched outside the dispatcher (dev mode).
     /// </summary>
-    public async Task RegisterAsync(Guid instanceId, string workflowTypeName, CancellationToken ct = default)
+    public async Task RegisterAsync(
+        Guid instanceId, string workflowTypeName, string lifetime = "OneShot", CancellationToken ct = default)
     {
         var existing = await dataAccess.ReadAsync(instanceId, ct);
         if (existing is not null)
         {
-            await dataAccess.SaveAsync(existing with { State = "Running" }, ct);
+            await dataAccess.SaveAsync(existing with { State = "Running", Lifetime = lifetime }, ct);
             return;
         }
 
@@ -40,9 +41,25 @@ public sealed class WorkflowInstanceRegistry(
             Id = instanceId,
             WorkflowType = workflowTypeName,
             State = "Running",
+            Lifetime = lifetime,
             CreatedUtc = timeProvider.GetUtcNow()
         }, ct);
     }
+
+    /// <summary>Running long-living instances of a workflow type (drain-and-replace targets).</summary>
+    public async Task<IReadOnlyList<WorkflowInstanceRecord>> GetRunningLongLivingAsync(
+        string workflowTypeName, CancellationToken ct = default)
+    {
+        var query = await dataAccess.ReadAsync(ct);
+        return query
+            .Where(r => r.WorkflowType == workflowTypeName &&
+                        r.Lifetime == "LongLiving" &&
+                        r.State == "Running")
+            .ToList();
+    }
+
+    public async Task<WorkflowInstanceRecord?> GetAsync(Guid instanceId, CancellationToken ct = default)
+        => await dataAccess.ReadAsync(instanceId, ct);
 
     public async Task<string?> GetWorkflowTypeAsync(Guid instanceId, CancellationToken ct = default)
     {

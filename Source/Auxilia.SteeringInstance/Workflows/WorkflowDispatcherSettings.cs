@@ -35,4 +35,11 @@ public sealed class WorkflowDispatcherSettings
 
     /// <summary>Interval for this instance's liveness heartbeat in the platform data layer.</summary>
     public int HeartbeatIntervalSeconds { get; set; } = 5;
+
+    /// <summary>
+    /// Workflow types the operator has approved for long-living deployment. One-shot is the
+    /// security default; registrations declaring a long-living lifetime are rejected unless
+    /// their type is listed here (ARCHITECTURE §6).
+    /// </summary>
+    public List<string> ApprovedLongLivingWorkflowTypes { get; set; } = [];
 }

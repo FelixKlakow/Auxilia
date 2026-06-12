@@ -719,8 +719,8 @@ Steering instances scale via **competing consumers** on the RabbitMQ command que
 
 Once a steering instance picks up a workflow it becomes the **owner** for its lifetime (it holds the container/process handle). Two concerns follow:
 
-- **Ownership tracking** - Redis records which steering instance owns which workflow instance
-- **Failover** - each steering instance emits a heartbeat; if it stops, the **Backend Service heartbeat monitor** detects the orphaned workflow instances, terminates them via `IWorkflowRunner`, and marks them Failed. Recovery is always a fresh restart from scratch (workflows are not resumable, see section 6) issued as a new dispatch command per retry policy; the failover event is surfaced in the dashboard so the user sees the run was restarted
+- **Ownership tracking** - each run's lifecycle record carries the owning instance's service ID; instances write liveness heartbeats. v1 keeps both in the **platform data layer** (shared MongoDB in replicated deployments); moving the hot heartbeat path to Redis is a later optimization, not a semantic change
+- **Failover** - each steering instance emits a heartbeat; if it stops, the **Backend Service heartbeat monitor** detects the orphaned workflow instances, terminates them gracefully via their per-run cancel queues (no Docker access required), and marks them Failed. Recovery is always a fresh restart from scratch (workflows are not resumable, see section 6) issued as a new dispatch command per retry policy — exactly once per orphaned run, so failovers never cascade; the failover event is surfaced in the dashboard so the user sees the run was restarted
 
 ```mermaid
 graph TB
@@ -793,7 +793,7 @@ sequenceDiagram
 |---|---|---|---|
 | Blazor Server instances | 1 (no backplane needed) | N + sticky LB + Redis backplane | N + Azure Front Door + Azure Cache for Redis |
 | Steering instances | 1 | Pool via competing consumers | Pool via competing consumers with auto-scale |
-| Ownership and heartbeat store | Not needed | Redis | Azure Cache for Redis |
+| Ownership and heartbeat store | Not needed | Platform data layer (MongoDB); Redis as later optimization | Platform data layer; Azure Cache for Redis as later optimization |
 | Message bus | RabbitMQ single in Docker | RabbitMQ cluster | Azure Service Bus |
 | Workflow runtime | OS Process | Docker / k3s | AKS node pool |
 

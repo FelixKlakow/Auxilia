@@ -20,7 +20,8 @@ public class WorkflowRegistrationHandlerTests
         ConfigurationResolver? configResolver = null,
         WorkflowInstanceRegistry? instanceRegistry = null,
         WorkflowInstanceTokenRegistry? tokenRegistry = null,
-        bool requireInstanceToken = false)
+        bool requireInstanceToken = false,
+        List<string>? approvedLongLivingWorkflowTypes = null)
     {
         var profile = new RunnerProfile
         {
@@ -40,7 +41,8 @@ public class WorkflowRegistrationHandlerTests
 
         var settings = Options.Create(new WorkflowDispatcherSettings
         {
-            RequireInstanceToken = requireInstanceToken
+            RequireInstanceToken = requireInstanceToken,
+            ApprovedLongLivingWorkflowTypes = approvedLongLivingWorkflowTypes ?? []
         });
 
         return new WorkflowRegistrationHandler(
@@ -244,6 +246,53 @@ public class WorkflowRegistrationHandlerTests
         await handler.StartAsync(CancellationToken.None);
         await bus.InvokeAsync(request, CancellationToken.None);
 
+        Assert.That(handler.RegisteredCount, Is.EqualTo(1));
+    }
+
+    // ------------------------------------------------------------------ Long-living lifetime approval
+
+    private static WorkflowRegistrationRequest LongLivingSlotlessRequest(string workflowName)
+    {
+        var instanceId = Guid.NewGuid();
+        return new WorkflowRegistrationRequest(
+            instanceId,
+            new WorkflowManifest(workflowName, instanceId.ToString(), [], [], string.Empty, [], [])
+            {
+                Lifetime = WorkflowLifetime.LongLiving
+            },
+            ValidPublicKey(), "reply-topic");
+    }
+
+    [Test]
+    public async Task HandleAsync_LongLivingManifest_TypeNotApproved_PublishesFailureResponse()
+    {
+        var bus = new CapturingFakeMessageBusClient();
+        var handler = MakeHandler(bus); // no approved types
+        await handler.StartAsync(CancellationToken.None);
+
+        await bus.InvokeAsync(LongLivingSlotlessRequest("ServiceWorkflow"), CancellationToken.None);
+
+        var responses = bus.Published.Where(p => p.Message is WorkflowConfigurationResponse).ToList();
+        Assert.That(responses, Has.Count.EqualTo(1));
+        var response = (WorkflowConfigurationResponse)responses[0].Message;
+        Assert.That(response.Success, Is.False);
+        Assert.That(response.ErrorMessage, Does.Contain("operator approval"));
+        Assert.That(handler.RegisteredCount, Is.Zero);
+    }
+
+    [Test]
+    public async Task HandleAsync_LongLivingManifest_TypeApproved_PublishesSuccessResponse()
+    {
+        var bus = new CapturingFakeMessageBusClient();
+        var handler = MakeHandler(bus, approvedLongLivingWorkflowTypes: ["ServiceWorkflow"]);
+        await handler.StartAsync(CancellationToken.None);
+
+        await bus.InvokeAsync(LongLivingSlotlessRequest("ServiceWorkflow"), CancellationToken.None);
+
+        var responses = bus.Published.Where(p => p.Message is WorkflowConfigurationResponse).ToList();
+        Assert.That(responses, Has.Count.EqualTo(1));
+        var response = (WorkflowConfigurationResponse)responses[0].Message;
+        Assert.That(response.Success, Is.True);
         Assert.That(handler.RegisteredCount, Is.EqualTo(1));
     }
 

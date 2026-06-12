@@ -10,6 +10,7 @@ public sealed class SlotConfigurationSeedHandler(
     IMessageBusClient messageBus,
     SlotConfigurationStore slotStore,
     SlotProviderRegistry providerRegistry,
+    LongLivingDrainCoordinator drainCoordinator,
     IOptions<WorkflowDispatcherSettings> dispatcherSettings,
     ILogger<SlotConfigurationSeedHandler> logger)
 {
@@ -51,6 +52,7 @@ public sealed class SlotConfigurationSeedHandler(
         logger.LogInformation(
             "Upserted slot configuration. WorkflowType={WorkflowType} SlotName={SlotName} ProviderType={ProviderType}",
             cmd.WorkflowType, cmd.SlotName, cmd.ProviderType);
+        await drainCoordinator.DrainRunningInstancesAsync(cmd.WorkflowType, ct);
     }
 
     private async Task HandleRemoveSlotAsync(RemoveSlotConfigurationCommand cmd, CancellationToken ct)
@@ -59,6 +61,7 @@ public sealed class SlotConfigurationSeedHandler(
         logger.LogInformation(
             "Removed slot configuration. WorkflowType={WorkflowType} SlotName={SlotName}",
             cmd.WorkflowType, cmd.SlotName);
+        await drainCoordinator.DrainRunningInstancesAsync(cmd.WorkflowType, ct);
     }
 
     private async Task HandleRegisterProviderAsync(RegisterSlotProviderCommand cmd, CancellationToken ct)

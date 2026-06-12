@@ -13,6 +13,8 @@ public sealed record WorkflowInstanceRecord : IEntity
     public string? ErrorMessage { get; init; }
     /// <summary>Service ID of the Steering Instance owning this run (failover detection).</summary>
     public Guid? OwnerServiceId { get; init; }
+    /// <summary>"OneShot" or "LongLiving" — drives drain-and-replace behaviour.</summary>
+    public string Lifetime { get; init; } = "OneShot";
     /// <summary>The originating dispatch command as JSON, kept for policy-driven re-dispatch.</summary>
     public string? DispatchCommandJson { get; init; }
 }

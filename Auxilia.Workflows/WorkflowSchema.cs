@@ -9,6 +9,7 @@ public sealed record WorkflowSchema(
 {
     public string SchemaVersion { get; init; } = "1.0";
     public string Version { get; init; } = string.Empty;
+    public WorkflowLifetime Lifetime { get; init; } = WorkflowLifetime.OneShot;
     public IReadOnlyList<string> Tags { get; init; } = [];
     public IReadOnlyList<WorkflowOutputDescriptor> Outputs { get; init; } = [];
     public IReadOnlyList<SignalDescriptor> Signals { get; init; } = [];

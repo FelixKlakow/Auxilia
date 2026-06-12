@@ -41,6 +41,11 @@ internal static class TestStores
     public static WorkflowStatusPublisher NewStatusPublisher(Auxilia.Messaging.IMessageBusClient bus)
         => new(bus, TimeProvider.System);
 
+    public static LongLivingDrainCoordinator NewDrainCoordinator(
+        Auxilia.Messaging.IMessageBusClient bus, WorkflowInstanceRegistry? instanceRegistry = null)
+        => new(bus, instanceRegistry ?? NewWorkflowInstanceRegistry(), NewStatusPublisher(bus), NewAuditLog(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<LongLivingDrainCoordinator>.Instance);
+
     public static SteeringInstanceInfo NewInstanceInfo()
         => new(Guid.NewGuid(), DateTime.UtcNow);
 }

@@ -56,6 +56,25 @@ public sealed class WorkflowRegistrationHandler(
             responseTopic = WorkflowQueues.ResponseQueueFor(request.WorkflowInstanceId);
         }
 
+        // One-shot is the security default: long-living deployment needs operator approval.
+        if (request.Manifest.Lifetime == Auxilia.Workflows.WorkflowLifetime.LongLiving &&
+            !dispatcherSettings.Value.ApprovedLongLivingWorkflowTypes.Contains(request.Manifest.WorkflowName))
+        {
+            logger.LogWarning(
+                "Rejected long-living registration for {WorkflowName}: type is not operator-approved.",
+                request.Manifest.WorkflowName);
+            await auditLog.AppendAsync(
+                "steering-instance", "workflow.registration.rejected",
+                request.WorkflowInstanceId.ToString(), "long-living-not-approved", ct: cancellationToken);
+            await messageBus.PublishAsync(responseTopic, new WorkflowConfigurationResponse(
+                request.WorkflowInstanceId,
+                false,
+                "Long-living lifetime requires operator approval (WorkflowDispatcher:ApprovedLongLivingWorkflowTypes).",
+                new Dictionary<string, EncryptedSlotConfiguration>()),
+                cancellationToken);
+            return;
+        }
+
         var envResult = environmentValidator.Validate(request.Manifest);
         if (!envResult.IsValid)
         {
@@ -88,7 +107,8 @@ public sealed class WorkflowRegistrationHandler(
                 cancellationToken);
             _registeredInstances.TryAdd(request.WorkflowInstanceId, 0);
             await instanceRegistry.RegisterAsync(
-                request.WorkflowInstanceId, request.Manifest.WorkflowName, cancellationToken);
+                request.WorkflowInstanceId, request.Manifest.WorkflowName,
+                request.Manifest.Lifetime.ToString(), cancellationToken);
             await statusPublisher.PublishAsync(
                 request.WorkflowInstanceId, request.Manifest.WorkflowName, "Running", ct: cancellationToken);
             await auditLog.AppendAsync(
@@ -129,7 +149,8 @@ public sealed class WorkflowRegistrationHandler(
 
         _registeredInstances.TryAdd(request.WorkflowInstanceId, 0);
         await instanceRegistry.RegisterAsync(
-            request.WorkflowInstanceId, request.Manifest.WorkflowName, cancellationToken);
+            request.WorkflowInstanceId, request.Manifest.WorkflowName,
+            request.Manifest.Lifetime.ToString(), cancellationToken);
         await statusPublisher.PublishAsync(
             request.WorkflowInstanceId, request.Manifest.WorkflowName, "Running", ct: cancellationToken);
         await auditLog.AppendAsync(

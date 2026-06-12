@@ -12,4 +12,5 @@ public sealed record WorkflowManifest(
     IReadOnlyList<WorkflowOutputDescriptor> Outputs)
 {
     public IReadOnlyList<SignalDescriptor> Signals { get; init; } = [];
+    public WorkflowLifetime Lifetime { get; init; } = WorkflowLifetime.OneShot;
 }
