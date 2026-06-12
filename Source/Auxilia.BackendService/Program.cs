@@ -114,6 +114,23 @@ try
     builder.Configuration.GetSection("Governance").Bind(governanceSettings);
     builder.Services.AddGovernance(platformDataSettings, governanceSettings);
 
+    // --- Dashboard: cookie sessions + SignalR fan-out ---
+    builder.Services.AddAuthentication(Microsoft.AspNetCore.Authentication.Cookies
+            .CookieAuthenticationDefaults.AuthenticationScheme)
+        .AddCookie(o =>
+        {
+            o.Cookie.Name = "auxilia.session";
+            o.Cookie.HttpOnly = true;
+            o.ExpireTimeSpan = TimeSpan.FromHours(8);
+            o.SlidingExpiration = true;
+            // API/hub clients get status codes, not login redirects.
+            o.Events.OnRedirectToLogin = ctx => { ctx.Response.StatusCode = 401; return Task.CompletedTask; };
+            o.Events.OnRedirectToAccessDenied = ctx => { ctx.Response.StatusCode = 403; return Task.CompletedTask; };
+        });
+    builder.Services.AddAuthorization();
+    builder.Services.AddSignalR();
+    builder.Services.AddHostedService<Auxilia.BackendService.Dashboard.ViewDataFanOutHandler>();
+
     // --- Platform host (status fan-out, heartbeat monitor, scheduler) ---
     builder.Services.Configure<PlatformHostSettings>(
         builder.Configuration.GetSection("PlatformHost"));
@@ -136,6 +153,11 @@ try
     var app = builder.Build();
 
     await app.Services.GetRequiredService<GovernanceSeeder>().SeedAsync(app.Lifetime.ApplicationStopping);
+
+    app.UseAuthentication();
+    app.UseAuthorization();
+    Auxilia.BackendService.Dashboard.DashboardAuthEndpoints.MapDashboardAuth(app);
+    app.MapHub<Auxilia.BackendService.Dashboard.ViewDataHub>("/hubs/views");
 
     app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
     app.MapPrometheusScrapingEndpoint(); // GET /metrics
