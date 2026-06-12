@@ -8,14 +8,41 @@ public sealed class WorkflowInstanceRegistry(
     IDataAccess<WorkflowInstanceRecord> dataAccess,
     TimeProvider timeProvider)
 {
-    public Task RegisterAsync(Guid instanceId, string workflowTypeName, CancellationToken ct = default)
+    /// <summary>Creates the lifecycle record at dispatch time, before the container starts.</summary>
+    public Task CreateAsync(
+        Guid instanceId, string workflowTypeName, string state,
+        Guid? ownerServiceId = null, string? dispatchCommandJson = null, CancellationToken ct = default)
         => dataAccess.SaveAsync(new WorkflowInstanceRecord
+        {
+            Id = instanceId,
+            WorkflowType = workflowTypeName,
+            State = state,
+            CreatedUtc = timeProvider.GetUtcNow(),
+            OwnerServiceId = ownerServiceId,
+            DispatchCommandJson = dispatchCommandJson
+        }, ct);
+
+    /// <summary>
+    /// Marks an instance Running at registration. Preserves the dispatcher-created record when
+    /// present; creates a fresh one for instances launched outside the dispatcher (dev mode).
+    /// </summary>
+    public async Task RegisterAsync(Guid instanceId, string workflowTypeName, CancellationToken ct = default)
+    {
+        var existing = await dataAccess.ReadAsync(instanceId, ct);
+        if (existing is not null)
+        {
+            await dataAccess.SaveAsync(existing with { State = "Running" }, ct);
+            return;
+        }
+
+        await dataAccess.SaveAsync(new WorkflowInstanceRecord
         {
             Id = instanceId,
             WorkflowType = workflowTypeName,
             State = "Running",
             CreatedUtc = timeProvider.GetUtcNow()
         }, ct);
+    }
 
     public async Task<string?> GetWorkflowTypeAsync(Guid instanceId, CancellationToken ct = default)
     {

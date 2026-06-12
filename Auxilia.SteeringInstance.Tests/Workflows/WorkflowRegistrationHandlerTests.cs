@@ -50,6 +50,7 @@ public class WorkflowRegistrationHandlerTests
             instanceRegistry ?? TestStores.NewWorkflowInstanceRegistry(),
             tokenRegistry ?? new WorkflowInstanceTokenRegistry(settings, TimeProvider.System),
             TestStores.NewAuditLog(),
+            TestStores.NewStatusPublisher(messageBus),
             settings,
             NullLogger<WorkflowRegistrationHandler>.Instance);
     }
@@ -161,8 +162,11 @@ public class WorkflowRegistrationHandlerTests
         await handler.StartAsync(CancellationToken.None);
         await bus.InvokeAsync(request, CancellationToken.None);
 
-        Assert.That(bus.Published, Has.Count.EqualTo(1));
-        var (topic, msg) = bus.Published[0];
+        // The handler additionally publishes a WorkflowStatusEvent to the status exchange;
+        // this test only cares about the configuration response.
+        var configResponses = bus.Published.Where(p => p.Message is WorkflowConfigurationResponse).ToList();
+        Assert.That(configResponses, Has.Count.EqualTo(1));
+        var (topic, msg) = configResponses[0];
         Assert.That(topic, Is.EqualTo("my-response-topic"));
         var response = (WorkflowConfigurationResponse)msg;
         Assert.That(response.Success, Is.True);

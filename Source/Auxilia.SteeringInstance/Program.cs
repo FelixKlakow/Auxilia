@@ -95,6 +95,7 @@ try
     builder.Services.AddSingleton<WorkflowDispatcher>();
     builder.Services.AddSingleton<WorkflowCancelDispatcher>();
     builder.Services.AddSingleton<WorkflowStateHandler>();
+    builder.Services.AddSingleton<WorkflowStatusPublisher>();
     builder.Services.AddSingleton<IWorkflowLauncher, DockerWorkflowLauncher>();
     builder.Services.AddSingleton<IDockerClientFactory, DefaultDockerClientFactory>();
     builder.Services.AddSingleton<IDeveloperModeProvider, EnvironmentDeveloperModeProvider>();

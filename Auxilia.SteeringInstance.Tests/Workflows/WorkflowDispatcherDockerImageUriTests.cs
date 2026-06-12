@@ -45,6 +45,16 @@ public class WorkflowDispatcherDockerImageUriTests
         _mockBus
             .Setup(b => b.DeclareQueueAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
+
+        // The dispatcher publishes a WorkflowStatusEvent for every received command.
+        _mockBus
+            .Setup(b => b.DeclareExchangeAsync("workflow.status-events", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _mockBus
+            .Setup(b => b.PublishToExchangeAsync(
+                "workflow.status-events", It.IsAny<WorkflowStatusEvent>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
         _mockBus
             .Setup(b => b.SubscribeAsync<RunWorkflowCommand>(
                 It.IsAny<string>(),
@@ -67,6 +77,9 @@ public class WorkflowDispatcherDockerImageUriTests
             new WorkflowInstanceTokenRegistry(
                 Options.Create(new WorkflowDispatcherSettings()), TimeProvider.System),
             TestStores.NewPolicyEngine(),
+            TestStores.NewWorkflowInstanceRegistry(),
+            TestStores.NewStatusPublisher(_mockBus.Object),
+            TestStores.NewInstanceInfo(),
             NullLogger<WorkflowDispatcher>.Instance);
     }
 

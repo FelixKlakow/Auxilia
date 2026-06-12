@@ -33,6 +33,7 @@ public class WorkflowCancelPipelineComponentTests
                 services.AddSingleton<AuditLog>();
 
                 services.AddSingleton(TimeProvider.System);
+                services.AddSingleton<WorkflowStatusPublisher>();
                 services.AddSingleton<WorkflowInstanceRegistry>();
                 services.AddSingleton<WorkflowStateHandler>();
                 services.AddSingleton<WorkflowCancelDispatcher>();

@@ -72,6 +72,8 @@ public class AuthenticatedHandshakeComponentTests
                 services.AddGovernance(platformData, new Auxilia.Governance.GovernanceSettings());
 
                 services.AddSingleton(TimeProvider.System);
+                services.AddSingleton<WorkflowStatusPublisher>();
+                services.AddSingleton(new SteeringInstanceInfo(Guid.NewGuid(), DateTime.UtcNow));
                 services.AddSingleton<WorkflowInstanceTokenRegistry>();
                 services.AddSingleton<SlotConfigurationStore>();
                 services.AddSingleton<SlotProviderRegistry>();

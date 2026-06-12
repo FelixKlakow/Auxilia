@@ -36,4 +36,10 @@ internal static class TestStores
 
     public static AuditLog NewAuditLog()
         => new(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System);
+
+    public static WorkflowStatusPublisher NewStatusPublisher(Auxilia.Messaging.IMessageBusClient bus)
+        => new(bus, TimeProvider.System);
+
+    public static SteeringInstanceInfo NewInstanceInfo()
+        => new(Guid.NewGuid(), DateTime.UtcNow);
 }

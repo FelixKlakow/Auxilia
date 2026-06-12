@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Text.Json;
 using Auxilia.Governance;
 using Auxilia.Governance.Policy;
 using Auxilia.Messaging;
@@ -35,6 +36,9 @@ public sealed class WorkflowDispatcher(
     SlotProviderRegistry providerRegistry,
     WorkflowInstanceTokenRegistry tokenRegistry,
     IPolicyEngine policyEngine,
+    WorkflowInstanceRegistry instanceRegistry,
+    WorkflowStatusPublisher statusPublisher,
+    SteeringInstanceInfo instanceInfo,
     ILogger<WorkflowDispatcher> logger)
 {
     private IAsyncDisposable? _subscription;
@@ -55,6 +59,15 @@ public sealed class WorkflowDispatcher(
             "Received RunWorkflowCommand. CommandId={CommandId} WorkflowType={WorkflowType} PackageUri={PackageUri}",
             command.CommandId, command.WorkflowType, command.WorkflowPackageUri);
 
+        // The instance identity exists for the whole lifecycle — including pre-flight
+        // rejections — so every outcome is visible in the dashboard.
+        var issued = tokenRegistry.Issue(command.WorkflowType);
+        var instanceId = issued.WorkflowInstanceId;
+        await instanceRegistry.CreateAsync(
+            instanceId, command.WorkflowType, "Received",
+            instanceInfo.ServiceId, JsonSerializer.Serialize(command), ct);
+        await statusPublisher.PublishAsync(instanceId, command.WorkflowType, "Received", ct: ct);
+
         // Pre-flight authorization: the trigger permission of the requesting principal.
         if (command.RequestedBy is { } principalId)
         {
@@ -68,6 +81,8 @@ public sealed class WorkflowDispatcher(
                 logger.LogWarning(
                     "Dispatch denied by policy. CommandId={CommandId} WorkflowType={WorkflowType} Principal={Principal} Reason={Reason}",
                     command.CommandId, command.WorkflowType, principalId, decision.Reason);
+                await FailPreFlightAsync(instanceId, command.WorkflowType,
+                    $"dispatch denied by policy: {decision.Reason}", ct);
                 return;
             }
         }
@@ -76,15 +91,16 @@ public sealed class WorkflowDispatcher(
             logger.LogWarning(
                 "Dispatch rejected: RunWorkflowCommand without RequestedBy principal while RequirePrincipal is enabled. CommandId={CommandId}",
                 command.CommandId);
+            await FailPreFlightAsync(instanceId, command.WorkflowType,
+                "dispatch rejected: no requesting principal", ct);
             return;
         }
 
         var settings = launcherSettings.Value;
 
-        // Issue the per-launch identity and one-time token, and pre-create the instance's
-        // exclusive response queue so configuration is never delivered to a self-declared topic.
-        var issued = tokenRegistry.Issue(command.WorkflowType);
-        await messageBus.DeclareQueueAsync(WorkflowQueues.ResponseQueueFor(issued.WorkflowInstanceId), ct);
+        // Pre-create the instance's exclusive response queue so configuration is never
+        // delivered to a self-declared topic.
+        await messageBus.DeclareQueueAsync(WorkflowQueues.ResponseQueueFor(instanceId), ct);
 
         // 5. Build env vars
         var env = new Dictionary<string, string>
@@ -95,7 +111,7 @@ public sealed class WorkflowDispatcher(
             ["RabbitMq__Password"]           = settings.RabbitMqPassword,
             [WorkflowEnvironmentVariables.RegistrationQueue] = dispatcherSettings.Value.RegistrationQueueName,
             [WorkflowEnvironmentVariables.AnnouncementQueue] = dispatcherSettings.Value.AnnouncementQueueName,
-            [WorkflowEnvironmentVariables.InstanceId]        = issued.WorkflowInstanceId.ToString("D"),
+            [WorkflowEnvironmentVariables.InstanceId]        = instanceId.ToString("D"),
             [WorkflowEnvironmentVariables.InstanceToken]     = issued.Token,
         };
 
@@ -141,6 +157,7 @@ public sealed class WorkflowDispatcher(
             await launcher.LaunchAsync(
                 new WorkflowLaunchRequest(string.Empty, env, pluginFiles) { DockerImageUri = imageName },
                 ct);
+            await MarkQueuedAsync(instanceId, command.WorkflowType, ct);
             return;
         }
 
@@ -155,6 +172,8 @@ public sealed class WorkflowDispatcher(
         {
             logger.LogError(ex,
                 "Failed to download workflow package from {PackageUri}.", command.WorkflowPackageUri);
+            await FailPreFlightAsync(instanceId, command.WorkflowType,
+                "workflow package download failed", ct);
             return;
         }
 
@@ -164,6 +183,8 @@ public sealed class WorkflowDispatcher(
             logger.LogError(
                 "Workflow package verification failed for {WorkflowType}. Aborting launch.",
                 command.WorkflowType);
+            await FailPreFlightAsync(instanceId, command.WorkflowType,
+                "workflow package signature verification failed", ct);
             return;
         }
 
@@ -182,6 +203,20 @@ public sealed class WorkflowDispatcher(
 
         // 6. Launch
         await launcher.LaunchAsync(new WorkflowLaunchRequest(extractedPath, env, pluginFiles), ct);
+        await MarkQueuedAsync(instanceId, command.WorkflowType, ct);
+    }
+
+    private async Task FailPreFlightAsync(Guid instanceId, string workflowType, string reason, CancellationToken ct)
+    {
+        await instanceRegistry.SetStateAsync(instanceId, "PreFlightFailed", reason, ct);
+        await statusPublisher.PublishAsync(instanceId, workflowType, "PreFlightFailed", reason, ct);
+        tokenRegistry.Consume(instanceId);
+    }
+
+    private async Task MarkQueuedAsync(Guid instanceId, string workflowType, CancellationToken ct)
+    {
+        await instanceRegistry.SetStateAsync(instanceId, "Queued", ct: ct);
+        await statusPublisher.PublishAsync(instanceId, workflowType, "Queued", ct: ct);
     }
 
     public async ValueTask StopAsync()

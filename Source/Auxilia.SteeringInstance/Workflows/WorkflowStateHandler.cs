@@ -8,6 +8,7 @@ public sealed class WorkflowStateHandler(
     IMessageBusClient messageBus,
     WorkflowInstanceRegistry instanceRegistry,
     AuditLog auditLog,
+    WorkflowStatusPublisher statusPublisher,
     ILogger<WorkflowStateHandler> logger)
 {
     private IAsyncDisposable? _subscription;
@@ -49,6 +50,10 @@ public sealed class WorkflowStateHandler(
 
         await instanceRegistry.SetStateAsync(
             message.WorkflowInstanceId, message.State.ToString(), message.ErrorMessage, ct);
+        var workflowType = await instanceRegistry.GetWorkflowTypeAsync(message.WorkflowInstanceId, ct);
+        await statusPublisher.PublishAsync(
+            message.WorkflowInstanceId, workflowType ?? "unknown",
+            message.State.ToString(), message.ErrorMessage, ct);
         await auditLog.AppendAsync(
             "steering-instance", "workflow.state-changed",
             message.WorkflowInstanceId.ToString(), message.State.ToString(),

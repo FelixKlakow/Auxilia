@@ -101,6 +101,15 @@ public class WorkflowDispatcherTests
                 It.Is<string>(q => q.StartsWith("workflow-response-")), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
+        // The dispatcher publishes a WorkflowStatusEvent for every received command.
+        _mockBus
+            .Setup(b => b.DeclareExchangeAsync("workflow.status-events", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _mockBus
+            .Setup(b => b.PublishToExchangeAsync(
+                "workflow.status-events", It.IsAny<WorkflowStatusEvent>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
         _mockBus
             .Setup(b => b.SubscribeAsync<RunWorkflowCommand>(
                 "workflow.run-commands",
@@ -126,6 +135,9 @@ public class WorkflowDispatcherTests
             TestStores.NewSlotProviderRegistry(),
             _tokenRegistry,
             TestStores.NewPolicyEngine(),
+            TestStores.NewWorkflowInstanceRegistry(),
+            TestStores.NewStatusPublisher(_mockBus.Object),
+            TestStores.NewInstanceInfo(),
             NullLogger<WorkflowDispatcher>.Instance);
 
         await _sut.StartAsync(CancellationToken.None);
@@ -337,6 +349,9 @@ public class WorkflowDispatcherTests
             providerRegistry,
             _tokenRegistry,
             TestStores.NewPolicyEngine(),
+            TestStores.NewWorkflowInstanceRegistry(),
+            TestStores.NewStatusPublisher(_mockBus.Object),
+            TestStores.NewInstanceInfo(),
             NullLogger<WorkflowDispatcher>.Instance);
         await _sut.StartAsync(CancellationToken.None);
 
@@ -395,6 +410,9 @@ public class WorkflowDispatcherTests
             TestStores.NewSlotProviderRegistry(),
             _tokenRegistry,
             TestStores.NewPolicyEngine(),
+            TestStores.NewWorkflowInstanceRegistry(),
+            TestStores.NewStatusPublisher(_mockBus.Object),
+            TestStores.NewInstanceInfo(),
             NullLogger<WorkflowDispatcher>.Instance);
         await _sut.StartAsync(CancellationToken.None);
 
@@ -441,6 +459,9 @@ public class WorkflowDispatcherTests
             providerRegistry,
             _tokenRegistry,
             TestStores.NewPolicyEngine(),
+            TestStores.NewWorkflowInstanceRegistry(),
+            TestStores.NewStatusPublisher(_mockBus.Object),
+            TestStores.NewInstanceInfo(),
             NullLogger<WorkflowDispatcher>.Instance);
         await _sut.StartAsync(CancellationToken.None);
 

@@ -121,7 +121,8 @@ public class SignalDispatchPhaseTests
         var validator = new EnvironmentValidator(Options.Create(profile), NullLogger<EnvironmentValidator>.Instance);
         var settings = Options.Create(new WorkflowDispatcherSettings { RequireInstanceToken = false });
         var handler = new WorkflowRegistrationHandler(bus, validator, resolver, registry,
-            new WorkflowInstanceTokenRegistry(settings, TimeProvider.System), TestStores.NewAuditLog(), settings,
+            new WorkflowInstanceTokenRegistry(settings, TimeProvider.System), TestStores.NewAuditLog(),
+            TestStores.NewStatusPublisher(bus), settings,
             NullLogger<WorkflowRegistrationHandler>.Instance);
 
         await handler.StartAsync(CancellationToken.None);
@@ -134,8 +135,10 @@ public class SignalDispatchPhaseTests
 
         await bus.InvokeRegistrationAsync(request, CancellationToken.None);
 
-        Assert.That(bus.Published, Has.Count.EqualTo(1));
-        var response = (WorkflowConfigurationResponse)bus.Published[0].Message;
+        // Only the configuration response matters here — status events go to the status exchange.
+        var configResponses = bus.Published.Where(p => p.Message is WorkflowConfigurationResponse).ToList();
+        Assert.That(configResponses, Has.Count.EqualTo(1));
+        var response = (WorkflowConfigurationResponse)configResponses[0].Message;
         Assert.That(response.Success, Is.True);
         Assert.That(response.SignalHandlers, Contains.Key("on-done"));
         Assert.That(response.SignalHandlers["on-done"], Is.InstanceOf<NotifySignalHandler>());

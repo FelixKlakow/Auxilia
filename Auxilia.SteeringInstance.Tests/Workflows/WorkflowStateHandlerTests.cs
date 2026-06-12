@@ -26,6 +26,15 @@ public class WorkflowStateHandlerTests
             .Setup(b => b.DeclareExchangeAsync("workflow.state", It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
+        // The handler republishes every state change as a WorkflowStatusEvent.
+        _mockBus
+            .Setup(b => b.DeclareExchangeAsync("workflow.status-events", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _mockBus
+            .Setup(b => b.PublishToExchangeAsync(
+                "workflow.status-events", It.IsAny<WorkflowStatusEvent>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
         _mockBus
             .Setup(b => b.SubscribeToExchangeAsync<WorkflowStateMessage>(
                 "workflow.state",
@@ -39,6 +48,7 @@ public class WorkflowStateHandlerTests
             _mockBus.Object,
             TestStores.NewWorkflowInstanceRegistry(),
             TestStores.NewAuditLog(),
+            TestStores.NewStatusPublisher(_mockBus.Object),
             NullLogger<WorkflowStateHandler>.Instance);
 
         await _sut.StartAsync(CancellationToken.None);
