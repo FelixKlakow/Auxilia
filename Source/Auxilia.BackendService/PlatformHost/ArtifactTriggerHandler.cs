@@ -49,7 +49,7 @@ public sealed class ArtifactTriggerHandler(
                     ["ArtifactType"] = persisted.ArtifactType,
                     ["WorkItemId"] = persisted.WorkItemId
                 },
-                trigger.RunAsPrincipalId);
+                trigger.RunAsPrincipalId, trigger.WorkflowConfigurationId);
 
             await messageBus.PublishAsync(settings.Value.CommandQueueName, command, ct);
             await auditLog.AppendAsync("backend-service", "trigger.artifact-dispatch",

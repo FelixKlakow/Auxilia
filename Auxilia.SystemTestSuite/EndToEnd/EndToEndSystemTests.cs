@@ -27,7 +27,7 @@ public sealed class EndToEndSystemTests
     private const string ReviewerMailbox = "reviewer@localhost";
 
     [Test]
-    [CancelAfter(300_000)]
+    [CancelAfter(540_000)]
     public async Task WhenMailArrives_CodeReviewRunsThroughTheWholePlatform(
         CancellationToken cancellationToken)
     {
@@ -156,6 +156,52 @@ public sealed class EndToEndSystemTests
                 statusEvents, cancellationToken);
         Assert.That(reply!.TextBody, Does.Contain("Code Review Summary"),
             "The reply must carry the review summary.");
+
+        // 6. RERUN (#20): re-dispatch the completed run's ORIGINAL command over the same bus
+        //    path the dashboard uses — fresh command ID, RERUN_OF back-reference, requester set.
+        var instanceStore = provider.GetRequiredService<IDataAccess<WorkflowInstanceRecord>>();
+        var firstRun = await instanceStore.ReadAsync(instanceId, cancellationToken);
+        Assert.That(firstRun?.DispatchCommandJson, Is.Not.Null,
+            "The completed run must keep its dispatch command for policy-driven re-dispatch.");
+
+        var originalCommand = System.Text.Json.JsonSerializer
+            .Deserialize<RunWorkflowCommand>(firstRun!.DispatchCommandJson!)!;
+        var rerunCommand = originalCommand with
+        {
+            CommandId = Guid.NewGuid(),
+            Context = new Dictionary<string, string>(originalCommand.Context)
+            {
+                ["RERUN_OF"] = instanceId.ToString("D")
+            },
+            RequestedBy = EndToEndEnvironment.RunAsPrincipalId
+        };
+        await bus.PublishAsync(EndToEndEnvironment.CommandQueue, rerunCommand, cancellationToken);
+
+        Guid rerunInstanceId = default;
+        var rerunComplete = await WaitForAsync(() =>
+        {
+            var complete = statusEvents
+                .Where(e => e.WorkflowType == EndToEndEnvironment.WorkflowType &&
+                            e.WorkflowInstanceId != instanceId)
+                .GroupBy(e => e.WorkflowInstanceId)
+                .FirstOrDefault(g => g.Any(e => e.State == "Success"));
+            if (complete is null)
+                return false;
+            rerunInstanceId = complete.Key;
+            return true;
+        }, TimeSpan.FromSeconds(210), cancellationToken);
+        if (!rerunComplete)
+            await FailWithDiagnosticsAsync(
+                "The rerun must reach Success like the original run.", statusEvents, cancellationToken);
+
+        var rerunRecord = await instanceStore.ReadAsync(rerunInstanceId, cancellationToken);
+        Assert.That(rerunRecord?.DispatchCommandJson, Is.Not.Null,
+            "The rerun must keep its own dispatch command.");
+        var recordedCommand = System.Text.Json.JsonSerializer
+            .Deserialize<RunWorkflowCommand>(rerunRecord!.DispatchCommandJson!)!;
+        Assert.That(recordedCommand.Context.GetValueOrDefault("RERUN_OF"),
+            Is.EqualTo(instanceId.ToString("D")),
+            "The rerun must record its predecessor via the RERUN_OF context entry.");
     }
 
     [Test]

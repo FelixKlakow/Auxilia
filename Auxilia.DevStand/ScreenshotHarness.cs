@@ -1,6 +1,7 @@
 using Auxilia.PlatformData.Entities;
 using Auxilia.SystemTestSuite.EndToEnd;
 using Auxilia.UniversalDataAccess;
+using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 
@@ -16,6 +17,9 @@ namespace Auxilia.DevStand;
 internal static class ScreenshotHarness
 {
     private const string WorkflowType = "pull-request-code-review"; // EndToEndEnvironment.WorkflowType (internal there)
+    private const string WorkflowPackageUri = "docker://auxilia-code-review-workflow:system-test"; // EndToEndEnvironment.WorkflowPackageUri
+    private const string CommandQueue = "workflow.run-commands-e2e"; // EndToEndEnvironment.CommandQueue
+    private const string DemoConfigurationName = "team-code-review";
 
     private static readonly TimeSpan RunCompletionTimeout = TimeSpan.FromMinutes(8);
     private static readonly TimeSpan SettleDelay          = TimeSpan.FromMilliseconds(700);
@@ -55,6 +59,9 @@ internal static class ScreenshotHarness
 
             var run = await WaitForTerminalRunAsync();
             Console.WriteLine($"Run {run.Id} reached terminal state '{run.State}'.");
+
+            Console.WriteLine("Seeding workflow-editor demo data (provider catalog + demo configuration) ...");
+            await SeedWorkflowEditorDemoDataAsync();
 
             var captured = await CaptureAllPagesAsync(dashboardUrl, run.Id, outputDir);
 
@@ -122,21 +129,128 @@ internal static class ScreenshotHarness
         (string Route, string FileName)[] pages =
         [
             ("/",                           "02-dashboard.png"),
-            ("/runs",                       "03-runs.png"),
-            ($"/runs/{runId}",              "04-run-detail.png"),
-            ("/trigger",                    "05-trigger.png"),
-            ("/operator/slots",             "06-operator-slots.png"),
-            ("/operator/schedules",         "07-operator-schedules.png"),
-            ("/operator/artifact-triggers", "08-operator-artifact-triggers.png"),
-            ("/admin",                      "09-admin.png"),
-            ("/admin/bundles",              "10-admin-bundles.png"),
-            ("/admin/provider-catalog",     "11-admin-provider-catalog.png"),
-            ("/audit",                      "12-audit.png")
+            ("/workflows",                  "03-workflows.png"),
+            ("/runs",                       "05-runs.png"),
+            ($"/runs/{runId}",              "06-run-detail.png"),
+            ("/trigger",                    "07-trigger.png"),
+            ("/operator/slots",             "08-operator-slots.png"),
+            ("/operator/schedules",         "09-operator-schedules.png"),
+            ("/operator/artifact-triggers", "10-operator-artifact-triggers.png"),
+            ("/admin",                      "11-admin.png"),
+            ("/admin/bundles",              "12-admin-bundles.png"),
+            ("/admin/provider-catalog",     "13-admin-provider-catalog.png"),
+            ("/audit",                      "14-audit.png")
         ];
         foreach (var (route, fileName) in pages)
             await CapturePageAsync(page, dashboardUrl, route, fileName, outputDir, captured);
 
+        // The editor needs interaction before its screenshot is meaningful: a provider must
+        // be chosen so the generated settings form is visible (04 sorts it next to the list).
+        await CaptureWorkflowEditorAsync(page, dashboardUrl, outputDir, captured);
+
         return captured;
+    }
+
+    /// <summary>
+    /// Curates the provider catalog (availability is deny-by-default), seeds one named workflow
+    /// configuration over the same bus path the editor uses, and wires a daily schedule to it so
+    /// the workflows page shows a fully populated card.
+    /// </summary>
+    private static async Task SeedWorkflowEditorDemoDataAsync()
+    {
+        await using var provider = EndToEndEnvironment.BuildPlatformDataProvider();
+
+        var catalog = provider.GetRequiredService<IDataAccess<ProviderCatalogRecord>>();
+        await catalog.SaveAsync(new ProviderCatalogRecord
+        {
+            Id = ProviderCatalogRecord.IdFor("email-work-items"),
+            ProviderType = "email-work-items",
+            Available = true,
+            Category = "task-source"
+        });
+        await catalog.SaveAsync(new ProviderCatalogRecord
+        {
+            Id = ProviderCatalogRecord.IdFor("fake-code-review-happy"),
+            ProviderType = "fake-code-review-happy",
+            Available = true,
+            Category = "code-review"
+        });
+
+        await EndToEndEnvironment.MessageBusClient.PublishAsync(
+            CommandQueue + "-slot-seed.upsert-configuration",
+            new UpsertWorkflowConfigurationCommand(
+                DemoConfigurationName, "Team code review", WorkflowType, WorkflowPackageUri,
+                Enabled: true,
+                [
+                    new SlotBindingSeed("work-items", "email-work-items", new Dictionary<string, string>
+                    {
+                        ["ImapHost"] = "greenmail",
+                        ["ImapPort"] = "3143",
+                        ["UseSsl"]   = "false",
+                        ["Username"] = "workflows@localhost",
+                        ["Password"] = "pw",
+                        ["SmtpHost"] = "greenmail",
+                        ["SmtpPort"] = "3025",
+                        ["Folder"]   = "INBOX"
+                    }),
+                    new SlotBindingSeed("repository", "fake-code-review-happy", new Dictionary<string, string>())
+                ]));
+
+        var schedules = provider.GetRequiredService<IDataAccess<ScheduledTriggerRecord>>();
+        await schedules.SaveAsync(new ScheduledTriggerRecord
+        {
+            Id = ScheduledTriggerRecord.IdForConfiguration(DemoConfigurationName),
+            WorkflowType = WorkflowType,
+            WorkflowPackageUri = WorkflowPackageUri,
+            IntervalSeconds = 86400,
+            Enabled = true,
+            // Pre-stamped so the daily schedule does not fire during the capture session.
+            LastDispatchedUtc = DateTimeOffset.UtcNow,
+            WorkflowConfigurationId = WorkflowConfigurationRecord.IdFor(DemoConfigurationName)
+        });
+
+        await Task.Delay(TimeSpan.FromSeconds(1)); // bus seed propagation window
+    }
+
+    /// <summary>
+    /// Walks the create flow far enough that the screenshot shows the real editing experience:
+    /// basics filled, the work-items slot added, the email provider chosen, and the generated
+    /// settings form (from the provider's manifest descriptors) on screen.
+    /// </summary>
+    private static async Task CaptureWorkflowEditorAsync(
+        IPage page, string dashboardUrl, string outputDir, List<string> captured)
+    {
+        await page.GotoAsync(dashboardUrl + "/workflows/new");
+        try
+        {
+            await page.WaitForLoadStateAsync(
+                LoadState.NetworkIdle, new PageWaitForLoadStateOptions { Timeout = 10_000 });
+        }
+        catch (PlaywrightException)
+        {
+            // The circuit websocket can keep the network "busy" — the settle delay still applies.
+        }
+        await Task.Delay(SettleDelay);
+
+        // @bind commits on the change event — Tab after each fill.
+        await page.FillAsync("input[placeholder='e.g. Code review for team mailbox']", "Code review via team mailbox");
+        await page.Keyboard.PressAsync("Tab");
+        await page.FillAsync("input[list='known-workflow-types']", WorkflowType);
+        await page.Keyboard.PressAsync("Tab");
+        await Task.Delay(SettleDelay); // slot suggestions depend on the committed workflow type
+        await page.FillAsync("input[list='known-package-uris']", WorkflowPackageUri);
+        await page.Keyboard.PressAsync("Tab");
+        await Task.Delay(SettleDelay);
+
+        await page.ClickAsync("button:has-text('Add slot \"work-items\"')");
+        await Task.Delay(SettleDelay);
+        await page.ClickAsync(".provider-card:has-text('email-work-items')");
+        await Task.Delay(SettleDelay);
+
+        var path = Path.Combine(outputDir, "04-workflow-editor.png");
+        await page.ScreenshotAsync(new PageScreenshotOptions { Path = path, FullPage = true });
+        captured.Add(path);
+        Console.WriteLine($"  captured /workflows/new (provider chosen) -> {path}");
     }
 
     /// <summary>Submits the real login form (sets the session cookie via redirect).</summary>

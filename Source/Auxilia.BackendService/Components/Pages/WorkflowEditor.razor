@@ -1,0 +1,393 @@
+@page "/workflows/new"
+@page "/workflows/{ConfigurationId:guid}/edit"
+@attribute [Authorize]
+@using Auxilia.Workflows
+@inject WorkflowConfigurationEditorService Editor
+@inject ProviderCatalogService Catalog
+@inject IPolicyEngine PolicyEngine
+@inject NavigationManager Navigation
+
+<PageTitle>@(IsEdit ? "Edit workflow" : "New workflow") — Auxilia</PageTitle>
+
+<div class="page-back"><a href="workflows">← All workflows</a></div>
+
+<PageHeader Title="@(IsEdit ? $"Edit \"{_draft.DisplayName}\"" : "New workflow configuration")"
+            Subtitle="Three steps: name the workflow, pick a provider for each capability slot, and wire a trigger. No JSON required."/>
+
+@if (!_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else if (!_allowed)
+{
+    <div class="panel denied">Access denied: @_denyReason</div>
+}
+else if (_notFound)
+{
+    <div class="panel denied">Workflow configuration not found.</div>
+}
+else
+{
+    @if (_errors.Count > 0)
+    {
+        <div class="panel denied">
+            @foreach (var error in _errors)
+            {
+                <div>@error</div>
+            }
+        </div>
+    }
+
+    <section class="card">
+        <div class="card-header">
+            <h2><span class="step-number">1</span> Basics</h2>
+            <p class="card-subtitle">What is this workflow called and which program does it run?</p>
+        </div>
+        <div class="card-body form-grid">
+            <label>
+                Display name
+                <input @bind="_draft.DisplayName" placeholder="e.g. Code review for team mailbox"/>
+                <span class="field-hint">Shown on the workflows page and in run history.</span>
+            </label>
+            <label>
+                Workflow type
+                <input @bind="_draft.WorkflowType" @bind:after="OnWorkflowTypeChanged"
+                       list="known-workflow-types" placeholder="e.g. pull-request-code-review"/>
+                <datalist id="known-workflow-types">
+                    @foreach (var type in _known.WorkflowTypes)
+                    {
+                        <option value="@type"></option>
+                    }
+                </datalist>
+                <span class="field-hint">Pick a known type or enter a new one.</span>
+            </label>
+            <label>
+                Package URI
+                <input @bind="_draft.PackageUri" list="known-package-uris"
+                       placeholder="docker://my-workflow:latest"/>
+                <datalist id="known-package-uris">
+                    @foreach (var uri in _known.PackageUris)
+                    {
+                        <option value="@uri"></option>
+                    }
+                </datalist>
+                <span class="field-hint">The signed workflow package the platform launches.</span>
+            </label>
+            <label class="check-label"><input type="checkbox" @bind="_draft.Enabled"/> Enabled</label>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">
+            <h2><span class="step-number">2</span> Slots &amp; providers</h2>
+            <p class="card-subtitle">Each capability slot of the workflow is filled by one provider — pick where work items, repositories, or reviewers come from.</p>
+        </div>
+        <div class="card-body">
+            @if (_draft.Bindings.Count == 0)
+            {
+                <p class="muted">No slots bound yet — add one below.</p>
+            }
+            @foreach (var binding in _draft.Bindings)
+            {
+                <div class="slot-binding">
+                    <div class="slot-binding-header">
+                        <label class="slot-name-label">
+                            Slot
+                            <input class="input-inline slot-name-input" @bind="binding.SlotName"
+                                   list="known-slot-names" placeholder="e.g. work-items"/>
+                        </label>
+                        <button class="btn btn-danger btn-sm" @onclick="() => _draft.Bindings.Remove(binding)">
+                            Remove slot
+                        </button>
+                    </div>
+
+                    @if (_availableByCategory.Count == 0)
+                    {
+                        <p class="muted">No providers are available yet — an administrator curates them in the provider catalog.</p>
+                    }
+                    else
+                    {
+                        <div class="provider-grid">
+                            @foreach (var (category, entries) in _availableByCategory)
+                            {
+                                @foreach (var entry in entries)
+                                {
+                                    <label class="provider-card @(binding.ProviderType == entry.ProviderType ? "selected" : null)">
+                                        <input type="radio" name="provider-@_draft.Bindings.IndexOf(binding)"
+                                               checked="@(binding.ProviderType == entry.ProviderType)"
+                                               @onchange="() => SelectProvider(binding, entry)"/>
+                                        <span class="provider-name">@entry.ProviderType</span>
+                                        <span class="provider-category">@(category.Length == 0 ? "uncategorized" : category)</span>
+                                    </label>
+                                }
+                            }
+                        </div>
+                    }
+                    @if (binding.ProviderType.Length > 0 && !IsAvailable(binding.ProviderType))
+                    {
+                        <p class="field-hint">
+                            Currently bound to <span class="cell-strong">@binding.ProviderType</span>, which an
+                            administrator has hidden from the catalog — it keeps working, but to change it pick
+                            one of the providers above.
+                        </p>
+                    }
+
+                    @if (binding.ProviderType.Length > 0 && DescriptorsOf(binding.ProviderType) is { Count: > 0 } descriptors)
+                    {
+                        <div class="form-grid setting-grid">
+                            @foreach (var descriptor in descriptors)
+                            {
+                                <label>
+                                    @descriptor.Label@(descriptor.Required ? " *" : "")
+                                    @switch (descriptor.Kind)
+                                    {
+                                        case SettingKind.Secret:
+                                            <input type="password" autocomplete="new-password"
+                                                   @bind="binding.Settings[descriptor.Key]"
+                                                   placeholder="@(binding.StoredSecretKeys.Contains(descriptor.Key) ? "set — leave empty to keep unchanged" : "")"/>
+                                            break;
+                                        case SettingKind.Number:
+                                            <input type="number" @bind="binding.Settings[descriptor.Key]"/>
+                                            break;
+                                        case SettingKind.Boolean:
+                                            <select @bind="binding.Settings[descriptor.Key]">
+                                                <option value="">(default)</option>
+                                                <option value="true">Yes</option>
+                                                <option value="false">No</option>
+                                            </select>
+                                            break;
+                                        case SettingKind.Choice:
+                                            <select @bind="binding.Settings[descriptor.Key]">
+                                                <option value="">(choose)</option>
+                                                @foreach (var choice in descriptor.Choices ?? [])
+                                                {
+                                                    <option value="@choice">@choice</option>
+                                                }
+                                            </select>
+                                            break;
+                                        default:
+                                            <input @bind="binding.Settings[descriptor.Key]"/>
+                                            break;
+                                    }
+                                    @if (descriptor.HelpText is { Length: > 0 } help)
+                                    {
+                                        <span class="field-hint">@help</span>
+                                    }
+                                </label>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+
+            <datalist id="known-slot-names">
+                @foreach (var slot in KnownSlotNames)
+                {
+                    <option value="@slot"></option>
+                }
+            </datalist>
+
+            <div class="button-row slot-add-row">
+                @foreach (var suggestion in SuggestedSlots)
+                {
+                    <button class="btn btn-secondary btn-sm" @onclick="() => AddSlot(suggestion)">
+                        + Add slot "@suggestion"
+                    </button>
+                }
+                <button class="btn btn-secondary btn-sm" @onclick='() => AddSlot("")'>+ Add another slot</button>
+            </div>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">
+            <h2><span class="step-number">3</span> Trigger</h2>
+            <p class="card-subtitle">How runs of this workflow start. Manual reruns of finished runs are always possible from the run pages.</p>
+        </div>
+        <div class="card-body">
+            <div class="provider-grid trigger-grid">
+                <label class="provider-card @(_draft.Trigger == TriggerKind.None ? "selected" : null)">
+                    <input type="radio" name="trigger" checked="@(_draft.Trigger == TriggerKind.None)"
+                           @onchange="() => _draft.Trigger = TriggerKind.None"/>
+                    <span class="provider-name">No trigger</span>
+                    <span class="provider-category">runs start via rerun or other systems</span>
+                </label>
+                <label class="provider-card @(_draft.Trigger == TriggerKind.Schedule ? "selected" : null)">
+                    <input type="radio" name="trigger" checked="@(_draft.Trigger == TriggerKind.Schedule)"
+                           @onchange="() => _draft.Trigger = TriggerKind.Schedule"/>
+                    <span class="provider-name">Schedule</span>
+                    <span class="provider-category">run on a fixed interval</span>
+                </label>
+                <label class="provider-card @(_draft.Trigger == TriggerKind.ArtifactChain ? "selected" : null)">
+                    <input type="radio" name="trigger" checked="@(_draft.Trigger == TriggerKind.ArtifactChain)"
+                           @onchange="() => _draft.Trigger = TriggerKind.ArtifactChain"/>
+                    <span class="provider-name">Artifact chain</span>
+                    <span class="provider-category">run after another workflow's result</span>
+                </label>
+            </div>
+
+            @if (_draft.Trigger == TriggerKind.Schedule)
+            {
+                <div class="form-grid setting-grid">
+                    <label>
+                        Interval (seconds)
+                        <input type="number" @bind="_draft.ScheduleIntervalSeconds"/>
+                        <span class="field-hint">e.g. 3600 = once per hour.</span>
+                    </label>
+                    <label>
+                        Context (optional)
+                        <input @bind="_draft.ScheduleContextJson" placeholder='{"WorkItemId":"42"}'/>
+                        <span class="field-hint">Key/value map handed to every scheduled run.</span>
+                    </label>
+                </div>
+            }
+            @if (_draft.Trigger == TriggerKind.ArtifactChain)
+            {
+                <div class="form-grid setting-grid">
+                    <label>
+                        Artifact type
+                        <input @bind="_draft.ArtifactType" placeholder="e.g. code-review-result"/>
+                        <span class="field-hint">Each time any workflow persists an artifact of this type, this workflow runs.</span>
+                    </label>
+                </div>
+            }
+            @if (_draft.Trigger != TriggerKind.None)
+            {
+                <p class="field-hint">Triggered runs are dispatched on your behalf and pass the same policy checks as manual ones.</p>
+            }
+        </div>
+    </section>
+
+    <div class="button-row editor-actions">
+        <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_busy">
+            @(IsEdit ? "Save changes" : "Create workflow")
+        </button>
+        <a class="btn btn-secondary" href="workflows">Cancel</a>
+    </div>
+}
+
+@code {
+
+    [Parameter]
+    public Guid? ConfigurationId { get; set; }
+
+    [CascadingParameter]
+    public Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool _loaded;
+    private bool _allowed;
+    private bool _busy;
+    private bool _notFound;
+    private string _denyReason = "";
+    private Guid? _principalId;
+    private IReadOnlyList<string> _errors = [];
+
+    private WorkflowConfigurationDraft _draft = new();
+    private KnownWorkflowValues _known = new([], [], new Dictionary<string, IReadOnlyList<string>>());
+    private IReadOnlyDictionary<string, IReadOnlyList<ProviderCatalogEntry>> _availableByCategory =
+        new Dictionary<string, IReadOnlyList<ProviderCatalogEntry>>();
+    private IReadOnlyList<ProviderCatalogEntry> _allProviders = [];
+
+    private bool IsEdit => ConfigurationId is not null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState!).User;
+        _principalId = DashboardAuthEndpoints.PrincipalIdOf(user);
+        if (_principalId is not null)
+        {
+            var decision = await PolicyEngine.EvaluateAsync(
+                new PolicyContext(_principalId.Value, PermissionActions.WorkflowConfigurationManage,
+                    "workflow-configurations"));
+            _allowed = decision.Allowed;
+            _denyReason = decision.Reason;
+        }
+        else
+        {
+            _denyReason = "no platform principal in session";
+        }
+
+        if (_allowed)
+        {
+            _known = await Editor.KnownValuesAsync();
+            _availableByCategory = await Catalog.ListAvailableByCategoryAsync();
+            _allProviders = await Catalog.ListAsync();
+
+            if (ConfigurationId is { } id)
+            {
+                var draft = await Editor.LoadDraftAsync(id);
+                if (draft is null)
+                    _notFound = true;
+                else
+                {
+                    _draft = draft;
+                    foreach (var binding in _draft.Bindings)
+                        EnsureSettingKeys(binding);
+                }
+            }
+        }
+
+        _loaded = true;
+    }
+
+    private IReadOnlyList<string> KnownSlotNames
+        => _known.SlotNamesByWorkflowType.GetValueOrDefault(_draft.WorkflowType.Trim()) ?? [];
+
+    private IEnumerable<string> SuggestedSlots
+        => KnownSlotNames.Where(slot => _draft.Bindings.All(b => b.SlotName.Trim() != slot));
+
+    private void AddSlot(string slotName)
+        => _draft.Bindings.Add(new SlotBindingDraft { SlotName = slotName });
+
+    private Task OnWorkflowTypeChanged()
+        // Known slots depend on the workflow type — re-render picks the new suggestions up.
+        => InvokeAsync(StateHasChanged);
+
+    private bool IsAvailable(string providerType)
+        => _availableByCategory.Values.Any(entries => entries.Any(e => e.ProviderType == providerType));
+
+    private IReadOnlyList<SettingDescriptor> DescriptorsOf(string providerType)
+        => _allProviders.FirstOrDefault(e => e.ProviderType == providerType)?.Descriptors ?? [];
+
+    private void SelectProvider(SlotBindingDraft binding, ProviderCatalogEntry entry)
+    {
+        binding.ProviderType = entry.ProviderType;
+        EnsureSettingKeys(binding);
+    }
+
+    /// <summary>Every descriptor key needs a dictionary entry for @bind; defaults pre-fill empty fields.</summary>
+    private void EnsureSettingKeys(SlotBindingDraft binding)
+    {
+        foreach (var descriptor in DescriptorsOf(binding.ProviderType))
+        {
+            if (!binding.Settings.ContainsKey(descriptor.Key))
+                binding.Settings[descriptor.Key] = descriptor.Kind == SettingKind.Secret
+                    ? ""
+                    : descriptor.DefaultValue ?? "";
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _errors = [];
+        _busy = true;
+        try
+        {
+            await Editor.SaveAsync(_principalId!.Value.ToString("D"), _principalId, _draft);
+            Navigation.NavigateTo("workflows?saved=true");
+        }
+        catch (ArgumentException ex)
+        {
+            _errors = ex.Message.Split('\n');
+        }
+        catch (Exception ex)
+        {
+            _errors = [ex.Message];
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+}

@@ -16,7 +16,13 @@ public sealed record ArtifactTriggerRecord : IEntity
     public bool Enabled { get; init; } = true;
     /// <summary>Principal on whose behalf the chained dispatch runs (policy-checked).</summary>
     public Guid? RunAsPrincipalId { get; init; }
+    /// <summary>When set, dispatches reference this named workflow configuration (#20).</summary>
+    public Guid? WorkflowConfigurationId { get; init; }
 
     public static Guid IdFor(string artifactType, string workflowType)
         => DeterministicGuid.For("artifact-trigger", artifactType, "", workflowType);
+
+    /// <summary>Deterministic ID for the single chaining rule wired by a workflow configuration's editor.</summary>
+    public static Guid IdForConfiguration(string configurationName)
+        => DeterministicGuid.For("artifact-trigger", "workflow-configuration", "", configurationName);
 }

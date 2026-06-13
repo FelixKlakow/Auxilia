@@ -313,6 +313,9 @@ public class EndToEndEnvironment
         AddEntity<ViewDataRecord>(services);
         AddEntity<WorkflowInstanceRecord>(services);
         AddEntity<SlotProviderRecord>(services);
+        AddEntity<ProviderCatalogRecord>(services);
+        AddEntity<WorkflowConfigurationRecord>(services);
+        AddEntity<ScheduledTriggerRecord>(services);
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<AuditLog>();
         services.AddSingleton<PrincipalDirectory>();

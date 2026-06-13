@@ -20,6 +20,8 @@ public static class TimeText
     public static string Duration(DateTimeOffset start, DateTimeOffset? end)
         => end is null ? "—" : Span(end.Value - start);
 
+    public static string Interval(int seconds) => Span(TimeSpan.FromSeconds(seconds));
+
     private static string Span(TimeSpan span) => span switch
     {
         { TotalSeconds: < 1 } => "< 1 s",

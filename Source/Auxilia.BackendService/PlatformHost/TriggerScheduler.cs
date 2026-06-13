@@ -58,9 +58,11 @@ public sealed class TriggerScheduler(
                 ? new Dictionary<string, string>()
                 : JsonSerializer.Deserialize<Dictionary<string, string>>(trigger.ContextJson) ?? [];
 
+            // Configuration-wired triggers (#20) dispatch by configuration ID; the dispatcher
+            // then resolves workflow type, package, and slot bindings from the stored record.
             var command = new RunWorkflowCommand(
                 Guid.NewGuid(), trigger.WorkflowType, trigger.WorkflowPackageUri,
-                context, trigger.RunAsPrincipalId);
+                context, trigger.RunAsPrincipalId, trigger.WorkflowConfigurationId);
 
             await messageBus.PublishAsync(settings.Value.CommandQueueName, command, ct);
             await triggers.SaveAsync(trigger with { LastDispatchedUtc = now }, ct);

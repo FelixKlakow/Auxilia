@@ -9,6 +9,7 @@
 @inject IPolicyEngine PolicyEngine
 @inject LiveViewBroker Broker
 @inject DashboardComposer Composer
+@inject WorkflowRerunService Rerun
 
 <PageTitle>@(_run is null ? "Run" : $"{_run.WorkflowType} · run {ShortId}") — Auxilia</PageTitle>
 
@@ -34,11 +35,30 @@ else
     <header class="page-header">
         <h1>@_run.WorkflowType · run @ShortId</h1>
         <p class="page-subtitle run-id-line" title="Full run ID — select to copy">@InstanceId</p>
+        @if (RerunOf is { } predecessorId)
+        {
+            <p class="page-subtitle">
+                <a class="type-chip" href="runs/@predecessorId" title="This run is a rerun — open the original run">
+                    Rerun of @predecessorId.ToString("N")[..8]
+                </a>
+            </p>
+        }
     </header>
+
+    @if (IsTerminal && _run.DispatchCommandJson is not null)
+    {
+        <div class="button-row rerun-row">
+            <button class="btn btn-secondary" disabled="@_busy" @onclick="RerunAsync">Rerun this workflow</button>
+        </div>
+    }
 
     @if (_error is not null)
     {
         <div class="panel denied">@_error</div>
+    }
+    @if (_rerunNotice is not null)
+    {
+        <div class="panel success">@_rerunNotice</div>
     }
 
     <div class="card">
@@ -120,8 +140,10 @@ else
     private IDisposable? _liveSubscription;
     private bool _loaded;
     private bool _allowed;
+    private bool _busy;
     private string _denyReason = "";
     private string? _error;
+    private string? _rerunNotice;
     private Guid? _principalId;
     private WorkflowInstanceRecord? _run;
     private IReadOnlyList<ViewDescriptor> _views = [];
@@ -132,6 +154,30 @@ else
     private bool IsTerminal =>
         _run is null || _run.CompletedUtc is not null ||
         _run.State is "Success" or "Failed" or "Cancelled" or "PreFlightFailed";
+
+    private Guid? RerunOf => _run is null ? null : WorkflowRerunService.RerunOf(_run);
+
+    private async Task RerunAsync()
+    {
+        if (_principalId is null)
+            return;
+        _error = null;
+        _rerunNotice = null;
+        _busy = true;
+        try
+        {
+            var commandId = await Rerun.RerunAsync(_principalId.Value, InstanceId, _cts.Token);
+            _rerunNotice = $"Rerun dispatched (command {commandId}) — the new run appears under Runs shortly.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {

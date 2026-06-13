@@ -65,7 +65,7 @@ public class TriggerSchedulerTests
     }
 
     private Task SeedTriggerAsync(int intervalSeconds = 60, bool enabled = true,
-        DateTimeOffset? lastDispatched = null, Guid? runAs = null)
+        DateTimeOffset? lastDispatched = null, Guid? runAs = null, Guid? workflowConfigurationId = null)
         => _triggers.SaveAsync(new ScheduledTriggerRecord
         {
             Id = ScheduledTriggerRecord.IdFor("nightly-scan"),
@@ -74,7 +74,8 @@ public class TriggerSchedulerTests
             IntervalSeconds = intervalSeconds,
             Enabled = enabled,
             LastDispatchedUtc = lastDispatched,
-            RunAsPrincipalId = runAs
+            RunAsPrincipalId = runAs,
+            WorkflowConfigurationId = workflowConfigurationId
         });
 
     [Test]
@@ -113,6 +114,19 @@ public class TriggerSchedulerTests
         await _sut.DispatchDueTriggersAsync(CancellationToken.None);
 
         Assert.That(_bus.Published.Select(p => p.Message).OfType<RunWorkflowCommand>().Count(), Is.EqualTo(1));
+    }
+
+    [Test]
+    public async Task ConfigurationWiredTrigger_DispatchesByConfigurationId()
+    {
+        var configurationId = Guid.NewGuid();
+        await SeedTriggerAsync(workflowConfigurationId: configurationId);
+
+        await _sut.DispatchDueTriggersAsync(CancellationToken.None);
+
+        var command = _bus.Published.Select(p => p.Message).OfType<RunWorkflowCommand>().Single();
+        Assert.That(command.WorkflowConfigurationId, Is.EqualTo(configurationId),
+            "the dispatcher must resolve type, package, and slot bindings from the configuration");
     }
 
     [Test]

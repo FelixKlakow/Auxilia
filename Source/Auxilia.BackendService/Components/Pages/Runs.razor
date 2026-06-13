@@ -2,10 +2,20 @@
 @attribute [Authorize]
 @implements IDisposable
 @inject IDataAccess<WorkflowInstanceRecord> Instances
+@inject WorkflowRerunService Rerun
 
 <PageTitle>Runs — Auxilia</PageTitle>
 
 <PageHeader Title="Runs" Subtitle="Every workflow execution on this platform — click a run to inspect its views."/>
+
+@if (_error is not null)
+{
+    <div class="panel denied">@_error</div>
+}
+@if (_rerunNotice is not null)
+{
+    <div class="panel success">@_rerunNotice</div>
+}
 
 @if (_runs.Count == 0)
 {
@@ -14,6 +24,15 @@
 }
 else
 {
+    @if (Configuration is { } configurationFilter)
+    {
+        <div class="panel success filter-panel">
+            Showing only runs of configuration
+            <span class="cell-strong">@(ConfigurationDisplayName ?? configurationFilter.ToString("N")[..8])</span>
+            · <a href="runs">Show all runs</a>
+        </div>
+    }
+
     <div class="chip-bar" role="group" aria-label="Filter runs by state">
         @foreach (var state in StateOptions)
         {
@@ -35,6 +54,7 @@ else
                 <th>Started</th>
                 <th>Duration</th>
                 <th>Error</th>
+                <th>Actions</th>
             </tr>
             </thead>
             <tbody>
@@ -45,6 +65,10 @@ else
                     <td>
                         <a class="cell-strong" href="runs/@run.Id">@run.WorkflowType</a>
                         <span class="muted mono"> @ShortId(run.Id)</span>
+                        @if (run.WorkflowConfigurationName is { Length: > 0 } configurationName)
+                        {
+                            <span class="cell-sub">@configurationName</span>
+                        }
                     </td>
                     <td>
                         @TimeText.Relative(run.CreatedUtc)
@@ -52,6 +76,13 @@ else
                     </td>
                     <td>@TimeText.Duration(run.CreatedUtc, run.CompletedUtc)</td>
                     <td class="error-cell">@run.ErrorMessage</td>
+                    <td>
+                        @if (WorkflowRerunService.IsTerminal(run) && run.DispatchCommandJson is not null)
+                        {
+                            <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                    @onclick="() => RerunAsync(run.Id)">Rerun</button>
+                        }
+                    </td>
                 </tr>
             }
             </tbody>
@@ -68,12 +99,25 @@ else
     private static readonly string[] StateOptions =
         ["All", "Running", "Success", "Failed", "Queued", "Cancelled", "PreFlightFailed"];
 
+    [CascadingParameter]
+    public Task<AuthenticationState>? AuthState { get; set; }
+
+    /// <summary>Optional filter: show only runs dispatched from this workflow configuration.</summary>
+    [SupplyParameterFromQuery(Name = "configuration")]
+    public Guid? Configuration { get; set; }
+
     // Backplane-less v1: the component polls the data layer every 2 s instead of
     // subscribing to the SignalR fan-out hub from its own circuit.
     private IReadOnlyList<WorkflowInstanceRecord> _runs = [];
     private readonly CancellationTokenSource _cts = new();
     private PeriodicTimer? _timer;
     private string _stateFilter = "All";
+    private string? _error;
+    private string? _rerunNotice;
+    private bool _busy;
+
+    private string? ConfigurationDisplayName
+        => _runs.FirstOrDefault(r => r.WorkflowConfigurationName is not null)?.WorkflowConfigurationName;
 
     private IEnumerable<WorkflowInstanceRecord> FilteredRuns
         => _stateFilter == "All" ? _runs : _runs.Where(r => r.State == _stateFilter);
@@ -112,7 +156,38 @@ else
     private async Task LoadAsync()
     {
         var all = await Instances.ReadAsync(_cts.Token);
-        _runs = all.OrderByDescending(r => r.CreatedUtc).Take(200).ToList();
+        var query = all.OrderByDescending(r => r.CreatedUtc).AsEnumerable();
+        if (Configuration is { } configurationId)
+            query = query.Where(r => r.WorkflowConfigurationId == configurationId);
+        _runs = query.Take(200).ToList();
+    }
+
+    private async Task RerunAsync(Guid instanceId)
+    {
+        _error = null;
+        _rerunNotice = null;
+        _busy = true;
+        try
+        {
+            var user = (await AuthState!).User;
+            var principalId = DashboardAuthEndpoints.PrincipalIdOf(user);
+            if (principalId is null)
+            {
+                _error = "No platform principal in session.";
+                return;
+            }
+
+            var commandId = await Rerun.RerunAsync(principalId.Value, instanceId, _cts.Token);
+            _rerunNotice = $"Rerun of {ShortId(instanceId)} dispatched (command {commandId}). The new run appears below shortly.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
     }
 
     public void Dispose()

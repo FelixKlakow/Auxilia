@@ -21,8 +21,11 @@ Code Review run (the reply is announced when it arrives), `o` re-opens the brows
 demo mail, waits until the triggered Code Review run reaches a terminal state (polled via
 Mongo), then drives headless Chromium through Microsoft.Playwright (1600x900 viewport) and
 captures full-page PNGs of every dashboard page in navigation order: `01-login.png` through
-`12-audit.png` (login is captured anonymously, the rest after logging in through the real
-login form). It prints each absolute path, tears the stack down, and exits 0 on success.
+`14-audit.png` (login is captured anonymously, the rest after logging in through the real
+login form). `04-workflow-editor.png` is interactive: the harness walks the workflow-editor
+create flow (basics filled, work-items slot added, email provider chosen) so the generated
+settings form is on screen; the catalog availability and one demo workflow configuration are
+seeded beforehand. It prints each absolute path, tears the stack down, and exits 0 on success.
 
 Browser provisioning is automatic: before booting containers the harness invokes
 `Microsoft.Playwright.Program.Main(["install", "chromium"])`, which downloads Chromium to

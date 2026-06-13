@@ -78,7 +78,8 @@ public class ArtifactTriggerHandlerTests
     }
 
     private Task SeedTriggerAsync(
-        string artifactType = "review-result", bool enabled = true, Guid? runAsPrincipalId = null)
+        string artifactType = "review-result", bool enabled = true, Guid? runAsPrincipalId = null,
+        Guid? workflowConfigurationId = null)
         => _triggers.SaveAsync(new ArtifactTriggerRecord
         {
             Id = ArtifactTriggerRecord.IdFor(artifactType, "follow-up-workflow"),
@@ -86,7 +87,8 @@ public class ArtifactTriggerHandlerTests
             WorkflowType = "follow-up-workflow",
             WorkflowPackageUri = "docker://follow-up-workflow:test",
             Enabled = enabled,
-            RunAsPrincipalId = runAsPrincipalId
+            RunAsPrincipalId = runAsPrincipalId,
+            WorkflowConfigurationId = workflowConfigurationId
         });
 
     private static ArtifactPersistedEvent Persisted(string artifactType = "review-result")
@@ -119,6 +121,19 @@ public class ArtifactTriggerHandlerTests
 
         var auditQuery = await _audit.ReadAsync();
         Assert.That(auditQuery.Any(a => a.Action == "trigger.artifact-dispatch"), Is.True);
+    }
+
+    [Test]
+    public async Task ConfigurationWiredTrigger_DispatchesByConfigurationId()
+    {
+        var configurationId = Guid.NewGuid();
+        await SeedTriggerAsync(workflowConfigurationId: configurationId);
+
+        await _bus.ArtifactHandler!(Persisted(), CancellationToken.None);
+
+        var command = _bus.Published.Select(p => p.Message).OfType<RunWorkflowCommand>().Single();
+        Assert.That(command.WorkflowConfigurationId, Is.EqualTo(configurationId),
+            "the dispatcher must resolve type, package, and slot bindings from the configuration");
     }
 
     [Test]

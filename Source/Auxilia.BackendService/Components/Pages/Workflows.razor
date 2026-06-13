@@ -1,0 +1,271 @@
+@page "/workflows"
+@attribute [Authorize]
+@using Auxilia.Adapters.Email
+@using Microsoft.Extensions.Options
+@implements IDisposable
+@inject WorkflowConfigurationEditorService Editor
+@inject IPolicyEngine PolicyEngine
+@inject IOptions<EmailTaskSourceSettings> EmailSettings
+
+<PageTitle>Workflows — Auxilia</PageTitle>
+
+<PageHeader Title="Workflows"
+            Subtitle="Every configured workflow on this platform: what it does, where its work comes from, and how its runs are triggered."/>
+
+@if (!_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else if (!_allowed)
+{
+    <div class="panel denied">Access denied: @_denyReason</div>
+}
+else
+{
+    @if (_error is not null)
+    {
+        <div class="panel denied">@_error</div>
+    }
+    @if (Saved)
+    {
+        <div class="panel success">Configuration saved — the Steering Instance is applying it; the card below updates automatically.</div>
+    }
+
+    <div class="toolbar">
+        <a class="btn btn-primary" href="workflows/new">New workflow configuration</a>
+    </div>
+
+    @if (_configurations.Count == 0)
+    {
+        <EmptyState Title="No workflows configured yet"
+                    Description="A workflow configuration binds a workflow's capability slots to providers (Jira, email, a repository …) and wires a trigger — all visually, no JSON.">
+            <a class="btn btn-primary" href="workflows/new">Configure your first workflow</a>
+        </EmptyState>
+    }
+
+    @foreach (var configuration in _configurations)
+    {
+        <section class="card workflow-card">
+            <div class="card-header">
+                <h2>@configuration.DisplayName <span class="type-chip">@configuration.WorkflowType</span></h2>
+                <div class="card-actions">
+                    <span class="badge badge-state @(configuration.Enabled ? "badge-success" : "badge-cancelled")">
+                        @(configuration.Enabled ? "Enabled" : "Disabled")
+                    </span>
+                    <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                            @onclick="() => ToggleEnabledAsync(configuration)">
+                        @(configuration.Enabled ? "Disable" : "Enable")
+                    </button>
+                </div>
+            </div>
+            <div class="card-body workflow-card-body">
+                <div class="workflow-facts">
+                    <div>
+                        <h3 class="fact-label">Slots</h3>
+                        @if (configuration.Bindings.Count == 0)
+                        {
+                            <p class="muted">No slot bindings.</p>
+                        }
+                        <ul class="binding-list">
+                            @foreach (var (slotName, providerType) in configuration.Bindings)
+                            {
+                                <li><span class="cell-strong">@slotName</span> <span class="binding-arrow">→</span> @providerType</li>
+                            }
+                        </ul>
+                    </div>
+                    <div>
+                        <h3 class="fact-label">Trigger</h3>
+                        @foreach (var trigger in TriggerSummaries(configuration))
+                        {
+                            <p class="fact-line">@trigger</p>
+                        }
+                        @if (!TriggerSummaries(configuration).Any())
+                        {
+                            <p class="muted">None — runs only via rerun or chaining from elsewhere.</p>
+                        }
+                    </div>
+                    <div>
+                        <h3 class="fact-label">Last run</h3>
+                        @if (configuration.LastRun is { } run)
+                        {
+                            <p class="fact-line">
+                                <span class="badge badge-state badge-@run.State.ToLowerInvariant()">@run.State</span>
+                                <a href="runs/@run.Id">@TimeText.Relative(run.CreatedUtc)</a>
+                            </p>
+                        }
+                        else
+                        {
+                            <p class="muted">No runs yet.</p>
+                        }
+                    </div>
+                </div>
+            </div>
+            <div class="card-footer">
+                <div class="cell-actions">
+                    <a class="btn btn-secondary btn-sm" href="workflows/@configuration.Id/edit">Edit</a>
+                    <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                            @onclick="() => DuplicateAsync(configuration)">Duplicate</button>
+                    <a class="btn btn-secondary btn-sm" href="runs?configuration=@configuration.Id">View runs</a>
+                    @if (_deleteCandidate == configuration.Id)
+                    {
+                        <span class="confirm-inline">
+                            Delete "@configuration.DisplayName"?
+                            <button class="btn btn-danger btn-sm" disabled="@_busy"
+                                    @onclick="() => DeleteAsync(configuration)">Delete</button>
+                            <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                    @onclick="() => _deleteCandidate = null">Cancel</button>
+                        </span>
+                    }
+                    else
+                    {
+                        <button class="btn btn-danger btn-sm" disabled="@_busy"
+                                @onclick="() => _deleteCandidate = configuration.Id">Delete</button>
+                    }
+                </div>
+            </div>
+        </section>
+    }
+
+    @if (EmailSettings.Value.Enabled)
+    {
+        <section class="card">
+            <div class="card-header">
+                <h2>Mailbox trigger <span class="type-chip">@EmailSettings.Value.WorkflowType</span></h2>
+                <div class="card-actions">
+                    <span class="badge badge-state badge-success">Active</span>
+                </div>
+            </div>
+            <div class="card-body">
+                <p class="fact-line">
+                    Watches <span class="cell-strong">@EmailSettings.Value.Username</span>
+                    every @EmailSettings.Value.PollIntervalSeconds s — each new mail starts a
+                    <span class="cell-strong">@EmailSettings.Value.WorkflowType</span> run.
+                </p>
+                <p class="muted">This mailbox is configured per deployment (appsettings), not in this editor.</p>
+            </div>
+        </section>
+    }
+}
+
+@code {
+
+    [CascadingParameter]
+    public Task<AuthenticationState>? AuthState { get; set; }
+
+    [SupplyParameterFromQuery(Name = "saved")]
+    public bool Saved { get; set; }
+
+    private readonly CancellationTokenSource _cts = new();
+    private PeriodicTimer? _timer;
+    private bool _loaded;
+    private bool _allowed;
+    private bool _busy;
+    private string _denyReason = "";
+    private string? _error;
+    private Guid? _principalId;
+    private Guid? _deleteCandidate;
+    private IReadOnlyList<WorkflowConfigurationOverview> _configurations = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState!).User;
+        _principalId = DashboardAuthEndpoints.PrincipalIdOf(user);
+        if (_principalId is not null)
+        {
+            var decision = await PolicyEngine.EvaluateAsync(
+                new PolicyContext(_principalId.Value, PermissionActions.WorkflowConfigurationManage,
+                    "workflow-configurations"));
+            _allowed = decision.Allowed;
+            _denyReason = decision.Reason;
+        }
+        else
+        {
+            _denyReason = "no platform principal in session";
+        }
+
+        if (_allowed)
+            await LoadAsync();
+        _loaded = true;
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender || _timer is not null || !_allowed)
+            return;
+        // The Steering Instance applies bus-published changes asynchronously — poll so a
+        // freshly saved configuration appears without a manual refresh.
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+        _ = PollAsync();
+    }
+
+    private async Task PollAsync()
+    {
+        try
+        {
+            while (await _timer!.WaitForNextTickAsync(_cts.Token))
+            {
+                await LoadAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Component disposed — polling ends.
+        }
+    }
+
+    private async Task LoadAsync() => _configurations = await Editor.ListAsync(_cts.Token);
+
+    private IEnumerable<string> TriggerSummaries(WorkflowConfigurationOverview configuration)
+    {
+        if (configuration.Schedule is { } schedule)
+            yield return $"Schedule · every {TimeText.Interval(schedule.IntervalSeconds)}";
+        if (configuration.ArtifactChain is { } chain)
+            yield return $"Artifact chain · after every '{chain.ArtifactType}' artifact";
+        var email = EmailSettings.Value;
+        if (email.Enabled && email.WorkflowType == configuration.WorkflowType)
+            yield return $"Mailbox {email.Username} · every {email.PollIntervalSeconds} s (deployment-configured)";
+    }
+
+    private Task ToggleEnabledAsync(WorkflowConfigurationOverview configuration)
+        => RunAsync(() => Editor.SetEnabledAsync(Actor, configuration.Id, !configuration.Enabled));
+
+    private Task DuplicateAsync(WorkflowConfigurationOverview configuration)
+        => RunAsync(() => Editor.DuplicateAsync(Actor, configuration.Id));
+
+    private Task DeleteAsync(WorkflowConfigurationOverview configuration)
+        => RunAsync(async () =>
+        {
+            await Editor.DeleteAsync(Actor, configuration.Id);
+            _deleteCandidate = null;
+        });
+
+    private string Actor => _principalId!.Value.ToString("D");
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        _error = null;
+        _busy = true;
+        try
+        {
+            await action();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+        _timer?.Dispose();
+    }
+
+}

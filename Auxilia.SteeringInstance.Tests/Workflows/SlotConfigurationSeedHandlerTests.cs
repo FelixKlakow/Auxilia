@@ -199,4 +199,37 @@ public class SlotConfigurationSeedHandlerTests
 
         Assert.That(await _configurationStore.GetByNameAsync("gamma"), Is.Null);
     }
+
+    [Test]
+    public async Task WhenRemoveWorkflowConfigurationReceivedOnExchange_ConfigurationIsRemoved()
+    {
+        await _configurationStore.UpsertAsync(new StoredWorkflowConfiguration(
+            "delta", "Delta", "wf", "docker://wf:test", Enabled: true, []));
+
+        await _fakeBus.SimulateReceivedAsync("slot-configurations",
+            new RemoveWorkflowConfigurationCommand("delta"));
+
+        Assert.That(await _configurationStore.GetByNameAsync("delta"), Is.Null);
+    }
+
+    [Test]
+    public async Task WhenRemoveWorkflowConfigurationReceivedOnSeedQueue_ConfigurationIsRemoved()
+    {
+        await _configurationStore.UpsertAsync(new StoredWorkflowConfiguration(
+            "epsilon", "Epsilon", "wf", "docker://wf:test", Enabled: true, []));
+
+        await _fakeBus.SimulateReceivedAsync("test-queue-slot-seed.remove-configuration",
+            new RemoveWorkflowConfigurationCommand("epsilon"));
+
+        Assert.That(await _configurationStore.GetByNameAsync("epsilon"), Is.Null);
+    }
+
+    [Test]
+    public async Task WhenRemoveWorkflowConfigurationTargetsUnknownName_NothingHappens()
+    {
+        await _fakeBus.SimulateReceivedAsync("slot-configurations",
+            new RemoveWorkflowConfigurationCommand("does-not-exist"));
+
+        Assert.That(await _configurationStore.GetByNameAsync("does-not-exist"), Is.Null);
+    }
 }

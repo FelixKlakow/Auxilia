@@ -14,6 +14,12 @@ public sealed record ScheduledTriggerRecord : IEntity
     /// <summary>Principal on whose behalf the scheduled dispatches run (policy-checked).</summary>
     public Guid? RunAsPrincipalId { get; init; }
     public DateTimeOffset? LastDispatchedUtc { get; init; }
+    /// <summary>When set, dispatches reference this named workflow configuration (#20).</summary>
+    public Guid? WorkflowConfigurationId { get; init; }
 
     public static Guid IdFor(string name) => DeterministicGuid.For("scheduled-trigger", name);
+
+    /// <summary>Deterministic ID for the single schedule wired by a workflow configuration's editor.</summary>
+    public static Guid IdForConfiguration(string configurationName)
+        => DeterministicGuid.For("scheduled-trigger", "workflow-configuration", "", configurationName);
 }
