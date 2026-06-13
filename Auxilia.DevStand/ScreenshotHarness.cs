@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Auxilia.PlatformData.Entities;
 using Auxilia.SystemTestSuite.EndToEnd;
 using Auxilia.UniversalDataAccess;
@@ -9,7 +10,8 @@ namespace Auxilia.DevStand;
 
 /// <summary>
 /// Visual verification harness: boots the same containerized stack as the interactive dev
-/// stand, triggers one Code Review run via demo mail, waits for it to finish, and captures
+/// stand, triggers one Code Review run via demo mail, captures the dashboard home while that
+/// run is RUNNING (so the Live now section has content), waits for it to finish, and captures
 /// a full-page PNG of every dashboard page with headless Chromium so the UI can be reviewed
 /// by looking at it. Activated with `dotnet run --project Auxilia.DevStand -- --screenshots
 /// [outputDir]` (default output: artifacts/screenshots under the repo root).
@@ -57,13 +59,7 @@ internal static class ScreenshotHarness
             Console.WriteLine($"Stack is up ({dashboardUrl}) — triggering a demo Code Review run ...");
             await DemoMail.SendAsync("Please review PR-1 (screenshot harness)", CancellationToken.None);
 
-            var run = await WaitForTerminalRunAsync();
-            Console.WriteLine($"Run {run.Id} reached terminal state '{run.State}'.");
-
-            Console.WriteLine("Seeding workflow-editor demo data (provider catalog + demo configuration) ...");
-            await SeedWorkflowEditorDemoDataAsync();
-
-            var captured = await CaptureAllPagesAsync(dashboardUrl, run.Id, outputDir);
+            var captured = await CaptureAllPagesAsync(dashboardUrl, outputDir);
 
             Console.WriteLine();
             Console.WriteLine($"=== {captured.Count} screenshots captured ===");
@@ -85,9 +81,9 @@ internal static class ScreenshotHarness
 
     /// <summary>
     /// Polls the shared Mongo (more robust than scraping the runs page) until the
-    /// mail-triggered run reaches a terminal state, so run views have real content.
+    /// mail-triggered run reaches the wanted lifecycle stage.
     /// </summary>
-    private static async Task<WorkflowInstanceRecord> WaitForTerminalRunAsync()
+    private static async Task<WorkflowInstanceRecord> WaitForRunAsync(Func<string, bool> stateReached, string wanted)
     {
         await using var provider = EndToEndEnvironment.BuildPlatformDataProvider();
         var instances = provider.GetRequiredService<IDataAccess<WorkflowInstanceRecord>>();
@@ -100,18 +96,24 @@ internal static class ScreenshotHarness
             latest = all.Where(r => r.WorkflowType == WorkflowType)
                         .OrderByDescending(r => r.CreatedUtc)
                         .FirstOrDefault();
-            if (latest?.State is "Success" or "Failed" or "Cancelled")
+            if (latest is not null && stateReached(latest.State))
                 return latest;
-            await Task.Delay(TimeSpan.FromSeconds(2));
+            await Task.Delay(TimeSpan.FromSeconds(1));
         }
 
         throw new TimeoutException(
-            $"No '{WorkflowType}' run reached a terminal state within {RunCompletionTimeout} " +
+            $"No '{WorkflowType}' run reached {wanted} within {RunCompletionTimeout} " +
             $"(last observed: {(latest is null ? "none" : $"{latest.Id} in state '{latest.State}'")}).");
     }
 
-    private static async Task<IReadOnlyList<string>> CaptureAllPagesAsync(
-        string dashboardUrl, Guid runId, string outputDir)
+    private static Task<WorkflowInstanceRecord> WaitForTerminalRunAsync()
+        => WaitForRunAsync(state => state is "Success" or "Failed" or "Cancelled", "a terminal state");
+
+    /// <summary>Running, or already terminal when the run was faster than the browser warm-up.</summary>
+    private static Task<WorkflowInstanceRecord> WaitForRunningRunAsync()
+        => WaitForRunAsync(state => state is "Running" or "Success" or "Failed" or "Cancelled", "'Running'");
+
+    private static async Task<IReadOnlyList<string>> CaptureAllPagesAsync(string dashboardUrl, string outputDir)
     {
         using var playwright = await Playwright.CreateAsync();
         await using var browser = await playwright.Chromium.LaunchAsync();
@@ -126,12 +128,25 @@ internal static class ScreenshotHarness
         await CapturePageAsync(page, dashboardUrl, "/login", "01-login.png", outputDir, captured);
         await LoginAsync(page);
 
+        // Dashboard home is captured while the mail-triggered run is active so the
+        // Live now section (#21) shows a pulsing Running row.
+        var activeRun = await WaitForRunningRunAsync();
+        Console.WriteLine($"Run {activeRun.Id} is in state '{activeRun.State}' — capturing the dashboard home live ...");
+        await CapturePageAsync(page, dashboardUrl, "/", "02-dashboard.png", outputDir, captured);
+
+        var run = await WaitForTerminalRunAsync();
+        Console.WriteLine($"Run {run.Id} reached terminal state '{run.State}'.");
+
+        Console.WriteLine("Seeding demo data (provider catalog, demo configuration, run history) ...");
+        await SeedWorkflowEditorDemoDataAsync();
+        await SeedRunHistoryDemoDataAsync(run);
+
+        var configurationId = WorkflowConfigurationRecord.IdFor(DemoConfigurationName);
         (string Route, string FileName)[] pages =
         [
-            ("/",                           "02-dashboard.png"),
             ("/workflows",                  "03-workflows.png"),
             ("/runs",                       "05-runs.png"),
-            ($"/runs/{runId}",              "06-run-detail.png"),
+            ($"/runs/{run.Id}",             "06-run-detail.png"),
             ("/trigger",                    "07-trigger.png"),
             ("/operator/slots",             "08-operator-slots.png"),
             ("/operator/schedules",         "09-operator-schedules.png"),
@@ -139,7 +154,8 @@ internal static class ScreenshotHarness
             ("/admin",                      "11-admin.png"),
             ("/admin/bundles",              "12-admin-bundles.png"),
             ("/admin/provider-catalog",     "13-admin-provider-catalog.png"),
-            ("/audit",                      "14-audit.png")
+            ("/audit",                      "14-audit.png"),
+            ($"/runs?configuration={configurationId}", "15-runs-filtered.png")
         ];
         foreach (var (route, fileName) in pages)
             await CapturePageAsync(page, dashboardUrl, route, fileName, outputDir, captured);
@@ -210,6 +226,63 @@ internal static class ScreenshotHarness
         });
 
         await Task.Delay(TimeSpan.FromSeconds(1)); // bus seed propagation window
+    }
+
+    /// <summary>
+    /// Makes the run-centric surfaces (#21) worth photographing: adopts the finished
+    /// mail-triggered run into the demo configuration (so the filtered run-history page has
+    /// content) and adds a finished rerun of it plus one schedule-dispatched run, giving the
+    /// trigger-origin column and the lineage chips real data.
+    /// </summary>
+    private static async Task SeedRunHistoryDemoDataAsync(WorkflowInstanceRecord run)
+    {
+        await using var provider = EndToEndEnvironment.BuildPlatformDataProvider();
+        var instances = provider.GetRequiredService<IDataAccess<WorkflowInstanceRecord>>();
+        var configurationId = WorkflowConfigurationRecord.IdFor(DemoConfigurationName);
+
+        await instances.SaveAsync(run with
+        {
+            WorkflowConfigurationId = configurationId,
+            WorkflowConfigurationName = DemoConfigurationName
+        });
+
+        var original = run.DispatchCommandJson is null
+            ? null
+            : JsonSerializer.Deserialize<RunWorkflowCommand>(run.DispatchCommandJson);
+        var rerunContext = new Dictionary<string, string>(
+            original?.Context ?? new Dictionary<string, string>())
+        {
+            ["RERUN_OF"] = run.Id.ToString("D")
+        };
+        var rerunCommand = new RunWorkflowCommand(
+            Guid.NewGuid(), WorkflowType, WorkflowPackageUri, rerunContext,
+            original?.RequestedBy, configurationId);
+        await instances.SaveAsync(new WorkflowInstanceRecord
+        {
+            Id = Guid.NewGuid(),
+            WorkflowType = WorkflowType,
+            State = "Success",
+            CreatedUtc = DateTimeOffset.UtcNow.AddSeconds(-90),
+            CompletedUtc = DateTimeOffset.UtcNow.AddSeconds(-25),
+            DispatchCommandJson = JsonSerializer.Serialize(rerunCommand),
+            WorkflowConfigurationId = configurationId,
+            WorkflowConfigurationName = DemoConfigurationName
+        });
+
+        var scheduleCommand = new RunWorkflowCommand(
+            Guid.NewGuid(), WorkflowType, WorkflowPackageUri,
+            new Dictionary<string, string>(), null, configurationId);
+        await instances.SaveAsync(new WorkflowInstanceRecord
+        {
+            Id = Guid.NewGuid(),
+            WorkflowType = WorkflowType,
+            State = "Success",
+            CreatedUtc = DateTimeOffset.UtcNow.AddHours(-3),
+            CompletedUtc = DateTimeOffset.UtcNow.AddHours(-3).AddSeconds(70),
+            DispatchCommandJson = JsonSerializer.Serialize(scheduleCommand),
+            WorkflowConfigurationId = configurationId,
+            WorkflowConfigurationName = DemoConfigurationName
+        });
     }
 
     /// <summary>

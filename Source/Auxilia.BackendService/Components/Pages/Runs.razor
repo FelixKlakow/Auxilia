@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @implements IDisposable
 @inject IDataAccess<WorkflowInstanceRecord> Instances
+@inject IDataAccess<WorkflowConfigurationRecord> Configurations
 @inject WorkflowRerunService Rerun
 
 <PageTitle>Runs — Auxilia</PageTitle>
@@ -17,22 +18,48 @@
     <div class="panel success">@_rerunNotice</div>
 }
 
+@if (Configuration is { } configurationFilter)
+{
+    @* Run-history mode (#21): a header card describing the filtered configuration. *@
+    <section class="card history-card">
+        <div class="card-header">
+            <h2>
+                @(_configuration?.DisplayName ?? ConfigurationDisplayName ?? configurationFilter.ToString("N")[..8])
+                @if ((_configuration?.WorkflowType ?? _runs.FirstOrDefault()?.WorkflowType) is { } workflowType)
+                {
+                    <span class="type-chip">@workflowType</span>
+                }
+            </h2>
+            <div class="card-actions">
+                @if (_configuration is not null)
+                {
+                    <span class="badge badge-state @(_configuration.Enabled ? "badge-success" : "badge-cancelled")">
+                        @(_configuration.Enabled ? "Enabled" : "Disabled")
+                    </span>
+                    <a class="btn btn-secondary btn-sm" href="workflows/@_configuration.Id/edit">Edit configuration</a>
+                }
+                <a class="btn btn-secondary btn-sm" href="runs">All runs</a>
+            </div>
+            <p class="card-subtitle">Run history of this workflow configuration — newest first.</p>
+        </div>
+    </section>
+}
+
 @if (_runs.Count == 0)
 {
-    <EmptyState Title="No workflow runs yet"
-                Description="Runs appear here as soon as a task source, schedule, or trigger dispatches a workflow."/>
+    @if (Configuration is null)
+    {
+        <EmptyState Title="No workflow runs yet"
+                    Description="Runs appear here as soon as a task source, schedule, or trigger dispatches a workflow."/>
+    }
+    else
+    {
+        <EmptyState Title="No runs for this configuration yet"
+                    Description="Runs appear here as soon as this configuration's trigger fires or it is run manually."/>
+    }
 }
 else
 {
-    @if (Configuration is { } configurationFilter)
-    {
-        <div class="panel success filter-panel">
-            Showing only runs of configuration
-            <span class="cell-strong">@(ConfigurationDisplayName ?? configurationFilter.ToString("N")[..8])</span>
-            · <a href="runs">Show all runs</a>
-        </div>
-    }
-
     <div class="chip-bar" role="group" aria-label="Filter runs by state">
         @foreach (var state in StateOptions)
         {
@@ -51,6 +78,10 @@ else
             <tr>
                 <th>State</th>
                 <th>Workflow</th>
+                @if (Configuration is not null)
+                {
+                    <th>Trigger origin</th>
+                }
                 <th>Started</th>
                 <th>Duration</th>
                 <th>Error</th>
@@ -70,6 +101,21 @@ else
                             <span class="cell-sub">@configurationName</span>
                         }
                     </td>
+                    @if (Configuration is not null)
+                    {
+                        var origin = OriginOf(run);
+                        <td>
+                            @if (origin.PredecessorInstanceId is { } predecessorId)
+                            {
+                                <a class="type-chip" href="runs/@predecessorId"
+                                   title="Open the run this one was rerun from">@origin.Label</a>
+                            }
+                            else
+                            {
+                                <span class="cell-truncate" title="@origin.Label">@origin.Label</span>
+                            }
+                        </td>
+                    }
                     <td>
                         @TimeText.Relative(run.CreatedUtc)
                         <span class="cell-sub">@run.CreatedUtc.ToString("yyyy-MM-dd HH:mm:ss") UTC</span>
@@ -115,6 +161,8 @@ else
     private string? _error;
     private string? _rerunNotice;
     private bool _busy;
+    private WorkflowConfigurationRecord? _configuration;
+    private Dictionary<Guid, TriggerOrigin> _origins = [];
 
     private string? ConfigurationDisplayName
         => _runs.FirstOrDefault(r => r.WorkflowConfigurationName is not null)?.WorkflowConfigurationName;
@@ -160,7 +208,18 @@ else
         if (Configuration is { } configurationId)
             query = query.Where(r => r.WorkflowConfigurationId == configurationId);
         _runs = query.Take(200).ToList();
+
+        if (Configuration is { } id)
+        {
+            _configuration = await Configurations.ReadAsync(id, _cts.Token);
+            // Origins are derived from the stored dispatch command; cached per load so the
+            // JSON is not re-parsed on every render of the 2 s poll.
+            _origins = _runs.ToDictionary(r => r.Id, TriggerOrigin.Of);
+        }
     }
+
+    private TriggerOrigin OriginOf(WorkflowInstanceRecord run)
+        => _origins.TryGetValue(run.Id, out var origin) ? origin : TriggerOrigin.Of(run);
 
     private async Task RerunAsync(Guid instanceId)
     {

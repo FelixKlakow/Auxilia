@@ -18,14 +18,19 @@ Code Review run (the reply is announced when it arrives), `o` re-opens the brows
 
 `dotnet run --project Auxilia.DevStand -- --screenshots [outputDir]` (default outputDir:
 `artifacts/screenshots` under the repo root, which is gitignored) boots the stack, sends one
-demo mail, waits until the triggered Code Review run reaches a terminal state (polled via
-Mongo), then drives headless Chromium through Microsoft.Playwright (1600x900 viewport) and
-captures full-page PNGs of every dashboard page in navigation order: `01-login.png` through
-`14-audit.png` (login is captured anonymously, the rest after logging in through the real
-login form). `04-workflow-editor.png` is interactive: the harness walks the workflow-editor
-create flow (basics filled, work-items slot added, email provider chosen) so the generated
-settings form is on screen; the catalog availability and one demo workflow configuration are
-seeded beforehand. It prints each absolute path, tears the stack down, and exits 0 on success.
+demo mail, then drives headless Chromium through Microsoft.Playwright (1600x900 viewport) and
+captures full-page PNGs of every dashboard page: `01-login.png` through `14-audit.png` plus
+`15-runs-filtered.png` (login is captured anonymously, the rest after logging in through the
+real login form). `02-dashboard.png` is captured while the mail-triggered Code Review run is
+still RUNNING (polled via Mongo) so the dashboard's Live now section has content; the harness
+then waits for the terminal state before capturing the remaining pages. Demo data is seeded
+beforehand: catalog availability, one demo workflow configuration, and run-history records
+(the finished run is adopted into the demo configuration and gains a rerun successor plus a
+schedule-dispatched sibling, so `15-runs-filtered.png` shows the trigger-origin column and
+`06-run-detail.png` shows lineage chips). `04-workflow-editor.png` is interactive: the
+harness walks the workflow-editor create flow (basics filled, work-items slot added, email
+provider chosen) so the generated settings form is on screen. It prints each absolute path,
+tears the stack down, and exits 0 on success.
 
 Browser provisioning is automatic: before booting containers the harness invokes
 `Microsoft.Playwright.Program.Main(["install", "chromium"])`, which downloads Chromium to

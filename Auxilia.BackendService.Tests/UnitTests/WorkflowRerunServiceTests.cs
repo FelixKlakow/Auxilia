@@ -183,6 +183,55 @@ public class WorkflowRerunServiceTests
     }
 
     [Test]
+    public void SuccessorsOf_FindsRunsRerunFromTheGivenRun_OldestFirst()
+    {
+        var run = Instance("pull-request-code-review", "Success", DateTimeOffset.UtcNow.AddHours(-2));
+        var newerRerun = RerunInstance(run, DateTimeOffset.UtcNow.AddMinutes(-5));
+        var olderRerun = RerunInstance(run, DateTimeOffset.UtcNow.AddHours(-1));
+        var unrelated = Instance("pull-request-code-review", "Success", DateTimeOffset.UtcNow);
+
+        var successors = WorkflowRerunService.SuccessorsOf(
+            run, [unrelated, newerRerun, run, olderRerun]);
+
+        Assert.That(successors.Select(s => s.Id), Is.EqualTo(new[] { olderRerun.Id, newerRerun.Id }));
+    }
+
+    [Test]
+    public void SuccessorsOf_IgnoresOtherWorkflowTypes_ForeignPredecessors_AndUnparseableCommands()
+    {
+        var run = Instance("pull-request-code-review", "Success", DateTimeOffset.UtcNow.AddHours(-1));
+        var otherType = RerunInstance(run, DateTimeOffset.UtcNow) with { WorkflowType = "other-workflow" };
+        var foreignPredecessor = RerunInstance(
+            Instance("pull-request-code-review", "Success", DateTimeOffset.UtcNow), DateTimeOffset.UtcNow);
+        var unparseable = Instance("pull-request-code-review", "Success", DateTimeOffset.UtcNow)
+            with { DispatchCommandJson = "{not json" };
+
+        var successors = WorkflowRerunService.SuccessorsOf(
+            run, [otherType, foreignPredecessor, unparseable]);
+
+        Assert.That(successors, Is.Empty);
+    }
+
+    private static WorkflowInstanceRecord Instance(string workflowType, string state, DateTimeOffset createdUtc)
+        => new()
+        {
+            Id = Guid.NewGuid(),
+            WorkflowType = workflowType,
+            State = state,
+            CreatedUtc = createdUtc,
+            DispatchCommandJson = JsonSerializer.Serialize(OriginalCommand())
+        };
+
+    private static WorkflowInstanceRecord RerunInstance(WorkflowInstanceRecord predecessor, DateTimeOffset createdUtc)
+        => Instance(predecessor.WorkflowType, "Success", createdUtc) with
+        {
+            DispatchCommandJson = JsonSerializer.Serialize(OriginalCommand() with
+            {
+                Context = new Dictionary<string, string> { ["RERUN_OF"] = predecessor.Id.ToString("D") }
+            })
+        };
+
+    [Test]
     public void BuildRerunCommand_OverwritesAnInheritedRerunMarker()
     {
         var firstRun = Guid.NewGuid();

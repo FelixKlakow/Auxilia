@@ -936,4 +936,42 @@ select { cursor: pointer; }
 
 .rerun-row { margin-bottom: 1.1rem; }
 
-.filter-panel a { font-weight: 600; }
+/* ------------------------------------------------------------------ run-centric surfaces (#21) */
+
+/* Uppercase mini-heading separating the dashboard's Live now and Pinned views sections. */
+.section-title {
+    margin: 0 0 0.8rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+.live-now-section { margin-bottom: 1.8rem; }
+
+/* Compact live-now counter in the sidebar next to "Runs". */
+.nav-live-badge {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.02rem 0.5rem;
+    border-radius: 999px;
+    background: var(--sidebar-active);
+    border: 1px solid var(--sidebar-border);
+    color: var(--sidebar-text-active);
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+
+.live-dot {
+    width: 0.42rem;
+    height: 0.42rem;
+    border-radius: 50%;
+    background: #4ade80;
+    animation: badge-pulse 1.4s ease-in-out infinite;
+}
+
+/* Successor chips on the run detail header ("Rerun #… started"). */
+.rerun-successors { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }

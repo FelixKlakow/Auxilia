@@ -43,6 +43,18 @@ else
                 </a>
             </p>
         }
+        @if (_successors.Count > 0)
+        {
+            <p class="page-subtitle rerun-successors">
+                @foreach (var successor in _successors)
+                {
+                    <a class="type-chip" href="runs/@successor.Id"
+                       title="A rerun of this run — currently @successor.State">
+                        Rerun #@successor.Id.ToString("N")[..8] started @TimeText.Relative(successor.CreatedUtc)
+                    </a>
+                }
+            </p>
+        }
     </header>
 
     @if (IsTerminal && _run.DispatchCommandJson is not null)
@@ -148,6 +160,7 @@ else
     private WorkflowInstanceRecord? _run;
     private IReadOnlyList<ViewDescriptor> _views = [];
     private IReadOnlyList<DashboardPin> _pins = [];
+    private IReadOnlyList<WorkflowInstanceRecord> _successors = [];
 
     private string ShortId => InstanceId.ToString("N")[..8];
 
@@ -188,6 +201,7 @@ else
             if (_allowed)
             {
                 await LoadViewsAsync();
+                await LoadLineageAsync();
                 await LoadPinsAsync();
                 // Live path: in-process fan-out from the bus handlers (LiveViewBroker).
                 _liveSubscription = Broker.Subscribe(OnLiveViewData, OnLiveStatus);
@@ -240,6 +254,15 @@ else
         }
     }
 
+    /// <summary>Rerun lineage (#21): every run that was dispatched as a rerun of this one.</summary>
+    private async Task LoadLineageAsync()
+    {
+        if (_run is null)
+            return;
+        var all = await Instances.ReadAsync(_cts.Token);
+        _successors = WorkflowRerunService.SuccessorsOf(_run, all);
+    }
+
     private ViewItemBuffer BufferOf(string viewName)
     {
         if (!_buffers.TryGetValue(viewName, out var buffer))
@@ -287,14 +310,25 @@ else
 
     private void OnLiveStatus(WorkflowStatusEvent statusEvent)
     {
-        if (statusEvent.WorkflowInstanceId != InstanceId)
-            return;
-
-        _ = InvokeAsync(async () =>
+        if (statusEvent.WorkflowInstanceId == InstanceId)
         {
-            await LoadViewsAsync();
-            StateHasChanged();
-        });
+            _ = InvokeAsync(async () =>
+            {
+                await LoadViewsAsync();
+                await LoadLineageAsync();
+                StateHasChanged();
+            });
+        }
+        else if (_run is not null && statusEvent.WorkflowType == _run.WorkflowType)
+        {
+            // A sibling run of the same type may be a freshly dispatched rerun of this one —
+            // refresh the successor chips so lineage appears without a page reload.
+            _ = InvokeAsync(async () =>
+            {
+                await LoadLineageAsync();
+                StateHasChanged();
+            });
+        }
     }
 
     private bool IsPinned(string viewName)
@@ -347,6 +381,7 @@ else
             while (!IsTerminal && await _timer!.WaitForNextTickAsync(_cts.Token))
             {
                 await LoadViewsAsync();
+                await LoadLineageAsync();
                 await InvokeAsync(StateHasChanged);
             }
         }

@@ -74,6 +74,17 @@ public sealed class WorkflowRerunService(
         };
     }
 
+    /// <summary>
+    /// Runs that were dispatched as reruns of the given run, oldest first. Candidates are
+    /// pre-filtered by workflow type so the dispatch-command JSON is only parsed for siblings.
+    /// </summary>
+    public static IReadOnlyList<WorkflowInstanceRecord> SuccessorsOf(
+        WorkflowInstanceRecord run, IEnumerable<WorkflowInstanceRecord> candidates)
+        => candidates
+            .Where(c => c.Id != run.Id && c.WorkflowType == run.WorkflowType && RerunOf(c) == run.Id)
+            .OrderBy(c => c.CreatedUtc)
+            .ToList();
+
     /// <summary>The predecessor instance ID when the run was dispatched as a rerun, otherwise null.</summary>
     public static Guid? RerunOf(WorkflowInstanceRecord run)
         => ParseDispatchCommand(run.DispatchCommandJson)?.Context is { } context

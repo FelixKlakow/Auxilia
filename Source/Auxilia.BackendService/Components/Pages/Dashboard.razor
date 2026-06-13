@@ -13,7 +13,7 @@
 
 <PageTitle>Dashboard — Auxilia</PageTitle>
 
-<PageHeader Title="Dashboard" Subtitle="Views you pinned from workflow runs, updated live."/>
+<PageHeader Title="Dashboard" Subtitle="What is running right now, plus the views you pinned from workflow runs — updated live."/>
 
 @if (!_loaded)
 {
@@ -23,15 +23,6 @@ else if (_principalId is null)
 {
     <div class="panel denied">Access denied: no platform principal in session.</div>
 }
-else if (_panels.Count == 0)
-{
-    <EmptyState Title="Nothing pinned yet">
-        <p class="empty-description">
-            Open a <a href="runs">run</a> and pin one of its views — it will stay on this dashboard
-            and update live while the workflow is running.
-        </p>
-    </EmptyState>
-}
 else
 {
     @if (_error is not null)
@@ -39,41 +30,94 @@ else
         <div class="panel denied">@_error</div>
     }
 
-    <div class="panel-grid">
-        @foreach (var panel in _panels)
+    <section class="live-now-section">
+        <h2 class="section-title">Live now</h2>
+        @if (_liveNow.Count == 0)
         {
-            <section class="card dashboard-panel">
-                <div class="card-header">
-                    <h2 class="view-title">
-                        @panel.Pin.DisplayTitle
-                        @if (panel.Run is not null)
-                        {
-                            <span class="badge badge-state badge-@panel.Run.State.ToLowerInvariant()">@panel.Run.State</span>
-                        }
-                    </h2>
-                    <div class="card-actions">
-                        <a class="btn btn-secondary btn-sm" href="runs/@panel.Pin.InstanceId">Open run</a>
-                        <button class="btn btn-secondary btn-sm" @onclick="() => UnpinAsync(panel.Pin)">Unpin</button>
-                    </div>
-                </div>
-                <div class="card-body">
-                    @if (!panel.Allowed)
-                    {
-                        <div class="panel denied">Access denied: @panel.DenyReason</div>
-                    }
-                    else if (panel.Descriptor is null)
-                    {
-                        <div class="panel denied">View '@panel.Pin.ViewName' is no longer declared by this run.</div>
-                    }
-                    else
-                    {
-                        <ViewRenderer Descriptor="panel.Descriptor" Items="panel.Buffer.Items"
-                                      IsLive="panel.Run?.CompletedUtc is null"/>
-                    }
-                </div>
-            </section>
+            <EmptyState Title="Nothing running right now"
+                        Description="Runs appear here the moment a trigger fires."/>
         }
-    </div>
+        else
+        {
+            <div class="card">
+                <table class="data-table">
+                    <thead>
+                    <tr>
+                        <th>State</th>
+                        <th>Workflow</th>
+                        <th>Started</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var run in _liveNow)
+                    {
+                        <tr>
+                            <td><span class="badge badge-state badge-@run.State.ToLowerInvariant()">@run.State</span></td>
+                            <td>
+                                <a class="cell-strong" href="runs/@run.Id">@(run.WorkflowConfigurationName ?? run.WorkflowType)</a>
+                                <span class="muted mono"> @run.Id.ToString("N")[..8]</span>
+                                @if (run.WorkflowConfigurationName is not null)
+                                {
+                                    <span class="cell-sub">@run.WorkflowType</span>
+                                }
+                            </td>
+                            <td>@TimeText.Relative(run.CreatedUtc)</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    <h2 class="section-title">Pinned views</h2>
+    @if (_panels.Count == 0)
+    {
+        <EmptyState Title="Nothing pinned yet">
+            <p class="empty-description">
+                Open a <a href="runs">run</a> and pin one of its views — it will stay on this dashboard
+                and update live while the workflow is running.
+            </p>
+        </EmptyState>
+    }
+    else
+    {
+        <div class="panel-grid">
+            @foreach (var panel in _panels)
+            {
+                <section class="card dashboard-panel">
+                    <div class="card-header">
+                        <h2 class="view-title">
+                            @panel.Pin.DisplayTitle
+                            @if (panel.Run is not null)
+                            {
+                                <span class="badge badge-state badge-@panel.Run.State.ToLowerInvariant()">@panel.Run.State</span>
+                            }
+                        </h2>
+                        <div class="card-actions">
+                            <a class="btn btn-secondary btn-sm" href="runs/@panel.Pin.InstanceId">Open run</a>
+                            <button class="btn btn-secondary btn-sm" @onclick="() => UnpinAsync(panel.Pin)">Unpin</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        @if (!panel.Allowed)
+                        {
+                            <div class="panel denied">Access denied: @panel.DenyReason</div>
+                        }
+                        else if (panel.Descriptor is null)
+                        {
+                            <div class="panel denied">View '@panel.Pin.ViewName' is no longer declared by this run.</div>
+                        }
+                        else
+                        {
+                            <ViewRenderer Descriptor="panel.Descriptor" Items="panel.Buffer.Items"
+                                          IsLive="panel.Run?.CompletedUtc is null"/>
+                        }
+                    </div>
+                </section>
+            }
+        </div>
+    }
 }
 
 @code {
@@ -98,6 +142,7 @@ else
     private string? _error;
     private Guid? _principalId;
     private List<PinnedPanel> _panels = [];
+    private IReadOnlyList<WorkflowInstanceRecord> _liveNow = [];
 
     protected override async Task OnInitializedAsync()
     {
@@ -105,6 +150,7 @@ else
         _principalId = DashboardAuthEndpoints.PrincipalIdOf(user);
         if (_principalId is not null)
         {
+            await LoadLiveNowAsync();
             await LoadPanelsAsync();
             // Live path: in-process fan-out from the bus handlers (LiveViewBroker).
             _liveSubscription = Broker.Subscribe(OnLiveViewData, OnLiveStatus);
@@ -121,6 +167,10 @@ else
         _timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
         _ = PollAsync();
     }
+
+    /// <summary>The Live now section: every currently active run, newest first (#21).</summary>
+    private async Task LoadLiveNowAsync()
+        => _liveNow = LiveNow.ActiveOf(await Instances.ReadAsync(_cts.Token));
 
     private async Task LoadPanelsAsync()
     {
@@ -210,11 +260,11 @@ else
 
     private void OnLiveStatus(WorkflowStatusEvent statusEvent)
     {
-        if (_panels.All(p => p.Pin.InstanceId != statusEvent.WorkflowInstanceId))
-            return;
-
         _ = InvokeAsync(async () =>
         {
+            // Every lifecycle event can change the Live now section; pinned panels only
+            // need a refresh when the event belongs to one of them.
+            await LoadLiveNowAsync();
             foreach (var panel in _panels.Where(p => p.Pin.InstanceId == statusEvent.WorkflowInstanceId))
                 panel.Run = await Instances.ReadAsync(panel.Pin.InstanceId, _cts.Token) ?? panel.Run;
             StateHasChanged();
@@ -242,6 +292,7 @@ else
         {
             while (await _timer!.WaitForNextTickAsync(_cts.Token))
             {
+                await LoadLiveNowAsync();
                 await LoadPanelsAsync();
                 await InvokeAsync(StateHasChanged);
             }
