@@ -17,6 +17,7 @@ public static class BuiltInRoles
             [Administrator] = new HashSet<string>
             {
                 PermissionActions.PrincipalAdminister,
+                PermissionActions.IdentitySourceManage,
                 PermissionActions.PolicyAdminister,
                 PermissionActions.BundleManage,
                 PermissionActions.ProviderCatalogManage,

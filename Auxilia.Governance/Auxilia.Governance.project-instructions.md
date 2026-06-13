@@ -25,14 +25,21 @@ Auxilia.Governance/
 │   ├── IPolicyEngine.cs / PolicyEngine.cs
 │   ├── PolicyContext.cs          # (principal, action, resource, optional workflow type)
 │   └── PolicyDecision.cs         # Allowed + Reason
-└── Identity/
-    ├── IIdentityProvider.cs      # AuthenticatePassword / AuthenticateApiKey → IdentitySession
-    ├── IdentitySession.cs        # PrincipalId, Kind, resolved role names
-    ├── LocalIdentityProvider.cs  # PBKDF2 passwords, SHA-256 API keys
-    ├── PasswordHasher.cs         # pbkdf2:{iterations}:{salt}:{hash} envelope
-    └── GroupMappingResolver.cs   # IdP group claims → role names
+├── Identity/
+│   ├── IIdentityProvider.cs      # AuthenticatePassword / AuthenticateApiKey → IdentitySession
+│   ├── IdentitySession.cs        # PrincipalId, Kind, resolved role names
+│   ├── LocalIdentityProvider.cs  # PBKDF2 passwords, SHA-256 API keys
+│   ├── PasswordHasher.cs         # pbkdf2:{iterations}:{salt}:{hash} envelope
+│   └── GroupMappingResolver.cs   # IdP group claims → role names
+└── IdentityImport/               # Admin-run user import from external systems (#23)
+    ├── IIdentityImportConnector.cs        # ExternalUser fetch + connection test per connector type
+    ├── ConnectorSettingDescriptor.cs      # Minimal descriptor for admin forms (NOT the workflow SDK type)
+    ├── LdapIdentityImportConnector.cs     # System.DirectoryServices.Protocols, paged search
+    ├── CsvIdentityImportConnector.cs      # Pasted CSV rows (externalId,username,displayName,enabled,groups)
+    └── IdentityImportService.cs           # Source CRUD + idempotent UPSERT import; disables, never deletes
 ```
 
 ## Special rules
 - Never log or audit credential material; audit records reference principals by ID.
+- Identity-import connector settings are secrets-bearing: never log/audit setting values (only key names), and imported principals get NO local credentials — an administrator sets them before first sign-in (v1: no pass-through authentication against the source).
 - All policy decisions (allow AND deny) must go through `PolicyEngine` so the audit trail stays complete — no caller-side shortcuts.

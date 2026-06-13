@@ -1,4 +1,5 @@
 using Auxilia.Governance.Identity;
+using Auxilia.Governance.IdentityImport;
 using Auxilia.Governance.Policy;
 using Auxilia.PlatformData;
 using Auxilia.PlatformData.Entities;
@@ -23,7 +24,11 @@ public static class DependencyInjectionExtensions
         services.AddPlatformEntity<WorkflowTypeAccessRecord>(dataSettings);
         services.AddPlatformEntity<CredentialRecord>(dataSettings);
         services.AddPlatformEntity<AccountBundleRecord>(dataSettings);
+        services.AddPlatformEntity<IdentitySourceRecord>(dataSettings);
 
+        services.AddSingleton<IIdentityImportConnector, LdapIdentityImportConnector>();
+        services.AddSingleton<IIdentityImportConnector, CsvIdentityImportConnector>();
+        services.AddSingleton<IdentityImportService>();
         services.AddSingleton<PrincipalDirectory>();
         services.AddSingleton<AccountBundleStore>();
         services.AddSingleton<WorkflowTypeAccessStore>();

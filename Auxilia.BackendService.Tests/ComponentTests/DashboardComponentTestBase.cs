@@ -41,8 +41,14 @@ public abstract class DashboardComponentTestBase
             {
                 services.RemoveAll<IMessageBusClient>();
                 services.AddSingleton<IMessageBusClient>(MessageBus);
+                ConfigureTestServices(services);
             });
         });
+    }
+
+    /// <summary>Fixture hook to add or replace services in the test container.</summary>
+    protected virtual void ConfigureTestServices(IServiceCollection services)
+    {
     }
 
     [OneTimeTearDown]

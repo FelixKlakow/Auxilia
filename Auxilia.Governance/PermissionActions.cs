@@ -18,6 +18,7 @@ public static class PermissionActions
     public const string DashboardManage = "dashboard.manage";
     public const string BundleManage = "bundle.manage";
     public const string PrincipalAdminister = "principal.administer";
+    public const string IdentitySourceManage = "identity-source.manage";
     public const string PolicyAdminister = "policy.administer";
     public const string AuditRead = "audit.read";
 }

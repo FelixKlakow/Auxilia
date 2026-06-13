@@ -140,6 +140,7 @@ internal static class ScreenshotHarness
         Console.WriteLine("Seeding demo data (provider catalog, demo configuration, run history) ...");
         await SeedWorkflowEditorDemoDataAsync();
         await SeedRunHistoryDemoDataAsync(run);
+        await SeedIdentitySourceDemoDataAsync();
 
         var configurationId = WorkflowConfigurationRecord.IdFor(DemoConfigurationName);
         (string Route, string FileName)[] pages =
@@ -163,6 +164,10 @@ internal static class ScreenshotHarness
         // The editor needs interaction before its screenshot is meaningful: a provider must
         // be chosen so the generated settings form is visible (04 sorts it next to the list).
         await CaptureWorkflowEditorAsync(page, dashboardUrl, outputDir, captured);
+
+        // Identity sources (#23): pick the LDAP connector so the generated settings form
+        // (host, bind DN, filters, ...) is on screen alongside the seeded source list.
+        await CaptureIdentitySourcesAsync(page, dashboardUrl, outputDir, captured);
 
         return captured;
     }
@@ -283,6 +288,70 @@ internal static class ScreenshotHarness
             WorkflowConfigurationId = configurationId,
             WorkflowConfigurationName = DemoConfigurationName
         });
+    }
+
+    /// <summary>
+    /// One configured LDAP source with a finished import, so the identity-sources list shows
+    /// a populated row. The EndToEnd backend runs without a protection key
+    /// (NullSettingsProtector), so plain settings JSON is the correct stored format here.
+    /// </summary>
+    private static async Task SeedIdentitySourceDemoDataAsync()
+    {
+        await using var provider = EndToEndEnvironment.BuildPlatformDataProvider();
+        var sources = provider.GetRequiredService<IDataAccess<IdentitySourceRecord>>();
+        await sources.SaveAsync(new IdentitySourceRecord
+        {
+            Id = IdentitySourceRecord.IdFor("corporate-directory"),
+            Name = "Corporate directory",
+            ConnectorType = "ldap",
+            ProtectedSettingsJson = JsonSerializer.Serialize(new Dictionary<string, string>
+            {
+                ["Host"] = "ldap.corp.example.org",
+                ["Port"] = "389",
+                ["UseSsl"] = "false",
+                ["BindDn"] = "cn=auxilia-import,ou=services,dc=corp,dc=example,dc=org",
+                ["BindPassword"] = "demo-not-a-real-secret",
+                ["BaseDn"] = "ou=people,dc=corp,dc=example,dc=org",
+                ["UserFilter"] = "(objectClass=person)",
+                ["UsernameAttribute"] = "sAMAccountName",
+                ["DisplayNameAttribute"] = "displayName",
+                ["GroupAttribute"] = "memberOf"
+            }),
+            DefaultRole = "User",
+            GroupRoleMappingsJson = """{"Platform Operators":"Operator"}""",
+            DisableMissing = true,
+            LastImportSummaryJson = JsonSerializer.Serialize(
+                new { Created = 12, Updated = 3, Disabled = 1, Skipped = 27, Warnings = Array.Empty<string>() }),
+            LastImportUtc = DateTimeOffset.UtcNow.AddHours(-2)
+        });
+    }
+
+    /// <summary>
+    /// The identity-sources page becomes meaningful once a connector is chosen: clicking the
+    /// LDAP card reveals the descriptor-generated settings form with its AD hints.
+    /// </summary>
+    private static async Task CaptureIdentitySourcesAsync(
+        IPage page, string dashboardUrl, string outputDir, List<string> captured)
+    {
+        await page.GotoAsync(dashboardUrl + "/admin/identity-sources");
+        try
+        {
+            await page.WaitForLoadStateAsync(
+                LoadState.NetworkIdle, new PageWaitForLoadStateOptions { Timeout = 10_000 });
+        }
+        catch (PlaywrightException)
+        {
+            // The circuit websocket can keep the network "busy" — the settle delay still applies.
+        }
+        await Task.Delay(SettleDelay);
+
+        await page.ClickAsync(".provider-card:has-text('LDAP / Active Directory')");
+        await Task.Delay(SettleDelay);
+
+        var path = Path.Combine(outputDir, "16-admin-identity-sources.png");
+        await page.ScreenshotAsync(new PageScreenshotOptions { Path = path, FullPage = true });
+        captured.Add(path);
+        Console.WriteLine($"  captured /admin/identity-sources (LDAP connector chosen) -> {path}");
     }
 
     /// <summary>

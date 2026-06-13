@@ -314,6 +314,7 @@ public class EndToEndEnvironment
         AddEntity<WorkflowInstanceRecord>(services);
         AddEntity<SlotProviderRecord>(services);
         AddEntity<ProviderCatalogRecord>(services);
+        AddEntity<IdentitySourceRecord>(services);
         AddEntity<WorkflowConfigurationRecord>(services);
         AddEntity<ScheduledTriggerRecord>(services);
         services.AddSingleton(TimeProvider.System);

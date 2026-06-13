@@ -15,6 +15,7 @@ public class OperatorAreaAuthorizationTests : DashboardComponentTestBase
     [TestCase("/operator/artifact-triggers")]
     [TestCase("/admin/bundles")]
     [TestCase("/admin/provider-catalog")]
+    [TestCase("/admin/identity-sources")]
     [TestCase("/dashboard")]
     [TestCase("/")]
     public async Task Page_Anonymous_Returns401(string path)
