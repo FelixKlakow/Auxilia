@@ -1,0 +1,2 @@
+# Shell scripts are executed inside Linux containers — they must stay LF even on Windows.
+*.sh text eol=lf

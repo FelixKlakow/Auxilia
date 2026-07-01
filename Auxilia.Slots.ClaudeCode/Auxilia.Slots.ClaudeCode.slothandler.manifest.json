@@ -1,0 +1,38 @@
+{
+  "ProviderType": "claude-code-cli",
+  "ContentHashBase64": "",
+  "SignatureBase64": "",
+  "PublicKeyBase64": "",
+  "Settings": [
+    {
+      "Key": "ApiKey",
+      "Label": "Anthropic API key",
+      "Kind": "Secret",
+      "Required": true,
+      "HelpText": "Delivered to the agent container just-in-time and passed to the CLI only via its process environment; stored encrypted at rest and never displayed back."
+    },
+    {
+      "Key": "Model",
+      "Label": "Model",
+      "Kind": "Text",
+      "Required": false,
+      "HelpText": "Optional model override (e.g. claude-sonnet-4-6); the CLI's default model is used when empty."
+    },
+    {
+      "Key": "MaxTurns",
+      "Label": "Maximum turns",
+      "Kind": "Number",
+      "Required": false,
+      "HelpText": "Hard cap on agent turns per run.",
+      "DefaultValue": "25"
+    },
+    {
+      "Key": "CliPath",
+      "Label": "CLI path",
+      "Kind": "Text",
+      "Required": false,
+      "HelpText": "Path of the Claude Code executable inside the workflow image; only changed for testing.",
+      "DefaultValue": "claude"
+    }
+  ]
+}

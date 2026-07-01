@@ -56,6 +56,7 @@
     <Project Path="Source\Auxilia.Workflows.TaskSource\Auxilia.Workflows.TaskSource.csproj" />
   </Folder>
   <Folder Name="/06_WorkflowImplementations/">
+    <Project Path="Auxilia.ClaudeCode.Workflow.Tests\Auxilia.ClaudeCode.Workflow.Tests.csproj" />
     <Project Path="Auxilia.CodeReview.Workflow.Tests\Auxilia.CodeReview.Workflow.Tests.csproj" />
     <Project Path="Auxilia.FakeSlots.CodeReview.Happy\Auxilia.FakeSlots.CodeReview.Happy.csproj" />
     <Project Path="Auxilia.FakeSlots.CodeReview.WriteBackFailure\Auxilia.FakeSlots.CodeReview.WriteBackFailure.csproj" />
@@ -63,8 +64,11 @@
     <Project Path="Auxilia.FakeSlots.Implementation.Happy\Auxilia.FakeSlots.Implementation.Happy.csproj" />
     <Project Path="Auxilia.FakeSlots.Tests\Auxilia.FakeSlots.Tests.csproj" />
     <Project Path="Auxilia.ImplementationWorkflow.Tests/Auxilia.ImplementationWorkflow.Tests.csproj" />
+    <Project Path="Auxilia.Slots.ClaudeCode.Tests\Auxilia.Slots.ClaudeCode.Tests.csproj" />
+    <Project Path="Auxilia.Slots.ClaudeCode\Auxilia.Slots.ClaudeCode.csproj" />
     <Project Path="Auxilia.Slots.Email.Tests\Auxilia.Slots.Email.Tests.csproj" />
     <Project Path="Auxilia.Slots.Email\Auxilia.Slots.Email.csproj" />
+    <Project Path="Source/Auxilia.ClaudeCode.Workflow/Auxilia.ClaudeCode.Workflow.csproj" />
     <Project Path="Source/Auxilia.ImplementationWorkflow/Auxilia.ImplementationWorkflow.csproj" />
     <Project Path="Source\Auxilia.CodeReview.Workflow\Auxilia.CodeReview.Workflow.csproj" />
   </Folder>
