@@ -6,10 +6,10 @@
 @inject IMessageBusClient MessageBus
 @inject DashboardSettings Settings
 
-<PageTitle>Trigger — Auxilia</PageTitle>
+<PageTitle>Manual dispatch — Auxilia</PageTitle>
 
-<PageHeader Title="Trigger a workflow"
-            Subtitle="Developer tool: publishes a run command straight to the command queue, bypassing task-source adapters."/>
+<PageHeader Title="Manual dispatch"
+            Subtitle="Developer tool: publishes a raw run command straight to the command queue, bypassing configurations and task-source adapters. In normal operation runs start via triggers or rerun."/>
 
 @if (_error is not null)
 {

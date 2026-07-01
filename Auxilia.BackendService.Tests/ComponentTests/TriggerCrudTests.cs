@@ -100,4 +100,49 @@ public class TriggerCrudTests : DashboardComponentTestBase
 
         await Triggers.DeleteScheduledAsync("test-operator", trigger.Id);
     }
+
+    [Test]
+    public async Task TriggerPages_CreateFormsAreConfigurationFirst_NoRawCoordinatesOrJson()
+    {
+        var configurations = Factory.Services
+            .GetRequiredService<IDataAccess<WorkflowConfigurationRecord>>();
+        var configuration = new WorkflowConfigurationRecord
+        {
+            Id = WorkflowConfigurationRecord.IdFor("trigger-form-demo"),
+            Name = "trigger-form-demo",
+            DisplayName = "Trigger form demo",
+            WorkflowType = "demo-workflow",
+            PackageUri = "docker://demo:1",
+            Enabled = true,
+            SlotBindingsJson = "[]"
+        };
+        await configurations.SaveAsync(configuration);
+        try
+        {
+            using var client = CreateClient();
+            var (_, username, password) = await CreatePrincipalAsync("Operator");
+            var (cookie, _) = await LoginAsync(client, username, password);
+
+            var schedules = await GetHtmlAsync(client, "/operator/schedules", cookie);
+            var chaining = await GetHtmlAsync(client, "/operator/artifact-triggers", cookie);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(schedules, Does.Contain("Trigger form demo"),
+                    "Schedules are created against a named workflow configuration.");
+                Assert.That(schedules, Does.Not.Contain("Context JSON"),
+                    "No JSON configuration anywhere in the dashboard.");
+                Assert.That(schedules, Does.Not.Contain("Package URI"),
+                    "Raw package coordinates belong to the configuration, not the schedule form.");
+                Assert.That(chaining, Does.Contain("Trigger form demo"),
+                    "Chaining rules are created against a named workflow configuration.");
+                Assert.That(chaining, Does.Not.Contain("Package URI"));
+                Assert.That(chaining, Does.Contain("No chaining rules configured yet"));
+            });
+        }
+        finally
+        {
+            await configurations.RemoveAsync(configuration.Id);
+        }
+    }
 }

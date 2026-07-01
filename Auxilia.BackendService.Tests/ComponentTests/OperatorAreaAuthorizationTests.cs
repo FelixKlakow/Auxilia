@@ -27,7 +27,7 @@ public class OperatorAreaAuthorizationTests : DashboardComponentTestBase
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
     }
 
-    [TestCase("/operator/slots", "Registered slot providers")]
+    [TestCase("/operator/slots", "Slot configurations")]
     [TestCase("/operator/schedules", "Create schedule")]
     [TestCase("/operator/artifact-triggers", "Create chaining rule")]
     public async Task OperatorPage_AsOperator_RendersContent(string path, string expectedSection)

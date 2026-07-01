@@ -70,13 +70,20 @@ else
                     </td>
                     <td>
                         <div class="cell-actions">
-                            <select class="select-inline" @bind="_roleSelections[principal.Id]">
-                                @foreach (var role in BuiltInRoles.AllRoleNames.Except(roles))
-                                {
-                                    <option value="@role">@role</option>
-                                }
-                            </select>
-                            <button class="btn btn-secondary btn-sm" @onclick="() => AssignRoleAsync(principal.Id)" disabled="@_busy">Assign</button>
+                            @if (BuiltInRoles.AllRoleNames.Except(roles).Any())
+                            {
+                                <select class="select-inline" @bind="_roleSelections[principal.Id]">
+                                    @foreach (var role in BuiltInRoles.AllRoleNames.Except(roles))
+                                    {
+                                        <option value="@role">@role</option>
+                                    }
+                                </select>
+                                <button class="btn btn-secondary btn-sm" @onclick="() => AssignRoleAsync(principal.Id)" disabled="@_busy">Assign</button>
+                            }
+                            else
+                            {
+                                <span class="muted">All roles assigned</span>
+                            }
                             @if (principal.Status == "Active")
                             {
                                 <button class="btn btn-danger btn-sm" @onclick="() => DisableAsync(principal.Id)" disabled="@_busy">Disable</button>
@@ -170,8 +177,14 @@ else
         _principals = principals.OrderBy(p => p.DisplayName).ToList();
         var assignments = await RoleAssignments.ReadAsync();
         _assignments = assignments.ToList();
+        // The dropdown lists only roles the principal does NOT have — keep each selection
+        // inside that set or the browser renders an empty select.
         foreach (var principal in _principals)
-            _roleSelections.TryAdd(principal.Id, BuiltInRoles.AllRoleNames.First());
+        {
+            var assignable = BuiltInRoles.AllRoleNames.Except(RolesOf(principal.Id)).ToList();
+            if (!_roleSelections.TryGetValue(principal.Id, out var selected) || !assignable.Contains(selected))
+                _roleSelections[principal.Id] = assignable.FirstOrDefault() ?? "";
+        }
     }
 
     private IReadOnlyList<string> RolesOf(Guid principalId)

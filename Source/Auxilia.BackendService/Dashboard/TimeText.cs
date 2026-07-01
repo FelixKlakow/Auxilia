@@ -26,7 +26,9 @@ public static class TimeText
     {
         { TotalSeconds: < 1 } => "< 1 s",
         { TotalMinutes: < 1 } => $"{(int)span.TotalSeconds} s",
+        { TotalHours: < 1 } when span.Seconds == 0 => $"{(int)span.TotalMinutes} min",
         { TotalHours: < 1 } => $"{(int)span.TotalMinutes} min {span.Seconds} s",
+        _ when span.Minutes == 0 => $"{(int)span.TotalHours} h",
         _ => $"{(int)span.TotalHours} h {span.Minutes} min"
     };
 }

@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @inject TriggerAdministration Triggers
 @inject IDataAccess<PrincipalRecord> Principals
+@inject IDataAccess<WorkflowConfigurationRecord> Configurations
 @inject IPolicyEngine PolicyEngine
 
 <PageTitle>Schedules — Auxilia</PageTitle>
@@ -39,7 +40,7 @@ else
             <table class="data-table">
                 <thead>
                 <tr>
-                    <th>Workflow type</th>
+                    <th>Workflow</th>
                     <th>Interval</th>
                     <th>Enabled</th>
                     <th>Run as</th>
@@ -51,8 +52,11 @@ else
                 @foreach (var trigger in _triggers)
                 {
                     <tr>
-                        <td class="cell-strong">@trigger.WorkflowType</td>
-                        <td>@trigger.IntervalSeconds s</td>
+                        <td>
+                            <span class="cell-strong">@WorkflowLabel(trigger)</span>
+                            <span class="cell-sub">@trigger.WorkflowType</span>
+                        </td>
+                        <td>every @TimeText.Interval(trigger.IntervalSeconds)</td>
                         <td>
                             <span class="badge badge-state @(trigger.Enabled ? "badge-success" : "badge-cancelled")">
                                 @(trigger.Enabled ? "Enabled" : "Disabled")
@@ -82,32 +86,50 @@ else
             <p class="card-subtitle">The workflow is dispatched on the interval as the selected principal.</p>
         </div>
         <div class="card-body form-grid">
-            <label>Workflow type <input @bind="_workflowType"/></label>
-            <label>Package URI <input @bind="_packageUri"/></label>
-            <label>Interval (seconds) <input type="number" @bind="_intervalSeconds"/></label>
-            <label>
-                Context JSON (optional, string map)
-                <input @bind="_contextJson" placeholder='{"Key":"Value"}'/>
-                <span class="field-hint">Passed to the workflow as its initial context.</span>
-            </label>
-            <label>
-                Run as principal
-                <select @bind="_runAsPrincipalId">
-                    <option value="">(none)</option>
-                    @foreach (var principal in _principals)
+            @if (_configurations.Count == 0)
+            {
+                <p class="muted">
+                    No workflow configurations yet — schedules dispatch a configured workflow.
+                    <a href="workflows/new">Configure one first</a>.
+                </p>
+            }
+            else
+            {
+                <label>
+                    Workflow configuration
+                    <select @bind="_configurationId">
+                        <option value="" disabled>Pick a workflow configuration…</option>
+                        @foreach (var configuration in _configurations)
+                        {
+                            <option value="@configuration.Id">@configuration.DisplayName (@configuration.WorkflowType)</option>
+                        }
+                    </select>
+                    <span class="field-hint">Which configured workflow this schedule dispatches.</span>
+                </label>
+                <label>
+                    Interval (seconds)
+                    <input type="number" @bind="_intervalSeconds"/>
+                    <span class="field-hint">= every @TimeText.Interval(_intervalSeconds)</span>
+                </label>
+                <label>
+                    Run as principal
+                    <select @bind="_runAsPrincipalId">
+                        <option value="">(none)</option>
+                        @foreach (var principal in _principals)
+                        {
+                            <option value="@principal.Id">@principal.DisplayName</option>
+                        }
+                    </select>
+                </label>
+                <label class="check-label"><input type="checkbox" @bind="_enabled"/> Enabled</label>
+                <div class="button-row">
+                    <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_busy">@(_editingId is null ? "Create" : "Save")</button>
+                    @if (_editingId is not null)
                     {
-                        <option value="@principal.Id">@principal.DisplayName</option>
+                        <button class="btn btn-secondary" @onclick="ResetForm" disabled="@_busy">Cancel edit</button>
                     }
-                </select>
-            </label>
-            <label class="check-label"><input type="checkbox" @bind="_enabled"/> Enabled</label>
-            <div class="button-row">
-                <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_busy">@(_editingId is null ? "Create" : "Save")</button>
-                @if (_editingId is not null)
-                {
-                    <button class="btn btn-secondary" @onclick="ResetForm" disabled="@_busy">Cancel edit</button>
-                }
-            </div>
+                </div>
+            }
         </div>
     </section>
 }
@@ -125,15 +147,14 @@ else
     private Guid? _principalId;
 
     private Guid? _editingId;
-    private string _workflowType = "";
-    private string _packageUri = "";
+    private string _configurationId = "";
     private int _intervalSeconds = 3600;
-    private string _contextJson = "";
     private string _runAsPrincipalId = "";
     private bool _enabled = true;
 
     private IReadOnlyList<ScheduledTriggerRecord> _triggers = [];
     private IReadOnlyList<PrincipalRecord> _principals = [];
+    private IReadOnlyList<WorkflowConfigurationRecord> _configurations = [];
 
     protected override async Task OnInitializedAsync()
     {
@@ -161,18 +182,22 @@ else
         _triggers = await Triggers.ListScheduledAsync();
         var principals = await Principals.ReadAsync();
         _principals = principals.ToList().OrderBy(p => p.DisplayName).ToList();
+        var configurations = await Configurations.ReadAsync();
+        _configurations = configurations.OrderBy(c => c.DisplayName).ToList();
     }
 
     private string PrincipalName(Guid? id)
         => id is null ? "—" : _principals.FirstOrDefault(p => p.Id == id)?.DisplayName ?? id.Value.ToString();
 
+    private string WorkflowLabel(ScheduledTriggerRecord trigger)
+        => _configurations.FirstOrDefault(c => c.Id == trigger.WorkflowConfigurationId)?.DisplayName
+           ?? trigger.WorkflowType;
+
     private void Edit(ScheduledTriggerRecord trigger)
     {
         _editingId = trigger.Id;
-        _workflowType = trigger.WorkflowType;
-        _packageUri = trigger.WorkflowPackageUri;
+        _configurationId = trigger.WorkflowConfigurationId?.ToString("D") ?? "";
         _intervalSeconds = trigger.IntervalSeconds;
-        _contextJson = trigger.ContextJson ?? "";
         _runAsPrincipalId = trigger.RunAsPrincipalId?.ToString("D") ?? "";
         _enabled = trigger.Enabled;
     }
@@ -180,10 +205,8 @@ else
     private void ResetForm()
     {
         _editingId = null;
-        _workflowType = "";
-        _packageUri = "";
+        _configurationId = "";
         _intervalSeconds = 3600;
-        _contextJson = "";
         _runAsPrincipalId = "";
         _enabled = true;
     }
@@ -192,13 +215,22 @@ else
         => RunAsync(async () =>
         {
             var existing = _editingId is null ? null : _triggers.FirstOrDefault(t => t.Id == _editingId);
+            var configuration = Guid.TryParse(_configurationId, out var configurationId)
+                ? _configurations.FirstOrDefault(c => c.Id == configurationId)
+                : null;
+            // Legacy schedules created before the configuration-first editor keep their raw
+            // workflow coordinates when edited without picking a configuration.
+            if (configuration is null && existing is null)
+                throw new InvalidOperationException("Pick the workflow configuration this schedule dispatches.");
+
             await Triggers.SaveScheduledAsync(_principalId!.Value.ToString("D"), new ScheduledTriggerRecord
             {
                 Id = _editingId ?? Guid.Empty,
-                WorkflowType = _workflowType.Trim(),
-                WorkflowPackageUri = _packageUri.Trim(),
+                WorkflowType = configuration?.WorkflowType ?? existing!.WorkflowType,
+                WorkflowPackageUri = configuration?.PackageUri ?? existing!.WorkflowPackageUri,
+                WorkflowConfigurationId = configuration?.Id ?? existing?.WorkflowConfigurationId,
                 IntervalSeconds = _intervalSeconds,
-                ContextJson = string.IsNullOrWhiteSpace(_contextJson) ? null : _contextJson.Trim(),
+                ContextJson = existing?.ContextJson,
                 RunAsPrincipalId = Guid.TryParse(_runAsPrincipalId, out var runAs) ? runAs : null,
                 Enabled = _enabled,
                 LastDispatchedUtc = existing?.LastDispatchedUtc

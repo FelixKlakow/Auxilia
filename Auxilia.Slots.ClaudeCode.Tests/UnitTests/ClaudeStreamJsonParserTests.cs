@@ -61,7 +61,33 @@ public sealed class ClaudeStreamJsonParserTests
             Assert.That(entries[1].ToolName, Is.EqualTo("Bash"));
             Assert.That(entries[1].ToolState, Is.EqualTo("Running"));
             Assert.That(entries[1].Content, Does.Contain("dotnet test"));
+            Assert.That(entries[1].Label, Is.EqualTo("dotnet test"),
+                "The primary input value becomes the tool card label.");
         });
+    }
+
+    [Test]
+    public void ToolUseWithFilePathInput_UsesItAsLabel()
+    {
+        var parser = new ClaudeStreamJsonParser();
+
+        var entries = parser.ParseLine(
+            """{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_2","name":"Write","input":{"file_path":"NOTES.md","content":"hello"}}]}}""",
+            Timestamp);
+
+        Assert.That(entries.Single().Label, Is.EqualTo("NOTES.md"));
+    }
+
+    [Test]
+    public void ToolUseWithoutRecognizedInputKey_HasNoLabel()
+    {
+        var parser = new ClaudeStreamJsonParser();
+
+        var entries = parser.ParseLine(
+            """{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_3","name":"Custom","input":{"answer":42}}]}}""",
+            Timestamp);
+
+        Assert.That(entries.Single().Label, Is.Null);
     }
 
     [Test]

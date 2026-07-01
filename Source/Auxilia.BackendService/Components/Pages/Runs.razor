@@ -78,10 +78,7 @@ else
             <tr>
                 <th>State</th>
                 <th>Workflow</th>
-                @if (Configuration is not null)
-                {
-                    <th>Trigger origin</th>
-                }
+                <th>Trigger origin</th>
                 <th>Started</th>
                 <th>Duration</th>
                 <th>Error</th>
@@ -101,21 +98,20 @@ else
                             <span class="cell-sub">@configurationName</span>
                         }
                     </td>
-                    @if (Configuration is not null)
-                    {
+                    @{
                         var origin = OriginOf(run);
-                        <td>
-                            @if (origin.PredecessorInstanceId is { } predecessorId)
-                            {
-                                <a class="type-chip" href="runs/@predecessorId"
-                                   title="Open the run this one was rerun from">@origin.Label</a>
-                            }
-                            else
-                            {
-                                <span class="cell-truncate" title="@origin.Label">@origin.Label</span>
-                            }
-                        </td>
                     }
+                    <td>
+                        @if (origin.PredecessorInstanceId is { } predecessorId)
+                        {
+                            <a class="type-chip" href="runs/@predecessorId"
+                               title="Open the run this one was rerun from">@origin.Label</a>
+                        }
+                        else
+                        {
+                            <span class="cell-truncate" title="@origin.Label">@origin.Label</span>
+                        }
+                    </td>
                     <td>
                         @TimeText.Relative(run.CreatedUtc)
                         <span class="cell-sub">@run.CreatedUtc.ToString("yyyy-MM-dd HH:mm:ss") UTC</span>
@@ -210,12 +206,11 @@ else
         _runs = query.Take(200).ToList();
 
         if (Configuration is { } id)
-        {
             _configuration = await Configurations.ReadAsync(id, _cts.Token);
-            // Origins are derived from the stored dispatch command; cached per load so the
-            // JSON is not re-parsed on every render of the 2 s poll.
-            _origins = _runs.ToDictionary(r => r.Id, TriggerOrigin.Of);
-        }
+
+        // Origins are derived from the stored dispatch command; cached per load so the
+        // JSON is not re-parsed on every render of the 2 s poll.
+        _origins = _runs.ToDictionary(r => r.Id, TriggerOrigin.Of);
     }
 
     private TriggerOrigin OriginOf(WorkflowInstanceRecord run)

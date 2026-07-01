@@ -102,6 +102,7 @@ public sealed class ClaudeStreamJsonParser
                         : string.Empty;
                     entries.Add(new AgentChatEntry(
                         AgentChatRole.Tool, input, timestampUtc,
+                        Label: item.TryGetProperty("input", out var labelInput) ? LabelOf(labelInput) : null,
                         ToolName: toolName, ToolState: "Running"));
                     break;
 
@@ -152,6 +153,24 @@ public sealed class ClaudeStreamJsonParser
             : $"Session finished: {numTurns} turn(s)" +
               (cost is { } c ? $", ${c:0.####}" : "") + ".";
         return [new AgentChatEntry(AgentChatRole.System, summary, timestampUtc, Label: "Claude Code")];
+    }
+
+    /// <summary>
+    /// The one input value a human wants on the tool card (the command, the file, the
+    /// pattern …) — the full input JSON stays available as the entry content.
+    /// </summary>
+    private static string? LabelOf(JsonElement input)
+    {
+        if (input.ValueKind != JsonValueKind.Object)
+            return null;
+
+        string[] preferredKeys = ["command", "file_path", "path", "pattern", "url", "query", "description"];
+        foreach (var key in preferredKeys)
+            if (input.TryGetProperty(key, out var value) &&
+                value.ValueKind == JsonValueKind.String &&
+                value.GetString() is { Length: > 0 } text)
+                return text.Length <= 80 ? text : text[..77] + "…";
+        return null;
     }
 
     /// <summary>tool_result content is either a plain string or an array of text blocks.</summary>

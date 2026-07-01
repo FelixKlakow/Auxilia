@@ -975,3 +975,11 @@ select { cursor: pointer; }
 
 /* Successor chips on the run detail header ("Rerun #… started"). */
 .rerun-successors { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+
+/* BlazorAgentView renders a content bubble even for tool-call-only messages. Our
+   AgentChatRenderer always keeps tool-message content empty (the payload lives in the
+   collapsible tool card), so the bubble is always an empty pill — hide it. */
+.agent-chat-host .bav-message-tool .bav-bubble,
+.agent-chat-host .bav-message-tool .bav-bubble-plain {
+    display: none;
+}

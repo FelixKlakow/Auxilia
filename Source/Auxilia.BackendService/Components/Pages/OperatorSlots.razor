@@ -23,36 +23,6 @@ else
 {
     <section class="card">
         <div class="card-header">
-            <h2>Registered slot providers</h2>
-        </div>
-        @if (HandlerProviders.Count == 0)
-        {
-            <div class="card-body"><p class="muted view-empty">No slot providers registered.</p></div>
-        }
-        else
-        {
-            <table class="data-table">
-                <thead>
-                <tr>
-                    <th>Provider type</th>
-                    <th>Plugin DLL</th>
-                </tr>
-                </thead>
-                <tbody>
-                @foreach (var provider in HandlerProviders)
-                {
-                    <tr>
-                        <td class="cell-strong">@provider.ProviderType</td>
-                        <td><span class="muted cell-mono">@provider.DllPath</span></td>
-                    </tr>
-                }
-                </tbody>
-            </table>
-        }
-    </section>
-
-    <section class="card">
-        <div class="card-header">
             <h2>Slot configurations</h2>
             <p class="card-subtitle">Settings are encrypted at rest — only key names are shown, values stay opaque.</p>
         </div>
@@ -96,6 +66,40 @@ else
             </table>
         }
     </section>
+
+    <details class="advanced-section">
+        <summary>Provider plugin files (advanced)</summary>
+        <div class="advanced-body">
+            <p class="muted">
+                Which DLL backs each registered provider. Curating what users may pick happens in
+                the <a href="admin/provider-catalog">provider catalog</a>, not here.
+            </p>
+            @if (HandlerProviders.Count == 0)
+            {
+                <p class="muted view-empty">No slot providers registered.</p>
+            }
+            else
+            {
+                <table class="data-table">
+                    <thead>
+                    <tr>
+                        <th>Provider type</th>
+                        <th>Plugin DLL</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var provider in HandlerProviders)
+                    {
+                        <tr>
+                            <td class="cell-strong">@provider.ProviderType</td>
+                            <td><span class="muted cell-mono">@provider.DllPath</span></td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </details>
 
     @if (LibraryProviders.Count > 0 || LibraryConfigurations.Any())
     {

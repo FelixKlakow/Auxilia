@@ -51,7 +51,9 @@
             Role = RoleOf(entry.Role),
             Content = entry.Role == AgentChatRole.Tool ? "" : entry.Content,
             Timestamp = entry.TimestampUtc,
-            RoleLabel = entry.Label
+            // A tool entry's label belongs on the tool card (subtitle), not on the row
+            // header — otherwise "TOOL" is replaced by e.g. the shell command.
+            RoleLabel = entry.Role == AgentChatRole.Tool ? null : entry.Label
         };
         if (entry.Role == AgentChatRole.Tool)
             message.ToolCalls.Add(new ToolCall
