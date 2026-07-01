@@ -83,7 +83,8 @@ internal static class ScreenshotHarness
     /// Polls the shared Mongo (more robust than scraping the runs page) until the
     /// mail-triggered run reaches the wanted lifecycle stage.
     /// </summary>
-    private static async Task<WorkflowInstanceRecord> WaitForRunAsync(Func<string, bool> stateReached, string wanted)
+    private static async Task<WorkflowInstanceRecord> WaitForRunAsync(
+        string workflowType, Func<string, bool> stateReached, string wanted)
     {
         await using var provider = EndToEndEnvironment.BuildPlatformDataProvider();
         var instances = provider.GetRequiredService<IDataAccess<WorkflowInstanceRecord>>();
@@ -93,7 +94,7 @@ internal static class ScreenshotHarness
         while (DateTime.UtcNow < deadline)
         {
             var all = await instances.ReadAsync(CancellationToken.None);
-            latest = all.Where(r => r.WorkflowType == WorkflowType)
+            latest = all.Where(r => r.WorkflowType == workflowType)
                         .OrderByDescending(r => r.CreatedUtc)
                         .FirstOrDefault();
             if (latest is not null && stateReached(latest.State))
@@ -102,16 +103,39 @@ internal static class ScreenshotHarness
         }
 
         throw new TimeoutException(
-            $"No '{WorkflowType}' run reached {wanted} within {RunCompletionTimeout} " +
+            $"No '{workflowType}' run reached {wanted} within {RunCompletionTimeout} " +
             $"(last observed: {(latest is null ? "none" : $"{latest.Id} in state '{latest.State}'")}).");
     }
 
     private static Task<WorkflowInstanceRecord> WaitForTerminalRunAsync()
-        => WaitForRunAsync(state => state is "Success" or "Failed" or "Cancelled", "a terminal state");
+        => WaitForRunAsync(WorkflowType, state => state is "Success" or "Failed" or "Cancelled", "a terminal state");
 
     /// <summary>Running, or already terminal when the run was faster than the browser warm-up.</summary>
     private static Task<WorkflowInstanceRecord> WaitForRunningRunAsync()
-        => WaitForRunAsync(state => state is "Running" or "Success" or "Failed" or "Cancelled", "'Running'");
+        => WaitForRunAsync(WorkflowType, state => state is "Running" or "Success" or "Failed" or "Cancelled", "'Running'");
+
+    /// <summary>
+    /// The flagship demo (#24): dispatches a Claude Code run (in-image stub CLI) and waits
+    /// for it to finish so the persisted agent-chat transcript renders on the detail page.
+    /// </summary>
+    private static async Task<WorkflowInstanceRecord> TriggerAndAwaitClaudeRunAsync()
+    {
+        await EndToEndEnvironment.MessageBusClient.PublishAsync(
+            CommandQueue,
+            new RunWorkflowCommand(
+                Guid.NewGuid(),
+                EndToEndEnvironment.ClaudeWorkflowType,
+                EndToEndEnvironment.ClaudeWorkflowPackageUri,
+                new Dictionary<string, string>
+                {
+                    ["Title"] = "Leave a note in the workspace",
+                    ["Body"] = "Look around the workspace and leave a short note about what you find."
+                },
+                RequestedBy: EndToEndEnvironment.RunAsPrincipalId));
+        return await WaitForRunAsync(
+            EndToEndEnvironment.ClaudeWorkflowType,
+            state => state is "Success" or "Failed" or "Cancelled", "a terminal state");
+    }
 
     private static async Task<IReadOnlyList<string>> CaptureAllPagesAsync(string dashboardUrl, string outputDir)
     {
@@ -168,6 +192,13 @@ internal static class ScreenshotHarness
         // Identity sources (#23): pick the LDAP connector so the generated settings form
         // (host, bind DN, filters, ...) is on screen alongside the seeded source list.
         await CaptureIdentitySourcesAsync(page, dashboardUrl, outputDir, captured);
+
+        // Claude Code (#24): a finished agent run whose transcript renders in the
+        // BlazorAgentView agent-chat view on the run detail page.
+        Console.WriteLine("Dispatching a Claude Code run (stub CLI) ...");
+        var claudeRun = await TriggerAndAwaitClaudeRunAsync();
+        Console.WriteLine($"Claude Code run {claudeRun.Id} reached terminal state '{claudeRun.State}'.");
+        await CapturePageAsync(page, dashboardUrl, $"/runs/{claudeRun.Id}", "17-claude-code-run.png", outputDir, captured);
 
         return captured;
     }

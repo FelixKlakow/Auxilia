@@ -11,8 +11,14 @@ running until quit, so the dashboard can be explored manually in a browser.
 
 On startup it prints (and opens) the dashboard URL — login `admin` / `e2e-admin-pw` — plus
 the mapped GreenMail and MongoDB endpoints. Keys: `m` sends a demo mail that triggers a
-Code Review run (the reply is announced when it arrives), `o` re-opens the browser,
-`q` (or Ctrl+C) tears everything down.
+Code Review run (the reply is announced when it arrives), `c` dispatches a Claude Code run
+(watch the live agent chat on the dashboard), `o` re-opens the browser, `q` (or Ctrl+C)
+tears everything down.
+
+Claude Code runs use the in-image stub CLI by default. Set `ANTHROPIC_API_KEY` in the
+environment BEFORE starting the stand and the `coding-agent` slot is re-seeded with the
+real `claude` binary baked into the workflow image — `c` then runs a real agent session
+(this is the manual test path; system tests always use the stub).
 
 ## Screenshot mode (visual verification harness)
 

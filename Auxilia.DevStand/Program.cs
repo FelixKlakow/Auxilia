@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Auxilia.DevStand;
 using Auxilia.SystemTestSuite.EndToEnd;
+using Auxilia.Workflows.Messaging.Messages;
 using MailKit;
 using MailKit.Net.Imap;
 using MailKit.Security;
@@ -29,14 +30,30 @@ try
 {
     var dashboardUrl = $"http://localhost:{EndToEndEnvironment.Backend.GetMappedPublicPort(8080)}";
 
+    // With a real key on the host, Claude Code runs are the real thing: override the
+    // stub-CLI seed with the default `claude` binary baked into the workflow image.
+    var anthropicKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
+    var claudeIsReal = !string.IsNullOrWhiteSpace(anthropicKey);
+    if (claudeIsReal)
+    {
+        await EndToEndEnvironment.MessageBusClient.PublishAsync(
+            EndToEndEnvironment.CommandQueue + "-slot-seed.upsert",
+            new UpsertSlotConfigurationCommand(
+                EndToEndEnvironment.ClaudeWorkflowType, "coding-agent", "claude-code-cli",
+                new Dictionary<string, string> { ["ApiKey"] = anthropicKey! }));
+    }
+
     Console.WriteLine();
     Console.WriteLine("=== Auxilia dev stand is up ===");
     Console.WriteLine($"  Dashboard : {dashboardUrl}   (login: admin / e2e-admin-pw)");
     Console.WriteLine($"  GreenMail : IMAP localhost:{EndToEndEnvironment.MappedImap}, " +
                       $"SMTP localhost:{EndToEndEnvironment.MappedSmtp}  (auth disabled — any address logs in)");
     Console.WriteLine($"  MongoDB   : {EndToEndEnvironment.MongoConnectionString}  (database 'Auxilia')");
+    Console.WriteLine($"  Claude    : {(claudeIsReal
+        ? "REAL Claude Code CLI (ANTHROPIC_API_KEY found)"
+        : "stub CLI (set ANTHROPIC_API_KEY before starting for real runs)")}");
     Console.WriteLine();
-    Console.WriteLine("  [m] send a demo mail (triggers a Code Review run)   [o] open dashboard   [q] quit");
+    Console.WriteLine("  [m] send a demo mail (triggers a Code Review run)   [c] run Claude Code   [o] open dashboard   [q] quit");
     Console.WriteLine();
 
     OpenBrowser(dashboardUrl);
@@ -71,6 +88,23 @@ try
                     await DemoMail.SendAsync(subject, cts.Token);
                     Console.WriteLine($"  -> mail sent: \"{subject}\" — the run appears on the dashboard within a few seconds.");
                     _ = WatchForReplyAsync(subject, cts.Token);
+                    break;
+                case ConsoleKey.C:
+                    await EndToEndEnvironment.MessageBusClient.PublishAsync(
+                        EndToEndEnvironment.CommandQueue,
+                        new RunWorkflowCommand(
+                            Guid.NewGuid(),
+                            EndToEndEnvironment.ClaudeWorkflowType,
+                            EndToEndEnvironment.ClaudeWorkflowPackageUri,
+                            new Dictionary<string, string>
+                            {
+                                ["Title"] = $"Dev-stand Claude Code session #{++demoCounter}",
+                                ["Body"] = "Look around the workspace and leave a short note about what you find."
+                            },
+                            RequestedBy: EndToEndEnvironment.RunAsPrincipalId),
+                        cts.Token);
+                    Console.WriteLine(
+                        "  -> Claude Code run dispatched — open the dashboard's Live now section to watch the agent chat.");
                     break;
             }
         }

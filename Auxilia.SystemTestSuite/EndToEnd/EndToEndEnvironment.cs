@@ -35,8 +35,13 @@ public class EndToEndEnvironment
     internal const string WorkflowType        = "pull-request-code-review";
     internal const string WorkflowImageName   = "auxilia-code-review-workflow:system-test";
     internal const string WorkflowPackageUri  = "docker://" + WorkflowImageName;
+    public   const string ClaudeWorkflowType       = "claude-code";
+    public   const string ClaudeWorkflowImageName  = "auxilia-claude-code-workflow:system-test";
+    public   const string ClaudeWorkflowPackageUri = "docker://" + ClaudeWorkflowImageName;
+    /// <summary>In-image stand-in CLI — system tests never call real AI (cost rule).</summary>
+    public   const string ClaudeStubCliPath        = "/usr/local/bin/claude-stub";
     internal const string BackendImageName    = "auxilia-backendservice:system-test";
-    internal const string CommandQueue        = "workflow.run-commands-e2e";
+    public   const string CommandQueue        = "workflow.run-commands-e2e";
     internal const string AdapterMailbox      = "workflows@localhost";
     internal const string MailboxPassword     = "pw";
 
@@ -89,6 +94,9 @@ public class EndToEndEnvironment
         await PublishProjectAsync(
             "Auxilia.Slots.Email/Auxilia.Slots.Email.csproj",
             _publishDir);
+        await PublishProjectAsync(
+            "Auxilia.Slots.ClaudeCode/Auxilia.Slots.ClaudeCode.csproj",
+            _publishDir);
 
         // Sequential on purpose: parallel docker builds have wedged Docker Desktop daemons
         // (see FailoverEnvironment); the .prebuilt-images marker skips them locally anyway.
@@ -98,6 +106,8 @@ public class EndToEndEnvironment
             BackendImageName, "Source/Auxilia.BackendService/Dockerfile");
         await WorkflowDispatchEnvironment.BuildImageAsync(
             WorkflowImageName, "Source/Auxilia.CodeReview.Workflow/Dockerfile");
+        await WorkflowDispatchEnvironment.BuildImageAsync(
+            ClaudeWorkflowImageName, "Source/Auxilia.ClaudeCode.Workflow/Dockerfile");
 
         _network = new NetworkBuilder().WithName(NetworkName).Build();
         await _network.CreateAsync();
@@ -250,6 +260,25 @@ public class EndToEndEnvironment
                 }));
 
         await SeedEmailSlotDependenciesAsync(seedBase);
+
+        // The Claude Code workflow: the REAL claude-code-cli provider, pointed at the
+        // in-image stub CLI (cost rule — a real key run stays a manual dev-stand exercise).
+        var claudeManifest = System.Text.Json.JsonSerializer.Deserialize<Auxilia.Workflows.PluginManifest>(
+            await File.ReadAllTextAsync(Path.Combine(_publishDir, "Auxilia.Slots.ClaudeCode.slothandler.manifest.json")))!;
+        await MessageBusClient.PublishAsync(seedBase + ".register",
+            new RegisterSlotProviderCommand(
+                "claude-code-cli",
+                $"{ContainerPluginsDir}/Auxilia.Slots.ClaudeCode.slothandler.dll",
+                claudeManifest.Settings));
+        await MessageBusClient.PublishAsync(seedBase + ".upsert",
+            new UpsertSlotConfigurationCommand(
+                ClaudeWorkflowType, "coding-agent", "claude-code-cli",
+                new Dictionary<string, string>
+                {
+                    ["ApiKey"]   = "e2e-stub-key",
+                    ["CliPath"]  = ClaudeStubCliPath,
+                    ["MaxTurns"] = "5"
+                }));
 
         await Task.Delay(TimeSpan.FromMilliseconds(500)); // seed propagation window
     }
