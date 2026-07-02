@@ -38,6 +38,12 @@ public class EndToEndEnvironment
     public   const string ClaudeWorkflowType       = "claude-code";
     public   const string ClaudeWorkflowImageName  = "auxilia-claude-code-workflow:system-test";
     public   const string ClaudeWorkflowPackageUri = "docker://" + ClaudeWorkflowImageName;
+    public   const string CodingSessionWorkflowType      = "coding-session";
+    public   const string CodingSessionImageName         = "auxilia-coding-session-workflow:system-test";
+    public   const string CodingSessionPackageUri        = "docker://" + CodingSessionImageName;
+    public   const string SessionNotifierWorkflowType    = "session-notifier";
+    public   const string SessionNotifierImageName       = "auxilia-session-notifier-workflow:system-test";
+    public   const string SessionNotifierPackageUri      = "docker://" + SessionNotifierImageName;
     /// <summary>In-image stand-in CLI — system tests never call real AI (cost rule).</summary>
     public   const string ClaudeStubCliPath        = "/usr/local/bin/claude-stub";
     internal const string BackendImageName    = "auxilia-backendservice:system-test";
@@ -111,6 +117,10 @@ public class EndToEndEnvironment
             WorkflowImageName, "Source/Auxilia.CodeReview.Workflow/Dockerfile");
         await WorkflowDispatchEnvironment.BuildImageAsync(
             ClaudeWorkflowImageName, "Source/Auxilia.ClaudeCode.Workflow/Dockerfile");
+        await WorkflowDispatchEnvironment.BuildImageAsync(
+            CodingSessionImageName, "Source/Auxilia.CodingSession.Workflow/Dockerfile");
+        await WorkflowDispatchEnvironment.BuildImageAsync(
+            SessionNotifierImageName, "Source/Auxilia.SessionNotifier.Workflow/Dockerfile");
 
         _network = new NetworkBuilder().WithName(NetworkName).Build();
         await _network.CreateAsync();
@@ -346,6 +356,15 @@ public class EndToEndEnvironment
             new RegisterWorkflowPackageCommand(
                 ClaudeWorkflowType, ClaudeWorkflowPackageUri, "Claude Code",
                 SchemaJson: await EmitSchemaAsync(ClaudeWorkflowImageName)));
+        // The live coding-session pair: the interactive session and its chained notifier.
+        await MessageBusClient.PublishAsync(seedBase + ".register-package",
+            new RegisterWorkflowPackageCommand(
+                CodingSessionWorkflowType, CodingSessionPackageUri, "Live coding session",
+                SchemaJson: await EmitSchemaAsync(CodingSessionImageName)));
+        await MessageBusClient.PublishAsync(seedBase + ".register-package",
+            new RegisterWorkflowPackageCommand(
+                SessionNotifierWorkflowType, SessionNotifierPackageUri, "Session summary mail",
+                SchemaJson: await EmitSchemaAsync(SessionNotifierImageName)));
 
         await Task.Delay(TimeSpan.FromMilliseconds(500)); // seed propagation window
     }
