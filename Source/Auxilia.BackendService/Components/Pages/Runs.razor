@@ -4,6 +4,7 @@
 @inject IDataAccess<WorkflowInstanceRecord> Instances
 @inject IDataAccess<WorkflowConfigurationRecord> Configurations
 @inject WorkflowRerunService Rerun
+@inject RunCancelService Cancel
 
 <PageTitle>Runs — Auxilia</PageTitle>
 
@@ -124,6 +125,11 @@ else
                             <button class="btn btn-secondary btn-sm" disabled="@_busy"
                                     @onclick="() => RerunAsync(run.Id)">Rerun</button>
                         }
+                        else if (!WorkflowRerunService.IsTerminal(run))
+                        {
+                            <button class="btn btn-danger btn-sm" disabled="@_busy"
+                                    @onclick="() => CancelAsync(run.Id)">Cancel</button>
+                        }
                     </td>
                 </tr>
             }
@@ -215,6 +221,32 @@ else
 
     private TriggerOrigin OriginOf(WorkflowInstanceRecord run)
         => _origins.TryGetValue(run.Id, out var origin) ? origin : TriggerOrigin.Of(run);
+
+    private async Task CancelAsync(Guid instanceId)
+    {
+        _error = null;
+        _busy = true;
+        try
+        {
+            var user = (await AuthState!).User;
+            if (DashboardAuthEndpoints.PrincipalIdOf(user) is not { } principalId)
+            {
+                _error = "No platform principal in session.";
+                return;
+            }
+
+            await Cancel.RequestCancelAsync(principalId, instanceId, _cts.Token);
+            _rerunNotice = $"Cancellation of {ShortId(instanceId)} requested — the state flips once the workflow acknowledges.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 
     private async Task RerunAsync(Guid instanceId)
     {

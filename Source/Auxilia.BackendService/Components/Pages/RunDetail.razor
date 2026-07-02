@@ -10,6 +10,7 @@
 @inject LiveViewBroker Broker
 @inject DashboardComposer Composer
 @inject WorkflowRerunService Rerun
+@inject RunCancelService Cancel
 
 <PageTitle>@(_run is null ? "Run" : $"{_run.WorkflowType} · run {ShortId}") — Auxilia</PageTitle>
 
@@ -63,6 +64,12 @@ else
             <button class="btn btn-secondary" disabled="@_busy" @onclick="RerunAsync">Rerun this workflow</button>
         </div>
     }
+    @if (!IsTerminal)
+    {
+        <div class="button-row rerun-row">
+            <button class="btn btn-danger" disabled="@_busy" @onclick="CancelAsync">Cancel this run</button>
+        </div>
+    }
 
     @if (_error is not null)
     {
@@ -71,6 +78,10 @@ else
     @if (_rerunNotice is not null)
     {
         <div class="panel success">@_rerunNotice</div>
+    }
+    @if (_cancelNotice is not null)
+    {
+        <div class="panel success">@_cancelNotice</div>
     }
 
     <div class="card">
@@ -156,6 +167,7 @@ else
     private string _denyReason = "";
     private string? _error;
     private string? _rerunNotice;
+    private string? _cancelNotice;
     private Guid? _principalId;
     private WorkflowInstanceRecord? _run;
     private IReadOnlyList<ViewDescriptor> _views = [];
@@ -181,6 +193,28 @@ else
         {
             var commandId = await Rerun.RerunAsync(_principalId.Value, InstanceId, _cts.Token);
             _rerunNotice = $"Rerun dispatched (command {commandId}) — the new run appears under Runs shortly.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CancelAsync()
+    {
+        if (_principalId is null)
+            return;
+        _error = null;
+        _cancelNotice = null;
+        _busy = true;
+        try
+        {
+            await Cancel.RequestCancelAsync(_principalId.Value, InstanceId, _cts.Token);
+            _cancelNotice = "Cancellation requested — the run flips to Cancelled once the workflow acknowledges.";
         }
         catch (Exception ex)
         {

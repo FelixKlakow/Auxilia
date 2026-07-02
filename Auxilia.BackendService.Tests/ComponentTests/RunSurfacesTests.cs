@@ -70,6 +70,53 @@ public class RunSurfacesTests : DashboardComponentTestBase
     }
 
     [Test]
+    public async Task DashboardHome_ShowsStatTiles_RecentRuns_AndCancelForActiveRuns()
+    {
+        var running = Guid.NewGuid();
+        var finished = Guid.NewGuid();
+        await Instances.SaveAsync(new WorkflowInstanceRecord
+        {
+            Id = running,
+            WorkflowType = "code-review",
+            State = "Running",
+            CreatedUtc = DateTimeOffset.UtcNow,
+            WorkflowConfigurationName = "team-code-review"
+        });
+        await Instances.SaveAsync(new WorkflowInstanceRecord
+        {
+            Id = finished,
+            WorkflowType = "code-review",
+            State = "Success",
+            CreatedUtc = DateTimeOffset.UtcNow.AddMinutes(-10),
+            CompletedUtc = DateTimeOffset.UtcNow.AddMinutes(-9)
+        });
+        using var client = CreateClient();
+        var (cookie, _) = await LoginAsync(client, AdminUsername, AdminPassword);
+
+        try
+        {
+            var html = await GetHtmlAsync(client, "/dashboard", cookie);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(html, Does.Contain("runs (24 h)"), "the KPI tiles render");
+                Assert.That(html, Does.Contain("success rate (24 h)"));
+                Assert.That(html, Does.Contain("failures (24 h)"));
+                Assert.That(html, Does.Contain("enabled workflows"));
+                Assert.That(html, Does.Contain("Recent runs"));
+                Assert.That(html, Does.Contain("Cancel</button>"), "active runs offer cancellation");
+            });
+        }
+        finally
+        {
+            // The host store is shared across the fixture — a leaked Running run would put
+            // the other dashboard tests' Live now assertions out of business.
+            await Instances.RemoveAsync(running);
+            await Instances.RemoveAsync(finished);
+        }
+    }
+
+    [Test]
     public async Task FilteredRuns_ShowsTheConfigurationHeaderCard_AndTheTriggerOriginColumn()
     {
         var configurations = Factory.Services.GetRequiredService<IDataAccess<WorkflowConfigurationRecord>>();

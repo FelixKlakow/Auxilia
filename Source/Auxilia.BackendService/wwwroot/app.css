@@ -1116,6 +1116,83 @@ select { cursor: pointer; }
 
 .live-now-section { margin-bottom: 1.8rem; }
 
+.recent-runs-section { margin-bottom: 1.8rem; }
+
+/* At-a-glance numbers on the dashboard. */
+.stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.8rem;
+}
+
+.stat-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    padding: 1rem 1.2rem;
+    box-shadow: 0 1px 2px rgba(15, 18, 34, 0.06);
+}
+
+.stat-value { font-size: 1.7rem; font-weight: 700; line-height: 1.1; }
+
+.stat-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+
+.stat-warn .stat-value { color: #b45309; }
+.stat-bad .stat-value  { color: var(--error-text); }
+
+/* Warnings the operator should act on. */
+.attention-card { margin-bottom: 1.8rem; border-left: 3px solid #d9822b; }
+
+.attention-list {
+    margin: 0;
+    padding: 0.4rem 1.2rem 1rem;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+/* First-run setup checklist; disappears once every step is done. */
+.getting-started { margin-bottom: 1.8rem; }
+
+.setup-steps {
+    margin: 0;
+    padding: 0.3rem 1.2rem 1.1rem;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+}
+
+.setup-step { display: flex; align-items: flex-start; gap: 0.7rem; }
+
+.setup-step-mark {
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 2px solid var(--border-strong);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #fff;
+}
+
+.setup-step-done .setup-step-mark { background: #2f9e6e; border-color: #2f9e6e; }
+.setup-step-done .cell-strong { text-decoration: line-through; color: var(--text-secondary); }
+
 /* Compact live-now counter in the sidebar next to "Runs". */
 .nav-live-badge {
     margin-left: auto;

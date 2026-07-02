@@ -159,6 +159,8 @@ try
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.WorkflowConfigurationEditorService>();
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.SlotInstanceService>();
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.WorkflowRerunService>();
+    builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.RunCancelService>();
+    builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.DashboardStatsService>();
     builder.Services.AddHostedService<Auxilia.BackendService.Dashboard.ViewDataFanOutHandler>();
 
     // --- Dashboard UI (interactive-server Blazor) ---

@@ -10,6 +10,8 @@
 @inject IDataAccess<ViewDataRecord> ViewData
 @inject IPolicyEngine PolicyEngine
 @inject LiveViewBroker Broker
+@inject DashboardStatsService Stats
+@inject RunCancelService Cancel
 
 <PageTitle>Dashboard — Auxilia</PageTitle>
 
@@ -30,6 +32,66 @@ else
         <div class="panel denied">@_error</div>
     }
 
+    @if (_stats is { SetupComplete: false } setup)
+    {
+        <section class="card getting-started">
+            <div class="card-header">
+                <h2>Getting started</h2>
+                <p class="card-subtitle">
+                    @setup.GettingStarted.Count(s => s.Done) of @setup.GettingStarted.Count steps done —
+                    the platform runs on its own once all are checked.
+                </p>
+            </div>
+            <ol class="setup-steps">
+                @foreach (var step in setup.GettingStarted)
+                {
+                    <li class="setup-step @(step.Done ? "setup-step-done" : null)">
+                        <span class="setup-step-mark">@(step.Done ? "✓" : "")</span>
+                        <div>
+                            <a class="cell-strong" href="@step.Href">@step.Title</a>
+                            <span class="cell-sub">@step.Description</span>
+                        </div>
+                    </li>
+                }
+            </ol>
+        </section>
+    }
+
+    @if (_stats is not null)
+    {
+        <div class="stat-grid">
+            <div class="stat-tile">
+                <span class="stat-value">@_stats.Runs24h</span>
+                <span class="stat-label">runs (24 h)</span>
+            </div>
+            <div class="stat-tile @(_stats.SuccessRatePercent is < 100 ? "stat-warn" : null)">
+                <span class="stat-value">@(_stats.SuccessRatePercent is { } rate ? $"{rate}%" : "—")</span>
+                <span class="stat-label">success rate (24 h)</span>
+            </div>
+            <div class="stat-tile @(_stats.Failures24h > 0 ? "stat-bad" : null)">
+                <span class="stat-value">@_stats.Failures24h</span>
+                <span class="stat-label">failures (24 h)</span>
+            </div>
+            <div class="stat-tile">
+                <span class="stat-value">@_stats.EnabledConfigurations</span>
+                <span class="stat-label">enabled workflows</span>
+            </div>
+        </div>
+
+        @if (_stats.Attention.Count > 0)
+        {
+            <section class="card attention-card">
+                <div class="card-header"><h2>Needs attention</h2></div>
+                <ul class="attention-list">
+                    @foreach (var item in _stats.Attention)
+                    {
+                        <li><a href="@item.Href">@item.Text</a></li>
+                    }
+                </ul>
+            </section>
+        }
+    }
+
     <section class="live-now-section">
         <h2 class="section-title">Live now</h2>
         @if (_liveNow.Count == 0)
@@ -46,6 +108,7 @@ else
                         <th>State</th>
                         <th>Workflow</th>
                         <th>Started</th>
+                        <th>Actions</th>
                     </tr>
                     </thead>
                     <tbody>
@@ -62,6 +125,10 @@ else
                                 }
                             </td>
                             <td>@TimeText.Relative(run.CreatedUtc)</td>
+                            <td>
+                                <button class="btn btn-danger btn-sm" disabled="@_busy"
+                                        @onclick="() => CancelRunAsync(run.Id)">Cancel</button>
+                            </td>
                         </tr>
                     }
                     </tbody>
@@ -69,6 +136,39 @@ else
             </div>
         }
     </section>
+
+    @if (_stats is { RecentRuns.Count: > 0 })
+    {
+        <section class="recent-runs-section">
+            <h2 class="section-title">Recent runs</h2>
+            <div class="card">
+                <table class="data-table">
+                    <thead>
+                    <tr>
+                        <th>State</th>
+                        <th>Workflow</th>
+                        <th>Started</th>
+                        <th>Duration</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var run in _stats.RecentRuns)
+                    {
+                        <tr>
+                            <td><span class="badge badge-state badge-@run.State.ToLowerInvariant()">@run.State</span></td>
+                            <td>
+                                <a class="cell-strong" href="runs/@run.Id">@(run.WorkflowConfigurationName ?? run.WorkflowType)</a>
+                                <span class="muted mono"> @run.Id.ToString("N")[..8]</span>
+                            </td>
+                            <td>@TimeText.Relative(run.CreatedUtc)</td>
+                            <td>@TimeText.Duration(run.CreatedUtc, run.CompletedUtc)</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    }
 
     <h2 class="section-title">Pinned views</h2>
     @if (_panels.Count == 0)
@@ -139,10 +239,12 @@ else
     private PeriodicTimer? _timer;
     private IDisposable? _liveSubscription;
     private bool _loaded;
+    private bool _busy;
     private string? _error;
     private Guid? _principalId;
     private List<PinnedPanel> _panels = [];
     private IReadOnlyList<WorkflowInstanceRecord> _liveNow = [];
+    private DashboardStats? _stats;
 
     protected override async Task OnInitializedAsync()
     {
@@ -151,6 +253,7 @@ else
         if (_principalId is not null)
         {
             await LoadLiveNowAsync();
+            await LoadStatsAsync();
             await LoadPanelsAsync();
             // Live path: in-process fan-out from the bus handlers (LiveViewBroker).
             _liveSubscription = Broker.Subscribe(OnLiveViewData, OnLiveStatus);
@@ -171,6 +274,27 @@ else
     /// <summary>The Live now section: every currently active run, newest first (#21).</summary>
     private async Task LoadLiveNowAsync()
         => _liveNow = LiveNow.ActiveOf(await Instances.ReadAsync(_cts.Token));
+
+    private async Task LoadStatsAsync()
+        => _stats = await Stats.GetAsync(_cts.Token);
+
+    private async Task CancelRunAsync(Guid instanceId)
+    {
+        _error = null;
+        _busy = true;
+        try
+        {
+            await Cancel.RequestCancelAsync(_principalId!.Value, instanceId, _cts.Token);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 
     private async Task LoadPanelsAsync()
     {
@@ -265,6 +389,7 @@ else
             // Every lifecycle event can change the Live now section; pinned panels only
             // need a refresh when the event belongs to one of them.
             await LoadLiveNowAsync();
+            await LoadStatsAsync();
             foreach (var panel in _panels.Where(p => p.Pin.InstanceId == statusEvent.WorkflowInstanceId))
                 panel.Run = await Instances.ReadAsync(panel.Pin.InstanceId, _cts.Token) ?? panel.Run;
             StateHasChanged();
@@ -293,6 +418,7 @@ else
             while (await _timer!.WaitForNextTickAsync(_cts.Token))
             {
                 await LoadLiveNowAsync();
+                await LoadStatsAsync();
                 await LoadPanelsAsync();
                 await InvokeAsync(StateHasChanged);
             }
