@@ -57,6 +57,13 @@ public sealed class DockerWorkflowLauncherSettings
     /// For example: <c>{"AUXILIA_DEVELOPER_MODE": "1"}</c>.
     /// </summary>
     public Dictionary<string, string>? ExtraEnvironmentVariables { get; set; }
+
+    /// <summary>
+    /// Host name under which published web-terminal ports are reachable FROM THE BACKEND:
+    /// "host.docker.internal" when the backend itself runs in a container (the default),
+    /// "localhost" for bare-process development.
+    /// </summary>
+    public string TerminalPublishHost { get; set; } = "host.docker.internal";
 }
 
 

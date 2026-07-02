@@ -70,7 +70,7 @@ public class WorkflowDispatcherConfigurationTests
 
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         _sut = new WorkflowDispatcher(
             _mockBus.Object,
@@ -144,7 +144,7 @@ public class WorkflowDispatcherConfigurationTests
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
             .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         await _capturedHandler!(ConfigurationCommand(configuration.Id), CancellationToken.None);
 

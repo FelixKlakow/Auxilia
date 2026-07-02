@@ -67,6 +67,12 @@ else
     @if (!IsTerminal)
     {
         <div class="button-row rerun-row">
+            @if (_run.TerminalEndpoint is { Length: > 0 })
+            {
+                <a class="btn btn-primary" href="sessions/@InstanceId/terminal/" target="_blank">
+                    Open live session
+                </a>
+            }
             <button class="btn btn-danger" disabled="@_busy" @onclick="CancelAsync">Cancel this run</button>
         </div>
     }

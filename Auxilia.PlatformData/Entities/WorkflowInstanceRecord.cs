@@ -25,4 +25,10 @@ public sealed record WorkflowInstanceRecord : IEntity
     public Guid? WorkflowConfigurationId { get; init; }
     /// <summary>Natural-key name of the dispatching configuration, for run-history grouping.</summary>
     public string? WorkflowConfigurationName { get; init; }
+
+    /// <summary>
+    /// "host:port" of the run's published interactive web terminal (ttyd), set at launch for
+    /// workflows declaring one; the dashboard proxies it — authenticated — to the run owner.
+    /// </summary>
+    public string? TerminalEndpoint { get; init; }
 }

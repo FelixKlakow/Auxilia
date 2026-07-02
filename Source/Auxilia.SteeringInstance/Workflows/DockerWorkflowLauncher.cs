@@ -19,7 +19,7 @@ public sealed class DockerWorkflowLauncher(
     ILogger<DockerWorkflowLauncher> logger) : IWorkflowLauncher
 {
 
-    public async Task LaunchAsync(WorkflowLaunchRequest request, CancellationToken ct = default)
+    public async Task<WorkflowLaunchResult> LaunchAsync(WorkflowLaunchRequest request, CancellationToken ct = default)
     {
         var settings = settingsOptions.Value;
 
@@ -78,6 +78,24 @@ public sealed class DockerWorkflowLauncher(
         logger.LogInformation(
             "Workflow container started. RuntimeImage={RuntimeImage} ContainerId={ContainerId}",
             settings.RuntimeImage, created.ID[..Math.Min(12, created.ID.Length)]);
+
+        if (request.PublishTerminalPort is not { } terminalPort)
+            return new WorkflowLaunchResult();
+
+        // Docker assigned the ephemeral host port at start; read it back from the inspect data.
+        var inspected = await client.Containers.InspectContainerAsync(created.ID, ct);
+        int? hostPort = null;
+        if (inspected.NetworkSettings?.Ports is { } ports
+            && ports.TryGetValue($"{terminalPort}/tcp", out var bindings) && bindings is not null)
+        {
+            hostPort = bindings
+                .Select(binding => int.TryParse(binding.HostPort, out var port) ? port : (int?)null)
+                .FirstOrDefault(port => port is not null);
+        }
+        logger.LogInformation(
+            "Published workflow terminal. ContainerPort={ContainerPort} HostPort={HostPort}",
+            terminalPort, hostPort);
+        return new WorkflowLaunchResult(hostPort);
     }
 
     /// <summary>
@@ -143,6 +161,7 @@ public sealed class DockerWorkflowLauncher(
             };
         }
 
+        ApplyTerminalPort(parameters, request);
         return parameters;
     }
 
@@ -190,7 +209,25 @@ public sealed class DockerWorkflowLauncher(
             };
         }
 
+        ApplyTerminalPort(parameters, request);
         return parameters;
+    }
+
+    /// <summary>
+    /// Publishes the workflow's declared web-terminal port to an ephemeral host port; the
+    /// dashboard proxies it (authenticated) to the run owner. Nothing is published otherwise.
+    /// </summary>
+    internal static void ApplyTerminalPort(
+        CreateContainerParameters parameters, WorkflowLaunchRequest request)
+    {
+        if (request.PublishTerminalPort is not { } port)
+            return;
+        var key = $"{port}/tcp";
+        parameters.ExposedPorts = new Dictionary<string, EmptyStruct> { [key] = default };
+        parameters.HostConfig.PortBindings = new Dictionary<string, IList<PortBinding>>
+        {
+            [key] = [new PortBinding { HostPort = "" }] // "" = Docker assigns an ephemeral port
+        };
     }
 
     /// <summary>

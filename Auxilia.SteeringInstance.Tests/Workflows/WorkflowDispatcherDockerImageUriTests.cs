@@ -102,7 +102,7 @@ public class WorkflowDispatcherDockerImageUriTests
         _mockPendingPackages.Setup(p => p.Store(It.IsAny<string>(), It.IsAny<string>()));
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         _sut = BuildDispatcher();
         await _sut.StartAsync(CancellationToken.None);
@@ -120,7 +120,7 @@ public class WorkflowDispatcherDockerImageUriTests
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
             .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "my-workflow", "docker://my-image:1.0",
@@ -155,7 +155,7 @@ public class WorkflowDispatcherDockerImageUriTests
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
             .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "my-workflow", "docker://my-image:1.0",
@@ -181,7 +181,7 @@ public class WorkflowDispatcherDockerImageUriTests
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
             .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
@@ -210,7 +210,7 @@ public class WorkflowDispatcherDockerImageUriTests
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
             .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "my-workflow", "docker://my-image:1.0",

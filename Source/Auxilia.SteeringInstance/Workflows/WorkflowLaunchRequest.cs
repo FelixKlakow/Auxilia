@@ -33,5 +33,14 @@ public sealed record WorkflowLaunchRequest(
     /// at <c>/workspace</c> — workflows commit locally; pushes go through slots.
     /// </summary>
     public string? WorkspaceDirectoryBind { get; init; }
+
+    /// <summary>
+    /// Container port of the workflow's declared interactive web terminal; the launcher
+    /// publishes it to an ephemeral host port. Null = nothing published (the default).
+    /// </summary>
+    public int? PublishTerminalPort { get; init; }
 }
+
+/// <summary>What a launch produced: the published terminal host port when one was requested.</summary>
+public sealed record WorkflowLaunchResult(int? TerminalHostPort = null);
 

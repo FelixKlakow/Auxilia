@@ -209,6 +209,7 @@ try
     app.UseAuthorization();
     app.UseAntiforgery();
     Auxilia.BackendService.Dashboard.DashboardAuthEndpoints.MapDashboardAuth(app);
+    Auxilia.BackendService.Dashboard.SessionTerminalProxy.MapSessionTerminal(app);
     app.MapHub<Auxilia.BackendService.Dashboard.ViewDataHub>("/hubs/views");
     app.MapMcp("/mcp").RequireAuthorization(new Microsoft.AspNetCore.Authorization.AuthorizeAttribute
     {

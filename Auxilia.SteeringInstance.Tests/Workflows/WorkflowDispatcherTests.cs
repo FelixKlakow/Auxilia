@@ -129,7 +129,7 @@ public class WorkflowDispatcherTests
 
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         _sut = new WorkflowDispatcher(
             _mockBus.Object,
@@ -204,7 +204,7 @@ public class WorkflowDispatcherTests
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
             .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
@@ -224,7 +224,7 @@ public class WorkflowDispatcherTests
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
             .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "wf", "https://example.com/test.workflow.zip", new Dictionary<string, string>());
@@ -248,7 +248,7 @@ public class WorkflowDispatcherTests
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
             .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "wf", "https://example.com/test.workflow.zip",
@@ -275,7 +275,7 @@ public class WorkflowDispatcherTests
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
             .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "wf", "https://example.com/test.workflow.zip",
@@ -293,7 +293,7 @@ public class WorkflowDispatcherTests
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
             .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "wf", "https://example.com/test.workflow.zip",
@@ -352,7 +352,7 @@ public class WorkflowDispatcherTests
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
             .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         await _sut.StopAsync();
         _sut = new WorkflowDispatcher(
@@ -396,7 +396,7 @@ public class WorkflowDispatcherTests
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
             .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
@@ -419,7 +419,7 @@ public class WorkflowDispatcherTests
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
             .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         await _sut.StopAsync();
         _sut = new WorkflowDispatcher(
@@ -474,7 +474,7 @@ public class WorkflowDispatcherTests
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
             .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         await _sut.StopAsync();
         _sut = new WorkflowDispatcher(
@@ -519,7 +519,7 @@ public class WorkflowDispatcherTests
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
             .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
@@ -543,7 +543,7 @@ public class WorkflowDispatcherTests
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
             .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
@@ -564,7 +564,7 @@ public class WorkflowDispatcherTests
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
             .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
@@ -593,7 +593,7 @@ public class WorkflowDispatcherTests
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
             .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
@@ -617,7 +617,7 @@ public class WorkflowDispatcherTests
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
             .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
@@ -644,7 +644,7 @@ public class WorkflowDispatcherTests
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
             .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new WorkflowLaunchResult());
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",

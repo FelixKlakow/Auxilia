@@ -267,20 +267,25 @@ public sealed class WorkflowDispatcher(
                 instanceId.ToString(), repositories.Count.ToString(), ct: ct);
         }
 
+        // Workflows declaring an interactive web terminal get its port published at launch.
+        var terminalPort = (await schemaStore.GetSchemaAsync(workflowType, ct))?.InteractiveTerminalPort;
+
         // docker:// URI — skip download/verify/extract; use baked image
         if (packageUri.StartsWith("docker://", StringComparison.OrdinalIgnoreCase))
         {
             var imageName = packageUri.Substring("docker://".Length);
-            await launcher.LaunchAsync(
+            var launched = await launcher.LaunchAsync(
                 new WorkflowLaunchRequest(string.Empty, env, pluginFiles)
                 {
                     DockerImageUri = imageName,
                     OutputDirectoryBind = outputDirectoryBind,
                     NetworkPolicy = networkPolicy,
-                    WorkspaceDirectoryBind = workspaceRoot
+                    WorkspaceDirectoryBind = workspaceRoot,
+                    PublishTerminalPort = terminalPort
                 },
                 ct);
             await MarkQueuedAsync(instanceId, workflowType, packageUri, ct);
+            await StampTerminalEndpointAsync(instanceId, launched, ct);
             return;
         }
 
@@ -325,13 +330,24 @@ public sealed class WorkflowDispatcher(
         pendingPackages.Store(workflowType, extractedPath);
 
         // 6. Launch
-        await launcher.LaunchAsync(new WorkflowLaunchRequest(extractedPath, env, pluginFiles)
+        var launchResult = await launcher.LaunchAsync(new WorkflowLaunchRequest(extractedPath, env, pluginFiles)
         {
             OutputDirectoryBind = outputDirectoryBind,
             NetworkPolicy = networkPolicy,
-            WorkspaceDirectoryBind = workspaceRoot
+            WorkspaceDirectoryBind = workspaceRoot,
+            PublishTerminalPort = terminalPort
         }, ct);
         await MarkQueuedAsync(instanceId, workflowType, packageUri, ct);
+        await StampTerminalEndpointAsync(instanceId, launchResult, ct);
+    }
+
+    /// <summary>The dashboard proxies this endpoint — authenticated — to the run's owner.</summary>
+    private async Task StampTerminalEndpointAsync(
+        Guid instanceId, WorkflowLaunchResult launched, CancellationToken ct)
+    {
+        if (launched.TerminalHostPort is { } hostPort)
+            await instanceRegistry.SetTerminalEndpointAsync(
+                instanceId, $"{launcherSettings.Value.TerminalPublishHost}:{hostPort}", ct);
     }
 
     /// <summary>

@@ -6,6 +6,6 @@ namespace Auxilia.SteeringInstance.Workflows;
 /// </summary>
 public interface IWorkflowLauncher
 {
-    Task LaunchAsync(WorkflowLaunchRequest request, CancellationToken ct = default);
+    Task<WorkflowLaunchResult> LaunchAsync(WorkflowLaunchRequest request, CancellationToken ct = default);
 }
 

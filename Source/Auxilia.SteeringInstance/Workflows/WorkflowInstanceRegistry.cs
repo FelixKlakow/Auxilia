@@ -80,6 +80,14 @@ public sealed class WorkflowInstanceRegistry(
         return record?.WorkflowType;
     }
 
+    /// <summary>Stamps the run's published web-terminal endpoint at launch (no-op for unknown instances).</summary>
+    public async Task SetTerminalEndpointAsync(Guid instanceId, string endpoint, CancellationToken ct = default)
+    {
+        var record = await dataAccess.ReadAsync(instanceId, ct);
+        if (record is not null)
+            await dataAccess.SaveAsync(record with { TerminalEndpoint = endpoint }, ct);
+    }
+
     /// <summary>Records a terminal or intermediate state; returns false for unknown instances.</summary>
     public async Task<bool> SetStateAsync(
         Guid instanceId, string state, string? errorMessage = null, CancellationToken ct = default)

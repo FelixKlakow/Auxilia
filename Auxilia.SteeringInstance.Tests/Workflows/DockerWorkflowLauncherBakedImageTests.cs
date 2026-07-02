@@ -190,4 +190,31 @@ public class DockerWorkflowLauncherBakedImageTests
             Directory.Delete(tempDir, recursive: true);
         }
     }
+
+    [Test]
+    public void BuildBakedImageContainerParameters_WithTerminalPort_PublishesItEphemerally()
+    {
+        var request = MakeBakedRequest() with { PublishTerminalPort = 7681 };
+
+        var p = DockerWorkflowLauncher.BuildBakedImageContainerParameters(request, DefaultSettings);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(p.ExposedPorts, Contains.Key("7681/tcp"));
+            var binding = p.HostConfig.PortBindings["7681/tcp"].Single();
+            Assert.That(binding.HostPort, Is.Empty, "empty host port = Docker assigns an ephemeral one");
+        });
+    }
+
+    [Test]
+    public void BuildBakedImageContainerParameters_WithoutTerminalPort_PublishesNothing()
+    {
+        var p = DockerWorkflowLauncher.BuildBakedImageContainerParameters(MakeBakedRequest(), DefaultSettings);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(p.ExposedPorts, Is.Null);
+            Assert.That(p.HostConfig.PortBindings, Is.Null);
+        });
+    }
 }
