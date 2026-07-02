@@ -25,6 +25,13 @@ public sealed class SlotBindingDraft
 {
     public string SlotName { get; set; } = "";
     public string ProviderType { get; set; } = "";
+
+    /// <summary>
+    /// When set, the binding uses a reusable slot instance — provider and settings come from
+    /// the instance and the inline values below are ignored.
+    /// </summary>
+    public Guid? SlotInstanceId { get; set; }
+
     public Dictionary<string, string> Settings { get; } = new(StringComparer.Ordinal);
 
     /// <summary>
@@ -109,6 +116,7 @@ public sealed class WorkflowConfigurationEditorService(
     IDataAccess<SlotProviderRecord> slotProviders,
     IDataAccess<WorkflowPackageRecord> workflowPackages,
     IDataAccess<WorkflowSchemaRecord> workflowSchemas,
+    IDataAccess<SlotInstanceRecord> slotInstances,
     ProviderCatalogService catalog,
     ISettingsProtector protector,
     IMessageBusClient messageBus,
@@ -165,8 +173,15 @@ public sealed class WorkflowConfigurationEditorService(
             var bindingDraft = new SlotBindingDraft
             {
                 SlotName = binding.SlotName,
-                ProviderType = binding.ProviderType
+                ProviderType = binding.SlotInstanceId is null ? binding.ProviderType : "",
+                SlotInstanceId = binding.SlotInstanceId
             };
+            if (binding.SlotInstanceId is not null)
+            {
+                // Instance-backed bindings carry no settings of their own.
+                draft.Bindings.Add(bindingDraft);
+                continue;
+            }
             var secretKeys = secretKeysByProvider.GetValueOrDefault(binding.ProviderType)
                              ?? new HashSet<string>(StringComparer.Ordinal);
             foreach (var (key, value) in UnprotectSettings(binding.ProtectedSettingsJson))
@@ -218,7 +233,9 @@ public sealed class WorkflowConfigurationEditorService(
         var schemaSlots = string.IsNullOrWhiteSpace(draft.WorkflowType)
             ? null
             : await SchemaSlotsOfAsync(draft.WorkflowType.Trim(), ct);
-        Validate(draft, descriptorsByProvider, schemaSlots);
+        var instancesById = (await slotInstances.ReadAsync(ct)).ToList()
+            .ToDictionary(r => r.Id);
+        Validate(draft, descriptorsByProvider, schemaSlots, instancesById, actorPrincipalId);
 
         var name = draft.ExistingName ?? await NewUniqueNameAsync(draft.DisplayName, ct);
         var existing = draft.ExistingName is null
@@ -228,6 +245,12 @@ public sealed class WorkflowConfigurationEditorService(
         var bindings = new List<SlotBindingSeed>();
         foreach (var binding in draft.Bindings)
         {
+            if (binding.SlotInstanceId is { } instanceId)
+            {
+                bindings.Add(new SlotBindingSeed(
+                    binding.SlotName.Trim(), "", new Dictionary<string, string>(), instanceId));
+                continue;
+            }
             var settings = EffectiveSettings(binding, existing, descriptorsByProvider);
             bindings.Add(new SlotBindingSeed(binding.SlotName.Trim(), binding.ProviderType, settings));
         }
@@ -262,9 +285,7 @@ public sealed class WorkflowConfigurationEditorService(
         var record = await configurations.ReadAsync(id, ct)
                      ?? throw new InvalidOperationException("Unknown workflow configuration.");
 
-        var bindings = ParseBindings(record.SlotBindingsJson)
-            .Select(b => new SlotBindingSeed(b.SlotName, b.ProviderType, UnprotectSettings(b.ProtectedSettingsJson)))
-            .ToList();
+        var bindings = ParseBindings(record.SlotBindingsJson).Select(ToSeed).ToList();
         var command = new UpsertWorkflowConfigurationCommand(
             record.Name, record.DisplayName, record.WorkflowType, record.PackageUri,
             enabled, bindings, record.OwnerPrincipalId);
@@ -291,9 +312,7 @@ public sealed class WorkflowConfigurationEditorService(
         var displayName = $"Copy of {record.DisplayName}";
         var name = await NewUniqueNameAsync(displayName, ct);
 
-        var bindings = ParseBindings(record.SlotBindingsJson)
-            .Select(b => new SlotBindingSeed(b.SlotName, b.ProviderType, UnprotectSettings(b.ProtectedSettingsJson)))
-            .ToList();
+        var bindings = ParseBindings(record.SlotBindingsJson).Select(ToSeed).ToList();
 
         var command = new UpsertWorkflowConfigurationCommand(
             name, displayName, record.WorkflowType, record.PackageUri,
@@ -461,7 +480,9 @@ public sealed class WorkflowConfigurationEditorService(
     private void Validate(
         WorkflowConfigurationDraft draft,
         IReadOnlyDictionary<string, IReadOnlyList<SettingDescriptor>> descriptorsByProvider,
-        IReadOnlyList<RegisteredWorkflowSlot>? schemaSlots)
+        IReadOnlyList<RegisteredWorkflowSlot>? schemaSlots,
+        IReadOnlyDictionary<Guid, SlotInstanceRecord> instancesById,
+        Guid? actorPrincipalId)
     {
         var errors = new List<string>();
         if (string.IsNullOrWhiteSpace(draft.DisplayName))
@@ -488,6 +509,15 @@ public sealed class WorkflowConfigurationEditorService(
             }
             if (!slotNames.Add(slot))
                 errors.Add($"Slot '{slot}' is bound twice.");
+            if (binding.SlotInstanceId is { } instanceId)
+            {
+                // Instance-backed binding: existence and access instead of inline settings.
+                if (!instancesById.TryGetValue(instanceId, out var instance))
+                    errors.Add($"Slot '{slot}': the selected slot instance no longer exists.");
+                else if (actorPrincipalId is { } actor && !InstanceAccessible(instance, actor))
+                    errors.Add($"Slot '{slot}': you have no access to the selected slot instance.");
+                continue;
+            }
             if (string.IsNullOrWhiteSpace(binding.ProviderType))
             {
                 errors.Add($"Slot '{slot}' has no provider selected.");
@@ -530,6 +560,18 @@ public sealed class WorkflowConfigurationEditorService(
         if (errors.Count > 0)
             throw new ArgumentException(string.Join("\n", errors));
     }
+
+    /// <summary>Round-trips a stored binding into a seed: instance references stay references.</summary>
+    private SlotBindingSeed ToSeed(WorkflowConfigurationSlotBinding binding)
+        => binding.SlotInstanceId is { } instanceId
+            ? new SlotBindingSeed(binding.SlotName, "", new Dictionary<string, string>(), instanceId)
+            : new SlotBindingSeed(binding.SlotName, binding.ProviderType, UnprotectSettings(binding.ProtectedSettingsJson));
+
+    private static bool InstanceAccessible(SlotInstanceRecord instance, Guid principalId)
+        => instance.Scope == SlotInstanceScope.Company
+           || instance.OwnerPrincipalId == principalId
+           || (JsonSerializer.Deserialize<List<Guid>>(instance.AssignedPrincipalIdsJson) ?? [])
+               .Contains(principalId);
 
     private async Task ApplyTriggerWiringAsync(
         string actor, Guid? actorPrincipalId, string name, WorkflowConfigurationDraft draft, CancellationToken ct)

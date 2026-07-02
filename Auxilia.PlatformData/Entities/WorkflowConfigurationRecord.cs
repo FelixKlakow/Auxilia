@@ -33,4 +33,10 @@ public sealed record WorkflowConfigurationSlotBinding
     public required string ProviderType { get; init; }
     /// <summary>The binding's settings dictionary as JSON, protected via <see cref="Protection.ISettingsProtector"/>.</summary>
     public required string ProtectedSettingsJson { get; init; }
+    /// <summary>
+    /// When set, the binding references a <see cref="SlotInstanceRecord"/> instead of carrying
+    /// its own settings — provider and settings are resolved from the instance at read time
+    /// (<see cref="ProviderType"/> is a denormalized copy for display).
+    /// </summary>
+    public Guid? SlotInstanceId { get; init; }
 }

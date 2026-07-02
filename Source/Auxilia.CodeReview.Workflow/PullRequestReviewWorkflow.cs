@@ -19,7 +19,9 @@ public static class PullRequestReviewWorkflow
                 new SourceControlCapabilities { RequiredPermissions = [Permission.Read] })
             .RequiresPullRequestAccess("pull-request",
                 new PullRequestAccessCapabilities { RequiredPermissions = [PullRequestPermission.Read, PullRequestPermission.Write] })
-            .RequiresTaskSource("work-items",
+            // The workflow only reads items and posts comments (IWorkItemAccess) — declaring
+            // the narrower contract lets matching providers (e.g. a mailbox) fill the slot.
+            .RequiresWorkItems("work-items",
                 new TaskSourceCapabilities { SupportedItemTypes = [ItemType.UserStory, ItemType.Bug, ItemType.Feature, ItemType.Epic] })
             .RequiresAiAgent("primary-reviewer",
                 new AiCapabilities { MinContextWindow = 128_000, SupportedModalities = [Modality.Text] })

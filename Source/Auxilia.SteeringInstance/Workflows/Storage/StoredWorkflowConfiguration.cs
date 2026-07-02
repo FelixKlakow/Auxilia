@@ -27,4 +27,12 @@ public sealed record StoredWorkflowConfiguration(
 public sealed record StoredSlotBinding(
     string SlotName,
     string ProviderType,
-    IReadOnlyDictionary<string, string> Settings);
+    IReadOnlyDictionary<string, string> Settings,
+    Guid? SlotInstanceId = null)
+{
+    /// <summary>
+    /// False when the binding references a slot instance that no longer exists — provider and
+    /// settings could not be resolved; pre-flight rejects such configurations.
+    /// </summary>
+    public bool SlotInstanceResolved { get; init; } = true;
+}

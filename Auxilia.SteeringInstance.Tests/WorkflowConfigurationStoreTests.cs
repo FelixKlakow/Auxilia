@@ -19,6 +19,7 @@ public class WorkflowConfigurationStoreTests
     private ManualTimeProvider _time = null!;
     private InMemoryDataAccess<WorkflowConfigurationRecord> _records = null!;
     private InMemoryDataAccess<AuditRecord> _auditRecords = null!;
+    private SlotInstanceStore _slotInstances = null!;
     private WorkflowConfigurationStore _sut = null!;
 
     [SetUp]
@@ -27,8 +28,9 @@ public class WorkflowConfigurationStoreTests
         _time = new ManualTimeProvider();
         _records = new InMemoryDataAccess<WorkflowConfigurationRecord>();
         _auditRecords = new InMemoryDataAccess<AuditRecord>();
+        _slotInstances = TestStores.NewSlotInstanceStore();
         _sut = new WorkflowConfigurationStore(
-            _records, new NullSettingsProtector(), new AuditLog(_auditRecords, _time), _time);
+            _records, _slotInstances, new NullSettingsProtector(), new AuditLog(_auditRecords, _time), _time);
     }
 
     [TearDown]
@@ -238,7 +240,7 @@ public class WorkflowConfigurationStoreTests
         var key = new byte[32];
         Random.Shared.NextBytes(key);
         var sut = new WorkflowConfigurationStore(
-            _records, new AesGcmSettingsProtector(key), new AuditLog(_auditRecords, _time), _time);
+            _records, _slotInstances, new AesGcmSettingsProtector(key), new AuditLog(_auditRecords, _time), _time);
 
         await sut.UpsertAsync(AnyConfiguration());
 
@@ -249,5 +251,89 @@ public class WorkflowConfigurationStoreTests
         // And the same store decrypts them back.
         var stored = await sut.GetByNameAsync("alpha");
         Assert.That(stored!.SlotBindings[0].Settings["ApiKey"], Is.EqualTo("s3cret-value"));
+    }
+
+    // ------------------------------------------------------------------ Slot-instance bindings
+
+    [Test]
+    public async Task UpsertAsync_InstanceBackedBinding_ResolvesProviderAndSettingsAtReadTime()
+    {
+        var instance = await _slotInstances.UpsertAsync(new StoredSlotInstance(
+            "team-mailbox", "Team mailbox", "email-work-items",
+            new Dictionary<string, string> { ["ImapHost"] = "imap.example.org" },
+            SlotInstanceScope.Company, null, []));
+
+        await _sut.UpsertAsync(AnyConfiguration(bindings:
+            [new StoredSlotBinding("work-items", "", new Dictionary<string, string>(), instance.Id)]));
+
+        var stored = await _sut.GetByNameAsync("alpha");
+        var binding = stored!.SlotBindings.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(binding.ProviderType, Is.EqualTo("email-work-items"));
+            Assert.That(binding.Settings["ImapHost"], Is.EqualTo("imap.example.org"));
+            Assert.That(binding.SlotInstanceId, Is.EqualTo(instance.Id));
+            Assert.That(binding.SlotInstanceResolved, Is.True);
+        });
+    }
+
+    [Test]
+    public async Task InstanceUpdate_FlowsIntoEveryConfigurationReferencingIt()
+    {
+        var instance = await _slotInstances.UpsertAsync(new StoredSlotInstance(
+            "team-mailbox", "Team mailbox", "email-work-items",
+            new Dictionary<string, string> { ["ImapHost"] = "imap.old.org" },
+            SlotInstanceScope.Company, null, []));
+        await _sut.UpsertAsync(AnyConfiguration(bindings:
+            [new StoredSlotBinding("work-items", "", new Dictionary<string, string>(), instance.Id)]));
+
+        await _slotInstances.UpsertAsync(instance with
+        {
+            Settings = new Dictionary<string, string> { ["ImapHost"] = "imap.new.org" }
+        });
+
+        var stored = await _sut.GetByNameAsync("alpha");
+        Assert.That(stored!.SlotBindings.Single().Settings["ImapHost"], Is.EqualTo("imap.new.org"));
+    }
+
+    [Test]
+    public void UpsertAsync_UnknownInstanceReference_IsRejected()
+    {
+        var exception = Assert.ThrowsAsync<ArgumentException>(() => _sut.UpsertAsync(
+            AnyConfiguration(bindings:
+                [new StoredSlotBinding("work-items", "", new Dictionary<string, string>(), Guid.NewGuid())])));
+
+        Assert.That(exception!.Message, Does.Contain("unknown slot instance"));
+    }
+
+    [Test]
+    public async Task DeletedInstance_MarksTheBindingUnresolved()
+    {
+        var instance = await _slotInstances.UpsertAsync(new StoredSlotInstance(
+            "team-mailbox", "Team mailbox", "email-work-items",
+            new Dictionary<string, string>(), SlotInstanceScope.Company, null, []));
+        await _sut.UpsertAsync(AnyConfiguration(bindings:
+            [new StoredSlotBinding("work-items", "", new Dictionary<string, string>(), instance.Id)]));
+
+        await _slotInstances.RemoveAsync("team-mailbox");
+
+        var stored = await _sut.GetByNameAsync("alpha");
+        Assert.That(stored!.SlotBindings.Single().SlotInstanceResolved, Is.False);
+    }
+
+    [Test]
+    public async Task UpsertAsync_InstanceBackedBinding_StoresNoInlineSettings()
+    {
+        var instance = await _slotInstances.UpsertAsync(new StoredSlotInstance(
+            "team-mailbox", "Team mailbox", "email-work-items",
+            new Dictionary<string, string> { ["Password"] = "super-secret" },
+            SlotInstanceScope.Company, null, []));
+
+        await _sut.UpsertAsync(AnyConfiguration(bindings:
+            [new StoredSlotBinding("work-items", "", new Dictionary<string, string>(), instance.Id)]));
+
+        var record = await _records.ReadAsync(WorkflowConfigurationRecord.IdFor("alpha"));
+        Assert.That(record!.SlotBindingsJson, Does.Not.Contain("super-secret"),
+            "instance settings must live only on the instance record");
     }
 }

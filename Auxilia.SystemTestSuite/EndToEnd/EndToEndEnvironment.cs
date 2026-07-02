@@ -283,6 +283,23 @@ public class EndToEndEnvironment
                     ["MaxTurns"] = "5"
                 }));
 
+        // A reusable slot instance ("configure the mailbox once, bind it anywhere") — the
+        // slots page and the configuration editor offer it for IWorkItemAccess slots.
+        await MessageBusClient.PublishAsync(seedBase + ".upsert-instance",
+            new UpsertSlotInstanceCommand(
+                "team-mailbox", "Team mailbox", "email-work-items",
+                new Dictionary<string, string>
+                {
+                    ["ImapHost"] = GreenMailAlias,
+                    ["ImapPort"] = ImapPort.ToString(),
+                    ["UseSsl"]   = "false",
+                    ["Username"] = AdapterMailbox,
+                    ["Password"] = MailboxPassword,
+                    ["SmtpHost"] = GreenMailAlias,
+                    ["SmtpPort"] = SmtpPort.ToString(),
+                    ["Folder"]   = "INBOX"
+                }));
+
         // Workflow registry: register both baked packages with their emitted schemas so the
         // configuration editor offers them (slots included) before any run happened.
         await MessageBusClient.PublishAsync(seedBase + ".register-package",

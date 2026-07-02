@@ -44,6 +44,7 @@ public class WorkflowConfigurationEditorServiceTests
     private IDataAccess<SlotProviderRecord> _providers = null!;
     private IDataAccess<WorkflowPackageRecord> _packages = null!;
     private IDataAccess<WorkflowSchemaRecord> _schemas = null!;
+    private IDataAccess<SlotInstanceRecord> _slotInstances = null!;
     private IDataAccess<AuditRecord> _audit = null!;
     private NullSettingsProtector _protector = null!;
     private WorkflowConfigurationEditorService _sut = null!;
@@ -60,12 +61,13 @@ public class WorkflowConfigurationEditorServiceTests
         _providers = new InMemoryDataAccess<SlotProviderRecord>();
         _packages = new InMemoryDataAccess<WorkflowPackageRecord>();
         _schemas = new InMemoryDataAccess<WorkflowSchemaRecord>();
+        _slotInstances = new InMemoryDataAccess<SlotInstanceRecord>();
         _audit = new InMemoryDataAccess<AuditRecord>();
         _protector = new NullSettingsProtector();
         var auditLog = new AuditLog(_audit, TimeProvider.System);
         _sut = new WorkflowConfigurationEditorService(
             _configurations, _instances, _schedules, _chains, _slots, _providers,
-            _packages, _schemas,
+            _packages, _schemas, _slotInstances,
             new ProviderCatalogService(_providers, new InMemoryDataAccess<ProviderCatalogRecord>(), auditLog),
             _protector, _bus, auditLog,
             Options.Create(new EmailTaskSourceSettings()));
@@ -82,6 +84,7 @@ public class WorkflowConfigurationEditorServiceTests
         (_providers as IDisposable)?.Dispose();
         (_packages as IDisposable)?.Dispose();
         (_schemas as IDisposable)?.Dispose();
+        (_slotInstances as IDisposable)?.Dispose();
         (_audit as IDisposable)?.Dispose();
     }
 
@@ -241,6 +244,137 @@ public class WorkflowConfigurationEditorServiceTests
         var name = await _sut.SaveAsync("actor", null, NewDraft());
 
         Assert.That(name, Is.EqualTo("team-review"));
+    }
+
+    // ------------------------------------------------------------------ slot instances
+
+    private Task SeedInstanceAsync(
+        string name = "team-mailbox", string scope = "Company",
+        Guid? owner = null, IReadOnlyList<Guid>? assigned = null)
+        => _slotInstances.SaveAsync(new SlotInstanceRecord
+        {
+            Id = SlotInstanceRecord.IdFor(name),
+            Name = name,
+            DisplayName = "Team mailbox",
+            ProviderType = "email-work-items",
+            ProtectedSettingsJson = _protector.Protect("{}"),
+            Scope = scope,
+            OwnerPrincipalId = owner,
+            AssignedPrincipalIdsJson = JsonSerializer.Serialize(assigned ?? [])
+        });
+
+    [Test]
+    public async Task Save_InstanceBackedBinding_PublishesTheReferenceWithoutInlineSettings()
+    {
+        await SeedProviderAsync();
+        await SeedInstanceAsync();
+
+        var draft = NewDraft();
+        draft.Bindings.Clear();
+        draft.Bindings.Add(new SlotBindingDraft
+        {
+            SlotName = "work-items",
+            SlotInstanceId = SlotInstanceRecord.IdFor("team-mailbox")
+        });
+
+        await _sut.SaveAsync("actor", null, draft);
+
+        var binding = PublishedUpsert().SlotBindings.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(binding.SlotInstanceId, Is.EqualTo(SlotInstanceRecord.IdFor("team-mailbox")));
+            Assert.That(binding.Settings, Is.Empty);
+        });
+    }
+
+    [Test]
+    public async Task Save_BindingWithUnknownInstance_IsRejected()
+    {
+        await SeedProviderAsync();
+        var draft = NewDraft();
+        draft.Bindings.Clear();
+        draft.Bindings.Add(new SlotBindingDraft { SlotName = "work-items", SlotInstanceId = Guid.NewGuid() });
+
+        var exception = Assert.ThrowsAsync<ArgumentException>(() => _sut.SaveAsync("actor", null, draft));
+
+        Assert.That(exception!.Message, Does.Contain("no longer exists"));
+    }
+
+    [Test]
+    public async Task Save_BindingWithForeignPersonalInstance_IsRejected()
+    {
+        await SeedProviderAsync();
+        var owner = Guid.NewGuid();
+        var actor = Guid.NewGuid();
+        await SeedInstanceAsync(scope: "Personal", owner: owner);
+
+        var draft = NewDraft();
+        draft.Bindings.Clear();
+        draft.Bindings.Add(new SlotBindingDraft
+        {
+            SlotName = "work-items",
+            SlotInstanceId = SlotInstanceRecord.IdFor("team-mailbox")
+        });
+
+        var exception = Assert.ThrowsAsync<ArgumentException>(() => _sut.SaveAsync(actor.ToString("D"), actor, draft));
+
+        Assert.That(exception!.Message, Does.Contain("no access"));
+    }
+
+    [Test]
+    public async Task Save_BindingWithAssignedPersonalInstance_IsAccepted()
+    {
+        await SeedProviderAsync();
+        var owner = Guid.NewGuid();
+        var actor = Guid.NewGuid();
+        await SeedInstanceAsync(scope: "Personal", owner: owner, assigned: [actor]);
+
+        var draft = NewDraft();
+        draft.Bindings.Clear();
+        draft.Bindings.Add(new SlotBindingDraft
+        {
+            SlotName = "work-items",
+            SlotInstanceId = SlotInstanceRecord.IdFor("team-mailbox")
+        });
+
+        var name = await _sut.SaveAsync(actor.ToString("D"), actor, draft);
+
+        Assert.That(name, Is.EqualTo("team-review"));
+    }
+
+    [Test]
+    public async Task LoadDraft_InstanceBackedBinding_RoundTripsTheReference()
+    {
+        await SeedProviderAsync();
+        await SeedInstanceAsync();
+        await _configurations.SaveAsync(new WorkflowConfigurationRecord
+        {
+            Id = WorkflowConfigurationRecord.IdFor("instance-bound"),
+            Name = "instance-bound",
+            DisplayName = "Instance bound",
+            WorkflowType = "pull-request-code-review",
+            PackageUri = "docker://review:1",
+            Enabled = true,
+            SlotBindingsJson = JsonSerializer.Serialize(new List<WorkflowConfigurationSlotBinding>
+            {
+                new()
+                {
+                    SlotName = "work-items",
+                    ProviderType = "email-work-items",
+                    ProtectedSettingsJson = _protector.Protect("{}"),
+                    SlotInstanceId = SlotInstanceRecord.IdFor("team-mailbox")
+                }
+            })
+        });
+
+        var draft = await _sut.LoadDraftAsync(WorkflowConfigurationRecord.IdFor("instance-bound"));
+
+        var binding = draft!.Bindings.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(binding.SlotInstanceId, Is.EqualTo(SlotInstanceRecord.IdFor("team-mailbox")));
+            Assert.That(binding.Settings, Is.Empty, "instance-backed bindings carry no inline settings");
+        });
     }
 
     // ------------------------------------------------------------------ save & validation

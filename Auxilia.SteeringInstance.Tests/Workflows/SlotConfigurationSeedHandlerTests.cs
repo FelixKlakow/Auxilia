@@ -21,6 +21,7 @@ public class SlotConfigurationSeedHandlerTests
     private SlotProviderRegistry _providerRegistry = null!;
     private WorkflowConfigurationStore _configurationStore = null!;
     private WorkflowPackageStore _packageStore = null!;
+    private SlotInstanceStore _instanceStore = null!;
     private WorkflowSchemaStore _schemaStore = null!;
     private DirtyConfigurationDetector _dirtyDetector = null!;
     private SlotConfigurationSeedHandler _sut = null!;
@@ -32,7 +33,8 @@ public class SlotConfigurationSeedHandlerTests
         _slotStore = TestStores.NewSlotConfigurationStore();
         _providerRecords = new InMemoryDataAccess<SlotProviderRecord>();
         _providerRegistry = new SlotProviderRegistry(_providerRecords);
-        _configurationStore = TestStores.NewWorkflowConfigurationStore();
+        _instanceStore = TestStores.NewSlotInstanceStore();
+        _configurationStore = TestStores.NewWorkflowConfigurationStore(_instanceStore);
         _packageStore = TestStores.NewWorkflowPackageStore();
         _schemaStore = TestStores.NewWorkflowSchemaStore();
         _dirtyDetector = new DirtyConfigurationDetector(_schemaStore, _slotStore);
@@ -41,6 +43,7 @@ public class SlotConfigurationSeedHandlerTests
             _slotStore,
             _providerRegistry,
             _configurationStore,
+            _instanceStore,
             _packageStore,
             _dirtyDetector,
             TestStores.NewDrainCoordinator(_fakeBus),
@@ -193,6 +196,69 @@ public class SlotConfigurationSeedHandlerTests
             new RegisterWorkflowPackageCommand("type", " "));
 
         Assert.That(await _packageStore.GetAllAsync(), Is.Empty);
+    }
+
+    [Test]
+    public async Task WhenUpsertInstanceCommandReceived_InstanceIsStored()
+    {
+        await _fakeBus.SimulateReceivedAsync("slot-configurations",
+            new UpsertSlotInstanceCommand(
+                "team-mailbox", "Team mailbox", "email-work-items",
+                new Dictionary<string, string> { ["ImapHost"] = "imap.example.org" },
+                "Company"));
+
+        var instance = await _instanceStore.GetAsync(SlotInstanceRecord.IdFor("team-mailbox"));
+        Assert.Multiple(() =>
+        {
+            Assert.That(instance!.ProviderType, Is.EqualTo("email-work-items"));
+            Assert.That(instance.Settings["ImapHost"], Is.EqualTo("imap.example.org"));
+            Assert.That(instance.Scope, Is.EqualTo(SlotInstanceScope.Company));
+        });
+    }
+
+    [Test]
+    public async Task WhenUpsertInstanceCommandIsInvalid_ItIsRejected()
+    {
+        await _fakeBus.SimulateReceivedAsync("slot-configurations",
+            new UpsertSlotInstanceCommand("", "x", "p", new Dictionary<string, string>()));
+
+        Assert.That(await _instanceStore.GetAllAsync(), Is.Empty);
+    }
+
+    [Test]
+    public async Task WhenRemoveInstanceCommandReceived_InstanceIsRemoved()
+    {
+        await _instanceStore.UpsertAsync(new StoredSlotInstance(
+            "team-mailbox", "Team mailbox", "email-work-items",
+            new Dictionary<string, string>(), SlotInstanceScope.Company, null, []));
+
+        await _fakeBus.SimulateReceivedAsync("slot-configurations",
+            new RemoveSlotInstanceCommand("team-mailbox"));
+
+        Assert.That(await _instanceStore.GetAsync(SlotInstanceRecord.IdFor("team-mailbox")), Is.Null);
+    }
+
+    [Test]
+    public async Task WhenConfigurationUpsertCarriesInstanceReference_ItIsPreserved()
+    {
+        var instance = await _instanceStore.UpsertAsync(new StoredSlotInstance(
+            "team-mailbox", "Team mailbox", "email-work-items",
+            new Dictionary<string, string> { ["ImapHost"] = "imap.example.org" },
+            SlotInstanceScope.Company, null, []));
+
+        await _fakeBus.SimulateReceivedAsync("slot-configurations",
+            new UpsertWorkflowConfigurationCommand(
+                "with-instance", "With instance", "wf-type", "docker://wf:1", true,
+                [new SlotBindingSeed("work-items", "", new Dictionary<string, string>(), instance.Id)]));
+
+        var configuration = await _configurationStore.GetByNameAsync("with-instance");
+        var binding = configuration!.SlotBindings.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(binding.SlotInstanceId, Is.EqualTo(instance.Id));
+            Assert.That(binding.ProviderType, Is.EqualTo("email-work-items"));
+            Assert.That(binding.Settings["ImapHost"], Is.EqualTo("imap.example.org"));
+        });
     }
 
     [Test]

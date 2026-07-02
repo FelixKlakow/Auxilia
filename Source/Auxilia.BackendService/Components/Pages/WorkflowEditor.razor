@@ -4,6 +4,7 @@
 @using Auxilia.Workflows
 @inject WorkflowConfigurationEditorService Editor
 @inject ProviderCatalogService Catalog
+@inject SlotInstanceService Instances
 @inject IPolicyEngine PolicyEngine
 @inject NavigationManager Navigation
 
@@ -142,7 +143,7 @@ else
                         }
                         else
                         {
-                            @RenderProviderChoice(binding, ProvidersFor(slot))
+                            @RenderBindingChoice(binding, slot)
                         }
                     </div>
                 }
@@ -299,6 +300,7 @@ else
 
     private WorkflowConfigurationDraft _draft = new();
     private IReadOnlyList<RegisteredWorkflow> _registered = [];
+    private IReadOnlyList<SlotInstanceOverview> _instances = [];
     private KnownWorkflowValues _known = new([], [], new Dictionary<string, IReadOnlyList<string>>());
     private IReadOnlyDictionary<string, IReadOnlyList<ProviderCatalogEntry>> _availableByCategory =
         new Dictionary<string, IReadOnlyList<ProviderCatalogEntry>>();
@@ -341,6 +343,7 @@ else
             _known = await Editor.KnownValuesAsync();
             _availableByCategory = await Catalog.ListAvailableByCategoryAsync();
             _allProviders = await Catalog.ListAsync();
+            _instances = await Instances.AccessibleAsync(_principalId!.Value);
 
             if (ConfigurationId is { } id)
             {
@@ -416,6 +419,67 @@ else
         var matching = available.Where(p => p.Implements(contract)).ToList();
         return matching.Count > 0 ? matching : available;
     }
+
+    /// <summary>Accessible slot instances whose provider declares the slot's contract (all when unconstrained).</summary>
+    private IReadOnlyList<SlotInstanceOverview> InstancesFor(RegisteredWorkflowSlot slot)
+    {
+        if (slot.Contract is not { Length: > 0 } contract)
+            return _instances;
+        var matching = _instances
+            .Where(i => _allProviders.FirstOrDefault(p => p.ProviderType == i.ProviderType)?.Implements(contract) == true)
+            .ToList();
+        return matching;
+    }
+
+    private void SelectInstance(SlotBindingDraft binding, SlotInstanceOverview instance)
+    {
+        binding.SlotInstanceId = instance.Id;
+        binding.ProviderType = "";
+        binding.Settings.Clear();
+    }
+
+    /// <summary>
+    /// A slot is filled either with a reusable slot instance (default) or with inline provider
+    /// settings (advanced) — picking one clears the other.
+    /// </summary>
+    private RenderFragment RenderBindingChoice(
+        SlotBindingDraft binding, RegisteredWorkflowSlot slot) => __builder =>
+    {
+        var instances = InstancesFor(slot);
+        @if (instances.Count > 0)
+        {
+            <div class="provider-grid">
+                @foreach (var instance in instances)
+                {
+                    <label class="provider-card @(binding.SlotInstanceId == instance.Id ? "selected" : null)">
+                        <input type="radio" name="binding-@_draft.Bindings.IndexOf(binding)"
+                               checked="@(binding.SlotInstanceId == instance.Id)"
+                               @onchange="() => SelectInstance(binding, instance)"/>
+                        <span class="provider-name">@instance.DisplayName</span>
+                        <span class="provider-category">
+                            @instance.ProviderType · @(instance.Scope == "Company" ? "company" : "personal")
+                        </span>
+                    </label>
+                }
+            </div>
+        }
+        else
+        {
+            <p class="muted">
+                No reusable slot instance matches this slot yet — create one on the
+                <a href="operator/slots">Slots page</a>, or configure it inline below.
+            </p>
+        }
+
+        <details class="advanced-section" open="@(binding.SlotInstanceId is null && binding.ProviderType.Length > 0)">
+            <summary>@(binding.SlotInstanceId is null && binding.ProviderType.Length > 0
+                         ? "Configured inline (advanced)"
+                         : "Configure inline instead (advanced)")</summary>
+            <div class="advanced-body">
+                @RenderProviderChoice(binding, ProvidersFor(slot))
+            </div>
+        </details>
+    };
 
     private RenderFragment RenderProviderChoice(
         SlotBindingDraft binding, IReadOnlyList<ProviderCatalogEntry> providers) => __builder =>
@@ -512,6 +576,7 @@ else
 
     private void SelectProvider(SlotBindingDraft binding, ProviderCatalogEntry entry)
     {
+        binding.SlotInstanceId = null; // inline configuration replaces an instance reference
         binding.ProviderType = entry.ProviderType;
         EnsureSettingKeys(binding);
     }

@@ -412,7 +412,8 @@ internal static class ScreenshotHarness
         await page.SelectOptionAsync("#workflow-select", WorkflowType);
         await Task.Delay(SettleDelay);
 
-        await page.ClickAsync(".provider-card:has-text('email-work-items')");
+        // The work-items slot offers the seeded reusable instance — pick it (instance-first UX).
+        await page.ClickAsync(".provider-card:has-text('Team mailbox')");
         await Task.Delay(SettleDelay);
 
         var path = Path.Combine(outputDir, "04-workflow-editor.png");

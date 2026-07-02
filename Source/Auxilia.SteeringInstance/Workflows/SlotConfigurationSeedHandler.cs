@@ -11,6 +11,7 @@ public sealed class SlotConfigurationSeedHandler(
     SlotConfigurationStore slotStore,
     SlotProviderRegistry providerRegistry,
     WorkflowConfigurationStore configurationStore,
+    SlotInstanceStore instanceStore,
     WorkflowPackageStore packageStore,
     DirtyConfigurationDetector dirtyDetector,
     LongLivingDrainCoordinator drainCoordinator,
@@ -28,6 +29,8 @@ public sealed class SlotConfigurationSeedHandler(
         await messageBus.SubscribeToExchangeAsync<RemoveWorkflowConfigurationCommand>("slot-configurations", HandleRemoveWorkflowConfigurationAsync, ct);
         await messageBus.SubscribeToExchangeAsync<RegisterWorkflowPackageCommand>("slot-configurations", HandleRegisterPackageAsync, ct);
         await messageBus.SubscribeToExchangeAsync<RemoveWorkflowPackageCommand>("slot-configurations", HandleRemovePackageAsync, ct);
+        await messageBus.SubscribeToExchangeAsync<UpsertSlotInstanceCommand>("slot-configurations", HandleUpsertInstanceAsync, ct);
+        await messageBus.SubscribeToExchangeAsync<RemoveSlotInstanceCommand>("slot-configurations", HandleRemoveInstanceAsync, ct);
 
         // Per-instance seed queues: one sub-queue per command type so that each typed consumer
         // only receives messages it can deserialize. Using a single queue with multiple competing
@@ -42,6 +45,8 @@ public sealed class SlotConfigurationSeedHandler(
         var removeConfigurationQueue = seedBase + ".remove-configuration";
         var registerPackageQueue     = seedBase + ".register-package";
         var removePackageQueue       = seedBase + ".remove-package";
+        var upsertInstanceQueue      = seedBase + ".upsert-instance";
+        var removeInstanceQueue      = seedBase + ".remove-instance";
 
         await messageBus.DeclareQueueAsync(upsertQueue,              ct);
         await messageBus.DeclareQueueAsync(removeQueue,              ct);
@@ -51,6 +56,8 @@ public sealed class SlotConfigurationSeedHandler(
         await messageBus.DeclareQueueAsync(removeConfigurationQueue, ct);
         await messageBus.DeclareQueueAsync(registerPackageQueue,     ct);
         await messageBus.DeclareQueueAsync(removePackageQueue,       ct);
+        await messageBus.DeclareQueueAsync(upsertInstanceQueue,      ct);
+        await messageBus.DeclareQueueAsync(removeInstanceQueue,      ct);
 
         await messageBus.SubscribeAsync<UpsertSlotConfigurationCommand>(upsertQueue,         HandleUpsertAsync,          ct);
         await messageBus.SubscribeAsync<RemoveSlotConfigurationCommand>(removeQueue,         HandleRemoveSlotAsync,      ct);
@@ -60,6 +67,8 @@ public sealed class SlotConfigurationSeedHandler(
         await messageBus.SubscribeAsync<RemoveWorkflowConfigurationCommand>(removeConfigurationQueue, HandleRemoveWorkflowConfigurationAsync, ct);
         await messageBus.SubscribeAsync<RegisterWorkflowPackageCommand>(registerPackageQueue, HandleRegisterPackageAsync, ct);
         await messageBus.SubscribeAsync<RemoveWorkflowPackageCommand>  (removePackageQueue,   HandleRemovePackageAsync,   ct);
+        await messageBus.SubscribeAsync<UpsertSlotInstanceCommand>     (upsertInstanceQueue,  HandleUpsertInstanceAsync,  ct);
+        await messageBus.SubscribeAsync<RemoveSlotInstanceCommand>     (removeInstanceQueue,  HandleRemoveInstanceAsync,  ct);
 
         logger.LogInformation("SlotConfigurationSeedHandler started — subscribed to slot-configurations exchange.");
     }
@@ -105,7 +114,7 @@ public sealed class SlotConfigurationSeedHandler(
             await configurationStore.UpsertAsync(new StoredWorkflowConfiguration(
                 cmd.Name, cmd.DisplayName, cmd.WorkflowType, cmd.PackageUri, cmd.Enabled,
                 cmd.SlotBindings
-                    .Select(b => new StoredSlotBinding(b.SlotName, b.ProviderType, b.Settings))
+                    .Select(b => new StoredSlotBinding(b.SlotName, b.ProviderType, b.Settings, b.SlotInstanceId))
                     .ToList(),
                 cmd.OwnerPrincipalId), ct);
         }
@@ -120,6 +129,36 @@ public sealed class SlotConfigurationSeedHandler(
             "Upserted workflow configuration. Name={Name} WorkflowType={WorkflowType} Bindings={BindingCount}",
             cmd.Name, cmd.WorkflowType, cmd.SlotBindings.Count);
         await drainCoordinator.DrainRunningInstancesAsync(cmd.WorkflowType, ct);
+    }
+
+    private async Task HandleUpsertInstanceAsync(UpsertSlotInstanceCommand cmd, CancellationToken ct)
+    {
+        try
+        {
+            await instanceStore.UpsertAsync(new StoredSlotInstance(
+                cmd.Name, cmd.DisplayName, cmd.ProviderType, cmd.Settings,
+                cmd.Scope, cmd.OwnerPrincipalId, cmd.AssignedPrincipalIds ?? []), ct);
+        }
+        catch (ArgumentException ex)
+        {
+            logger.LogWarning(ex, "Rejected slot instance upsert. Name={Name}", cmd.Name);
+            return;
+        }
+
+        logger.LogInformation(
+            "Upserted slot instance. Name={Name} ProviderType={ProviderType} Scope={Scope}",
+            cmd.Name, cmd.ProviderType, cmd.Scope);
+    }
+
+    private async Task HandleRemoveInstanceAsync(RemoveSlotInstanceCommand cmd, CancellationToken ct)
+    {
+        if (!await instanceStore.RemoveAsync(cmd.Name, ct))
+        {
+            logger.LogWarning("Slot instance to remove not found. Name={Name}", cmd.Name);
+            return;
+        }
+
+        logger.LogInformation("Removed slot instance. Name={Name}", cmd.Name);
     }
 
     private async Task HandleRegisterPackageAsync(RegisterWorkflowPackageCommand cmd, CancellationToken ct)

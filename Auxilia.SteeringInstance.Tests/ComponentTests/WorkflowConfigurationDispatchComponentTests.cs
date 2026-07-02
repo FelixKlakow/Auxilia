@@ -32,6 +32,7 @@ public class WorkflowConfigurationDispatchComponentTests
     private const string ConfigurationName = "alpha";
     private const string SeedQueue = "workflow.run-commands-slot-seed.upsert-configuration";
     private const string RegisterProviderQueue = "workflow.run-commands-slot-seed.register";
+    private const string UpsertInstanceQueue = "workflow.run-commands-slot-seed.upsert-instance";
 
     private IHost _host = null!;
     private FakeMessageBusClient _bus = null!;
@@ -72,6 +73,7 @@ public class WorkflowConfigurationDispatchComponentTests
                 services.AddPlatformEntity<SlotConfigurationRecord>(platformData);
                 services.AddPlatformEntity<SlotProviderRecord>(platformData);
                 services.AddPlatformEntity<WorkflowConfigurationRecord>(platformData);
+                services.AddPlatformEntity<SlotInstanceRecord>(platformData);
                 services.AddPlatformEntity<SignalHandlerRecord>(platformData);
                 services.AddPlatformEntity<WorkflowInstanceRecord>(platformData);
                 services.AddPlatformEntity<AuditRecord>(platformData);
@@ -85,6 +87,7 @@ public class WorkflowConfigurationDispatchComponentTests
                 services.AddSingleton<WorkflowInstanceTokenRegistry>();
                 services.AddSingleton<SlotConfigurationStore>();
                 services.AddSingleton<WorkflowConfigurationStore>();
+                services.AddSingleton<SlotInstanceStore>();
                 services.AddSingleton<SlotProviderRegistry>();
                 services.AddSingleton<SignalHandlerStore>();
                 services.AddSingleton<WorkflowSchemaStore>();
@@ -256,5 +259,92 @@ public class WorkflowConfigurationDispatchComponentTests
         var settings = JsonSerializer.Deserialize<Dictionary<string, string>>(plainJson);
         Assert.That(settings!["RepositoryUrl"], Is.EqualTo("https://alpha.example/repo.git"),
             "Slot activation must serve the configuration binding's settings.");
+    }
+
+    [Test]
+    public async Task InstanceBackedBinding_SlotActivationServesTheInstanceSettings()
+    {
+        // A reusable slot instance plus a configuration whose binding references it by ID.
+        await _bus.SimulateReceivedAsync(RegisterProviderQueue,
+            new RegisterSlotProviderCommand("cfg-provider", "/plugins/cfg-provider.slothandler.dll"));
+        await _bus.SimulateReceivedAsync(UpsertInstanceQueue,
+            new UpsertSlotInstanceCommand(
+                "shared-repo", "Shared repo", "cfg-provider",
+                new Dictionary<string, string> { ["RepositoryUrl"] = "https://shared.example/repo.git" }));
+        await _bus.SimulateReceivedAsync(SeedQueue,
+            new UpsertWorkflowConfigurationCommand(
+                ConfigurationName, "Alpha", "cfg-wf", "docker://cfg-wf:test", Enabled: true,
+                [new SlotBindingSeed("repo", "", new Dictionary<string, string>(),
+                    SlotInstanceRecord.IdFor("shared-repo"))]));
+
+        var (instanceId, token) = await HandshakeAsync();
+        var canonicalQueue = WorkflowQueues.ResponseQueueFor(instanceId);
+
+        using var rsa = RSA.Create(4096);
+        var publicKey = Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
+        await _bus.SimulateReceivedAsync("workflow-slot-activation",
+            new SlotActivationRequest(instanceId, "repo", publicKey, token));
+        var responded = await _bus.WaitForConditionAsync(
+            () => _bus.PublishedMessages.Any(m => m.Topic == canonicalQueue && m.Message is SlotActivationResponse),
+            Timeout);
+        Assert.That(responded, Is.True, "Slot activation response was not published.");
+
+        var response = (SlotActivationResponse)_bus.PublishedMessages
+            .First(m => m.Topic == canonicalQueue && m.Message is SlotActivationResponse).Message;
+        Assert.Multiple(() =>
+        {
+            Assert.That(response.Success, Is.True, response.ErrorMessage);
+            Assert.That(response.Slot!.ProviderType, Is.EqualTo("cfg-provider"),
+                "the provider comes from the referenced instance");
+        });
+
+        var plainJson = System.Text.Encoding.UTF8.GetString(rsa.Decrypt(
+            Convert.FromBase64String(response.Slot!.EncryptedSettings), RSAEncryptionPadding.OaepSHA256));
+        var settings = JsonSerializer.Deserialize<Dictionary<string, string>>(plainJson);
+        Assert.That(settings!["RepositoryUrl"], Is.EqualTo("https://shared.example/repo.git"),
+            "Slot activation must serve the referenced instance's settings.");
+    }
+
+    [Test]
+    public async Task DeletedInstanceReference_FailsRegistrationPreFlight()
+    {
+        await _bus.SimulateReceivedAsync(RegisterProviderQueue,
+            new RegisterSlotProviderCommand("cfg-provider", "/plugins/cfg-provider.slothandler.dll"));
+        await _bus.SimulateReceivedAsync(UpsertInstanceQueue,
+            new UpsertSlotInstanceCommand(
+                "shared-repo", "Shared repo", "cfg-provider", new Dictionary<string, string>()));
+        await _bus.SimulateReceivedAsync(SeedQueue,
+            new UpsertWorkflowConfigurationCommand(
+                ConfigurationName, "Alpha", "cfg-wf", "docker://cfg-wf:test", Enabled: true,
+                [new SlotBindingSeed("repo", "", new Dictionary<string, string>(),
+                    SlotInstanceRecord.IdFor("shared-repo"))]));
+        await _bus.SimulateReceivedAsync("workflow.run-commands-slot-seed.remove-instance",
+            new RemoveSlotInstanceCommand("shared-repo"));
+
+        var (instanceId, token) = await DispatchByConfigurationAsync();
+        var canonicalQueue = WorkflowQueues.ResponseQueueFor(instanceId);
+        await _bus.SimulateReceivedAsync("workflow.announcements",
+            new WorkflowAnnouncementMessage(instanceId, "cfg-wf", AnyPublicKey(), "self-declared", token));
+        await _bus.WaitForConditionAsync(
+            () => _bus.PublishedMessages.Any(m => m.Topic == canonicalQueue && m.Message is WorkflowDirective),
+            Timeout);
+        await _bus.SimulateReceivedAsync("workflow-registration",
+            new WorkflowRegistrationRequest(
+                instanceId,
+                new WorkflowManifest("cfg-wf", instanceId.ToString(),
+                    [new SlotDefinition("repo", null) { ServiceType = typeof(object) }],
+                    [], string.Empty, [], []),
+                AnyPublicKey(), "self-declared", token));
+        await _bus.WaitForConditionAsync(
+            () => _bus.PublishedMessages.Any(m => m.Topic == canonicalQueue && m.Message is WorkflowConfigurationResponse),
+            Timeout);
+
+        var registration = (WorkflowConfigurationResponse)_bus.PublishedMessages
+            .First(m => m.Topic == canonicalQueue && m.Message is WorkflowConfigurationResponse).Message;
+        Assert.Multiple(() =>
+        {
+            Assert.That(registration.Success, Is.False);
+            Assert.That(registration.ErrorMessage, Does.Contain("deleted slot instance"));
+        });
     }
 }

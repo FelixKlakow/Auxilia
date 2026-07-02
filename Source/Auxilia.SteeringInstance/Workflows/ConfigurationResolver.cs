@@ -75,6 +75,9 @@ public sealed class ConfigurationResolver(
             return (false, $"Workflow configuration '{configuration.Name}' is disabled");
         if (configuration.SlotBindings.Count == 0)
             return (false, $"Workflow configuration '{configuration.Name}' has no slot bindings");
+        if (configuration.SlotBindings.FirstOrDefault(b => !b.SlotInstanceResolved) is { } unresolved)
+            return (false,
+                $"Slot binding '{unresolved.SlotName}' of workflow configuration '{configuration.Name}' references a deleted slot instance");
         return (true, null);
     }
 
@@ -104,6 +107,15 @@ public sealed class ConfigurationResolver(
                 slotName, configuration.Name);
             return (false,
                 $"No binding for slot '{slotName}' in workflow configuration '{configuration.Name}'", null);
+        }
+
+        if (!binding.SlotInstanceResolved)
+        {
+            logger.LogWarning(
+                "Slot '{SlotName}' of configuration '{ConfigurationName}' references a deleted slot instance.",
+                slotName, configuration.Name);
+            return (false,
+                $"Slot '{slotName}' of configuration '{configuration.Name}' references a deleted slot instance", null);
         }
 
         return EncryptSlot(binding.ProviderType, binding.Settings, publicKeyBase64);

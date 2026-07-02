@@ -118,6 +118,7 @@ public class WorkflowDispatchPipelineComponentTests
                 services.AddPlatformEntity<SlotConfigurationRecord>(platformData);
                 services.AddPlatformEntity<SlotProviderRecord>(platformData);
                 services.AddPlatformEntity<WorkflowConfigurationRecord>(platformData);
+                services.AddPlatformEntity<SlotInstanceRecord>(platformData);
                 services.AddPlatformEntity<SignalHandlerRecord>(platformData);
                 services.AddPlatformEntity<WorkflowInstanceRecord>(platformData);
                 services.AddPlatformEntity<AuditRecord>(platformData);
@@ -131,6 +132,7 @@ public class WorkflowDispatchPipelineComponentTests
                 services.AddSingleton<WorkflowInstanceTokenRegistry>();
                 services.AddSingleton<SlotConfigurationStore>();
                 services.AddSingleton<WorkflowConfigurationStore>();
+                services.AddSingleton<SlotInstanceStore>();
                 services.AddSingleton<SlotProviderRegistry>();
                 services.AddSingleton<SignalHandlerStore>();
                 services.AddSingleton<WorkflowSchemaStore>();

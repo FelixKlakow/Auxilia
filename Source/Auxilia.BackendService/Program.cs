@@ -113,6 +113,7 @@ try
     builder.Services.AddPlatformEntity<WorkflowConfigurationRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<WorkflowPackageRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<WorkflowSchemaRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<SlotInstanceRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<DashboardRecord>(platformDataSettings);
     builder.Services.AddSingleton(TimeProvider.System);
     builder.Services.AddSingleton<AuditLog>();
@@ -156,6 +157,7 @@ try
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.TriggerAdministration>();
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.ProviderCatalogService>();
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.WorkflowConfigurationEditorService>();
+    builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.SlotInstanceService>();
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.WorkflowRerunService>();
     builder.Services.AddHostedService<Auxilia.BackendService.Dashboard.ViewDataFanOutHandler>();
 
