@@ -408,7 +408,8 @@ public sealed class WorkflowConfigurationEditorService(
     public sealed record WorkflowFlow(
         WorkflowConfigurationOverview Configuration,
         IReadOnlyList<FlowTrigger> Triggers,
-        IReadOnlyList<FlowOutput> Outputs);
+        IReadOnlyList<FlowOutput> Outputs,
+        IReadOnlyList<FlowPaletteEntry> Palette);
 
     public sealed record FlowTrigger(TriggerKind Kind, string Label);
 
@@ -427,6 +428,25 @@ public sealed class WorkflowConfigurationEditorService(
     /// </summary>
     public sealed record FlowChainCandidate(
         Guid ConfigurationId, string DisplayName, bool MatchesCriteria);
+
+    /// <summary>
+    /// One entry of the flow view's palette: every other configuration, with how its workflow's
+    /// declared consumption criteria relate to this workflow's outputs.
+    /// </summary>
+    public sealed record FlowPaletteEntry(
+        Guid ConfigurationId, string DisplayName, string WorkflowType, FlowPaletteMatch Match);
+
+    public enum FlowPaletteMatch
+    {
+        /// <summary>Declares it consumes at least one of this workflow's output types.</summary>
+        DeclaredMatch,
+
+        /// <summary>Declares no consumed artifact types — chainable onto any output.</summary>
+        Unconstrained,
+
+        /// <summary>Declares consumed artifact types, none of which this workflow produces.</summary>
+        Incompatible
+    }
 
     /// <summary>Assembles the flow graph of one configuration from triggers, schema outputs, and chaining records.</summary>
     public async Task<WorkflowFlow?> FlowAsync(Guid id, CancellationToken ct = default)
@@ -489,7 +509,24 @@ public sealed class WorkflowConfigurationEditorService(
                     .ToList()))
             .ToList();
 
-        return new WorkflowFlow(configuration, triggers, outputs);
+        var outputNames = outputs.Select(o => o.Name).ToHashSet(StringComparer.Ordinal);
+        var palette = overviews
+            .Where(o => o.Id != id)
+            .Select(o =>
+            {
+                var consumed = consumedByType.GetValueOrDefault(o.WorkflowType) ?? [];
+                var match = consumed.Count == 0
+                    ? FlowPaletteMatch.Unconstrained
+                    : consumed.Any(outputNames.Contains)
+                        ? FlowPaletteMatch.DeclaredMatch
+                        : FlowPaletteMatch.Incompatible;
+                return new FlowPaletteEntry(o.Id, o.DisplayName, o.WorkflowType, match);
+            })
+            .OrderBy(e => e.Match)
+            .ThenBy(e => e.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return new WorkflowFlow(configuration, triggers, outputs, palette);
     }
 
     /// <summary>

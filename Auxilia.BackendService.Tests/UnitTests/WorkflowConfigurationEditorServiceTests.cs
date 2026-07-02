@@ -766,6 +766,52 @@ public class WorkflowConfigurationEditorServiceTests
     }
 
     [Test]
+    public async Task Flow_Palette_ListsEveryOtherConfigurationWithItsMatch()
+    {
+        await SeedProviderAsync();
+        await SeedOutputSchemaAsync(); // source outputs "code-review-result"
+        await SeedConfigurationAsync(); // source "team-review"
+        await _schemas.SaveAsync(new WorkflowSchemaRecord
+        {
+            Id = WorkflowSchemaRecord.IdFor("implementation-workflow"),
+            WorkflowType = "implementation-workflow",
+            SchemaJson = JsonSerializer.Serialize(new WorkflowSchema("implementation-workflow", [], [])
+            {
+                ConsumedArtifacts = ["code-review-result"]
+            })
+        });
+        await SeedConfigurationAsync("implementer", "Implementer", workflowType: "implementation-workflow");
+        await _schemas.SaveAsync(new WorkflowSchemaRecord
+        {
+            Id = WorkflowSchemaRecord.IdFor("report-workflow"),
+            WorkflowType = "report-workflow",
+            SchemaJson = JsonSerializer.Serialize(new WorkflowSchema("report-workflow", [], [])
+            {
+                ConsumedArtifacts = ["weekly-report"]
+            })
+        });
+        await SeedConfigurationAsync("reporter", "Reporter", workflowType: "report-workflow");
+        await SeedConfigurationAsync("generic", "Generic", workflowType: "unconstrained-workflow");
+
+        var flow = await _sut.FlowAsync(WorkflowConfigurationRecord.IdFor("team-review"));
+
+        var palette = flow!.Palette;
+        Assert.Multiple(() =>
+        {
+            Assert.That(palette.Select(e => e.DisplayName),
+                Is.EqualTo(new[] { "Implementer", "Generic", "Reporter" }),
+                "the palette lists EVERY other configuration: matches, then unconstrained, then incompatible");
+            Assert.That(palette.Single(e => e.DisplayName == "Implementer").Match,
+                Is.EqualTo(WorkflowConfigurationEditorService.FlowPaletteMatch.DeclaredMatch));
+            Assert.That(palette.Single(e => e.DisplayName == "Generic").Match,
+                Is.EqualTo(WorkflowConfigurationEditorService.FlowPaletteMatch.Unconstrained));
+            Assert.That(palette.Single(e => e.DisplayName == "Reporter").Match,
+                Is.EqualTo(WorkflowConfigurationEditorService.FlowPaletteMatch.Incompatible),
+                "declarers of other types appear in the list but are marked incompatible");
+        });
+    }
+
+    [Test]
     public async Task Chain_CreatesAnArtifactTriggerForTheTarget_AndAudits()
     {
         await SeedProviderAsync();

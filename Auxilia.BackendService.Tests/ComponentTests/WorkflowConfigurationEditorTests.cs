@@ -307,6 +307,8 @@ public class WorkflowConfigurationEditorTests : DashboardComponentTestBase
             Assert.That(html, Does.Contain("every 1 h"), "the schedule trigger node must render");
             Assert.That(html, Does.Contain("code-review-result"), "the output node must render");
             Assert.That(html, Does.Contain("flow-edges"), "the SVG edge layer must render");
+            Assert.That(html, Does.Contain("flow-port-in"), "nodes carry input knobs");
+            Assert.That(html, Does.Contain("flow-port-out"), "nodes carry output knobs");
             Assert.That(html, Does.Contain("Chainable workflows"), "the drag palette must render");
             Assert.That(html, Does.Contain("drop a workflow here to chain it"));
             Assert.That(html, Does.Not.Contain("Access denied"));
