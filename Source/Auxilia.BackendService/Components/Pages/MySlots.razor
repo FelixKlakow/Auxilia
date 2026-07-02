@@ -1,0 +1,351 @@
+@page "/my-slots"
+@attribute [Authorize]
+@using Auxilia.Workflows
+@inject SlotInstanceService Instances
+@inject ProviderCatalogService Catalog
+
+<PageTitle>My slots — Auxilia</PageTitle>
+
+<PageHeader Title="My slots"
+            Subtitle="Your personal slot instances: credentials only you (and workflows you configure) can bind — for example your own license seat or mail account. Administrators can additionally assign company-managed instances to you."/>
+
+@if (!_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else if (_principalId is null)
+{
+    <div class="panel denied">Access denied: no platform principal in session.</div>
+}
+else
+{
+    @if (_error is not null)
+    {
+        <div class="panel denied">@_error</div>
+    }
+    @if (_saved is not null)
+    {
+        <div class="panel success">Saved as "@_saved".</div>
+    }
+
+    <section class="card">
+        <div class="card-header">
+            <h2>Personal instances</h2>
+            <div class="card-actions">
+                <button class="btn btn-primary" disabled="@_busy" @onclick="StartCreate">
+                    New personal instance
+                </button>
+            </div>
+        </div>
+        @if (_mine.Count == 0)
+        {
+            <div class="card-body">
+                <p class="muted">
+                    Nothing yet — create an instance with your own credentials, or ask an
+                    administrator to assign one to you.
+                </p>
+            </div>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                <tr>
+                    <th>Instance</th>
+                    <th>Provider</th>
+                    <th>Origin</th>
+                    <th>Settings</th>
+                    <th>Used by</th>
+                    <th>Actions</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var instance in _mine)
+                {
+                    var own = instance.OwnerPrincipalId == _principalId;
+                    <tr>
+                        <td class="cell-strong">@instance.DisplayName</td>
+                        <td>
+                            @instance.ProviderType
+                            @if (instance.Category.Length > 0)
+                            {
+                                <span class="type-chip">@instance.Category</span>
+                            }
+                        </td>
+                        <td>
+                            @if (own)
+                            {
+                                <span class="badge badge-state badge-valid">yours</span>
+                            }
+                            else
+                            {
+                                <span class="badge badge-state" title="An administrator assigned this instance to you; its settings stay managed there.">assigned to you</span>
+                            }
+                        </td>
+                        <td>
+                            @if (instance.Settings.Count == 0)
+                            {
+                                <span class="muted">(none)</span>
+                            }
+                            @foreach (var setting in instance.Settings)
+                            {
+                                <span class="badge badge-secret">@setting.Key = @(setting.Value ?? "•••")</span>
+                            }
+                        </td>
+                        <td>
+                            @if (instance.UsedByConfigurations.Count == 0)
+                            {
+                                <span class="muted">not in use</span>
+                            }
+                            else
+                            {
+                                <span class="type-chip" title="@string.Join(", ", instance.UsedByConfigurations)">
+                                    @instance.UsedByConfigurations.Count workflow@(instance.UsedByConfigurations.Count == 1 ? "" : "s")
+                                </span>
+                            }
+                        </td>
+                        <td>
+                            @if (own)
+                            {
+                                <div class="cell-actions">
+                                    <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                            @onclick="() => StartEditAsync(instance)">Edit</button>
+                                    @if (instance.UsedByConfigurations.Count > 0)
+                                    {
+                                        <button class="btn btn-danger btn-sm" disabled
+                                                title="@($"Used by {string.Join(", ", instance.UsedByConfigurations)} — unbind it there first.")">
+                                            Delete
+                                        </button>
+                                    }
+                                    else if (_deleteCandidate == instance.Id)
+                                    {
+                                        <span class="confirm-inline">
+                                            Delete "@instance.DisplayName"?
+                                            <button class="btn btn-danger btn-sm" disabled="@_busy"
+                                                    @onclick="() => DeleteAsync(instance)">Delete</button>
+                                            <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                                    @onclick="() => _deleteCandidate = null">Cancel</button>
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-danger btn-sm" disabled="@_busy"
+                                                @onclick="() => _deleteCandidate = instance.Id">Delete</button>
+                                    }
+                                </div>
+                            }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </section>
+
+    @if (_draft is not null)
+    {
+        <section class="card">
+            <div class="card-header">
+                <h2>@(_draft.ExistingName is null ? "New personal instance" : $"Edit \"{_draft.DisplayName}\"")</h2>
+                <p class="card-subtitle">Pick the provider, then enter your credentials — secrets are encrypted at rest and never shown back.</p>
+            </div>
+            <div class="card-body">
+                <div class="provider-grid">
+                    @foreach (var entry in _providers)
+                    {
+                        <label class="provider-card @(_draft.ProviderType == entry.ProviderType ? "selected" : null)">
+                            <input type="radio" name="my-instance-provider"
+                                   checked="@(_draft.ProviderType == entry.ProviderType)"
+                                   @onchange="() => SelectProvider(entry)"/>
+                            <span class="provider-name">@entry.ProviderType</span>
+                            <span class="provider-category">@(entry.Category.Length == 0 ? "uncategorized" : entry.Category)</span>
+                            @if (entry.Description is { Length: > 0 })
+                            {
+                                <span class="provider-description">@entry.Description</span>
+                            }
+                        </label>
+                    }
+                </div>
+                @if (_providers.Count == 0)
+                {
+                    <p class="muted">No providers are available — an administrator curates them in the provider catalog.</p>
+                }
+
+                @if (_draft.ProviderType.Length > 0)
+                {
+                    <div class="form-grid setting-grid">
+                        <label>
+                            Display name
+                            <input @bind="_draft.DisplayName" placeholder="e.g. My Claude seat"/>
+                        </label>
+                    </div>
+
+                    @if (Descriptors.Count > 0)
+                    {
+                        <div class="form-grid setting-grid">
+                            @foreach (var descriptor in Descriptors)
+                            {
+                                <label>
+                                    @descriptor.Label@(descriptor.Required ? " *" : "")
+                                    @switch (descriptor.Kind)
+                                    {
+                                        case SettingKind.Secret:
+                                            <input type="password" autocomplete="new-password"
+                                                   @bind="_draft.Settings[descriptor.Key]"
+                                                   placeholder="@(_draft.StoredSecretKeys.Contains(descriptor.Key) ? "set — leave empty to keep unchanged" : "")"/>
+                                            break;
+                                        case SettingKind.Number:
+                                            <input type="number" @bind="_draft.Settings[descriptor.Key]"/>
+                                            break;
+                                        case SettingKind.Boolean:
+                                            <select @bind="_draft.Settings[descriptor.Key]">
+                                                <option value="">(default)</option>
+                                                <option value="true">Yes</option>
+                                                <option value="false">No</option>
+                                            </select>
+                                            break;
+                                        case SettingKind.Choice:
+                                            <select @bind="_draft.Settings[descriptor.Key]">
+                                                <option value="">(choose)</option>
+                                                @foreach (var choice in descriptor.Choices ?? [])
+                                                {
+                                                    <option value="@choice">@choice</option>
+                                                }
+                                            </select>
+                                            break;
+                                        default:
+                                            <input @bind="_draft.Settings[descriptor.Key]"/>
+                                            break;
+                                    }
+                                    @if (descriptor.HelpText is { Length: > 0 } help)
+                                    {
+                                        <span class="field-hint">@help</span>
+                                    }
+                                </label>
+                            }
+                        </div>
+                    }
+                }
+
+                <div class="button-row editor-actions">
+                    <button class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">
+                        @(_draft.ExistingName is null ? "Create instance" : "Save changes")
+                    </button>
+                    <button class="btn btn-secondary" disabled="@_busy" @onclick="() => _draft = null">Cancel</button>
+                </div>
+            </div>
+        </section>
+    }
+}
+
+@code {
+
+    [CascadingParameter]
+    public Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool _loaded;
+    private bool _busy;
+    private string? _error;
+    private string? _saved;
+    private Guid? _principalId;
+    private Guid? _deleteCandidate;
+    private IReadOnlyList<SlotInstanceOverview> _mine = [];
+    private IReadOnlyList<ProviderCatalogEntry> _providers = [];
+    private SlotInstanceDraft? _draft;
+
+    private IReadOnlyList<SettingDescriptor> Descriptors
+        => _providers.FirstOrDefault(p => p.ProviderType == _draft?.ProviderType)?.Descriptors ?? [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState!).User;
+        _principalId = DashboardAuthEndpoints.PrincipalIdOf(user);
+        if (_principalId is not null)
+        {
+            _providers = (await Catalog.ListAsync()).Where(p => p.Available).ToList();
+            await LoadAsync();
+        }
+
+        _loaded = true;
+    }
+
+    private async Task LoadAsync()
+        => _mine = await Instances.MineAsync(_principalId!.Value);
+
+    private void StartCreate()
+    {
+        _error = null;
+        _saved = null;
+        _draft = new SlotInstanceDraft();
+    }
+
+    private async Task StartEditAsync(SlotInstanceOverview instance)
+    {
+        _error = null;
+        _saved = null;
+        _draft = await Instances.LoadDraftAsync(instance.Id);
+        if (_draft is not null)
+            EnsureSettingKeys();
+    }
+
+    private void SelectProvider(ProviderCatalogEntry entry)
+    {
+        _draft!.ProviderType = entry.ProviderType;
+        EnsureSettingKeys();
+    }
+
+    private void EnsureSettingKeys()
+    {
+        foreach (var descriptor in Descriptors)
+        {
+            if (!_draft!.Settings.ContainsKey(descriptor.Key))
+                _draft.Settings[descriptor.Key] = descriptor.Kind == SettingKind.Secret
+                    ? ""
+                    : descriptor.DefaultValue ?? "";
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        _busy = true;
+        try
+        {
+            _saved = await Instances.SaveOwnAsync(_principalId!.Value, _draft!);
+            _draft = null;
+            // The Steering Instance applies the bus-published upsert asynchronously.
+            await Task.Delay(500);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DeleteAsync(SlotInstanceOverview instance)
+    {
+        _error = null;
+        _busy = true;
+        try
+        {
+            await Instances.DeleteOwnAsync(_principalId!.Value, instance.Id);
+            _deleteCandidate = null;
+            await Task.Delay(500);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+}

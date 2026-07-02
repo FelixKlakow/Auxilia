@@ -312,6 +312,72 @@ public class SlotInstanceServiceTests
             "both slot bindings and mailbox triggers count as usage");
     }
 
+    // ------------------------------------------------------------------ self-service (my slots)
+
+    [Test]
+    public async Task Mine_ListsOwnedAndAssignedPersonalInstances_Only()
+    {
+        await SeedProviderAsync();
+        var me = Guid.NewGuid();
+        var someoneElse = Guid.NewGuid();
+        await SeedInstanceAsync("company-mailbox");
+        await SeedInstanceAsync("own-seat", scope: "Personal", owner: me);
+        await SeedInstanceAsync("assigned-seat", scope: "Personal", owner: someoneElse, assigned: [me]);
+        await SeedInstanceAsync("foreign-seat", scope: "Personal", owner: someoneElse);
+
+        var mine = await _sut.MineAsync(me);
+
+        Assert.That(mine.Select(i => i.Name), Is.EquivalentTo(new[] { "own-seat", "assigned-seat" }),
+            "company instances and other people's personal instances stay out");
+    }
+
+    [Test]
+    public async Task SaveOwn_ForcesPersonalScopeAndOwnership()
+    {
+        await SeedProviderAsync();
+        var me = Guid.NewGuid();
+        var draft = NewDraft();
+        draft.Scope = "Company"; // the caller cannot escalate to a company instance
+
+        await _sut.SaveOwnAsync(me, draft);
+
+        var command = _bus.Published.Select(p => p.Item2).OfType<UpsertSlotInstanceCommand>().Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(command.Scope, Is.EqualTo("Personal"));
+            Assert.That(command.OwnerPrincipalId, Is.EqualTo(me));
+        });
+    }
+
+    [Test]
+    public async Task SaveOwn_OfSomeoneElsesInstance_IsRefused()
+    {
+        await SeedProviderAsync();
+        await SeedInstanceAsync("foreign-seat", scope: "Personal", owner: Guid.NewGuid());
+        var draft = NewDraft();
+        draft.ExistingName = "foreign-seat";
+
+        var exception = Assert.ThrowsAsync<InvalidOperationException>(
+            () => _sut.SaveOwnAsync(Guid.NewGuid(), draft));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(exception!.Message, Does.Contain("Only the owner"));
+            Assert.That(_bus.Published.Select(p => p.Item2).OfType<UpsertSlotInstanceCommand>(), Is.Empty);
+        });
+    }
+
+    [Test]
+    public async Task DeleteOwn_OfSomeoneElsesInstance_IsRefused()
+    {
+        await SeedProviderAsync();
+        await SeedInstanceAsync("foreign-seat", scope: "Personal", owner: Guid.NewGuid());
+
+        Assert.ThrowsAsync<InvalidOperationException>(
+            () => _sut.DeleteOwnAsync(Guid.NewGuid(), SlotInstanceRecord.IdFor("foreign-seat")));
+        Assert.That(_bus.Published.Select(p => p.Item2).OfType<RemoveSlotInstanceCommand>(), Is.Empty);
+    }
+
     [Test]
     public async Task Delete_OfAnInstanceInUse_IsRefused()
     {

@@ -145,6 +145,46 @@ public sealed class SlotInstanceService(
            || instance.OwnerPrincipalId == principalId
            || instance.AssignedPrincipalIds.Contains(principalId);
 
+    /// <summary>Personal instances the principal owns or was assigned — the "my slots" view.</summary>
+    public async Task<IReadOnlyList<SlotInstanceOverview>> MineAsync(
+        Guid principalId, CancellationToken ct = default)
+        => (await ListAsync(ct))
+            .Where(i => i.Scope == SlotInstanceScope.Personal
+                        && (i.OwnerPrincipalId == principalId || i.AssignedPrincipalIds.Contains(principalId)))
+            .ToList();
+
+    /// <summary>
+    /// Self-service save: the instance is always personal and owned by the caller; editing
+    /// someone else's instance is refused. Admin-made assignments survive the owner's edits.
+    /// </summary>
+    public async Task<string> SaveOwnAsync(
+        Guid principalId, SlotInstanceDraft draft, CancellationToken ct = default)
+    {
+        draft.Scope = SlotInstanceScope.Personal;
+        draft.AssignedPrincipalIds.Clear();
+        if (draft.ExistingName is { } name)
+        {
+            var existing = await instances.ReadAsync(SlotInstanceRecord.IdFor(name), ct)
+                           ?? throw new InvalidOperationException("Unknown slot instance.");
+            if (existing.OwnerPrincipalId != principalId)
+                throw new InvalidOperationException("Only the owner may edit a personal slot instance.");
+            draft.AssignedPrincipalIds.AddRange(
+                JsonSerializer.Deserialize<List<Guid>>(existing.AssignedPrincipalIdsJson) ?? []);
+        }
+
+        return await SaveAsync(principalId.ToString("D"), principalId, draft, ct);
+    }
+
+    /// <summary>Self-service delete: owner-only, still guarded by the usage check.</summary>
+    public async Task DeleteOwnAsync(Guid principalId, Guid id, CancellationToken ct = default)
+    {
+        var record = await instances.ReadAsync(id, ct)
+                     ?? throw new InvalidOperationException("Unknown slot instance.");
+        if (record.OwnerPrincipalId != principalId)
+            throw new InvalidOperationException("Only the owner may delete a personal slot instance.");
+        await DeleteAsync(principalId.ToString("D"), id, ct);
+    }
+
     /// <summary>Loads an instance for editing; stored secret values are masked, never returned.</summary>
     public async Task<SlotInstanceDraft?> LoadDraftAsync(Guid id, CancellationToken ct = default)
     {
