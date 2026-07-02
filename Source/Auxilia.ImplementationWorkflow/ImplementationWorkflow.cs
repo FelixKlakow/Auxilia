@@ -26,6 +26,10 @@ public static class ImplementationWorkflow
             .RequiresPullRequestAccess("pull-request",
                 new PullRequestAccessCapabilities { RequiredPermissions = [PullRequestPermission.Read, PullRequestPermission.Write] })
             .DeclaresOutput("implementation-summary", "output/implementation-summary.json", "Implementation run summary with branch, PR URL, and review notes")
+            // Chaining criteria: a code review's typed output can dispatch this workflow.
+            .ConsumesArtifact("code-review-result")
+            .DeclaresTrigger(TriggerDeclaration.Artifact,
+                "Designed to run after an upstream workflow's artifact (e.g. a code review result).")
             .DeclaresSignal<CompletedSignalPayload>("Completed", "Emitted when the workflow completes successfully")
             .DeclaresSignal<ReviewNotesFlaggedSignalPayload>("ReviewNotesFlagged", "Emitted when the reviewer flags issues")
             .DeclaresSignal<FailedSignalPayload>("Failed", "Emitted when the implementation agent fails")

@@ -115,6 +115,16 @@ public sealed class EmailTaskSourceAdapter(
 
         foreach (var mail in unseen)
         {
+            if (!MatchesFilters(trigger, mail))
+            {
+                // Filtered mails are marked seen without a dispatch so they are not
+                // re-evaluated on every poll. Never log subjects or senders.
+                await mailbox.MarkSeenAsync(mail.Uid, ct);
+                logger.LogInformation(
+                    "Mail skipped by trigger filters. Trigger={TriggerId} Uid={Uid}", trigger.Id, mail.Uid);
+                continue;
+            }
+
             var workItemId = WorkItemIdFor(mail.MessageId);
             var command = new RunWorkflowCommand(
                 Guid.NewGuid(), null, null,
@@ -167,6 +177,12 @@ public sealed class EmailTaskSourceAdapter(
             Folder = settings.GetValueOrDefault("Folder", "INBOX")
         };
     }
+
+    internal static bool MatchesFilters(MailboxTriggerRecord trigger, InboundMail mail)
+        => (string.IsNullOrWhiteSpace(trigger.SubjectContains)
+            || mail.Subject.Contains(trigger.SubjectContains.Trim(), StringComparison.OrdinalIgnoreCase))
+           && (string.IsNullOrWhiteSpace(trigger.FromContains)
+               || mail.From.Contains(trigger.FromContains.Trim(), StringComparison.OrdinalIgnoreCase));
 
     /// <summary>Stable work-item ID from the RFC 5322 Message-Id.</summary>
     internal static string WorkItemIdFor(string messageId)

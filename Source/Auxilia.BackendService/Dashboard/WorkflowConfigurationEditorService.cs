@@ -38,6 +38,9 @@ public sealed class TriggerDraft
     /// <summary>The email slot instance whose mailbox is polled.</summary>
     public Guid? MailboxInstanceId { get; set; }
     public int PollIntervalSeconds { get; set; } = 15;
+    /// <summary>Optional case-insensitive filters; a mail must match both to dispatch.</summary>
+    public string SubjectContains { get; set; } = "";
+    public string FromContains { get; set; } = "";
 }
 
 /// <summary>One slot binding being edited; secret values are write-only (see <see cref="StoredSecretKeys"/>).</summary>
@@ -110,7 +113,9 @@ public sealed record RegisteredWorkflow(
     string DisplayName,
     string Version,
     bool SchemaKnown,
-    IReadOnlyList<RegisteredWorkflowSlot> Slots);
+    IReadOnlyList<RegisteredWorkflowSlot> Slots,
+    IReadOnlyList<TriggerDeclaration> DeclaredTriggers,
+    IReadOnlyList<string> ConsumedArtifacts);
 
 /// <summary>
 /// Backing service of the visual workflow configuration editor (#20).
@@ -266,7 +271,9 @@ public sealed class WorkflowConfigurationEditorService(
                 ExistingId = mailbox.Id,
                 Kind = TriggerKind.Mailbox,
                 MailboxInstanceId = mailbox.SlotInstanceId,
-                PollIntervalSeconds = mailbox.PollIntervalSeconds
+                PollIntervalSeconds = mailbox.PollIntervalSeconds,
+                SubjectContains = mailbox.SubjectContains,
+                FromContains = mailbox.FromContains
             });
 
         return draft;
@@ -397,20 +404,29 @@ public sealed class WorkflowConfigurationEditorService(
 
     // ------------------------------------------------------------------ flow view
 
-    /// <summary>One node column set of the flow view: triggers → workflow → outputs → consumers.</summary>
+    /// <summary>One node graph of the flow view: triggers → workflow → outputs → consumers.</summary>
     public sealed record WorkflowFlow(
         WorkflowConfigurationOverview Configuration,
         IReadOnlyList<FlowTrigger> Triggers,
-        IReadOnlyList<FlowOutput> Outputs,
-        IReadOnlyList<WorkflowConfigurationOverview> ChainCandidates);
+        IReadOnlyList<FlowOutput> Outputs);
 
     public sealed record FlowTrigger(TriggerKind Kind, string Label);
 
-    /// <summary>A declared output and the configurations chained to run after it.</summary>
+    /// <summary>A declared output, the configurations chained to run after it, and the chainable candidates.</summary>
     public sealed record FlowOutput(
-        string Name, string? Description, IReadOnlyList<FlowConsumer> Consumers);
+        string Name, string? Description,
+        IReadOnlyList<FlowConsumer> Consumers,
+        IReadOnlyList<FlowChainCandidate> Candidates);
 
     public sealed record FlowConsumer(Guid ConfigurationId, string DisplayName, Guid TriggerId);
+
+    /// <summary>
+    /// A configuration that can be chained onto an output. <see cref="MatchesCriteria"/> is true
+    /// when its workflow declares it consumes the output's artifact type; workflows declaring no
+    /// consumed artifacts are unconstrained and offered too (but rank behind declared matches).
+    /// </summary>
+    public sealed record FlowChainCandidate(
+        Guid ConfigurationId, string DisplayName, bool MatchesCriteria);
 
     /// <summary>Assembles the flow graph of one configuration from triggers, schema outputs, and chaining records.</summary>
     public async Task<WorkflowFlow?> FlowAsync(Guid id, CancellationToken ct = default)
@@ -429,7 +445,9 @@ public sealed class WorkflowConfigurationEditorService(
         triggers.AddRange((await mailboxTriggers.ReadAsync(ct)).ToList()
             .Where(t => t.WorkflowConfigurationId == id)
             .Select(t => new FlowTrigger(TriggerKind.Mailbox,
-                instanceNames.GetValueOrDefault(t.SlotInstanceId, "(deleted instance)"))));
+                instanceNames.GetValueOrDefault(t.SlotInstanceId, "(deleted instance)")
+                + (t.SubjectContains.Length > 0 ? $" · subject ~ \"{t.SubjectContains}\"" : "")
+                + (t.FromContains.Length > 0 ? $" · from ~ \"{t.FromContains}\"" : ""))));
         var chains = (await artifactTriggers.ReadAsync(ct)).ToList();
         triggers.AddRange(chains
             .Where(t => t.WorkflowConfigurationId == id)
@@ -440,6 +458,12 @@ public sealed class WorkflowConfigurationEditorService(
         var schema = ParseSchema(
             (await workflowSchemas.ReadAsync(WorkflowSchemaRecord.IdFor(configuration.WorkflowType), ct))?.SchemaJson);
         var overviewsById = overviews.ToDictionary(o => o.Id);
+
+        // Chaining criteria: what each candidate's workflow declares it can consume.
+        var consumedByType = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        foreach (var record in (await workflowSchemas.ReadAsync(ct)).ToList())
+            consumedByType[record.WorkflowType] = ParseSchema(record.SchemaJson)?.ConsumedArtifacts ?? [];
+
         var outputs = (schema?.Outputs ?? [])
             .Select(output => new FlowOutput(
                 output.Name, output.Description,
@@ -450,12 +474,22 @@ public sealed class WorkflowConfigurationEditorService(
                         t.WorkflowConfigurationId!.Value,
                         overviewsById[t.WorkflowConfigurationId.Value].DisplayName,
                         t.Id))
+                    .ToList(),
+                overviews
+                    .Where(o => o.Id != id)
+                    .Select(o => new FlowChainCandidate(o.Id, o.DisplayName,
+                        (consumedByType.GetValueOrDefault(o.WorkflowType) ?? [])
+                        .Contains(output.Name, StringComparer.Ordinal)))
+                    // Declared consumption is the criteria; declaring nothing = unconstrained.
+                    .Where(c => c.MatchesCriteria
+                                || (consumedByType.GetValueOrDefault(
+                                        overviewsById[c.ConfigurationId].WorkflowType) ?? []).Count == 0)
+                    .OrderByDescending(c => c.MatchesCriteria)
+                    .ThenBy(c => c.DisplayName, StringComparer.OrdinalIgnoreCase)
                     .ToList()))
             .ToList();
 
-        return new WorkflowFlow(
-            configuration, triggers, outputs,
-            overviews.Where(o => o.Id != id).ToList());
+        return new WorkflowFlow(configuration, triggers, outputs);
     }
 
     /// <summary>
@@ -521,7 +555,9 @@ public sealed class WorkflowConfigurationEditorService(
             schema is not null,
             (schema?.Slots ?? [])
                 .Select(s => new RegisteredWorkflowSlot(s.SlotName, s.Description, s.Contract, s.Optional))
-                .ToList());
+                .ToList(),
+            schema?.Triggers ?? [],
+            schema?.ConsumedArtifacts ?? []);
     }
 
     private static WorkflowSchema? ParseSchema(string? schemaJson)
@@ -839,7 +875,9 @@ public sealed class WorkflowConfigurationEditorService(
                         SlotInstanceId = trigger.MailboxInstanceId!.Value,
                         PollIntervalSeconds = trigger.PollIntervalSeconds,
                         Enabled = draft.Enabled,
-                        RunAsPrincipalId = actorPrincipalId ?? existing?.RunAsPrincipalId
+                        RunAsPrincipalId = actorPrincipalId ?? existing?.RunAsPrincipalId,
+                        SubjectContains = trigger.SubjectContains.Trim(),
+                        FromContains = trigger.FromContains.Trim()
                     };
                     await mailboxTriggers.SaveAsync(record, ct);
                     await auditLog.AppendAsync(actor,

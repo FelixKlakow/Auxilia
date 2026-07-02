@@ -197,6 +197,8 @@ public sealed class WorkflowRegistrationHandler(
             Lifetime = manifest.Lifetime,
             Views = manifest.Views,
             NetworkEndpoints = manifest.NetworkEndpoints,
-            Repositories = manifest.Repositories
+            Repositories = manifest.Repositories,
+            Triggers = manifest.Triggers,
+            ConsumedArtifacts = manifest.ConsumedArtifacts
         };
 }

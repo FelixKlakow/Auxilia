@@ -120,6 +120,37 @@ public class WorkflowBuilderTests
     }
 
     [Test]
+    public void DeclaresTrigger_AndConsumesArtifact_LandInTheSchema()
+    {
+        var builder = WorkflowBuilder.Create("test");
+        builder.DeclaresTrigger(TriggerDeclaration.Mailbox, "driven by mail");
+        builder.ConsumesArtifact("code-review-result");
+        builder.ConsumesArtifact("code-review-result"); // duplicates collapse
+
+        var schema = ((WorkflowBuilder)builder).BuildSchema();
+        var roundTripped = System.Text.Json.JsonSerializer.Deserialize<WorkflowSchema>(
+            System.Text.Json.JsonSerializer.Serialize(schema))!;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(schema.Triggers.Single().Kind, Is.EqualTo(TriggerDeclaration.Mailbox));
+            Assert.That(schema.Triggers.Single().Description, Is.EqualTo("driven by mail"));
+            Assert.That(schema.ConsumedArtifacts, Is.EqualTo(new[] { "code-review-result" }));
+            Assert.That(roundTripped.Triggers.Single().Kind, Is.EqualTo(TriggerDeclaration.Mailbox));
+            Assert.That(roundTripped.ConsumedArtifacts, Is.EqualTo(new[] { "code-review-result" }));
+        });
+    }
+
+    [Test]
+    public void DeclaresTrigger_DuplicateKind_Throws()
+    {
+        var builder = WorkflowBuilder.Create("test");
+        builder.DeclaresTrigger(TriggerDeclaration.Schedule);
+
+        Assert.Throws<InvalidOperationException>(() => builder.DeclaresTrigger(TriggerDeclaration.Schedule));
+    }
+
+    [Test]
     public void Requires_Capabilities_EqualsPassedObject()
     {
         var builder = WorkflowBuilder.Create("test");

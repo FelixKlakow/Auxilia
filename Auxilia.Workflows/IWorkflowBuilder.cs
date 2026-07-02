@@ -27,6 +27,19 @@ public interface IWorkflowBuilder
     IWorkflowBuilder DeclaresOutput(string name, string relativePath, string? description = null);
 
     /// <summary>
+    /// Declares a trigger kind (<see cref="TriggerDeclaration"/>) this workflow is designed to
+    /// be started by. The trigger itself lives outside the workflow — the declaration guides
+    /// configurators to wire one.
+    /// </summary>
+    IWorkflowBuilder DeclaresTrigger(string kind, string? description = null);
+
+    /// <summary>
+    /// Declares an artifact type this workflow can process as input — the criteria used when
+    /// chaining it after another workflow's typed output.
+    /// </summary>
+    IWorkflowBuilder ConsumesArtifact(string artifactType);
+
+    /// <summary>
     /// Declares a network endpoint this workflow needs to reach directly (ARCHITECTURE §10).
     /// Declarations form the signed baseline of the run's effective network policy.
     /// </summary>

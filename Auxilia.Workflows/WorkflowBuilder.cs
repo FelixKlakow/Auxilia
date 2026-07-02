@@ -23,6 +23,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     private readonly List<Workspace.RepositoryDeclaration> _repositories = new();
     private readonly List<SignalDescriptor> _signals = new();
     private readonly List<Views.ViewDescriptor> _views = new();
+    private readonly List<TriggerDeclaration> _triggers = new();
+    private readonly List<string> _consumedArtifacts = new();
     private readonly WorkflowMetadata _metadata = new();
     private Action<IServiceCollection>? _configureServices;
     private Func<IServiceProvider, CancellationToken, Task>? _application;
@@ -84,6 +86,23 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     public IWorkflowBuilder DeclaresOutput(string name, string relativePath, string? description = null)
     {
         _outputs.Add(new WorkflowOutputDescriptor(name, relativePath, description));
+        return this;
+    }
+
+    public IWorkflowBuilder DeclaresTrigger(string kind, string? description = null)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(kind);
+        if (_triggers.Any(t => t.Kind == kind))
+            throw new InvalidOperationException($"Trigger kind '{kind}' has already been declared.");
+        _triggers.Add(new TriggerDeclaration(kind, description));
+        return this;
+    }
+
+    public IWorkflowBuilder ConsumesArtifact(string artifactType)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(artifactType);
+        if (!_consumedArtifacts.Contains(artifactType))
+            _consumedArtifacts.Add(artifactType);
         return this;
     }
 
@@ -360,7 +379,9 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             Lifetime = _lifetime,
             Views = _views.AsReadOnly(),
             NetworkEndpoints = _networkEndpoints.AsReadOnly(),
-            Repositories = _repositories.AsReadOnly()
+            Repositories = _repositories.AsReadOnly(),
+            Triggers = _triggers.AsReadOnly(),
+            ConsumedArtifacts = _consumedArtifacts.AsReadOnly()
         };
 
     internal WorkflowManifest BuildManifest(Guid instanceId = default)
@@ -371,6 +392,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             Lifetime = _lifetime,
             Views = _views.AsReadOnly(),
             NetworkEndpoints = _networkEndpoints.AsReadOnly(),
-            Repositories = _repositories.AsReadOnly()
+            Repositories = _repositories.AsReadOnly(),
+            Triggers = _triggers.AsReadOnly(),
+            ConsumedArtifacts = _consumedArtifacts.AsReadOnly()
         };
 }

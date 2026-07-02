@@ -16,4 +16,6 @@ public sealed record WorkflowManifest(
     public IReadOnlyList<Views.ViewDescriptor> Views { get; init; } = [];
     public IReadOnlyList<Network.NetworkEndpointDeclaration> NetworkEndpoints { get; init; } = [];
     public IReadOnlyList<Workspace.RepositoryDeclaration> Repositories { get; init; } = [];
+    public IReadOnlyList<TriggerDeclaration> Triggers { get; init; } = [];
+    public IReadOnlyList<string> ConsumedArtifacts { get; init; } = [];
 }

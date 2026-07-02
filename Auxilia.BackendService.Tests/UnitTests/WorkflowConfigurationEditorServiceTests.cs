@@ -109,13 +109,14 @@ public class WorkflowConfigurationEditorServiceTests
     /// <summary>Seeds a stored configuration the way the Steering Instance would persist it.</summary>
     private Task SeedConfigurationAsync(
         string name = "team-review", string displayName = "Team review",
-        IReadOnlyDictionary<string, string>? settings = null, bool enabled = true)
+        IReadOnlyDictionary<string, string>? settings = null, bool enabled = true,
+        string workflowType = "pull-request-code-review")
         => _configurations.SaveAsync(new WorkflowConfigurationRecord
         {
             Id = WorkflowConfigurationRecord.IdFor(name),
             Name = name,
             DisplayName = displayName,
-            WorkflowType = "pull-request-code-review",
+            WorkflowType = workflowType,
             PackageUri = "docker://review:1",
             Enabled = enabled,
             SlotBindingsJson = JsonSerializer.Serialize(new List<WorkflowConfigurationSlotBinding>
@@ -574,7 +575,9 @@ public class WorkflowConfigurationEditorServiceTests
         {
             Kind = TriggerKind.Mailbox,
             MailboxInstanceId = SlotInstanceRecord.IdFor("team-mailbox"),
-            PollIntervalSeconds = 30
+            PollIntervalSeconds = 30,
+            SubjectContains = "[review]",
+            FromContains = "@team.example"
         });
 
         var name = await _sut.SaveAsync("actor", null, draft);
@@ -588,6 +591,9 @@ public class WorkflowConfigurationEditorServiceTests
             Assert.That(mailbox.WorkflowConfigurationId, Is.EqualTo(WorkflowConfigurationRecord.IdFor(name)));
             Assert.That(mailbox.SlotInstanceId, Is.EqualTo(SlotInstanceRecord.IdFor("team-mailbox")));
             Assert.That(mailbox.PollIntervalSeconds, Is.EqualTo(30));
+            Assert.That(mailbox.SubjectContains, Is.EqualTo("[review]"),
+                "mail filters persist on the trigger record");
+            Assert.That(mailbox.FromContains, Is.EqualTo("@team.example"));
         });
     }
 
@@ -708,7 +714,54 @@ public class WorkflowConfigurationEditorServiceTests
             Assert.That(output.Name, Is.EqualTo("code-review-result"));
             Assert.That(output.Consumers.Single().DisplayName, Is.EqualTo("Follow up"),
                 "a chaining record on the output's artifact type makes its configuration a consumer");
-            Assert.That(flow.ChainCandidates.Select(c => c.DisplayName), Does.Contain("Follow up"));
+            Assert.That(output.Candidates.Select(c => c.DisplayName), Does.Contain("Follow up"));
+        });
+    }
+
+    [Test]
+    public async Task Flow_ChainCandidates_HonourDeclaredConsumptionCriteria()
+    {
+        await SeedProviderAsync();
+        await SeedOutputSchemaAsync(); // source outputs "code-review-result", declares no consumption
+        await SeedConfigurationAsync(); // source "team-review"
+        // A workflow that DECLARES it consumes the output type ...
+        await _schemas.SaveAsync(new WorkflowSchemaRecord
+        {
+            Id = WorkflowSchemaRecord.IdFor("implementation-workflow"),
+            WorkflowType = "implementation-workflow",
+            SchemaJson = JsonSerializer.Serialize(new WorkflowSchema("implementation-workflow", [], [])
+            {
+                ConsumedArtifacts = ["code-review-result"]
+            })
+        });
+        await SeedConfigurationAsync("implementer", "Implementer", workflowType: "implementation-workflow");
+        // ... one that declares consuming only something ELSE ...
+        await _schemas.SaveAsync(new WorkflowSchemaRecord
+        {
+            Id = WorkflowSchemaRecord.IdFor("report-workflow"),
+            WorkflowType = "report-workflow",
+            SchemaJson = JsonSerializer.Serialize(new WorkflowSchema("report-workflow", [], [])
+            {
+                ConsumedArtifacts = ["weekly-report"]
+            })
+        });
+        await SeedConfigurationAsync("reporter", "Reporter", workflowType: "report-workflow");
+        // ... and one whose workflow declares nothing (unconstrained).
+        await SeedConfigurationAsync("generic", "Generic", workflowType: "unconstrained-workflow");
+
+        var flow = await _sut.FlowAsync(WorkflowConfigurationRecord.IdFor("team-review"));
+
+        var candidates = flow!.Outputs.Single().Candidates;
+        Assert.Multiple(() =>
+        {
+            Assert.That(candidates.Single(c => c.DisplayName == "Implementer").MatchesCriteria, Is.True,
+                "declared consumption of the output type is the matching criteria");
+            Assert.That(candidates.Select(c => c.DisplayName), Does.Not.Contain("Reporter"),
+                "a workflow declaring OTHER consumed types is not offered for this output");
+            Assert.That(candidates.Single(c => c.DisplayName == "Generic").MatchesCriteria, Is.False,
+                "workflows without declared criteria stay chainable but unmatched");
+            Assert.That(candidates[0].DisplayName, Is.EqualTo("Implementer"),
+                "criteria matches rank first");
         });
     }
 

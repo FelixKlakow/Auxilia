@@ -146,7 +146,8 @@ public class EmailTaskSourceAdapterTests
 
     private async Task<MailboxTriggerRecord> SeedTriggerAsync(
         Guid instanceId, Guid? configurationId = null, int pollSeconds = 15,
-        bool enabled = true, Guid? runAs = null)
+        bool enabled = true, Guid? runAs = null,
+        string subjectContains = "", string fromContains = "")
     {
         var record = new MailboxTriggerRecord
         {
@@ -155,7 +156,9 @@ public class EmailTaskSourceAdapterTests
             SlotInstanceId = instanceId,
             PollIntervalSeconds = pollSeconds,
             Enabled = enabled,
-            RunAsPrincipalId = runAs
+            RunAsPrincipalId = runAs,
+            SubjectContains = subjectContains,
+            FromContains = fromContains
         };
         await _triggers.SaveAsync(record);
         return record;
@@ -267,6 +270,51 @@ public class EmailTaskSourceAdapterTests
         {
             firstTrigger.WorkflowConfigurationId, secondTrigger.WorkflowConfigurationId
         }));
+    }
+
+    [Test]
+    public async Task Filters_NonMatchingMailIsMarkedSeenWithoutDispatch()
+    {
+        var instance = await SeedInstanceAsync();
+        await SeedTriggerAsync(instance.Id, subjectContains: "[review]", fromContains: "@team.example");
+        var client = new FakeMailboxClient(_journal);
+        _factory.ByHost["imap.example.org"] = client;
+        client.Unseen.Add(Mail(messageId: "<hit@x>", subject: "Please [review] PR-7",
+            from: "alice@team.example", uid: 1));
+        client.Unseen.Add(Mail(messageId: "<wrong-subject@x>", subject: "Lunch plans",
+            from: "alice@team.example", uid: 2));
+        client.Unseen.Add(Mail(messageId: "<wrong-sender@x>", subject: "Please [review] PR-8",
+            from: "spam@elsewhere.example", uid: 3));
+
+        await _sut.PollDueTriggersAsync(CancellationToken.None);
+
+        var dispatches = _bus.Published.Select(p => p.Message).OfType<RunWorkflowCommand>().ToList();
+        Assert.Multiple(() =>
+        {
+            Assert.That(dispatches, Has.Count.EqualTo(1), "only the matching mail dispatches");
+            Assert.That(dispatches[0].Context["Title"], Is.EqualTo("Please [review] PR-7"));
+            Assert.That(client.MarkedSeen, Is.EquivalentTo(new uint[] { 1, 2, 3 }),
+                "filtered mails are marked seen so they are not re-evaluated forever");
+        });
+    }
+
+    [TestCase("[REVIEW]", "please [review] this", true)]
+    [TestCase("", "anything", true)]
+    [TestCase("[review]", "unrelated", false)]
+    public void MatchesFilters_SubjectIsCaseInsensitiveSubstring(
+        string filter, string subject, bool expected)
+    {
+        var trigger = new MailboxTriggerRecord
+        {
+            Id = Guid.NewGuid(),
+            WorkflowConfigurationId = Guid.NewGuid(),
+            SlotInstanceId = Guid.NewGuid(),
+            SubjectContains = filter
+        };
+
+        Assert.That(
+            EmailTaskSourceAdapter.MatchesFilters(trigger, Mail(subject: subject)),
+            Is.EqualTo(expected));
     }
 
     [Test]

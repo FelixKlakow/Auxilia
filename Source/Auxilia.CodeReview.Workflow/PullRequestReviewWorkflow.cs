@@ -32,6 +32,10 @@ public static class PullRequestReviewWorkflow
             .DeclaresView<AgentChatEntry>("agent-conversation", ViewRendering.Custom, ViewLifecycle.LiveAndPersisted,
                 AgentChatEntry.RendererKey)
             .DeclaresOutput("code-review-result", "code-review-result.json", "Structured code review findings")
+            // The trigger lives outside the workflow (wired per configuration) — this
+            // declaration tells configurators what kind of trigger the workflow expects.
+            .DeclaresTrigger(TriggerDeclaration.Mailbox,
+                "Runs once per incoming work-item mail; subject and body become the review context.")
             .ConfigureServices(services => services.AddCodeReviewWorkflow())
             .WithApplication(ExecuteWorkflowAsync)
             .Run(args);

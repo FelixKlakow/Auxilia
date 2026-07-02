@@ -8,7 +8,7 @@
 <div class="page-back"><a href="workflows">← All workflows</a></div>
 
 <PageHeader Title="@($"Flow of \"{_flow?.Configuration.DisplayName ?? "…"}\"")"
-            Subtitle="What starts runs, what they produce, and which workflows consume the outputs. Chain a workflow onto any output — it runs after every artifact of that type."/>
+            Subtitle="What starts runs, what they produce, and which workflows consume the outputs. Drag a workflow from the palette onto an output to chain it — it then runs after every artifact of that type."/>
 
 @if (!_loaded)
 {
@@ -29,30 +29,33 @@ else
         <div class="panel denied">@_error</div>
     }
 
-    <div class="flow-canvas">
-        <div class="flow-column">
-            <span class="flow-column-label">Triggers</span>
+    <div class="flow-layout">
+        <div class="flow-board" style="width:@(Px(BoardWidth)); height:@(Px(_boardHeight));">
+            <svg class="flow-edges" width="@BoardWidth" height="@_boardHeight"
+                 viewBox="0 0 @BoardWidth @_boardHeight" aria-hidden="true">
+                @foreach (var edge in _edges)
+                {
+                    <path d="@edge" fill="none"/>
+                }
+            </svg>
+
             @if (_flow.Triggers.Count == 0)
             {
-                <div class="flow-node flow-node-ghost">
-                    <span class="flow-node-title">No triggers</span>
+                <div class="flow-node flow-node-ghost flow-abs" style="@Style(_triggerBoxes[0])">
+                    <span class="flow-node-kind">no triggers</span>
                     <span class="flow-node-subtitle">rerun / manual dispatch only</span>
                 </div>
             }
-            @foreach (var trigger in _flow.Triggers)
+            @foreach (var (trigger, index) in _flow.Triggers.Select((t, i) => (t, i)))
             {
-                <div class="flow-node flow-node-trigger">
+                <div class="flow-node flow-node-trigger flow-abs" style="@Style(_triggerBoxes[index])">
                     <span class="flow-node-kind">@TriggerKindLabel(trigger.Kind)</span>
                     <span class="flow-node-title">@trigger.Label</span>
                 </div>
             }
-        </div>
 
-        <div class="flow-connector" aria-hidden="true"></div>
-
-        <div class="flow-column">
-            <span class="flow-column-label">Workflow</span>
-            <div class="flow-node flow-node-workflow">
+            <div class="flow-node flow-node-workflow flow-abs" style="@Style(_workflowBox)">
+                <span class="flow-node-kind">workflow</span>
                 <span class="flow-node-title">@_flow.Configuration.DisplayName</span>
                 <span class="flow-node-subtitle">@_flow.Configuration.WorkflowType</span>
                 <span class="badge badge-state @(_flow.Configuration.Enabled ? "badge-success" : "badge-cancelled")">
@@ -60,24 +63,22 @@ else
                 </span>
                 <a class="btn btn-secondary btn-sm" href="workflows/@_flow.Configuration.Id/edit">Edit</a>
             </div>
-        </div>
 
-        <div class="flow-connector" aria-hidden="true"></div>
-
-        <div class="flow-column flow-column-outputs">
-            <span class="flow-column-label">Outputs → chained workflows</span>
             @if (_flow.Outputs.Count == 0)
             {
-                <div class="flow-node flow-node-ghost">
-                    <span class="flow-node-title">No declared outputs</span>
-                    <span class="flow-node-subtitle">
-                        the workflow's schema declares none (or has not been seen yet)
-                    </span>
+                <div class="flow-node flow-node-ghost flow-abs" style="@Style(_outputBoxes[0])">
+                    <span class="flow-node-kind">no outputs</span>
+                    <span class="flow-node-subtitle">the workflow's schema declares none (or has not been seen yet)</span>
                 </div>
             }
-            @foreach (var output in _flow.Outputs)
+            @foreach (var (output, index) in _flow.Outputs.Select((o, i) => (o, i)))
             {
-                <div class="flow-node flow-node-output">
+                <div class="flow-node flow-node-output flow-abs @(_dropTarget == output.Name ? "flow-drop-hover" : null)"
+                     style="@Style(_outputBoxes[index])"
+                     @ondragover:preventDefault
+                     @ondragenter="() => _dropTarget = output.Name"
+                     @ondragleave="() => _dropTarget = null"
+                     @ondrop="() => DropAsync(output)">
                     <span class="flow-node-kind">artifact</span>
                     <span class="flow-node-title">@output.Name</span>
                     @if (output.Description is { Length: > 0 })
@@ -85,44 +86,63 @@ else
                         <span class="flow-node-subtitle">@output.Description</span>
                     }
 
-                    <div class="flow-consumers">
-                        @foreach (var consumer in output.Consumers)
-                        {
-                            <span class="flow-consumer">
-                                <a href="workflows/@consumer.ConfigurationId/flow">@consumer.DisplayName</a>
-                                <button class="flow-consumer-remove" title="Remove this chaining"
-                                        disabled="@_busy"
-                                        @onclick="() => UnchainAsync(consumer.TriggerId)">×</button>
-                            </span>
-                        }
-                    </div>
-
-                    @if (_flow.ChainCandidates.Count > 0)
+                    @if (output.Consumers.Count > 0)
                     {
-                        <div class="flow-chain-row">
-                            <select class="input-inline" @bind="_chainTargets[output.Name]">
-                                <option value="">Chain a workflow…</option>
-                                @foreach (var candidate in _flow.ChainCandidates)
-                                {
-                                    <option value="@candidate.Id">@candidate.DisplayName</option>
-                                }
-                            </select>
-                            <button class="btn btn-secondary btn-sm" disabled="@_busy"
-                                    @onclick="() => ChainAsync(output.Name)">Chain</button>
+                        <div class="flow-consumers">
+                            @foreach (var consumer in output.Consumers)
+                            {
+                                <span class="flow-consumer">
+                                    <a href="workflows/@consumer.ConfigurationId/flow">@consumer.DisplayName</a>
+                                    <button class="flow-consumer-remove" title="Remove this chaining"
+                                            disabled="@_busy"
+                                            @onclick="() => UnchainAsync(consumer.TriggerId)">×</button>
+                                </span>
+                            }
                         </div>
+                    }
+                    else
+                    {
+                        <span class="flow-node-subtitle flow-drop-hint">drop a workflow here to chain it</span>
                     }
                 </div>
             }
         </div>
-    </div>
 
-    <p class="field-hint">
-        Chained workflows run after <em>every</em> artifact of the output's type and receive the
-        artifact reference in their run context.
-    </p>
+        <div class="flow-palette">
+            <span class="flow-column-label">Chainable workflows</span>
+            @if (PaletteCandidates.Count == 0)
+            {
+                <p class="muted">No other workflow configurations exist yet.</p>
+            }
+            @foreach (var candidate in PaletteCandidates)
+            {
+                <div class="flow-palette-card @(candidate.MatchesAnyOutput ? null : "flow-palette-unmatched")"
+                     draggable="true"
+                     @ondragstart="() => _dragged = candidate.ConfigurationId"
+                     @ondragend="() => { _dragged = null; _dropTarget = null; }">
+                    <span class="flow-node-title">@candidate.DisplayName</span>
+                    <span class="flow-node-subtitle">
+                        @(candidate.MatchesAnyOutput
+                            ? "declares it consumes an output of this workflow"
+                            : "no declared input criteria — chain freely")
+                    </span>
+                </div>
+            }
+            <p class="field-hint">
+                Drag a card onto an output node. Workflows declaring consumed artifact types are
+                offered only where the type matches; the run receives the artifact reference in
+                its context.
+            </p>
+        </div>
+    </div>
 }
 
 @code {
+
+    private const double NodeWidth = 280;
+    private const double ColumnGap = 130;
+    private const double RowGap = 26;
+    private const double BoardWidth = NodeWidth * 3 + ColumnGap * 2;
 
     [Parameter]
     public Guid ConfigurationId { get; set; }
@@ -136,8 +156,29 @@ else
     private string _denyReason = "";
     private string? _error;
     private Guid? _principalId;
+    private Guid? _dragged;
+    private string? _dropTarget;
     private WorkflowConfigurationEditorService.WorkflowFlow? _flow;
-    private readonly Dictionary<string, string> _chainTargets = new(StringComparer.Ordinal);
+
+    private sealed record Box(double X, double Y, double W, double H);
+
+    private sealed record PaletteCandidate(Guid ConfigurationId, string DisplayName, bool MatchesAnyOutput);
+
+    private IReadOnlyList<Box> _triggerBoxes = [];
+    private Box _workflowBox = new(0, 0, NodeWidth, 0);
+    private IReadOnlyList<Box> _outputBoxes = [];
+    private IReadOnlyList<string> _edges = [];
+    private double _boardHeight;
+
+    /// <summary>Every distinct chain candidate across the outputs, criteria-matching ones first.</summary>
+    private IReadOnlyList<PaletteCandidate> PaletteCandidates
+        => (_flow?.Outputs ?? [])
+            .SelectMany(o => o.Candidates)
+            .GroupBy(c => c.ConfigurationId)
+            .Select(g => new PaletteCandidate(g.Key, g.First().DisplayName, g.Any(c => c.MatchesCriteria)))
+            .OrderByDescending(c => c.MatchesAnyOutput)
+            .ThenBy(c => c.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
     protected override async Task OnParametersSetAsync()
     {
@@ -164,9 +205,74 @@ else
     private async Task LoadAsync()
     {
         _flow = await Editor.FlowAsync(ConfigurationId);
-        foreach (var output in _flow?.Outputs ?? [])
-            _chainTargets.TryAdd(output.Name, "");
+        if (_flow is not null)
+            ComputeLayout();
     }
+
+    /// <summary>
+    /// Column layout with estimated node heights: triggers left, the workflow centered, outputs
+    /// right; every node gets an absolute box and every connection a bezier edge between the
+    /// facing edge midpoints.
+    /// </summary>
+    private void ComputeLayout()
+    {
+        var triggerHeights = _flow!.Triggers.Count == 0
+            ? new List<double> { 84 }
+            : _flow.Triggers.Select(_ => 84d).ToList();
+        var outputHeights = _flow.Outputs.Count == 0
+            ? new List<double> { 96 }
+            : _flow.Outputs.Select(o =>
+                120d
+                + (o.Description is { Length: > 0 } ? 20 : 0)
+                + (o.Consumers.Count > 0 ? o.Consumers.Count * 34 : 22)).ToList();
+        const double workflowHeight = 170;
+
+        double ColumnHeight(IReadOnlyList<double> heights)
+            => heights.Sum() + RowGap * Math.Max(0, heights.Count - 1);
+
+        var triggerColumn = ColumnHeight(triggerHeights);
+        var outputColumn = ColumnHeight(outputHeights);
+        _boardHeight = Math.Max(workflowHeight, Math.Max(triggerColumn, outputColumn)) + 40;
+
+        List<Box> Stack(IReadOnlyList<double> heights, double x, double columnHeight)
+        {
+            var boxes = new List<Box>();
+            var y = (_boardHeight - columnHeight) / 2;
+            foreach (var height in heights)
+            {
+                boxes.Add(new Box(x, y, NodeWidth, height));
+                y += height + RowGap;
+            }
+            return boxes;
+        }
+
+        _triggerBoxes = Stack(triggerHeights, 0, triggerColumn);
+        _workflowBox = new Box(NodeWidth + ColumnGap, (_boardHeight - workflowHeight) / 2, NodeWidth, workflowHeight);
+        _outputBoxes = Stack(outputHeights, (NodeWidth + ColumnGap) * 2, outputColumn);
+
+        var edges = new List<string>();
+        if (_flow.Triggers.Count > 0)
+            edges.AddRange(_triggerBoxes.Select(box => Edge(box, _workflowBox)));
+        if (_flow.Outputs.Count > 0)
+            edges.AddRange(_outputBoxes.Select(box => Edge(_workflowBox, box)));
+        _edges = edges;
+    }
+
+    private static string Edge(Box from, Box to)
+    {
+        var x1 = from.X + from.W;
+        var y1 = from.Y + from.H / 2;
+        var x2 = to.X;
+        var y2 = to.Y + to.H / 2;
+        var bend = (x2 - x1) / 2;
+        return FormattableString.Invariant($"M {x1} {y1} C {x1 + bend} {y1}, {x2 - bend} {y2}, {x2} {y2}");
+    }
+
+    private static string Px(double value) => FormattableString.Invariant($"{value}px");
+
+    private static string Style(Box box)
+        => FormattableString.Invariant(
+            $"left:{box.X}px; top:{box.Y}px; width:{box.W}px; min-height:{box.H}px;");
 
     private static string TriggerKindLabel(TriggerKind kind) => kind switch
     {
@@ -176,17 +282,28 @@ else
         _ => kind.ToString().ToLowerInvariant()
     };
 
-    private async Task ChainAsync(string outputName)
+    private async Task DropAsync(WorkflowConfigurationEditorService.FlowOutput output)
     {
-        if (!Guid.TryParse(_chainTargets.GetValueOrDefault(outputName), out var targetId))
+        _dropTarget = null;
+        if (_dragged is not { } candidateId)
             return;
+        _dragged = null;
+
+        if (output.Candidates.FirstOrDefault(c => c.ConfigurationId == candidateId) is not { } candidate)
+        {
+            // The palette offered it for another output only — its workflow declares consumed
+            // artifact types and this output's type is not among them.
+            _error = $"That workflow does not declare it can consume '{output.Name}'.";
+            return;
+        }
+
         _error = null;
         _busy = true;
         try
         {
             await Editor.ChainAsync(
-                _principalId!.Value.ToString("D"), _principalId, ConfigurationId, outputName, targetId);
-            _chainTargets[outputName] = "";
+                _principalId!.Value.ToString("D"), _principalId, ConfigurationId, output.Name,
+                candidate.ConfigurationId);
             await LoadAsync();
         }
         catch (Exception ex)

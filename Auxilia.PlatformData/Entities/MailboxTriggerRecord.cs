@@ -17,4 +17,10 @@ public sealed record MailboxTriggerRecord : IEntity
     public bool Enabled { get; init; } = true;
     /// <summary>Principal on whose behalf mail-triggered dispatches run (policy-checked).</summary>
     public Guid? RunAsPrincipalId { get; init; }
+
+    /// <summary>Case-insensitive substring the subject must contain; empty = every subject.</summary>
+    public string SubjectContains { get; init; } = "";
+
+    /// <summary>Case-insensitive substring the sender must contain; empty = every sender.</summary>
+    public string FromContains { get; init; } = "";
 }

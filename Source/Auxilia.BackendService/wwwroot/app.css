@@ -896,24 +896,22 @@ select { cursor: pointer; }
 
 /* ---------------------------------------------------------------- flow view */
 
-.flow-canvas {
+.flow-layout {
     display: flex;
-    align-items: center;
-    gap: 0;
+    flex-wrap: wrap; /* the palette drops below the board when the content area is narrow */
+    align-items: flex-start;
+    gap: 2rem;
     padding: 1.5rem 0.5rem;
     overflow-x: auto;
 }
 
-.flow-column {
-    display: flex;
-    flex-direction: column;
-    gap: 0.9rem;
-    min-width: 15rem;
-    max-width: 22rem;
-    flex: 1;
-}
+/* The node board: absolutely positioned nodes over an SVG edge layer. */
+.flow-board { position: relative; flex: 0 0 auto; }
 
-.flow-column-outputs { max-width: 28rem; }
+.flow-edges { position: absolute; inset: 0; pointer-events: none; }
+.flow-edges path { stroke: var(--border); stroke-width: 2; }
+
+.flow-abs { position: absolute; box-sizing: border-box; }
 
 .flow-column-label {
     font-size: 0.75rem;
@@ -937,7 +935,7 @@ select { cursor: pointer; }
 }
 
 .flow-node-trigger  { border-left: 3px solid #7c6ff0; }
-.flow-node-workflow { border-left: 3px solid #2f9e6e; padding: 1.1rem 1.2rem; }
+.flow-node-workflow { border-left: 3px solid #2f9e6e; }
 .flow-node-output   { border-left: 3px solid #d9822b; }
 .flow-node-ghost    { border-style: dashed; background: var(--surface-muted); }
 
@@ -952,27 +950,10 @@ select { cursor: pointer; }
 .flow-node-title { font-weight: 600; }
 .flow-node-subtitle { font-size: 0.82rem; color: var(--text-secondary); }
 
-/* Column-to-column edge: a line with an arrow head. */
-.flow-connector {
-    flex: 0 0 3rem;
-    height: 2px;
-    background: var(--border);
-    position: relative;
-    align-self: center;
-    margin: 0 0.2rem;
-}
+.flow-drop-hover { outline: 2px dashed #d9822b; outline-offset: 2px; }
+.flow-drop-hint { font-style: italic; }
 
-.flow-connector::after {
-    content: "";
-    position: absolute;
-    right: -1px;
-    top: -4px;
-    border-left: 8px solid var(--border);
-    border-top: 5px solid transparent;
-    border-bottom: 5px solid transparent;
-}
-
-.flow-consumers { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.flow-consumers { display: flex; flex-direction: column; gap: 0.35rem; }
 
 .flow-consumer {
     display: inline-flex;
@@ -997,7 +978,29 @@ select { cursor: pointer; }
 
 .flow-consumer-remove:hover { color: #c0392b; }
 
-.flow-chain-row { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.3rem; }
+/* The drag palette of chainable workflow configurations. */
+.flow-palette {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+    min-width: 16rem;
+    max-width: 20rem;
+}
+
+.flow-palette-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    padding: 0.7rem 0.9rem;
+    cursor: grab;
+    box-shadow: 0 1px 2px rgba(15, 18, 34, 0.06);
+}
+
+.flow-palette-card:active { cursor: grabbing; }
+.flow-palette-unmatched { opacity: 0.65; }
 
 .slot-name-label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.86rem; font-weight: 500; color: var(--text-secondary); }
 .slot-name-input { max-width: 16rem; min-width: 12rem; }
