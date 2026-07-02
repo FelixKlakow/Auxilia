@@ -1053,6 +1053,15 @@ select { cursor: pointer; }
     stroke-width: 4px;
 }
 
+/* Editor's inline "create a reusable instance right here" form. */
+.inline-instance-form {
+    margin: 0.8rem 0;
+    padding: 0.9rem 1rem;
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface-muted);
+}
+
 .flow-consumers { display: flex; flex-direction: column; gap: 0.35rem; }
 
 .flow-consumer {
