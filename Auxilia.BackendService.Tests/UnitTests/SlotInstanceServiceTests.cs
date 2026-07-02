@@ -35,6 +35,8 @@ public class SlotInstanceServiceTests
 
     private RecordingBus _bus = null!;
     private IDataAccess<SlotInstanceRecord> _instances = null!;
+    private IDataAccess<WorkflowConfigurationRecord> _configurations = null!;
+    private IDataAccess<MailboxTriggerRecord> _mailboxTriggers = null!;
     private IDataAccess<SlotProviderRecord> _providers = null!;
     private IDataAccess<ProviderCatalogRecord> _catalogRecords = null!;
     private IDataAccess<AuditRecord> _audit = null!;
@@ -46,13 +48,15 @@ public class SlotInstanceServiceTests
     {
         _bus = new RecordingBus();
         _instances = new InMemoryDataAccess<SlotInstanceRecord>();
+        _configurations = new InMemoryDataAccess<WorkflowConfigurationRecord>();
+        _mailboxTriggers = new InMemoryDataAccess<MailboxTriggerRecord>();
         _providers = new InMemoryDataAccess<SlotProviderRecord>();
         _catalogRecords = new InMemoryDataAccess<ProviderCatalogRecord>();
         _audit = new InMemoryDataAccess<AuditRecord>();
         _protector = new NullSettingsProtector();
         var auditLog = new AuditLog(_audit, TimeProvider.System);
         _sut = new SlotInstanceService(
-            _instances,
+            _instances, _configurations, _mailboxTriggers,
             new ProviderCatalogService(_providers, _catalogRecords, auditLog),
             _protector, _bus, auditLog);
     }
@@ -61,6 +65,8 @@ public class SlotInstanceServiceTests
     public void TearDown()
     {
         (_instances as IDisposable)?.Dispose();
+        (_configurations as IDisposable)?.Dispose();
+        (_mailboxTriggers as IDisposable)?.Dispose();
         (_providers as IDisposable)?.Dispose();
         (_catalogRecords as IDisposable)?.Dispose();
         (_audit as IDisposable)?.Dispose();
@@ -229,6 +235,101 @@ public class SlotInstanceServiceTests
                 .OfType<RemoveSlotInstanceCommand>().Single();
             Assert.That(removal.Name, Is.EqualTo("team-mailbox"));
             Assert.That((await _audit.ReadAsync()).Any(a => a.Action == "slot-instance.deleted"), Is.True);
+        });
+    }
+
+    // ------------------------------------------------------------------ usage & masking
+
+    private Task SeedConfigurationUsingInstanceAsync(
+        string name = "team-review", Guid? viaBinding = null, string displayName = "Team review")
+        => _configurations.SaveAsync(new WorkflowConfigurationRecord
+        {
+            Id = WorkflowConfigurationRecord.IdFor(name),
+            Name = name,
+            DisplayName = displayName,
+            WorkflowType = "pull-request-code-review",
+            PackageUri = "docker://review:1",
+            SlotBindingsJson = JsonSerializer.Serialize(new List<WorkflowConfigurationSlotBinding>
+            {
+                new()
+                {
+                    SlotName = "work-items",
+                    ProviderType = "email-work-items",
+                    ProtectedSettingsJson = "{}",
+                    SlotInstanceId = viaBinding
+                }
+            })
+        });
+
+    [Test]
+    public async Task List_ShowsPlainValues_AndMasksOnlySecrets()
+    {
+        await SeedProviderAsync();
+        await SeedInstanceAsync();
+
+        var overview = (await _sut.ListAsync()).Single();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(overview.Settings.Single(s => s.Key == "ImapHost").Value,
+                Is.EqualTo("imap.example.org"), "declared-plain settings show their value in the list");
+            Assert.That(overview.Settings.Single(s => s.Key == "Password").Value,
+                Is.Null, "secret values never leave the service");
+        });
+    }
+
+    [Test]
+    public async Task List_MasksEverySetting_WhenTheProviderDeclaresNoDescriptors()
+    {
+        // No provider record at all: nothing is declared plain, so nothing may render.
+        await SeedInstanceAsync();
+
+        var overview = (await _sut.ListAsync()).Single();
+
+        Assert.That(overview.Settings.Select(s => s.Value), Is.All.Null,
+            "unknown keys are never guessed to be safe");
+    }
+
+    [Test]
+    public async Task List_ReportsWhichConfigurationsUseTheInstance()
+    {
+        await SeedProviderAsync();
+        await SeedInstanceAsync();
+        var instanceId = SlotInstanceRecord.IdFor("team-mailbox");
+        await SeedConfigurationUsingInstanceAsync("via-binding", viaBinding: instanceId, displayName: "Via binding");
+        await SeedConfigurationUsingInstanceAsync("via-trigger", displayName: "Via trigger");
+        await _mailboxTriggers.SaveAsync(new MailboxTriggerRecord
+        {
+            Id = Guid.NewGuid(),
+            WorkflowConfigurationId = WorkflowConfigurationRecord.IdFor("via-trigger"),
+            SlotInstanceId = instanceId
+        });
+
+        var overview = (await _sut.ListAsync()).Single();
+
+        Assert.That(overview.UsedByConfigurations,
+            Is.EquivalentTo(new[] { "Via binding", "Via trigger" }),
+            "both slot bindings and mailbox triggers count as usage");
+    }
+
+    [Test]
+    public async Task Delete_OfAnInstanceInUse_IsRefused()
+    {
+        await SeedProviderAsync();
+        await SeedInstanceAsync();
+        var instanceId = SlotInstanceRecord.IdFor("team-mailbox");
+        await SeedConfigurationUsingInstanceAsync(viaBinding: instanceId);
+
+        var exception = Assert.ThrowsAsync<InvalidOperationException>(
+            () => _sut.DeleteAsync("actor", instanceId));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(exception!.Message, Does.Contain("still used by 1 workflow configuration")
+                .And.Contain("Team review"));
+            Assert.That(_bus.Published.OfType<(string, object)>()
+                .Select(p => p.Item2).OfType<RemoveSlotInstanceCommand>(), Is.Empty,
+                "no removal reaches the bus while the instance is referenced");
         });
     }
 }

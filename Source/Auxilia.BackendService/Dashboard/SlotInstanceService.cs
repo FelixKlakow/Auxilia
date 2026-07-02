@@ -9,7 +9,7 @@ using Auxilia.Workflows.Messaging.Messages;
 
 namespace Auxilia.BackendService.Dashboard;
 
-/// <summary>One reusable slot instance on the slots page; settings values never leave the store.</summary>
+/// <summary>One reusable slot instance on the slots page; secret values never leave the store.</summary>
 public sealed record SlotInstanceOverview(
     Guid Id,
     string Name,
@@ -19,8 +19,15 @@ public sealed record SlotInstanceOverview(
     string Scope,
     Guid? OwnerPrincipalId,
     IReadOnlyList<Guid> AssignedPrincipalIds,
-    IReadOnlyList<string> SettingKeys,
-    DateTimeOffset UpdatedUtc);
+    IReadOnlyList<SlotInstanceSetting> Settings,
+    IReadOnlyList<string> UsedByConfigurations,
+    DateTimeOffset UpdatedUtc)
+{
+    public IReadOnlyList<string> SettingKeys => Settings.Select(s => s.Key).ToList();
+}
+
+/// <summary>One stored setting: the value is shown for plain settings, null (masked) for secrets.</summary>
+public sealed record SlotInstanceSetting(string Key, string? Value);
 
 /// <summary>Mutable editing model of a slot instance; secret values are write-only.</summary>
 public sealed class SlotInstanceDraft
@@ -47,6 +54,8 @@ public sealed class SlotInstanceDraft
 /// </summary>
 public sealed class SlotInstanceService(
     IDataAccess<SlotInstanceRecord> instances,
+    IDataAccess<WorkflowConfigurationRecord> configurations,
+    IDataAccess<MailboxTriggerRecord> mailboxTriggers,
     ProviderCatalogService catalog,
     ISettingsProtector protector,
     IMessageBusClient messageBus,
@@ -56,12 +65,74 @@ public sealed class SlotInstanceService(
 
     public async Task<IReadOnlyList<SlotInstanceOverview>> ListAsync(CancellationToken ct = default)
     {
-        var categories = (await catalog.ListAsync(ct))
+        var catalogEntries = await catalog.ListAsync(ct);
+        var categories = catalogEntries
             .ToDictionary(e => e.ProviderType, e => e.Category, StringComparer.Ordinal);
+        // Conservative masking: a value renders only when the provider's manifest explicitly
+        // declares the key as non-secret. Unknown keys (no descriptor, unknown provider) stay
+        // masked — never guess that something is safe to show.
+        var plainKeysByProvider = catalogEntries
+            .ToDictionary(
+                e => e.ProviderType,
+                e => e.Descriptors
+                    .Where(d => d.Kind != SettingKind.Secret)
+                    .Select(d => d.Key)
+                    .ToHashSet(StringComparer.Ordinal),
+                StringComparer.Ordinal);
+        var usage = await UsageAsync(ct);
         return (await instances.ReadAsync(ct)).ToList()
-            .Select(record => ToOverview(record, categories.GetValueOrDefault(record.ProviderType, "")))
+            .Select(record => ToOverview(
+                record,
+                categories.GetValueOrDefault(record.ProviderType, ""),
+                plainKeysByProvider.GetValueOrDefault(record.ProviderType) ?? [],
+                usage.GetValueOrDefault(record.Id) ?? []))
             .OrderBy(i => i.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    /// <summary>
+    /// Which configurations reference each instance — through a slot binding or a mailbox
+    /// trigger. Deleting an instance that appears here would break them at pre-flight.
+    /// </summary>
+    private async Task<Dictionary<Guid, List<string>>> UsageAsync(CancellationToken ct)
+    {
+        var configs = (await configurations.ReadAsync(ct)).ToList();
+        var configNamesById = configs.ToDictionary(c => c.Id, c => c.DisplayName);
+        var usage = new Dictionary<Guid, List<string>>();
+
+        void Add(Guid instanceId, string configurationName)
+        {
+            if (!usage.TryGetValue(instanceId, out var names))
+                usage[instanceId] = names = [];
+            if (!names.Contains(configurationName, StringComparer.Ordinal))
+                names.Add(configurationName);
+        }
+
+        foreach (var config in configs)
+        {
+            List<WorkflowConfigurationSlotBinding> bindings;
+            try
+            {
+                bindings = JsonSerializer.Deserialize<List<WorkflowConfigurationSlotBinding>>(
+                    config.SlotBindingsJson) ?? [];
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+
+            foreach (var binding in bindings.Where(b => b.SlotInstanceId is not null))
+                Add(binding.SlotInstanceId!.Value, config.DisplayName);
+        }
+
+        foreach (var trigger in (await mailboxTriggers.ReadAsync(ct)).ToList())
+        {
+            if (trigger.WorkflowConfigurationId is { } configId
+                && configNamesById.TryGetValue(configId, out var name))
+                Add(trigger.SlotInstanceId, name);
+        }
+
+        return usage;
     }
 
     /// <summary>The instances <paramref name="principalId"/> may bind: company-scoped, own, or assigned.</summary>
@@ -156,11 +227,21 @@ public sealed class SlotInstanceService(
         return name;
     }
 
-    /// <summary>Publishes the removal over the bus; configurations still referencing it fail pre-flight.</summary>
+    /// <summary>
+    /// Publishes the removal over the bus. Refused while any configuration still references
+    /// the instance — a deleted-but-referenced instance only surfaces later as a pre-flight
+    /// failure, which is the worst possible time.
+    /// </summary>
     public async Task DeleteAsync(string actor, Guid id, CancellationToken ct = default)
     {
         var record = await instances.ReadAsync(id, ct)
                      ?? throw new InvalidOperationException("Unknown slot instance.");
+
+        var usedBy = (await UsageAsync(ct)).GetValueOrDefault(id);
+        if (usedBy is { Count: > 0 })
+            throw new InvalidOperationException(
+                $"\"{record.DisplayName}\" is still used by {usedBy.Count} workflow configuration{(usedBy.Count == 1 ? "" : "s")} "
+                + $"({string.Join(", ", usedBy)}) — unbind it there first.");
 
         await messageBus.DeclareExchangeAsync(SeedExchangeName, ct);
         await messageBus.PublishToExchangeAsync(SeedExchangeName, new RemoveSlotInstanceCommand(record.Name), ct);
@@ -219,12 +300,21 @@ public sealed class SlotInstanceService(
         }
     }
 
-    private SlotInstanceOverview ToOverview(SlotInstanceRecord record, string category)
+    private SlotInstanceOverview ToOverview(
+        SlotInstanceRecord record, string category, HashSet<string> declaredPlainKeys,
+        IReadOnlyList<string> usedByConfigurations)
         => new(
             record.Id, record.Name, record.DisplayName, record.ProviderType, category,
             record.Scope, record.OwnerPrincipalId,
             JsonSerializer.Deserialize<List<Guid>>(record.AssignedPrincipalIdsJson) ?? [],
-            UnprotectSettings(record.ProtectedSettingsJson).Keys.Order(StringComparer.Ordinal).ToList(),
+            UnprotectSettings(record.ProtectedSettingsJson)
+                .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                // Declared-plain settings show their value so an operator can tell WHICH
+                // mailbox/host an instance points at from the list; everything else is masked.
+                .Select(kv => new SlotInstanceSetting(
+                    kv.Key, declaredPlainKeys.Contains(kv.Key) ? kv.Value : null))
+                .ToList(),
+            usedByConfigurations,
             record.UpdatedUtc);
 
     private Dictionary<string, string> UnprotectSettings(string protectedSettingsJson)

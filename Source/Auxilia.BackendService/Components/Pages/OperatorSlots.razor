@@ -65,6 +65,7 @@ else
                     <th>Provider</th>
                     <th>Scope</th>
                     <th>Settings</th>
+                    <th>Used by</th>
                     <th>Actions</th>
                 </tr>
                 </thead>
@@ -92,20 +93,41 @@ else
                             }
                         </td>
                         <td>
-                            @if (instance.SettingKeys.Count == 0)
+                            @if (instance.Settings.Count == 0)
                             {
                                 <span class="muted">(none)</span>
                             }
-                            @foreach (var key in instance.SettingKeys)
+                            @foreach (var setting in instance.Settings)
                             {
-                                <span class="badge badge-secret">@key = •••</span>
+                                <span class="badge badge-secret" title="@(setting.Value is null ? "secret — write-only" : setting.Value)">
+                                    @setting.Key = @(setting.Value ?? "•••")
+                                </span>
+                            }
+                        </td>
+                        <td>
+                            @if (instance.UsedByConfigurations.Count == 0)
+                            {
+                                <span class="muted">not in use</span>
+                            }
+                            else
+                            {
+                                <span class="type-chip" title="@string.Join(", ", instance.UsedByConfigurations)">
+                                    @instance.UsedByConfigurations.Count workflow@(instance.UsedByConfigurations.Count == 1 ? "" : "s")
+                                </span>
                             }
                         </td>
                         <td>
                             <div class="cell-actions">
                                 <button class="btn btn-secondary btn-sm" disabled="@_busy"
                                         @onclick="() => StartEditAsync(instance)">Edit</button>
-                                @if (_deleteCandidate == instance.Id)
+                                @if (instance.UsedByConfigurations.Count > 0)
+                                {
+                                    <button class="btn btn-danger btn-sm" disabled
+                                            title="@($"Used by {string.Join(", ", instance.UsedByConfigurations)} — unbind it there first.")">
+                                        Delete
+                                    </button>
+                                }
+                                else if (_deleteCandidate == instance.Id)
                                 {
                                     <span class="confirm-inline">
                                         Delete "@instance.DisplayName"?
