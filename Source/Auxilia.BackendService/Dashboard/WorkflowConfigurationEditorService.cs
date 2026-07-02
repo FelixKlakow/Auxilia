@@ -395,6 +395,106 @@ public sealed class WorkflowConfigurationEditorService(
         await auditLog.AppendAsync(actor, "workflow-configuration.deleted", record.Name, "removed", ct: ct);
     }
 
+    // ------------------------------------------------------------------ flow view
+
+    /// <summary>One node column set of the flow view: triggers → workflow → outputs → consumers.</summary>
+    public sealed record WorkflowFlow(
+        WorkflowConfigurationOverview Configuration,
+        IReadOnlyList<FlowTrigger> Triggers,
+        IReadOnlyList<FlowOutput> Outputs,
+        IReadOnlyList<WorkflowConfigurationOverview> ChainCandidates);
+
+    public sealed record FlowTrigger(TriggerKind Kind, string Label);
+
+    /// <summary>A declared output and the configurations chained to run after it.</summary>
+    public sealed record FlowOutput(
+        string Name, string? Description, IReadOnlyList<FlowConsumer> Consumers);
+
+    public sealed record FlowConsumer(Guid ConfigurationId, string DisplayName, Guid TriggerId);
+
+    /// <summary>Assembles the flow graph of one configuration from triggers, schema outputs, and chaining records.</summary>
+    public async Task<WorkflowFlow?> FlowAsync(Guid id, CancellationToken ct = default)
+    {
+        var overviews = await ListAsync(ct);
+        var configuration = overviews.FirstOrDefault(o => o.Id == id);
+        if (configuration is null)
+            return null;
+
+        var instanceNames = (await slotInstances.ReadAsync(ct)).ToList()
+            .ToDictionary(i => i.Id, i => i.DisplayName);
+        var triggers = new List<FlowTrigger>();
+        triggers.AddRange((await scheduledTriggers.ReadAsync(ct)).ToList()
+            .Where(t => t.WorkflowConfigurationId == id)
+            .Select(t => new FlowTrigger(TriggerKind.Schedule, $"every {TimeText.Interval(t.IntervalSeconds)}")));
+        triggers.AddRange((await mailboxTriggers.ReadAsync(ct)).ToList()
+            .Where(t => t.WorkflowConfigurationId == id)
+            .Select(t => new FlowTrigger(TriggerKind.Mailbox,
+                instanceNames.GetValueOrDefault(t.SlotInstanceId, "(deleted instance)"))));
+        var chains = (await artifactTriggers.ReadAsync(ct)).ToList();
+        triggers.AddRange(chains
+            .Where(t => t.WorkflowConfigurationId == id)
+            .Select(t => new FlowTrigger(TriggerKind.ArtifactChain, $"after '{t.ArtifactType}'")));
+
+        // Persisted artifacts carry the declared output's name as their artifact type — a
+        // chaining record on that type makes its configuration a consumer of the output.
+        var schema = ParseSchema(
+            (await workflowSchemas.ReadAsync(WorkflowSchemaRecord.IdFor(configuration.WorkflowType), ct))?.SchemaJson);
+        var overviewsById = overviews.ToDictionary(o => o.Id);
+        var outputs = (schema?.Outputs ?? [])
+            .Select(output => new FlowOutput(
+                output.Name, output.Description,
+                chains
+                    .Where(t => t.ArtifactType == output.Name && t.WorkflowConfigurationId is not null
+                                && overviewsById.ContainsKey(t.WorkflowConfigurationId.Value))
+                    .Select(t => new FlowConsumer(
+                        t.WorkflowConfigurationId!.Value,
+                        overviewsById[t.WorkflowConfigurationId.Value].DisplayName,
+                        t.Id))
+                    .ToList()))
+            .ToList();
+
+        return new WorkflowFlow(
+            configuration, triggers, outputs,
+            overviews.Where(o => o.Id != id).ToList());
+    }
+
+    /// <summary>
+    /// Chains <paramref name="targetConfigurationId"/> after <paramref name="outputName"/> of the
+    /// source configuration: every persisted artifact of that type dispatches the target.
+    /// </summary>
+    public async Task ChainAsync(
+        string actor, Guid? actorPrincipalId, Guid sourceConfigurationId, string outputName,
+        Guid targetConfigurationId, CancellationToken ct = default)
+    {
+        var source = await configurations.ReadAsync(sourceConfigurationId, ct)
+                     ?? throw new InvalidOperationException("Unknown source workflow configuration.");
+        var target = await configurations.ReadAsync(targetConfigurationId, ct)
+                     ?? throw new InvalidOperationException("Unknown target workflow configuration.");
+        if (string.IsNullOrWhiteSpace(outputName))
+            throw new ArgumentException("Output name is required.", nameof(outputName));
+
+        var record = new ArtifactTriggerRecord
+        {
+            Id = Guid.NewGuid(),
+            ArtifactType = outputName.Trim(),
+            WorkflowType = target.WorkflowType,
+            WorkflowPackageUri = target.PackageUri,
+            Enabled = target.Enabled,
+            RunAsPrincipalId = actorPrincipalId,
+            WorkflowConfigurationId = target.Id
+        };
+        await artifactTriggers.SaveAsync(record, ct);
+        await auditLog.AppendAsync(actor, "trigger.artifact.created", record.Id.ToString(),
+            $"{source.Name}:{record.ArtifactType} → {target.Name}", ct: ct);
+    }
+
+    /// <summary>Removes a chaining record created via the flow view.</summary>
+    public async Task UnchainAsync(string actor, Guid triggerId, CancellationToken ct = default)
+    {
+        if (await artifactTriggers.RemoveAsync(triggerId, ct))
+            await auditLog.AppendAsync(actor, "trigger.artifact.deleted", triggerId.ToString(), "deleted", ct: ct);
+    }
+
     // ------------------------------------------------------------------ registry
 
     /// <summary>The workflow packages registered on this platform, joined with their stored schemas.</summary>

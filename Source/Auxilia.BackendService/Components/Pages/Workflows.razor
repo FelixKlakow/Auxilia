@@ -99,6 +99,7 @@ else
             </div>
             <div class="card-footer">
                 <div class="cell-actions">
+                    <a class="btn btn-secondary btn-sm" href="workflows/@configuration.Id/flow">Flow</a>
                     <a class="btn btn-secondary btn-sm" href="workflows/@configuration.Id/edit">Edit</a>
                     <button class="btn btn-secondary btn-sm" disabled="@_busy"
                             @onclick="() => DuplicateAsync(configuration)">Duplicate</button>

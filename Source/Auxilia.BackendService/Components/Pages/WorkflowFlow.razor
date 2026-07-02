@@ -1,0 +1,221 @@
+@page "/workflows/{ConfigurationId:guid}/flow"
+@attribute [Authorize]
+@inject WorkflowConfigurationEditorService Editor
+@inject IPolicyEngine PolicyEngine
+
+<PageTitle>Flow — Auxilia</PageTitle>
+
+<div class="page-back"><a href="workflows">← All workflows</a></div>
+
+<PageHeader Title="@($"Flow of \"{_flow?.Configuration.DisplayName ?? "…"}\"")"
+            Subtitle="What starts runs, what they produce, and which workflows consume the outputs. Chain a workflow onto any output — it runs after every artifact of that type."/>
+
+@if (!_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else if (!_allowed)
+{
+    <div class="panel denied">Access denied: @_denyReason</div>
+}
+else if (_flow is null)
+{
+    <div class="panel denied">Workflow configuration not found.</div>
+}
+else
+{
+    @if (_error is not null)
+    {
+        <div class="panel denied">@_error</div>
+    }
+
+    <div class="flow-canvas">
+        <div class="flow-column">
+            <span class="flow-column-label">Triggers</span>
+            @if (_flow.Triggers.Count == 0)
+            {
+                <div class="flow-node flow-node-ghost">
+                    <span class="flow-node-title">No triggers</span>
+                    <span class="flow-node-subtitle">rerun / manual dispatch only</span>
+                </div>
+            }
+            @foreach (var trigger in _flow.Triggers)
+            {
+                <div class="flow-node flow-node-trigger">
+                    <span class="flow-node-kind">@TriggerKindLabel(trigger.Kind)</span>
+                    <span class="flow-node-title">@trigger.Label</span>
+                </div>
+            }
+        </div>
+
+        <div class="flow-connector" aria-hidden="true"></div>
+
+        <div class="flow-column">
+            <span class="flow-column-label">Workflow</span>
+            <div class="flow-node flow-node-workflow">
+                <span class="flow-node-title">@_flow.Configuration.DisplayName</span>
+                <span class="flow-node-subtitle">@_flow.Configuration.WorkflowType</span>
+                <span class="badge badge-state @(_flow.Configuration.Enabled ? "badge-success" : "badge-cancelled")">
+                    @(_flow.Configuration.Enabled ? "Enabled" : "Disabled")
+                </span>
+                <a class="btn btn-secondary btn-sm" href="workflows/@_flow.Configuration.Id/edit">Edit</a>
+            </div>
+        </div>
+
+        <div class="flow-connector" aria-hidden="true"></div>
+
+        <div class="flow-column flow-column-outputs">
+            <span class="flow-column-label">Outputs → chained workflows</span>
+            @if (_flow.Outputs.Count == 0)
+            {
+                <div class="flow-node flow-node-ghost">
+                    <span class="flow-node-title">No declared outputs</span>
+                    <span class="flow-node-subtitle">
+                        the workflow's schema declares none (or has not been seen yet)
+                    </span>
+                </div>
+            }
+            @foreach (var output in _flow.Outputs)
+            {
+                <div class="flow-node flow-node-output">
+                    <span class="flow-node-kind">artifact</span>
+                    <span class="flow-node-title">@output.Name</span>
+                    @if (output.Description is { Length: > 0 })
+                    {
+                        <span class="flow-node-subtitle">@output.Description</span>
+                    }
+
+                    <div class="flow-consumers">
+                        @foreach (var consumer in output.Consumers)
+                        {
+                            <span class="flow-consumer">
+                                <a href="workflows/@consumer.ConfigurationId/flow">@consumer.DisplayName</a>
+                                <button class="flow-consumer-remove" title="Remove this chaining"
+                                        disabled="@_busy"
+                                        @onclick="() => UnchainAsync(consumer.TriggerId)">×</button>
+                            </span>
+                        }
+                    </div>
+
+                    @if (_flow.ChainCandidates.Count > 0)
+                    {
+                        <div class="flow-chain-row">
+                            <select class="input-inline" @bind="_chainTargets[output.Name]">
+                                <option value="">Chain a workflow…</option>
+                                @foreach (var candidate in _flow.ChainCandidates)
+                                {
+                                    <option value="@candidate.Id">@candidate.DisplayName</option>
+                                }
+                            </select>
+                            <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                    @onclick="() => ChainAsync(output.Name)">Chain</button>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    <p class="field-hint">
+        Chained workflows run after <em>every</em> artifact of the output's type and receive the
+        artifact reference in their run context.
+    </p>
+}
+
+@code {
+
+    [Parameter]
+    public Guid ConfigurationId { get; set; }
+
+    [CascadingParameter]
+    public Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool _loaded;
+    private bool _allowed;
+    private bool _busy;
+    private string _denyReason = "";
+    private string? _error;
+    private Guid? _principalId;
+    private WorkflowConfigurationEditorService.WorkflowFlow? _flow;
+    private readonly Dictionary<string, string> _chainTargets = new(StringComparer.Ordinal);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var user = (await AuthState!).User;
+        _principalId = DashboardAuthEndpoints.PrincipalIdOf(user);
+        if (_principalId is not null)
+        {
+            var decision = await PolicyEngine.EvaluateAsync(
+                new PolicyContext(_principalId.Value, PermissionActions.WorkflowConfigurationManage,
+                    "workflow-configurations"));
+            _allowed = decision.Allowed;
+            _denyReason = decision.Reason;
+        }
+        else
+        {
+            _denyReason = "no platform principal in session";
+        }
+
+        if (_allowed)
+            await LoadAsync();
+        _loaded = true;
+    }
+
+    private async Task LoadAsync()
+    {
+        _flow = await Editor.FlowAsync(ConfigurationId);
+        foreach (var output in _flow?.Outputs ?? [])
+            _chainTargets.TryAdd(output.Name, "");
+    }
+
+    private static string TriggerKindLabel(TriggerKind kind) => kind switch
+    {
+        TriggerKind.Schedule => "schedule",
+        TriggerKind.ArtifactChain => "artifact",
+        TriggerKind.Mailbox => "mailbox",
+        _ => kind.ToString().ToLowerInvariant()
+    };
+
+    private async Task ChainAsync(string outputName)
+    {
+        if (!Guid.TryParse(_chainTargets.GetValueOrDefault(outputName), out var targetId))
+            return;
+        _error = null;
+        _busy = true;
+        try
+        {
+            await Editor.ChainAsync(
+                _principalId!.Value.ToString("D"), _principalId, ConfigurationId, outputName, targetId);
+            _chainTargets[outputName] = "";
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task UnchainAsync(Guid triggerId)
+    {
+        _error = null;
+        _busy = true;
+        try
+        {
+            await Editor.UnchainAsync(_principalId!.Value.ToString("D"), triggerId);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+}

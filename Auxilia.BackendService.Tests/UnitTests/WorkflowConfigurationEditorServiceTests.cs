@@ -650,6 +650,113 @@ public class WorkflowConfigurationEditorServiceTests
         Assert.That(exception!.Message, Does.Contain("mailbox"));
     }
 
+    // ------------------------------------------------------------------ flow view
+
+    private Task SeedOutputSchemaAsync(string workflowType = "pull-request-code-review")
+        => _schemas.SaveAsync(new WorkflowSchemaRecord
+        {
+            Id = WorkflowSchemaRecord.IdFor(workflowType),
+            WorkflowType = workflowType,
+            SchemaJson = JsonSerializer.Serialize(new WorkflowSchema(workflowType, [], [])
+            {
+                Outputs = [new WorkflowOutputDescriptor("code-review-result", "result.json", "Findings")]
+            })
+        });
+
+    [Test]
+    public async Task Flow_AssemblesTriggersOutputsAndConsumers()
+    {
+        await SeedProviderAsync();
+        await SeedInstanceAsync();
+        await SeedOutputSchemaAsync();
+        await SeedConfigurationAsync(); // "team-review"
+        await SeedConfigurationAsync("follow-up", "Follow up");
+        var id = WorkflowConfigurationRecord.IdFor("team-review");
+        await _schedules.SaveAsync(new ScheduledTriggerRecord
+        {
+            Id = Guid.NewGuid(),
+            WorkflowType = "pull-request-code-review",
+            WorkflowPackageUri = "docker://review:1",
+            IntervalSeconds = 3600,
+            WorkflowConfigurationId = id
+        });
+        await _mailboxTriggerRecords.SaveAsync(new MailboxTriggerRecord
+        {
+            Id = Guid.NewGuid(),
+            WorkflowConfigurationId = id,
+            SlotInstanceId = SlotInstanceRecord.IdFor("team-mailbox"),
+            PollIntervalSeconds = 15
+        });
+        await _chains.SaveAsync(new ArtifactTriggerRecord
+        {
+            Id = Guid.NewGuid(),
+            ArtifactType = "code-review-result",
+            WorkflowType = "pull-request-code-review",
+            WorkflowPackageUri = "docker://review:1",
+            WorkflowConfigurationId = WorkflowConfigurationRecord.IdFor("follow-up")
+        });
+
+        var flow = await _sut.FlowAsync(id);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(flow!.Triggers.Select(t => t.Kind),
+                Is.EquivalentTo(new[] { TriggerKind.Schedule, TriggerKind.Mailbox }));
+            Assert.That(flow.Triggers.Single(t => t.Kind == TriggerKind.Mailbox).Label,
+                Is.EqualTo("Team mailbox"));
+            var output = flow.Outputs.Single();
+            Assert.That(output.Name, Is.EqualTo("code-review-result"));
+            Assert.That(output.Consumers.Single().DisplayName, Is.EqualTo("Follow up"),
+                "a chaining record on the output's artifact type makes its configuration a consumer");
+            Assert.That(flow.ChainCandidates.Select(c => c.DisplayName), Does.Contain("Follow up"));
+        });
+    }
+
+    [Test]
+    public async Task Chain_CreatesAnArtifactTriggerForTheTarget_AndAudits()
+    {
+        await SeedProviderAsync();
+        await SeedConfigurationAsync(); // source "team-review"
+        await SeedConfigurationAsync("follow-up", "Follow up");
+        var actor = Guid.NewGuid();
+
+        await _sut.ChainAsync(actor.ToString("D"), actor,
+            WorkflowConfigurationRecord.IdFor("team-review"), "code-review-result",
+            WorkflowConfigurationRecord.IdFor("follow-up"));
+
+        var trigger = (await _chains.ReadAsync()).Single();
+        Assert.Multiple(async () =>
+        {
+            Assert.That(trigger.ArtifactType, Is.EqualTo("code-review-result"));
+            Assert.That(trigger.WorkflowConfigurationId,
+                Is.EqualTo(WorkflowConfigurationRecord.IdFor("follow-up")));
+            Assert.That(trigger.RunAsPrincipalId, Is.EqualTo(actor));
+            var audit = await _audit.ReadAsync();
+            Assert.That(audit.Any(a => a.Action == "trigger.artifact.created"), Is.True);
+        });
+    }
+
+    [Test]
+    public async Task Unchain_RemovesTheTriggerAndAudits()
+    {
+        await SeedProviderAsync();
+        await SeedConfigurationAsync();
+        await SeedConfigurationAsync("follow-up", "Follow up");
+        await _sut.ChainAsync("actor", null,
+            WorkflowConfigurationRecord.IdFor("team-review"), "code-review-result",
+            WorkflowConfigurationRecord.IdFor("follow-up"));
+        var trigger = (await _chains.ReadAsync()).Single();
+
+        await _sut.UnchainAsync("actor", trigger.Id);
+
+        Assert.Multiple(async () =>
+        {
+            Assert.That(await _chains.ReadAsync(), Is.Empty);
+            var audit = await _audit.ReadAsync();
+            Assert.That(audit.Any(a => a.Action == "trigger.artifact.deleted"), Is.True);
+        });
+    }
+
     // ------------------------------------------------------------------ delete
 
     [Test]

@@ -269,6 +269,59 @@ public class WorkflowConfigurationEditorTests : DashboardComponentTestBase
         }
     }
 
+    [Test]
+    public async Task FlowPage_RendersTriggerWorkflowAndOutputNodes()
+    {
+        await SeedEmailProviderAsync();
+        var id = await SeedConfigurationRecordAsync("flow-demo", "Flow demo");
+        var schemas = Factory.Services.GetRequiredService<IDataAccess<WorkflowSchemaRecord>>();
+        await schemas.SaveAsync(new WorkflowSchemaRecord
+        {
+            Id = WorkflowSchemaRecord.IdFor("pull-request-code-review"),
+            WorkflowType = "pull-request-code-review",
+            SchemaJson = JsonSerializer.Serialize(new WorkflowSchema("pull-request-code-review", [], [])
+            {
+                Outputs = [new WorkflowOutputDescriptor("code-review-result", "result.json", "Findings")]
+            })
+        });
+        var schedules = Factory.Services.GetRequiredService<IDataAccess<ScheduledTriggerRecord>>();
+        var schedule = new ScheduledTriggerRecord
+        {
+            Id = Guid.NewGuid(),
+            WorkflowType = "pull-request-code-review",
+            WorkflowPackageUri = "docker://review:1",
+            IntervalSeconds = 3600,
+            WorkflowConfigurationId = id
+        };
+        await schedules.SaveAsync(schedule);
+
+        using var client = CreateClient();
+        var (_, username, password) = await CreatePrincipalAsync("Operator");
+        var (cookie, _) = await LoginAsync(client, username, password);
+
+        var html = await GetHtmlAsync(client, $"/workflows/{id}/flow", cookie);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(html, Does.Contain("Flow demo"));
+            Assert.That(html, Does.Contain("every 1 h"), "the schedule trigger node must render");
+            Assert.That(html, Does.Contain("code-review-result"), "the output node must render");
+            Assert.That(html, Does.Contain("Chain a workflow"), "outputs offer chaining");
+            Assert.That(html, Does.Not.Contain("Access denied"));
+        });
+
+        try
+        {
+            await schedules.RemoveAsync(schedule.Id);
+            await schemas.RemoveAsync(WorkflowSchemaRecord.IdFor("pull-request-code-review"));
+            await Configurations.RemoveAsync(id);
+        }
+        catch
+        {
+            // Shared-host cleanup is best-effort.
+        }
+    }
+
     // ------------------------------------------------------------------ runs filter & rerun
 
     [Test]

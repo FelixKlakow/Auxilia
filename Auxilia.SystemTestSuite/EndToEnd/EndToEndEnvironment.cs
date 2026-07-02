@@ -43,7 +43,7 @@ public class EndToEndEnvironment
     internal const string BackendImageName    = "auxilia-backendservice:system-test";
     public   const string CommandQueue        = "workflow.run-commands-e2e";
     /// <summary>The configuration the mailbox trigger dispatches (single source of truth — no appsettings workflow).</summary>
-    internal const string MailReviewConfigurationName = "mail-review";
+    public   const string MailReviewConfigurationName = "mail-review";
     private static readonly Guid MailboxTriggerId = new("aaaaaaaa-e2e0-4000-8000-000000000001");
     internal const string AdapterMailbox      = "workflows@localhost";
     internal const string MailboxPassword     = "pw";

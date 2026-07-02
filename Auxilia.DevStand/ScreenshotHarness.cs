@@ -177,7 +177,11 @@ internal static class ScreenshotHarness
             ("/admin",                      "11-admin.png"),
             ("/admin/provider-catalog",     "13-admin-provider-catalog.png"),
             ("/audit",                      "14-audit.png"),
-            ($"/runs?configuration={configurationId}", "15-runs-filtered.png")
+            ($"/runs?configuration={configurationId}", "15-runs-filtered.png"),
+            // The mail-review configuration has a mailbox trigger and the code-review
+            // output — the flow view shows the full trigger → workflow → output pipeline.
+            ($"/workflows/{WorkflowConfigurationRecord.IdFor(EndToEndEnvironment.MailReviewConfigurationName)}/flow",
+                "18-workflow-flow.png")
         ];
         foreach (var (route, fileName) in pages)
             await CapturePageAsync(page, dashboardUrl, route, fileName, outputDir, captured);
