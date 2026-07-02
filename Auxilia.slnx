@@ -57,6 +57,7 @@
   </Folder>
   <Folder Name="/06_WorkflowImplementations/">
     <Project Path="Auxilia.ClaudeCode.Workflow.Tests\Auxilia.ClaudeCode.Workflow.Tests.csproj" />
+    <Project Path="Auxilia.CodingSession.Workflow.Tests\Auxilia.CodingSession.Workflow.Tests.csproj" />
     <Project Path="Auxilia.CodeReview.Workflow.Tests\Auxilia.CodeReview.Workflow.Tests.csproj" />
     <Project Path="Auxilia.FakeSlots.CodeReview.Happy\Auxilia.FakeSlots.CodeReview.Happy.csproj" />
     <Project Path="Auxilia.FakeSlots.CodeReview.WriteBackFailure\Auxilia.FakeSlots.CodeReview.WriteBackFailure.csproj" />
@@ -69,6 +70,7 @@
     <Project Path="Auxilia.Slots.Email.Tests\Auxilia.Slots.Email.Tests.csproj" />
     <Project Path="Auxilia.Slots.Email\Auxilia.Slots.Email.csproj" />
     <Project Path="Source/Auxilia.ClaudeCode.Workflow/Auxilia.ClaudeCode.Workflow.csproj" />
+    <Project Path="Source/Auxilia.CodingSession.Workflow/Auxilia.CodingSession.Workflow.csproj" />
     <Project Path="Source/Auxilia.ImplementationWorkflow/Auxilia.ImplementationWorkflow.csproj" />
     <Project Path="Source\Auxilia.CodeReview.Workflow\Auxilia.CodeReview.Workflow.csproj" />
   </Folder>
