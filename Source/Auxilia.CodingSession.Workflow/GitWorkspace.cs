@@ -40,7 +40,19 @@ public sealed class GitWorkspace(IGitRunner git, string workingDirectory)
 
     public async Task StartSessionBranchAsync(string branchName, CancellationToken ct)
     {
+        Directory.CreateDirectory(workingDirectory);
         var (exitCode, output) = await git.RunAsync(workingDirectory, "rev-parse HEAD", ct);
+        if (exitCode != 0)
+        {
+            // No repository (or no commits) at the mounted path — initialize one so the session
+            // has a real branch to work on and diffs are meaningful. A real clone skips this.
+            await git.RunAsync(workingDirectory, "init", ct);
+            await git.RunAsync(workingDirectory, "config user.email session@auxilia.local", ct);
+            await git.RunAsync(workingDirectory, "config user.name \"Auxilia Session\"", ct);
+            await git.RunAsync(workingDirectory, "commit --allow-empty -m \"session start\"", ct);
+            (exitCode, output) = await git.RunAsync(workingDirectory, "rev-parse HEAD", ct);
+        }
+
         _startCommit = exitCode == 0 ? output.Trim() : null;
         await git.RunAsync(workingDirectory, $"checkout -b {branchName}", ct);
     }

@@ -49,6 +49,9 @@ internal static class ScreenshotHarness
         Console.WriteLine("Booting the full Auxilia platform stack ...");
         Console.WriteLine("(first run builds Docker images — several minutes; a .prebuilt-images marker in the repo root skips that)");
 
+        // Keep the stub coding session alive long enough to boot ttyd, navigate, and capture.
+        EndToEndEnvironment.SessionStubSeconds = 150;
+
         var environment = new EndToEndEnvironment();
         await environment.OneTimeSetUp();
         try
@@ -202,7 +205,90 @@ internal static class ScreenshotHarness
         Console.WriteLine($"Claude Code run {claudeRun.Id} reached terminal state '{claudeRun.State}'.");
         await CapturePageAsync(page, dashboardUrl, $"/runs/{claudeRun.Id}", "17-claude-code-run.png", outputDir, captured);
 
+        // The live coding session: a Running session with the authenticated web terminal. The
+        // terminal itself depends on ttyd being up inside the container — non-fatal so a flaky
+        // headless WebSocket cannot cost the other 17 captures.
+        try
+        {
+            Console.WriteLine("Dispatching a live coding session (stub CLI) ...");
+            var sessionRun = await TriggerAndAwaitSessionTerminalAsync();
+            Console.WriteLine($"Session run {sessionRun.Id} is Running; terminal at '{sessionRun.TerminalEndpoint}'.");
+            await CapturePageAsync(page, dashboardUrl, $"/runs/{sessionRun.Id}", "21-live-session-run.png", outputDir, captured);
+            await CaptureSessionTerminalAsync(page, dashboardUrl, sessionRun.Id, outputDir, captured);
+        }
+        catch (Exception ex)
+        {
+            await Console.Error.WriteLineAsync($"WARNING: live-session terminal capture failed: {ex.Message}");
+        }
+
         return captured;
+    }
+
+    /// <summary>Dispatches the seeded coding-session configuration and waits until it is Running with a web terminal.</summary>
+    private static async Task<WorkflowInstanceRecord> TriggerAndAwaitSessionTerminalAsync()
+    {
+        await EndToEndEnvironment.MessageBusClient.PublishAsync(
+            CommandQueue,
+            new RunWorkflowCommand(
+                Guid.NewGuid(), null, null,
+                new Dictionary<string, string>
+                {
+                    ["Title"] = "Live coding session",
+                    ["Body"] = "Check out the repository and look around."
+                },
+                RequestedBy: EndToEndEnvironment.RunAsPrincipalId,
+                WorkflowConfigurationId: WorkflowConfigurationRecord.IdFor(
+                    EndToEndEnvironment.CodingSessionConfigurationName)));
+
+        await using var provider = EndToEndEnvironment.BuildPlatformDataProvider();
+        var instances = provider.GetRequiredService<IDataAccess<WorkflowInstanceRecord>>();
+        var deadline = DateTime.UtcNow + RunCompletionTimeout;
+        WorkflowInstanceRecord? latest = null;
+        while (DateTime.UtcNow < deadline)
+        {
+            var all = await instances.ReadAsync(CancellationToken.None);
+            latest = all.Where(r => r.WorkflowType == EndToEndEnvironment.CodingSessionWorkflowType)
+                        .OrderByDescending(r => r.CreatedUtc)
+                        .FirstOrDefault();
+            if (latest is { State: "Running", TerminalEndpoint: { Length: > 0 } })
+                return latest;
+            if (latest is { State: "Failed" or "PreFlightFailed" })
+                throw new InvalidOperationException(
+                    $"session run {latest.Id} failed: {latest.ErrorMessage}");
+            await Task.Delay(TimeSpan.FromSeconds(1));
+        }
+        throw new TimeoutException(
+            $"No coding-session run reached Running-with-terminal (last: {(latest is null ? "none" : $"{latest.Id}/{latest.State}")}).");
+    }
+
+    /// <summary>
+    /// Captures the authenticated web terminal itself: navigate the proxy route and wait for
+    /// ttyd's xterm to render, retrying while the container's ttyd is still warming up.
+    /// </summary>
+    private static async Task CaptureSessionTerminalAsync(
+        IPage page, string dashboardUrl, Guid runId, string outputDir, List<string> captured)
+    {
+        var url = $"{dashboardUrl}/sessions/{runId}/terminal/";
+        for (var attempt = 0; attempt < 12; attempt++)
+        {
+            try
+            {
+                await page.GotoAsync(url,
+                    new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 15000 });
+                await page.WaitForSelectorAsync(".xterm-screen, .xterm",
+                    new PageWaitForSelectorOptions { Timeout = 6000 });
+                break;
+            }
+            catch
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2));
+            }
+        }
+
+        await Task.Delay(TimeSpan.FromSeconds(4)); // let the pane content and cursor paint
+        var path = Path.Combine(outputDir, "22-live-session-terminal.png");
+        await page.ScreenshotAsync(new PageScreenshotOptions { Path = path, FullPage = true });
+        captured.Add(path);
     }
 
     /// <summary>

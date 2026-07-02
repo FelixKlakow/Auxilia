@@ -79,23 +79,17 @@ public sealed class DockerWorkflowLauncher(
             "Workflow container started. RuntimeImage={RuntimeImage} ContainerId={ContainerId}",
             settings.RuntimeImage, created.ID[..Math.Min(12, created.ID.Length)]);
 
-        if (request.PublishTerminalPort is not { } terminalPort)
-            return new WorkflowLaunchResult();
-
-        // Docker assigned the ephemeral host port at start; read it back from the inspect data.
-        var inspected = await client.Containers.InspectContainerAsync(created.ID, ct);
-        int? hostPort = null;
-        if (inspected.NetworkSettings?.Ports is { } ports
-            && ports.TryGetValue($"{terminalPort}/tcp", out var bindings) && bindings is not null)
+        // Terminal reachability is container-to-container on the shared network: the backend
+        // proxies to "<name>:<port>". No host port is published — the browser only ever talks
+        // to the backend, never to the workflow container directly.
+        if (request is { PublishTerminalPort: { } terminalPort, TerminalContainerName: { } name })
         {
-            hostPort = bindings
-                .Select(binding => int.TryParse(binding.HostPort, out var port) ? port : (int?)null)
-                .FirstOrDefault(port => port is not null);
+            logger.LogInformation(
+                "Workflow terminal available. Name={Name} ContainerPort={ContainerPort}", name, terminalPort);
+            return new WorkflowLaunchResult($"{name}:{terminalPort}");
         }
-        logger.LogInformation(
-            "Published workflow terminal. ContainerPort={ContainerPort} HostPort={HostPort}",
-            terminalPort, hostPort);
-        return new WorkflowLaunchResult(hostPort);
+
+        return new WorkflowLaunchResult();
     }
 
     /// <summary>
@@ -214,20 +208,18 @@ public sealed class DockerWorkflowLauncher(
     }
 
     /// <summary>
-    /// Publishes the workflow's declared web-terminal port to an ephemeral host port; the
-    /// dashboard proxies it (authenticated) to the run owner. Nothing is published otherwise.
+    /// Exposes the workflow's declared web-terminal port and names the container so the backend
+    /// (on the same Docker network) can reach the terminal at "&lt;name&gt;:&lt;port&gt;". No host
+    /// port is published — the dashboard is the only client, and it proxies over the network.
     /// </summary>
     internal static void ApplyTerminalPort(
         CreateContainerParameters parameters, WorkflowLaunchRequest request)
     {
         if (request.PublishTerminalPort is not { } port)
             return;
-        var key = $"{port}/tcp";
-        parameters.ExposedPorts = new Dictionary<string, EmptyStruct> { [key] = default };
-        parameters.HostConfig.PortBindings = new Dictionary<string, IList<PortBinding>>
-        {
-            [key] = [new PortBinding { HostPort = "" }] // "" = Docker assigns an ephemeral port
-        };
+        parameters.ExposedPorts = new Dictionary<string, EmptyStruct> { [$"{port}/tcp"] = default };
+        if (request.TerminalContainerName is { Length: > 0 } name)
+            parameters.Name = name;
     }
 
     /// <summary>

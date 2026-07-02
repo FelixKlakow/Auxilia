@@ -44,6 +44,9 @@ public class EndToEndEnvironment
     public   const string SessionNotifierWorkflowType    = "session-notifier";
     public   const string SessionNotifierImageName       = "auxilia-session-notifier-workflow:system-test";
     public   const string SessionNotifierPackageUri      = "docker://" + SessionNotifierImageName;
+    public   const string CodingSessionConfigurationName = "live-coding-demo";
+    /// <summary>How long the stub session CLI stays alive; the harness raises it so the live terminal is capturable.</summary>
+    public static int SessionStubSeconds { get; set; } = 6;
     /// <summary>In-image stand-in CLI — system tests never call real AI (cost rule).</summary>
     public   const string ClaudeStubCliPath        = "/usr/local/bin/claude-stub";
     internal const string BackendImageName    = "auxilia-backendservice:system-test";
@@ -188,6 +191,10 @@ public class EndToEndEnvironment
             .WithEnvironment("WorkflowLauncher__RabbitMqUserName", "guest")
             .WithEnvironment("WorkflowLauncher__RabbitMqPassword", "guest")
             .WithEnvironment("WorkflowLauncher__ExtraEnvironmentVariables__AUXILIA_DEVELOPER_MODE", "1")
+            // Coding-session runs use the baked stub CLI (cost rule: never real AI in tests);
+            // the stub stays alive this long so the live web terminal is observable.
+            .WithEnvironment("WorkflowLauncher__ExtraEnvironmentVariables__CODING_SESSION_CLI", "claude-session-stub")
+            .WithEnvironment("WorkflowLauncher__ExtraEnvironmentVariables__STUB_SESSION_SECONDS", SessionStubSeconds.ToString())
             .WithEnvironment("WorkflowDispatcher__CommandQueueName",        CommandQueue)
             .WithEnvironment("WorkflowDispatcher__RegistrationQueueName",   "workflow-registration-e2e")
             .WithEnvironment("WorkflowDispatcher__AnnouncementQueueName",   "workflow.announcements-e2e")
@@ -357,6 +364,18 @@ public class EndToEndEnvironment
                     new("work-items", "", new Dictionary<string, string>(),
                         SlotInstanceRecord.IdFor("team-mailbox"))
                 }.Concat(dependencyBindings).ToList(),
+                RunAsPrincipalId));
+
+        // The live coding-session configuration: its only required slot is the repository
+        // (the fake provides ISourceControlAccess); work-items is optional and left unbound.
+        await MessageBusClient.PublishAsync(seedBase + ".upsert-configuration",
+            new UpsertWorkflowConfigurationCommand(
+                CodingSessionConfigurationName, "Live coding session",
+                CodingSessionWorkflowType, CodingSessionPackageUri, Enabled: true,
+                new List<SlotBindingSeed>
+                {
+                    new("repository", "fake-code-review-happy", new Dictionary<string, string>())
+                },
                 RunAsPrincipalId));
 
         await using (var provider = BuildPlatformDataProvider())

@@ -35,12 +35,16 @@ public sealed record WorkflowLaunchRequest(
     public string? WorkspaceDirectoryBind { get; init; }
 
     /// <summary>
-    /// Container port of the workflow's declared interactive web terminal; the launcher
-    /// publishes it to an ephemeral host port. Null = nothing published (the default).
+    /// Container port of the workflow's declared interactive web terminal (ttyd). The launcher
+    /// exposes it and names the container <see cref="TerminalContainerName"/> so the backend —
+    /// on the same Docker network — can reach it by name. Null = no terminal (the default).
     /// </summary>
     public int? PublishTerminalPort { get; init; }
+
+    /// <summary>Deterministic container name/alias the terminal is reachable at on the shared network.</summary>
+    public string? TerminalContainerName { get; init; }
 }
 
-/// <summary>What a launch produced: the published terminal host port when one was requested.</summary>
-public sealed record WorkflowLaunchResult(int? TerminalHostPort = null);
+/// <summary>What a launch produced: the container-network "name:port" of the web terminal, when any.</summary>
+public sealed record WorkflowLaunchResult(string? TerminalEndpoint = null);
 

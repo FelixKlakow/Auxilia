@@ -286,8 +286,10 @@ public sealed class WorkflowDispatcher(
                 instanceId.ToString(), repositories.Count.ToString(), ct: ct);
         }
 
-        // Workflows declaring an interactive web terminal get its port published at launch.
+        // Workflows declaring an interactive web terminal get its container named so the
+        // backend can reach the terminal by name on the shared network.
         var terminalPort = (await schemaStore.GetSchemaAsync(workflowType, ct))?.InteractiveTerminalPort;
+        var terminalContainerName = terminalPort is null ? null : $"auxilia-session-{instanceId:N}";
 
         // docker:// URI — skip download/verify/extract; use baked image
         if (packageUri.StartsWith("docker://", StringComparison.OrdinalIgnoreCase))
@@ -300,7 +302,8 @@ public sealed class WorkflowDispatcher(
                     OutputDirectoryBind = outputDirectoryBind,
                     NetworkPolicy = networkPolicy,
                     WorkspaceDirectoryBind = workspaceRoot,
-                    PublishTerminalPort = terminalPort
+                    PublishTerminalPort = terminalPort,
+                    TerminalContainerName = terminalContainerName
                 },
                 ct);
             await MarkQueuedAsync(instanceId, workflowType, packageUri, ct);
@@ -354,7 +357,8 @@ public sealed class WorkflowDispatcher(
             OutputDirectoryBind = outputDirectoryBind,
             NetworkPolicy = networkPolicy,
             WorkspaceDirectoryBind = workspaceRoot,
-            PublishTerminalPort = terminalPort
+            PublishTerminalPort = terminalPort,
+            TerminalContainerName = terminalContainerName
         }, ct);
         await MarkQueuedAsync(instanceId, workflowType, packageUri, ct);
         await StampTerminalEndpointAsync(instanceId, launchResult, ct);
@@ -364,9 +368,8 @@ public sealed class WorkflowDispatcher(
     private async Task StampTerminalEndpointAsync(
         Guid instanceId, WorkflowLaunchResult launched, CancellationToken ct)
     {
-        if (launched.TerminalHostPort is { } hostPort)
-            await instanceRegistry.SetTerminalEndpointAsync(
-                instanceId, $"{launcherSettings.Value.TerminalPublishHost}:{hostPort}", ct);
+        if (launched.TerminalEndpoint is { Length: > 0 } endpoint)
+            await instanceRegistry.SetTerminalEndpointAsync(instanceId, endpoint, ct);
     }
 
     /// <summary>

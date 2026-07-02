@@ -192,29 +192,30 @@ public class DockerWorkflowLauncherBakedImageTests
     }
 
     [Test]
-    public void BuildBakedImageContainerParameters_WithTerminalPort_PublishesItEphemerally()
+    public void BuildBakedImageContainerParameters_WithTerminal_ExposesThePortAndNamesTheContainer()
     {
-        var request = MakeBakedRequest() with { PublishTerminalPort = 7681 };
+        var request = MakeBakedRequest() with
+        {
+            PublishTerminalPort = 7681,
+            TerminalContainerName = "auxilia-session-abc"
+        };
 
         var p = DockerWorkflowLauncher.BuildBakedImageContainerParameters(request, DefaultSettings);
 
         Assert.Multiple(() =>
         {
             Assert.That(p.ExposedPorts, Contains.Key("7681/tcp"));
-            var binding = p.HostConfig.PortBindings["7681/tcp"].Single();
-            Assert.That(binding.HostPort, Is.Empty, "empty host port = Docker assigns an ephemeral one");
+            Assert.That(p.Name, Is.EqualTo("auxilia-session-abc"),
+                "the deterministic name is how the backend reaches the terminal on the shared network");
+            Assert.That(p.HostConfig.PortBindings, Is.Null, "no host port is published — proxy is container-to-container");
         });
     }
 
     [Test]
-    public void BuildBakedImageContainerParameters_WithoutTerminalPort_PublishesNothing()
+    public void BuildBakedImageContainerParameters_WithoutTerminalPort_ExposesNothing()
     {
         var p = DockerWorkflowLauncher.BuildBakedImageContainerParameters(MakeBakedRequest(), DefaultSettings);
 
-        Assert.Multiple(() =>
-        {
-            Assert.That(p.ExposedPorts, Is.Null);
-            Assert.That(p.HostConfig.PortBindings, Is.Null);
-        });
+        Assert.That(p.ExposedPorts, Is.Null);
     }
 }

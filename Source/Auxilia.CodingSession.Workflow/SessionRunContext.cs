@@ -23,7 +23,7 @@ public sealed record SessionRunContext(
             Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.OutputDirectory),
             Environment.GetEnvironmentVariable("CODING_SESSION_CLI"),
             Environment.GetEnvironmentVariable("CODING_SESSION_MAX_MINUTES"),
-            Environment.GetEnvironmentVariable("WORKFLOW_INSTANCE_ID"));
+            Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.InstanceId));
 
     internal static SessionRunContext FromValues(
         string? workspaceDirectory, string? outputDirectory, string? sessionCommand,
