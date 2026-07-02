@@ -29,6 +29,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     private Action<IServiceCollection>? _configureServices;
     private Func<IServiceProvider, CancellationToken, Task>? _application;
     private WorkflowLifetime _lifetime = WorkflowLifetime.OneShot;
+    private int? _interactiveTerminalPort;
 
     private const string StateQueueName = "workflow.state";
     private const string StateExchangeName = "workflow.state";
@@ -103,6 +104,13 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
         ArgumentException.ThrowIfNullOrEmpty(artifactType);
         if (!_consumedArtifacts.Contains(artifactType))
             _consumedArtifacts.Add(artifactType);
+        return this;
+    }
+
+    public IWorkflowBuilder WithInteractiveTerminal(int containerPort = 7681)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(containerPort);
+        _interactiveTerminalPort = containerPort;
         return this;
     }
 
@@ -381,7 +389,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             NetworkEndpoints = _networkEndpoints.AsReadOnly(),
             Repositories = _repositories.AsReadOnly(),
             Triggers = _triggers.AsReadOnly(),
-            ConsumedArtifacts = _consumedArtifacts.AsReadOnly()
+            ConsumedArtifacts = _consumedArtifacts.AsReadOnly(),
+            InteractiveTerminalPort = _interactiveTerminalPort
         };
 
     internal WorkflowManifest BuildManifest(Guid instanceId = default)
@@ -394,6 +403,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             NetworkEndpoints = _networkEndpoints.AsReadOnly(),
             Repositories = _repositories.AsReadOnly(),
             Triggers = _triggers.AsReadOnly(),
-            ConsumedArtifacts = _consumedArtifacts.AsReadOnly()
+            ConsumedArtifacts = _consumedArtifacts.AsReadOnly(),
+            InteractiveTerminalPort = _interactiveTerminalPort
         };
 }

@@ -39,6 +39,9 @@ public interface IWorkflowBuilder
     /// </summary>
     IWorkflowBuilder ConsumesArtifact(string artifactType);
 
+    /// <summary>Declares the container port of the workflow's interactive web terminal (ttyd).</summary>
+    IWorkflowBuilder WithInteractiveTerminal(int containerPort = 7681);
+
     /// <summary>
     /// Declares a network endpoint this workflow needs to reach directly (ARCHITECTURE §10).
     /// Declarations form the signed baseline of the run's effective network policy.

@@ -18,6 +18,7 @@ public static class CodingSessionWorkflow
     public static Task Main(string[] args) =>
         WorkflowBuilder.Create(WorkflowType)
             .WithLifetime(WorkflowLifetime.LongLiving)
+            .WithInteractiveTerminal(SessionRunContext.DefaultTerminalPort)
             .RequiresSourceControl("repository",
                 new SourceControlCapabilities { RequiredPermissions = [Permission.Read, Permission.Write] },
                 "The repository the live session works on (mounted by the Workspace Manager)")

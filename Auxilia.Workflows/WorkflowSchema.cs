@@ -26,6 +26,13 @@ public sealed record WorkflowSchema(
     /// unconstrained (any chaining allowed).
     /// </summary>
     public IReadOnlyList<string> ConsumedArtifacts { get; init; } = [];
+
+    /// <summary>
+    /// Container port of the workflow's interactive web terminal (ttyd), when it hosts one.
+    /// The launcher publishes it to an ephemeral host port and the dashboard proxies it —
+    /// authenticated — to the run's owner. Null = no terminal.
+    /// </summary>
+    public int? InteractiveTerminalPort { get; init; }
 }
 
 /// <summary>
