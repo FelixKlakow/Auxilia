@@ -70,28 +70,30 @@ public class ProviderCatalogAdminTests : DashboardComponentTestBase
     }
 
     [Test]
-    public async Task ReadPath_ServesAvailableProviders_GroupedByCategory_WithMergedDescriptors()
+    public async Task ReadPath_ServesAvailableProviders_GroupedByManifestCategory()
     {
-        await SeedEmailProviderAsync();
-
-        await Catalog.SetCategoryAsync("test-admin", "email-work-items", "task-source");
+        var providers = Factory.Services.GetRequiredService<IDataAccess<SlotProviderRecord>>();
+        await providers.SaveAsync(new SlotProviderRecord
+        {
+            Id = SlotProviderRecord.IdFor("email-work-items"),
+            ProviderType = "email-work-items",
+            DllPath = "/plugins/Auxilia.Slots.Email.slothandler.dll",
+            Category = "task-source", // manifest-declared kind
+            SettingDescriptorsJson = JsonSerializer.Serialize(new List<SettingDescriptor>
+            {
+                new("Password", "Password", SettingKind.Secret, Required: true),
+                new("Folder", "Mail folder", SettingKind.Text, DefaultValue: "INBOX")
+            })
+        });
         await Catalog.SetAvailabilityAsync("test-admin", "email-work-items", true);
-        await Catalog.SetOverridesAsync("test-admin", "email-work-items",
-            [new SettingDescriptorOverride("Folder", Label: "Ticket folder", DefaultValue: "Tickets")]);
 
         var byCategory = await Catalog.ListAvailableByCategoryAsync();
 
-        Assert.That(byCategory.ContainsKey("task-source"), Is.True);
+        Assert.That(byCategory.ContainsKey("task-source"), Is.True,
+            "the manifest category groups providers without any admin curation");
         var email = byCategory["task-source"].Single(e => e.ProviderType == "email-work-items");
-        var folder = email.Descriptors.Single(d => d.Key == "Folder");
-        Assert.Multiple(() =>
-        {
-            Assert.That(folder.Label, Is.EqualTo("Ticket folder"));
-            Assert.That(folder.DefaultValue, Is.EqualTo("Tickets"));
-            Assert.That(folder.Kind, Is.EqualTo(SettingKind.Text), "kinds stay manifest-owned");
-            Assert.That(email.Descriptors.Single(d => d.Key == "Password").Kind,
-                Is.EqualTo(SettingKind.Secret));
-        });
+        Assert.That(email.Descriptors.Single(d => d.Key == "Password").Kind,
+            Is.EqualTo(SettingKind.Secret));
     }
 
     [Test]

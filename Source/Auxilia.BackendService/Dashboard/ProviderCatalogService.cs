@@ -77,47 +77,7 @@ public sealed class ProviderCatalogService(
         return ToEntry(provider, updated);
     }
 
-    public async Task<ProviderCatalogEntry> SetCategoryAsync(
-        string actor, string providerType, string category, CancellationToken ct = default)
-    {
-        var (provider, curation) = await RequireProviderAsync(providerType, ct);
-        var updated = curation with { Category = category.Trim() };
-        await catalog.SaveAsync(updated, ct);
-        await auditLog.AppendAsync(actor, "provider-catalog.category-changed",
-            providerType, updated.Category.Length == 0 ? "(uncategorized)" : updated.Category, ct: ct);
-        return ToEntry(provider, updated);
-    }
-
-    /// <summary>Replaces the admin overrides; every override must target a manifest-declared setting key.</summary>
-    public async Task<ProviderCatalogEntry> SetOverridesAsync(
-        string actor, string providerType, IReadOnlyList<SettingDescriptorOverride> overrides,
-        CancellationToken ct = default)
-    {
-        var (provider, curation) = await RequireProviderAsync(providerType, ct);
-
-        var declaredKeys = ParseDescriptors(provider.SettingDescriptorsJson)
-            .Select(d => d.Key)
-            .ToHashSet(StringComparer.Ordinal);
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var entry in overrides)
-        {
-            if (string.IsNullOrWhiteSpace(entry.Key))
-                throw new ArgumentException("Override keys must be non-empty.", nameof(overrides));
-            if (!declaredKeys.Contains(entry.Key))
-                throw new ArgumentException(
-                    $"Provider '{providerType}' declares no setting '{entry.Key}'.", nameof(overrides));
-            if (!seen.Add(entry.Key))
-                throw new ArgumentException($"Duplicate override for setting '{entry.Key}'.", nameof(overrides));
-        }
-
-        var updated = curation with { DescriptorOverridesJson = JsonSerializer.Serialize(overrides) };
-        await catalog.SaveAsync(updated, ct);
-        await auditLog.AppendAsync(actor, "provider-catalog.overrides-changed", providerType, "updated",
-            JsonSerializer.Serialize(new { keys = overrides.Select(o => o.Key).Order().ToList() }), ct);
-        return ToEntry(provider, updated);
-    }
-
-    /// <summary>Applies admin overrides onto the manifest descriptors; key, kind, required, and choices stay manifest-owned.</summary>
+    /// <summary>Applies stored admin overrides onto the manifest descriptors; key, kind, required, and choices stay manifest-owned.</summary>
     internal static IReadOnlyList<SettingDescriptor> Merge(
         IReadOnlyList<SettingDescriptor> descriptors, IReadOnlyList<SettingDescriptorOverride> overrides)
     {

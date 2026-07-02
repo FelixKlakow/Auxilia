@@ -7,7 +7,7 @@
 <PageTitle>Provider catalog — Auxilia</PageTitle>
 
 <PageHeader Title="Provider catalog"
-            Subtitle="Which registered slot providers users may pick when configuring workflows. Setting keys and kinds come from the signed plugin manifest; only labels, help texts, and defaults can be overridden here."/>
+            Subtitle="Which registered slot providers may be picked when configuring slot instances and workflows. Availability is deny-by-default; everything else comes from the signed plugin manifest."/>
 
 @if (!_loaded)
 {
@@ -27,7 +27,7 @@ else
     <section class="card">
         <div class="card-header">
             <h2>Registered providers</h2>
-            <p class="card-subtitle">Availability is deny-by-default: a provider is offered in the configuration editor only after it is made available. The category groups providers by slot kind (e.g. task-source, repository, ai-agent).</p>
+            <p class="card-subtitle">A provider is offered in the editors only after it is made available here.</p>
         </div>
         @if (_entries.Count == 0)
         {
@@ -40,6 +40,7 @@ else
                 <tr>
                     <th>Provider type</th>
                     <th>Category</th>
+                    <th>Contracts</th>
                     <th>Settings</th>
                     <th>Availability</th>
                     <th>Actions</th>
@@ -51,12 +52,24 @@ else
                     <tr>
                         <td class="cell-strong">@entry.ProviderType</td>
                         <td>
-                            <div class="cell-actions">
-                                <input class="input-inline" placeholder="e.g. task-source"
-                                       @bind="_categoryEdits[entry.ProviderType]"/>
-                                <button class="btn btn-secondary btn-sm" disabled="@_busy"
-                                        @onclick="() => SaveCategoryAsync(entry.ProviderType)">Save</button>
-                            </div>
+                            @if (entry.Category.Length == 0)
+                            {
+                                <span class="muted">(uncategorized)</span>
+                            }
+                            else
+                            {
+                                <span class="type-chip">@entry.Category</span>
+                            }
+                        </td>
+                        <td>
+                            @if (entry.Contracts.Count == 0)
+                            {
+                                <span class="muted">(none declared)</span>
+                            }
+                            @foreach (var contract in entry.Contracts)
+                            {
+                                <span class="badge badge-secret" title="@contract">@ShortName(contract)</span>
+                            }
                         </td>
                         <td>
                             @if (entry.Descriptors.Count == 0)
@@ -90,47 +103,6 @@ else
             </table>
         }
     </section>
-
-    @foreach (var entry in _entries.Where(e => e.Descriptors.Count > 0))
-    {
-        <details class="advanced-section">
-            <summary>Descriptor overrides — @entry.ProviderType</summary>
-            <div class="advanced-body">
-                <p class="muted">
-                    Leave a field empty to keep the manifest value (shown as placeholder).
-                    Keys and kinds are manifest-owned and cannot be changed here.
-                </p>
-                <table class="data-table">
-                    <thead>
-                    <tr>
-                        <th>Setting</th>
-                        <th>Kind</th>
-                        <th>Label</th>
-                        <th>Help text</th>
-                        <th>Default</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    @foreach (var descriptor in entry.Descriptors)
-                    {
-                        var edit = _overrideEdits[entry.ProviderType][descriptor.Key];
-                        <tr>
-                            <td class="cell-strong">@descriptor.Key@(descriptor.Required ? " *" : "")</td>
-                            <td><span class="type-chip">@descriptor.Kind</span></td>
-                            <td><input class="input-inline" placeholder="@descriptor.Label" @bind="edit.Label"/></td>
-                            <td><input class="input-inline" placeholder="@(descriptor.HelpText ?? "—")" @bind="edit.HelpText"/></td>
-                            <td><input class="input-inline" placeholder="@(descriptor.DefaultValue ?? "—")" @bind="edit.DefaultValue"/></td>
-                        </tr>
-                    }
-                    </tbody>
-                </table>
-                <div class="button-row">
-                    <button class="btn btn-primary btn-sm" disabled="@_busy"
-                            @onclick="() => SaveOverridesAsync(entry.ProviderType)">Save overrides</button>
-                </div>
-            </div>
-        </details>
-    }
 }
 
 @code {
@@ -144,17 +116,7 @@ else
     private string _denyReason = "";
     private string? _error;
     private Guid? _principalId;
-
     private IReadOnlyList<ProviderCatalogEntry> _entries = [];
-    private readonly Dictionary<string, string> _categoryEdits = new();
-    private readonly Dictionary<string, Dictionary<string, OverrideEdit>> _overrideEdits = new();
-
-    private sealed class OverrideEdit
-    {
-        public string Label { get; set; } = "";
-        public string HelpText { get; set; } = "";
-        public string DefaultValue { get; set; } = "";
-    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -173,68 +135,22 @@ else
         }
 
         if (_allowed)
-            await LoadAsync();
+            _entries = await Catalog.ListAsync();
         _loaded = true;
     }
 
-    private async Task LoadAsync()
-    {
-        _entries = await Catalog.ListAsync();
-        foreach (var entry in _entries)
-        {
-            _categoryEdits[entry.ProviderType] = entry.Category;
+    private static string ShortName(string contract)
+        => contract.LastIndexOf('.') is var dot and >= 0 ? contract[(dot + 1)..] : contract;
 
-            var edits = _overrideEdits.TryGetValue(entry.ProviderType, out var existing)
-                ? existing
-                : _overrideEdits[entry.ProviderType] = new Dictionary<string, OverrideEdit>();
-            foreach (var descriptor in entry.Descriptors)
-            {
-                var current = entry.Overrides.FirstOrDefault(o => o.Key == descriptor.Key);
-                edits[descriptor.Key] = new OverrideEdit
-                {
-                    Label = current?.Label ?? "",
-                    HelpText = current?.HelpText ?? "",
-                    DefaultValue = current?.DefaultValue ?? ""
-                };
-            }
-        }
-    }
-
-    private Task ToggleAvailabilityAsync(ProviderCatalogEntry entry)
-        => RunAsync(() => Catalog.SetAvailabilityAsync(Actor, entry.ProviderType, !entry.Available));
-
-    private Task SaveCategoryAsync(string providerType)
-        => RunAsync(() => Catalog.SetCategoryAsync(
-            Actor, providerType, _categoryEdits.GetValueOrDefault(providerType, "")));
-
-    private Task SaveOverridesAsync(string providerType)
-    {
-        var overrides = _overrideEdits[providerType]
-            .Where(e => e.Value.Label.Trim().Length > 0
-                        || e.Value.HelpText.Trim().Length > 0
-                        || e.Value.DefaultValue.Trim().Length > 0)
-            .Select(e => new SettingDescriptorOverride(
-                e.Key,
-                NullIfEmpty(e.Value.Label),
-                NullIfEmpty(e.Value.HelpText),
-                NullIfEmpty(e.Value.DefaultValue)))
-            .ToList();
-        return RunAsync(() => Catalog.SetOverridesAsync(Actor, providerType, overrides));
-    }
-
-    private static string? NullIfEmpty(string value)
-        => value.Trim().Length == 0 ? null : value.Trim();
-
-    private string Actor => _principalId!.Value.ToString("D");
-
-    private async Task RunAsync(Func<Task> action)
+    private async Task ToggleAvailabilityAsync(ProviderCatalogEntry entry)
     {
         _error = null;
         _busy = true;
         try
         {
-            await action();
-            await LoadAsync();
+            await Catalog.SetAvailabilityAsync(
+                _principalId!.Value.ToString("D"), entry.ProviderType, !entry.Available);
+            _entries = await Catalog.ListAsync();
         }
         catch (Exception ex)
         {

@@ -16,7 +16,6 @@ public static class PermissionActions
     public const string WorkflowTypeManage = "workflow-type.manage";
     public const string TriggerConfigure = "trigger.configure";
     public const string DashboardManage = "dashboard.manage";
-    public const string BundleManage = "bundle.manage";
     public const string PrincipalAdminister = "principal.administer";
     public const string IdentitySourceManage = "identity-source.manage";
     public const string PolicyAdminister = "policy.administer";

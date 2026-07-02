@@ -122,12 +122,19 @@ public class ProviderCatalogServiceTests
     }
 
     [Test]
-    public async Task SetAvailability_DoesNotWipeCategoryOrOverrides()
+    public async Task SetAvailability_DoesNotWipeStoredCuration()
     {
         await SeedProviderAsync(descriptors: EmailDescriptors);
-        await _sut.SetCategoryAsync("admin-1", "email-work-items", "task-source");
-        await _sut.SetOverridesAsync("admin-1", "email-work-items",
-            [new SettingDescriptorOverride("Folder", DefaultValue: "Tickets")]);
+        // Curation records may carry a category and overrides (written by earlier versions
+        // or seeding) - toggling availability must leave them untouched.
+        await _catalog.SaveAsync(new ProviderCatalogRecord
+        {
+            Id = ProviderCatalogRecord.IdFor("email-work-items"),
+            ProviderType = "email-work-items",
+            Category = "task-source",
+            DescriptorOverridesJson = System.Text.Json.JsonSerializer.Serialize(
+                new[] { new SettingDescriptorOverride("Folder", DefaultValue: "Tickets") })
+        });
 
         var entry = await _sut.SetAvailabilityAsync("admin-1", "email-work-items", available: true);
 
@@ -135,77 +142,6 @@ public class ProviderCatalogServiceTests
         {
             Assert.That(entry.Category, Is.EqualTo("task-source"));
             Assert.That(entry.Overrides, Has.Count.EqualTo(1));
-        });
-    }
-
-    // ------------------------------------------------------------------ category
-
-    [Test]
-    public async Task SetCategory_TrimsAndAudits()
-    {
-        await SeedProviderAsync();
-
-        var entry = await _sut.SetCategoryAsync("admin-1", "email-work-items", "  task-source ");
-
-        Assert.That(entry.Category, Is.EqualTo("task-source"));
-        var audit = (await _auditRecords.ReadAsync()).Single();
-        Assert.Multiple(() =>
-        {
-            Assert.That(audit.Action, Is.EqualTo("provider-catalog.category-changed"));
-            Assert.That(audit.Outcome, Is.EqualTo("task-source"));
-        });
-    }
-
-    [Test]
-    public void SetCategory_UnknownProvider_IsRejected()
-        => Assert.ThrowsAsync<InvalidOperationException>(
-            () => _sut.SetCategoryAsync("admin-1", "ghost", "task-source"));
-
-    // ------------------------------------------------------------------ overrides
-
-    [Test]
-    public async Task SetOverrides_UnknownSettingKey_IsRejected()
-    {
-        await SeedProviderAsync(descriptors: EmailDescriptors);
-
-        Assert.ThrowsAsync<ArgumentException>(() => _sut.SetOverridesAsync(
-            "admin-1", "email-work-items", [new SettingDescriptorOverride("NoSuchKey", Label: "X")]));
-    }
-
-    [Test]
-    public async Task SetOverrides_DuplicateKey_IsRejected()
-    {
-        await SeedProviderAsync(descriptors: EmailDescriptors);
-
-        Assert.ThrowsAsync<ArgumentException>(() => _sut.SetOverridesAsync(
-            "admin-1", "email-work-items",
-            [new SettingDescriptorOverride("Folder"), new SettingDescriptorOverride("Folder")]));
-    }
-
-    [Test]
-    public async Task SetOverrides_EmptyKey_IsRejected()
-    {
-        await SeedProviderAsync(descriptors: EmailDescriptors);
-
-        Assert.ThrowsAsync<ArgumentException>(() => _sut.SetOverridesAsync(
-            "admin-1", "email-work-items", [new SettingDescriptorOverride("  ")]));
-    }
-
-    [Test]
-    public async Task SetOverrides_Valid_PersistsAndAuditsKeyNamesOnly()
-    {
-        await SeedProviderAsync(descriptors: EmailDescriptors);
-
-        await _sut.SetOverridesAsync("admin-1", "email-work-items",
-            [new SettingDescriptorOverride("Folder", Label: "Ticket folder", DefaultValue: "Tickets")]);
-
-        var audit = (await _auditRecords.ReadAsync()).Single();
-        Assert.Multiple(() =>
-        {
-            Assert.That(audit.Action, Is.EqualTo("provider-catalog.overrides-changed"));
-            Assert.That(audit.DetailJson, Does.Contain("Folder"));
-            Assert.That(audit.DetailJson, Does.Not.Contain("Tickets"),
-                "audit must record which keys changed, not the values");
         });
     }
 
@@ -265,19 +201,27 @@ public class ProviderCatalogServiceTests
 
     // ------------------------------------------------------------------ read path for #20
 
+    private Task SeedProviderWithCategoryAsync(string providerType, string dllPath, string category,
+        IReadOnlyList<SettingDescriptor>? descriptors = null)
+        => _providers.SaveAsync(new SlotProviderRecord
+        {
+            Id = SlotProviderRecord.IdFor(providerType),
+            ProviderType = providerType,
+            DllPath = dllPath,
+            Category = category, // manifest-declared kind
+            SettingDescriptorsJson = descriptors is null ? null : JsonSerializer.Serialize(descriptors)
+        });
+
     [Test]
-    public async Task ListAvailableByCategory_GroupsAvailableProviders_WithMergedDescriptors()
+    public async Task ListAvailableByCategory_GroupsAvailableProviders_ByManifestCategory()
     {
-        await SeedProviderAsync("email-work-items", "/plugins/email.slothandler.dll", EmailDescriptors);
-        await SeedProviderAsync("github-repo", "/plugins/github.slothandler.dll");
+        await SeedProviderWithCategoryAsync("email-work-items", "/plugins/email.slothandler.dll",
+            "task-source", EmailDescriptors);
+        await SeedProviderWithCategoryAsync("github-repo", "/plugins/github.slothandler.dll", "repository");
         await SeedProviderAsync("hidden-provider", "/plugins/hidden.slothandler.dll");
 
-        await _sut.SetCategoryAsync("admin-1", "email-work-items", "task-source");
         await _sut.SetAvailabilityAsync("admin-1", "email-work-items", true);
-        await _sut.SetCategoryAsync("admin-1", "github-repo", "repository");
         await _sut.SetAvailabilityAsync("admin-1", "github-repo", true);
-        await _sut.SetOverridesAsync("admin-1", "email-work-items",
-            [new SettingDescriptorOverride("Folder", DefaultValue: "Tickets")]);
 
         var byCategory = await _sut.ListAvailableByCategoryAsync();
 
@@ -285,10 +229,7 @@ public class ProviderCatalogServiceTests
         {
             Assert.That(byCategory.Keys, Is.EquivalentTo(new[] { "task-source", "repository" }));
             Assert.That(byCategory["repository"].Single().ProviderType, Is.EqualTo("github-repo"));
-            var email = byCategory["task-source"].Single();
-            Assert.That(email.ProviderType, Is.EqualTo("email-work-items"));
-            Assert.That(email.Descriptors.Single(d => d.Key == "Folder").DefaultValue,
-                Is.EqualTo("Tickets"), "the read path must serve MERGED descriptors");
+            Assert.That(byCategory["task-source"].Single().ProviderType, Is.EqualTo("email-work-items"));
         });
     }
 

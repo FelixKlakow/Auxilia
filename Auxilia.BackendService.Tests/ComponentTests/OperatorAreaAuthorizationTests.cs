@@ -11,7 +11,6 @@ namespace Auxilia.BackendService.Tests.ComponentTests;
 public class OperatorAreaAuthorizationTests : DashboardComponentTestBase
 {
     [TestCase("/operator/slots")]
-    [TestCase("/admin/bundles")]
     [TestCase("/admin/provider-catalog")]
     [TestCase("/admin/identity-sources")]
     [TestCase("/dashboard")]
@@ -49,33 +48,6 @@ public class OperatorAreaAuthorizationTests : DashboardComponentTestBase
         var (cookie, _) = await LoginAsync(client, username, password);
 
         var html = await GetHtmlAsync(client, path, cookie);
-
-        Assert.That(html, Does.Contain("Access denied"));
-    }
-
-    [Test]
-    public async Task BundlesPage_AsAdministrator_RendersContent()
-    {
-        using var client = CreateClient();
-        var (cookie, _) = await LoginAsync(client, AdminUsername, AdminPassword);
-
-        var html = await GetHtmlAsync(client, "/admin/bundles", cookie);
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(html, Does.Contain("Create bundle"));
-            Assert.That(html, Does.Not.Contain("Access denied"));
-        });
-    }
-
-    [Test]
-    public async Task BundlesPage_AsOperator_IsDeniedByPolicy()
-    {
-        using var client = CreateClient();
-        var (_, username, password) = await CreatePrincipalAsync("Operator");
-        var (cookie, _) = await LoginAsync(client, username, password);
-
-        var html = await GetHtmlAsync(client, "/admin/bundles", cookie);
 
         Assert.That(html, Does.Contain("Access denied"));
     }

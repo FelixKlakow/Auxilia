@@ -19,7 +19,6 @@ public static class BuiltInRoles
                 PermissionActions.PrincipalAdminister,
                 PermissionActions.IdentitySourceManage,
                 PermissionActions.PolicyAdminister,
-                PermissionActions.BundleManage,
                 PermissionActions.ProviderCatalogManage,
                 PermissionActions.AuditRead,
                 // Administrators can also do everything operators and users can.

@@ -175,7 +175,6 @@ internal static class ScreenshotHarness
             ("/trigger",                    "07-trigger.png"),
             ("/operator/slots",             "08-operator-slots.png"),
             ("/admin",                      "11-admin.png"),
-            ("/admin/bundles",              "12-admin-bundles.png"),
             ("/admin/provider-catalog",     "13-admin-provider-catalog.png"),
             ("/audit",                      "14-audit.png"),
             ($"/runs?configuration={configurationId}", "15-runs-filtered.png")
