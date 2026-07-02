@@ -50,6 +50,14 @@ public class EndToEndEnvironment
     public   const string CommandQueue        = "workflow.run-commands-e2e";
     /// <summary>The configuration the mailbox trigger dispatches (single source of truth — no appsettings workflow).</summary>
     public   const string MailReviewConfigurationName = "mail-review";
+
+    /// <summary>
+    /// Presentation stand (set by the DevStand BEFORE setup, never by tests): the platform
+    /// boots with providers, the team-mailbox instance, and ONLY the coding-session package
+    /// pair registered — no pre-built workflow configurations, so the demo configures the
+    /// workflow live in the editor.
+    /// </summary>
+    public static bool PresentationMode { get; set; }
     private static readonly Guid MailboxTriggerId = new("aaaaaaaa-e2e0-4000-8000-000000000001");
     internal const string AdapterMailbox      = "workflows@localhost";
     internal const string MailboxPassword     = "pw";
@@ -265,7 +273,10 @@ public class EndToEndEnvironment
                     ["Folder"]   = "INBOX"
                 }));
 
-        var dependencyBindings = await SeedEmailSlotDependenciesAsync(seedBase);
+        // The e2e dependency fakes are pure test scaffolding — the presentation catalog stays clean.
+        var dependencyBindings = PresentationMode
+            ? []
+            : await SeedEmailSlotDependenciesAsync(seedBase);
 
         // The Claude Code workflow: the REAL claude-code-cli provider, pointed at the
         // in-image stub CLI (cost rule — a real key run stays a manual dev-stand exercise).
@@ -312,6 +323,22 @@ public class EndToEndEnvironment
             while (DateTime.UtcNow < deadline
                    && await instanceRecords.ReadAsync(SlotInstanceRecord.IdFor("team-mailbox")) is null)
                 await Task.Delay(200);
+        }
+
+        // Presentation stand: stop after the reusable instance — no pre-built configuration,
+        // no mail-review trigger, and only the coding-session package pair registered below.
+        if (PresentationMode)
+        {
+            await MessageBusClient.PublishAsync(seedBase + ".register-package",
+                new RegisterWorkflowPackageCommand(
+                    CodingSessionWorkflowType, CodingSessionPackageUri, "Live coding session",
+                    SchemaJson: await EmitSchemaAsync(CodingSessionImageName)));
+            await MessageBusClient.PublishAsync(seedBase + ".register-package",
+                new RegisterWorkflowPackageCommand(
+                    SessionNotifierWorkflowType, SessionNotifierPackageUri, "Session summary mail",
+                    SchemaJson: await EmitSchemaAsync(SessionNotifierImageName)));
+            await Task.Delay(TimeSpan.FromMilliseconds(500)); // seed propagation window
+            return;
         }
 
         // The mail-triggered path is configuration-first: a named configuration binds the

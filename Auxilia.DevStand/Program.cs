@@ -17,6 +17,11 @@ using MailKit.Security;
 if (args.Length > 0 && args[0] == "--screenshots")
     return await ScreenshotHarness.RunAsync(args.Length > 1 ? args[1] : null);
 
+// Presentation stand: platform ready (providers, team mailbox, session package pair), but
+// NO pre-built workflow configurations — the coding-session workflow is configured live.
+var presentation = args.Contains("--presentation");
+EndToEndEnvironment.PresentationMode = presentation;
+
 var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 
@@ -53,7 +58,24 @@ try
         ? "REAL Claude Code CLI (ANTHROPIC_API_KEY found)"
         : "stub CLI (set ANTHROPIC_API_KEY before starting for real runs)")}");
     Console.WriteLine();
-    Console.WriteLine("  [m] send a demo mail (triggers a Code Review run)   [c] run Claude Code   [o] open dashboard   [q] quit");
+    if (presentation)
+    {
+        Console.WriteLine("  === PRESENTATION MODE — nothing is pre-configured; the manual steps: ===");
+        Console.WriteLine("  1. Workflows -> New workflow configuration -> 'Live coding session'");
+        Console.WriteLine("     repository -> inline 'fake-code-review-happy' | work-items -> instance 'Team mailbox'");
+        Console.WriteLine("     Trigger: + Mailbox -> Team mailbox, poll 2 s, subject filter 'session'");
+        Console.WriteLine("  2. Flow -> drag 'Session summary mail' onto the coding-session-result output,");
+        Console.WriteLine("     then bind its work-items to 'Team mailbox' in its editor.");
+        Console.WriteLine("  3. Press [s] (or mail workflows@localhost, subject containing 'session').");
+        Console.WriteLine("  4. Runs -> Open live session -> work -> /exit -> reply mail lands.");
+        Console.WriteLine("  (Own mailbox instead? Create a slot instance with imap.gmail.com + app password.)");
+        Console.WriteLine();
+        Console.WriteLine("  [s] send a session mail   [o] open dashboard   [q] quit");
+    }
+    else
+    {
+        Console.WriteLine("  [m] send a demo mail (triggers a Code Review run)   [c] run Claude Code   [s] send a session mail   [o] open dashboard   [q] quit");
+    }
     Console.WriteLine();
 
     OpenBrowser(dashboardUrl);
@@ -83,13 +105,20 @@ try
                 case ConsoleKey.O:
                     OpenBrowser(dashboardUrl);
                     break;
-                case ConsoleKey.M:
+                case ConsoleKey.M when !presentation:
                     var subject = $"Please review PR-{++demoCounter} (dev stand)";
                     await DemoMail.SendAsync(subject, cts.Token);
                     Console.WriteLine($"  -> mail sent: \"{subject}\" — the run appears on the dashboard within a few seconds.");
                     _ = WatchForReplyAsync(subject, cts.Token);
                     break;
-                case ConsoleKey.C:
+                case ConsoleKey.S:
+                    var sessionSubject = $"session #{++demoCounter}: live coding";
+                    await DemoMail.SendAsync(sessionSubject, cts.Token);
+                    Console.WriteLine($"  -> mail sent: \"{sessionSubject}\" — the session run starts once the trigger polls; " +
+                                      "open the run and click 'Open live session'.");
+                    _ = WatchForReplyAsync(sessionSubject, cts.Token);
+                    break;
+                case ConsoleKey.C when !presentation:
                     await EndToEndEnvironment.MessageBusClient.PublishAsync(
                         EndToEndEnvironment.CommandQueue,
                         new RunWorkflowCommand(
