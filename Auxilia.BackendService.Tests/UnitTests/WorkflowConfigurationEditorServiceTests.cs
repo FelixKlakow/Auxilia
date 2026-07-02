@@ -769,6 +769,37 @@ public class WorkflowConfigurationEditorServiceTests
     }
 
     [Test]
+    public async Task GlobalFlow_LinksProducersToConsumers_ByArtifactType()
+    {
+        await SeedProviderAsync();
+        await SeedOutputSchemaAsync(); // "pull-request-code-review" outputs "code-review-result"
+        await SeedConfigurationAsync(); // producer "team-review"
+        await SeedConfigurationAsync("implementer", "Implementer", workflowType: "implementation-workflow");
+        await _chains.SaveAsync(new ArtifactTriggerRecord
+        {
+            Id = Guid.NewGuid(),
+            ArtifactType = "code-review-result",
+            WorkflowType = "implementation-workflow",
+            WorkflowPackageUri = "docker://impl:1",
+            WorkflowConfigurationId = WorkflowConfigurationRecord.IdFor("implementer")
+        });
+
+        var flow = await _sut.GlobalFlowAsync();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(flow.Nodes.Select(n => n.DisplayName),
+                Is.EquivalentTo(new[] { "Team review", "Implementer" }));
+            Assert.That(flow.Nodes.Single(n => n.DisplayName == "Team review").Outputs,
+                Is.EqualTo(new[] { "code-review-result" }));
+            var edge = flow.Edges.Single();
+            Assert.That(edge.ProducerId, Is.EqualTo(WorkflowConfigurationRecord.IdFor("team-review")));
+            Assert.That(edge.ConsumerId, Is.EqualTo(WorkflowConfigurationRecord.IdFor("implementer")));
+            Assert.That(edge.ArtifactType, Is.EqualTo("code-review-result"));
+        });
+    }
+
+    [Test]
     public async Task KnownArtifactTypes_CollectDeclaredOutputsAcrossSchemas()
     {
         await SeedOutputSchemaAsync(); // outputs "code-review-result"

@@ -1041,6 +1041,18 @@ select { cursor: pointer; }
 
 .provider-description { font-size: 0.8rem; color: var(--text-secondary); }
 
+/* Global flows board: nodes are links; edges carry their artifact type as a label. */
+.flow-node-link { text-decoration: none; color: inherit; }
+.flow-node-link:hover { border-color: var(--border-strong); box-shadow: 0 3px 10px rgba(15, 18, 34, 0.12); }
+
+.flow-edge-label {
+    font-size: 11px;
+    fill: var(--text-secondary);
+    paint-order: stroke;
+    stroke: var(--surface-muted);
+    stroke-width: 4px;
+}
+
 .flow-consumers { display: flex; flex-direction: column; gap: 0.35rem; }
 
 .flow-consumer {

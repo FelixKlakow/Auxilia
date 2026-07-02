@@ -495,6 +495,56 @@ public sealed class WorkflowConfigurationEditorService(
         Incompatible
     }
 
+    /// <summary>The whole platform's pipeline picture: every configuration and every chain between them.</summary>
+    public sealed record GlobalFlow(
+        IReadOnlyList<GlobalFlowNode> Nodes,
+        IReadOnlyList<GlobalFlowEdge> Edges);
+
+    public sealed record GlobalFlowNode(
+        Guid Id,
+        string DisplayName,
+        string WorkflowType,
+        bool Enabled,
+        IReadOnlyList<TriggerSummary> Triggers,
+        IReadOnlyList<string> Outputs);
+
+    /// <summary>One chain: the producer's artifact of <see cref="ArtifactType"/> dispatches the consumer.</summary>
+    public sealed record GlobalFlowEdge(Guid ProducerId, Guid ConsumerId, string ArtifactType);
+
+    /// <summary>
+    /// Assembles the global pipeline graph: every configuration as a node, and an edge for
+    /// each artifact-chain trigger from every configuration whose workflow declares the
+    /// consumed artifact type as an output.
+    /// </summary>
+    public async Task<GlobalFlow> GlobalFlowAsync(CancellationToken ct = default)
+    {
+        var overviews = await ListAsync(ct);
+
+        var outputsByType = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        foreach (var record in (await workflowSchemas.ReadAsync(ct)).ToList())
+            outputsByType[record.WorkflowType] =
+                (ParseSchema(record.SchemaJson)?.Outputs ?? []).Select(o => o.Name).ToList();
+
+        var nodes = overviews
+            .Select(o => new GlobalFlowNode(
+                o.Id, o.DisplayName, o.WorkflowType, o.Enabled, o.TriggerSummaries,
+                outputsByType.GetValueOrDefault(o.WorkflowType) ?? []))
+            .ToList();
+
+        var nodesById = nodes.ToDictionary(n => n.Id);
+        var edges = new List<GlobalFlowEdge>();
+        foreach (var chain in (await artifactTriggers.ReadAsync(ct)).ToList())
+        {
+            if (chain.WorkflowConfigurationId is not { } consumerId || !nodesById.ContainsKey(consumerId))
+                continue;
+            foreach (var producer in nodes.Where(n =>
+                         n.Id != consumerId && n.Outputs.Contains(chain.ArtifactType, StringComparer.Ordinal)))
+                edges.Add(new GlobalFlowEdge(producer.Id, consumerId, chain.ArtifactType));
+        }
+
+        return new GlobalFlow(nodes, edges.Distinct().ToList());
+    }
+
     /// <summary>Every artifact type any registered workflow declares as an output — the chaining vocabulary.</summary>
     public async Task<IReadOnlyList<string>> KnownArtifactTypesAsync(CancellationToken ct = default)
         => (await workflowSchemas.ReadAsync(ct)).ToList()

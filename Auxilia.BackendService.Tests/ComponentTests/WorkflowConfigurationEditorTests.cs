@@ -270,6 +270,36 @@ public class WorkflowConfigurationEditorTests : DashboardComponentTestBase
     }
 
     [Test]
+    public async Task FlowsPage_RendersTheGlobalPipelineBoard()
+    {
+        await SeedEmailProviderAsync();
+        var id = await SeedConfigurationRecordAsync("global-flow-demo", "Global flow demo");
+
+        using var client = CreateClient();
+        var (_, username, password) = await CreatePrincipalAsync("Operator");
+        var (cookie, _) = await LoginAsync(client, username, password);
+
+        var html = await GetHtmlAsync(client, "/flows", cookie);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(html, Does.Contain("Global flow demo"));
+            Assert.That(html, Does.Contain("flow-edges"), "the SVG edge layer must render");
+            Assert.That(html, Does.Contain($"workflows/{id}/flow"), "nodes link to the per-workflow flow");
+            Assert.That(html, Does.Not.Contain("Access denied"));
+        });
+
+        try
+        {
+            await Configurations.RemoveAsync(id);
+        }
+        catch
+        {
+            // Shared-host cleanup is best-effort.
+        }
+    }
+
+    [Test]
     public async Task FlowPage_RendersTriggerWorkflowAndOutputNodes()
     {
         await SeedEmailProviderAsync();
