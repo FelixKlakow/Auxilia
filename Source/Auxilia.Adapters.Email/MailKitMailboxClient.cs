@@ -42,6 +42,33 @@ public sealed class MailKitMailboxClient(IOptions<EmailTaskSourceSettings> optio
         return result;
     }
 
+    public async Task<IReadOnlyList<MailAttachment>> FetchAttachmentsAsync(
+        uint uid, CancellationToken ct = default)
+    {
+        var settings = options.Value;
+        using var client = new ImapClient();
+        await client.ConnectAsync(settings.ImapHost, settings.ImapPort,
+            settings.UseSsl ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.None, ct);
+        await client.AuthenticateAsync(settings.Username, settings.Password, ct);
+
+        var folder = await client.GetFolderAsync(settings.Folder, ct);
+        await folder.OpenAsync(FolderAccess.ReadOnly, ct);
+
+        var message = await folder.GetMessageAsync(new UniqueId(uid), ct);
+        var attachments = new List<MailAttachment>();
+        foreach (var attachment in message.Attachments.OfType<MimePart>())
+        {
+            using var buffer = new MemoryStream();
+            await attachment.Content.DecodeToAsync(buffer, ct);
+            attachments.Add(new MailAttachment(
+                attachment.FileName ?? $"attachment-{attachments.Count + 1}",
+                buffer.ToArray()));
+        }
+
+        await client.DisconnectAsync(quit: true, ct);
+        return attachments;
+    }
+
     public async Task MarkSeenAsync(uint uid, CancellationToken ct = default)
     {
         var settings = options.Value;

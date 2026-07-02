@@ -31,6 +31,18 @@ internal sealed class EmailWorkItemAccess(IMailboxClient mailbox) : IWorkItemAcc
         return items;
     }
 
+    /// <summary>Refetches the triggering mail by its protocol UID and returns its attachments.</summary>
+    public async Task<IReadOnlyList<WorkItemAttachment>> GetAttachmentsAsync(
+        string id, CancellationToken cancellationToken = default)
+    {
+        var uidRaw = Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__MAILUID");
+        if (!uint.TryParse(uidRaw, out var uid))
+            return [];
+        return (await mailbox.FetchAttachmentsAsync(uid, cancellationToken))
+            .Select(a => new WorkItemAttachment(a.FileName, a.Content))
+            .ToList();
+    }
+
     public Task PostCommentAsync(string id, string comment, CancellationToken cancellationToken = default)
     {
         var to = Environment.GetEnvironmentVariable(FromVariable)

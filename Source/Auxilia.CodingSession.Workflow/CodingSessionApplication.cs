@@ -1,3 +1,4 @@
+using Auxilia.Workflows.TaskSource;
 using Auxilia.Workflows.Views;
 
 namespace Auxilia.CodingSession.Workflow;
@@ -12,9 +13,11 @@ public sealed class CodingSessionApplication(
     IGitRunner git,
     IViewPublisher? views,
     SessionRunContext context,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IWorkItemAccess? workItems = null)
 {
     public const string ProgressViewName = "progress";
+    public const string AttachmentDirectoryName = "mail-attachments";
 
     public async Task<CodingSessionResult> RunAsync(CancellationToken cancellationToken)
     {
@@ -23,6 +26,8 @@ public sealed class CodingSessionApplication(
 
         await workspace.StartSessionBranchAsync(context.BranchName, cancellationToken);
         await PublishAsync("workspace", $"Session branch '{context.BranchName}' ready.", cancellationToken);
+
+        await MaterializeAttachmentsAsync(cancellationToken);
 
         await host.StartAsync(context, cancellationToken);
         await PublishAsync("session",
@@ -57,6 +62,37 @@ public sealed class CodingSessionApplication(
             $"Session ended — {changedFiles.Count} changed file{(changedFiles.Count == 1 ? "" : "s")} on '{context.BranchName}'.",
             cancellationToken);
         return result;
+    }
+
+    /// <summary>
+    /// The triggering mail's attachments land next to the checked-out code so the session can
+    /// read what was mailed in. File names are sanitized; contents are never logged.
+    /// </summary>
+    private async Task MaterializeAttachmentsAsync(CancellationToken ct)
+    {
+        if (workItems is null)
+            return;
+        var workItemId = Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__WORKITEMID");
+        if (string.IsNullOrWhiteSpace(workItemId))
+            return;
+
+        var attachments = await workItems.GetAttachmentsAsync(workItemId, ct);
+        if (attachments.Count == 0)
+            return;
+
+        var directory = Path.Combine(context.WorkspaceDirectory, AttachmentDirectoryName);
+        Directory.CreateDirectory(directory);
+        foreach (var attachment in attachments)
+        {
+            var safeName = Path.GetFileName(attachment.FileName);
+            if (string.IsNullOrWhiteSpace(safeName))
+                continue;
+            await File.WriteAllBytesAsync(Path.Combine(directory, safeName), attachment.Content, ct);
+        }
+
+        await PublishAsync("workspace",
+            $"{attachments.Count} mail attachment{(attachments.Count == 1 ? "" : "s")} placed in {AttachmentDirectoryName}/.",
+            ct);
     }
 
     private Task PublishAsync(string phase, string message, CancellationToken ct)

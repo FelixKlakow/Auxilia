@@ -8,6 +8,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\Auxilia.Workflows\Auxilia.Workflows.csproj" />
     <ProjectReference Include="..\Auxilia.Workflows.SourceControl\Auxilia.Workflows.SourceControl.csproj" />
+    <ProjectReference Include="..\Auxilia.Workflows.TaskSource\Auxilia.Workflows.TaskSource.csproj" />
   </ItemGroup>
   <ItemGroup>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">

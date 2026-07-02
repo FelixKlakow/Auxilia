@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Auxilia.CodingSession.Workflow;
 using Auxilia.Workflows.Views;
+using Moq;
 
 namespace Auxilia.CodingSession.Workflow.Tests;
 
@@ -113,6 +114,41 @@ public class CodingSessionApplicationTests
             Assert.That(written!.Branch, Is.EqualTo("cc-session/test1234"));
             Assert.That(written.ChangedFiles, Has.Count.EqualTo(3));
         });
+    }
+
+    [Test]
+    public async Task Run_MaterializesMailAttachments_IntoTheWorkspace()
+    {
+        var context = Context(_outputDir);
+        Directory.CreateDirectory(context.WorkspaceDirectory);
+        var workItems = new Moq.Mock<Auxilia.Workflows.TaskSource.IWorkItemAccess>();
+        workItems
+            .Setup(w => w.GetAttachmentsAsync("mail-42", It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new Auxilia.Workflows.TaskSource.WorkItemAttachment(
+                "../evil/spec.pdf", [1, 2, 3])]);
+        Environment.SetEnvironmentVariable("WORKFLOW_CONTEXT__WORKITEMID", "mail-42");
+        try
+        {
+            await new CodingSessionApplication(
+                    new FakeSessionHost(), new FakeGitRunner(), null, context,
+                    TimeProvider.System, workItems.Object)
+                .RunAsync(CancellationToken.None);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("WORKFLOW_CONTEXT__WORKITEMID", null);
+        }
+
+        var written = Path.Combine(
+            context.WorkspaceDirectory, CodingSessionApplication.AttachmentDirectoryName, "spec.pdf");
+        Assert.Multiple(() =>
+        {
+            Assert.That(File.Exists(written), "the attachment lands in the workspace");
+            Assert.That(File.ReadAllBytes(written), Is.EqualTo(new byte[] { 1, 2, 3 }));
+            Assert.That(Path.GetFileName(written), Is.EqualTo("spec.pdf"),
+                "path components in attachment names are stripped — no traversal");
+        });
+        Directory.Delete(context.WorkspaceDirectory, recursive: true);
     }
 
     [Test]

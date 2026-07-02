@@ -22,6 +22,13 @@ public static class CodingSessionWorkflow
             .RequiresSourceControl("repository",
                 new SourceControlCapabilities { RequiredPermissions = [Permission.Read, Permission.Write] },
                 "The repository the live session works on (mounted by the Workspace Manager)")
+            .Requires<Auxilia.Workflows.TaskSource.IWorkItemAccess>("work-items",
+                new Auxilia.Workflows.TaskSource.TaskSourceCapabilities
+                {
+                    SupportedItemTypes = [Auxilia.Workflows.TaskSource.ItemType.UserStory]
+                },
+                "Optional: the triggering mail — its attachments land in the workspace",
+                optional: true)
             .DeclaresView<SessionProgressEntry>(CodingSessionApplication.ProgressViewName,
                 ViewRendering.Log, ViewLifecycle.LiveAndPersisted)
             .DeclaresOutput("coding-session-result", CodingSessionResult.FileName,
@@ -48,7 +55,8 @@ public static class CodingSessionWorkflow
                 new ProcessGitRunner(),
                 provider.GetService<IViewPublisher>(),
                 context,
-                TimeProvider.System)
+                TimeProvider.System,
+                provider.GetService<Auxilia.Workflows.TaskSource.IWorkItemAccess>())
             .RunAsync(cancellationToken);
     }
 }

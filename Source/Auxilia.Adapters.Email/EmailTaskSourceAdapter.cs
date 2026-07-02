@@ -150,7 +150,10 @@ public sealed class EmailTaskSourceAdapter(
                     ["WorkItemId"] = workItemId,
                     ["Title"] = mail.Subject,
                     ["From"] = mail.From,
-                    ["Body"] = mail.BodyText
+                    ["Body"] = mail.BodyText,
+                    // Protocol handle so the workflow's work-items slot can refetch the
+                    // mail's attachments in-container — attachments never ride the bus.
+                    ["MailUid"] = mail.Uid.ToString()
                 },
                 trigger.RunAsPrincipalId,
                 trigger.WorkflowConfigurationId);
