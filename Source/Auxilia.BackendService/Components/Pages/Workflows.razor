@@ -74,7 +74,16 @@ else
                         <h3 class="fact-label">@(configuration.TriggerSummaries.Count == 1 ? "Trigger" : "Triggers")</h3>
                         @foreach (var trigger in configuration.TriggerSummaries)
                         {
-                            <p class="fact-line">@trigger</p>
+                            <p class="fact-line">
+                                @trigger.Label
+                                @if (trigger.Health is { Length: > 0 })
+                                {
+                                    <span class="trigger-health @(trigger.Failing ? "trigger-health-failing" : null)"
+                                          title="@trigger.Health">
+                                        <span class="trigger-health-dot"></span>@trigger.Health
+                                    </span>
+                                }
+                            </p>
                         }
                         @if (configuration.TriggerSummaries.Count == 0)
                         {

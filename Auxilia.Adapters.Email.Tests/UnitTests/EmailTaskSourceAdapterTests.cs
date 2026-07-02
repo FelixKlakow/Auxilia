@@ -92,6 +92,7 @@ public class EmailTaskSourceAdapterTests
     private FakeMailboxClientFactory _factory = null!;
     private InMemoryDataAccess<MailboxTriggerRecord> _triggers = null!;
     private InMemoryDataAccess<SlotInstanceRecord> _instances = null!;
+    private InMemoryDataAccess<TriggerHealthRecord> _health = null!;
     private IDataAccess<AuditRecord> _audit = null!;
     private NullSettingsProtector _protector = null!;
     private MailboxTriggerAdapterSettings _settings = null!;
@@ -106,11 +107,12 @@ public class EmailTaskSourceAdapterTests
         _factory = new FakeMailboxClientFactory(_journal);
         _triggers = new InMemoryDataAccess<MailboxTriggerRecord>();
         _instances = new InMemoryDataAccess<SlotInstanceRecord>();
+        _health = new InMemoryDataAccess<TriggerHealthRecord>();
         _audit = new InMemoryDataAccess<AuditRecord>();
         _protector = new NullSettingsProtector();
         _settings = new MailboxTriggerAdapterSettings { CommandQueueName = "workflow.run-commands" };
         _sut = new EmailTaskSourceAdapter(
-            _triggers, _instances, _protector, _factory, _bus,
+            _triggers, _instances, _health, _protector, _factory, _bus,
             new AuditLog(_audit, _time), _time,
             Options.Create(_settings), NullLogger<EmailTaskSourceAdapter>.Instance);
     }
@@ -121,6 +123,7 @@ public class EmailTaskSourceAdapterTests
         _sut.Dispose();
         _triggers.Dispose();
         _instances.Dispose();
+        _health.Dispose();
         (_audit as IDisposable)?.Dispose();
     }
 
@@ -233,6 +236,63 @@ public class EmailTaskSourceAdapterTests
         await _sut.PollDueTriggersAsync(CancellationToken.None);
 
         Assert.That(_factory.SeenSettings, Is.Empty);
+    }
+
+    [Test]
+    public async Task Poll_WritesTheHealthSidecar_OnSuccessAndDispatch()
+    {
+        var instance = await SeedInstanceAsync();
+        var trigger = await SeedTriggerAsync(instance.Id);
+        _factory.ByHost["imap.example.org"] = new FakeMailboxClient(_journal);
+        _factory.ByHost["imap.example.org"].Unseen.Add(Mail());
+
+        await _sut.PollDueTriggersAsync(CancellationToken.None);
+
+        var health = await _health.ReadAsync(trigger.Id);
+        Assert.Multiple(() =>
+        {
+            Assert.That(health, Is.Not.Null);
+            Assert.That(health!.LastPollUtc, Is.EqualTo(_time.Now));
+            Assert.That(health.LastSuccessUtc, Is.EqualTo(_time.Now));
+            Assert.That(health.LastDispatchUtc, Is.EqualTo(_time.Now), "a mail was dispatched this poll");
+            Assert.That(health.LastError, Is.Null);
+            Assert.That(health.FailingSinceUtc, Is.Null);
+        });
+    }
+
+    [Test]
+    public async Task Poll_FailureStreak_KeepsFailingSince_AndRecoveryClearsIt()
+    {
+        var trigger = await SeedTriggerAsync(Guid.NewGuid()); // instance missing → config error
+        var firstFailure = _time.Now;
+
+        await _sut.PollDueTriggersAsync(CancellationToken.None);
+        _time.Now = _time.Now.AddSeconds(20);
+        await _sut.PollDueTriggersAsync(CancellationToken.None);
+
+        var failing = await _health.ReadAsync(trigger.Id);
+        Assert.Multiple(() =>
+        {
+            Assert.That(failing!.LastError, Does.Contain("deleted slot instance"));
+            Assert.That(failing.FailingSinceUtc, Is.EqualTo(firstFailure),
+                "the streak start survives subsequent failing polls");
+            Assert.That(failing.LastPollUtc, Is.EqualTo(_time.Now));
+            Assert.That(failing.LastSuccessUtc, Is.Null);
+        });
+
+        // The instance appears (recovery): the next poll clears the failure.
+        var record = await SeedInstanceAsync();
+        await _triggers.SaveAsync((await _triggers.ReadAsync(trigger.Id))! with { SlotInstanceId = record.Id });
+        _time.Now = _time.Now.AddSeconds(20);
+        await _sut.PollDueTriggersAsync(CancellationToken.None);
+
+        var recovered = await _health.ReadAsync(trigger.Id);
+        Assert.Multiple(() =>
+        {
+            Assert.That(recovered!.LastError, Is.Null);
+            Assert.That(recovered.FailingSinceUtc, Is.Null);
+            Assert.That(recovered.LastSuccessUtc, Is.EqualTo(_time.Now));
+        });
     }
 
     [Test]

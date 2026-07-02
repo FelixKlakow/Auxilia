@@ -35,6 +35,7 @@ public sealed class MailboxTriggerAdapterSettings
 public sealed class EmailTaskSourceAdapter(
     IDataAccess<MailboxTriggerRecord> triggers,
     IDataAccess<SlotInstanceRecord> slotInstances,
+    IDataAccess<TriggerHealthRecord> health,
     ISettingsProtector protector,
     IMailboxClientFactory mailboxFactory,
     IMessageBusClient messageBus,
@@ -80,38 +81,54 @@ public sealed class EmailTaskSourceAdapter(
 
             try
             {
-                await PollTriggerAsync(trigger, ct);
+                var dispatched = await PollTriggerAsync(trigger, ct);
+                await WriteHealthAsync(trigger.Id, now, error: null, dispatched, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // One unreachable mailbox must not stall the other triggers.
                 logger.LogWarning(ex,
                     "Mailbox poll failed for trigger {TriggerId} — will retry next interval.", trigger.Id);
+                await WriteHealthAsync(trigger.Id, now, error: ex.Message, dispatched: 0, ct);
             }
         }
     }
 
-    private async Task PollTriggerAsync(MailboxTriggerRecord trigger, CancellationToken ct)
+    /// <summary>
+    /// Health sidecar of the poll: connection errors and configuration errors become
+    /// "failing since"; a clean poll clears them. Never carries mail content.
+    /// </summary>
+    private async Task WriteHealthAsync(
+        Guid triggerId, DateTimeOffset now, string? error, int dispatched, CancellationToken ct)
     {
-        var instance = await slotInstances.ReadAsync(trigger.SlotInstanceId, ct);
-        if (instance is null)
+        var existing = await health.ReadAsync(triggerId, ct);
+        await health.SaveAsync(new TriggerHealthRecord
         {
-            logger.LogWarning(
-                "Mailbox trigger {TriggerId} references a deleted slot instance — skipping.", trigger.Id);
-            return;
-        }
+            Id = triggerId,
+            LastPollUtc = now,
+            LastSuccessUtc = error is null ? now : existing?.LastSuccessUtc,
+            LastDispatchUtc = dispatched > 0 ? now : existing?.LastDispatchUtc,
+            LastError = error,
+            FailingSinceUtc = error is null
+                ? null
+                : existing?.LastError is not null ? existing.FailingSinceUtc : now
+        }, ct);
+    }
+
+    private async Task<int> PollTriggerAsync(MailboxTriggerRecord trigger, CancellationToken ct)
+    {
+        var instance = await slotInstances.ReadAsync(trigger.SlotInstanceId, ct)
+                       ?? throw new InvalidOperationException(
+                           "The trigger references a deleted slot instance.");
 
         var settings = SettingsFrom(instance);
         if (string.IsNullOrWhiteSpace(settings.ImapHost))
-        {
-            logger.LogWarning(
-                "Mailbox trigger {TriggerId}: slot instance '{Instance}' declares no IMAP host — skipping.",
-                trigger.Id, instance.Name);
-            return;
-        }
+            throw new InvalidOperationException(
+                $"Slot instance '{instance.Name}' declares no IMAP host.");
 
         var mailbox = mailboxFactory.Create(settings);
         var unseen = await mailbox.FetchUnseenAsync(ct);
+        var dispatched = 0;
 
         foreach (var mail in unseen)
         {
@@ -150,7 +167,10 @@ public sealed class EmailTaskSourceAdapter(
             logger.LogInformation(
                 "Mail dispatched as work item. WorkItem={WorkItemId} Configuration={ConfigurationId} Command={CommandId}",
                 workItemId, trigger.WorkflowConfigurationId, command.CommandId);
+            dispatched++;
         }
+
+        return dispatched;
     }
 
     /// <summary>Maps the instance's decrypted settings onto the mailbox client's shape; never logged.</summary>

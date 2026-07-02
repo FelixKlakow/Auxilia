@@ -46,6 +46,7 @@ public class WorkflowConfigurationEditorServiceTests
     private IDataAccess<WorkflowSchemaRecord> _schemas = null!;
     private IDataAccess<SlotInstanceRecord> _slotInstances = null!;
     private IDataAccess<MailboxTriggerRecord> _mailboxTriggerRecords = null!;
+    private IDataAccess<TriggerHealthRecord> _triggerHealth = null!;
     private IDataAccess<AuditRecord> _audit = null!;
     private NullSettingsProtector _protector = null!;
     private WorkflowConfigurationEditorService _sut = null!;
@@ -64,14 +65,15 @@ public class WorkflowConfigurationEditorServiceTests
         _schemas = new InMemoryDataAccess<WorkflowSchemaRecord>();
         _slotInstances = new InMemoryDataAccess<SlotInstanceRecord>();
         _mailboxTriggerRecords = new InMemoryDataAccess<MailboxTriggerRecord>();
+        _triggerHealth = new InMemoryDataAccess<TriggerHealthRecord>();
         _audit = new InMemoryDataAccess<AuditRecord>();
         _protector = new NullSettingsProtector();
         var auditLog = new AuditLog(_audit, TimeProvider.System);
         _sut = new WorkflowConfigurationEditorService(
             _configurations, _instances, _schedules, _chains, _slots, _providers,
-            _packages, _schemas, _slotInstances, _mailboxTriggerRecords,
+            _packages, _schemas, _slotInstances, _mailboxTriggerRecords, _triggerHealth,
             new ProviderCatalogService(_providers, new InMemoryDataAccess<ProviderCatalogRecord>(), auditLog),
-            _protector, _bus, auditLog);
+            _protector, _bus, auditLog, TimeProvider.System);
     }
 
     [TearDown]
@@ -86,6 +88,7 @@ public class WorkflowConfigurationEditorServiceTests
         (_packages as IDisposable)?.Dispose();
         (_schemas as IDisposable)?.Dispose();
         (_slotInstances as IDisposable)?.Dispose();
+        (_triggerHealth as IDisposable)?.Dispose();
         (_mailboxTriggerRecords as IDisposable)?.Dispose();
         (_audit as IDisposable)?.Dispose();
     }
@@ -762,6 +765,100 @@ public class WorkflowConfigurationEditorServiceTests
                 "workflows without declared criteria stay chainable but unmatched");
             Assert.That(candidates[0].DisplayName, Is.EqualTo("Implementer"),
                 "criteria matches rank first");
+        });
+    }
+
+    // ------------------------------------------------------------------ trigger health
+
+    [Test]
+    public void MailboxHealth_CoversUnpolled_Failing_AndHealthyStates()
+    {
+        var now = DateTimeOffset.UtcNow;
+        Assert.Multiple(() =>
+        {
+            Assert.That(WorkflowConfigurationEditorService.MailboxHealth(null),
+                Is.EqualTo(("not polled yet", false)));
+
+            var (failingText, failing) = WorkflowConfigurationEditorService.MailboxHealth(new TriggerHealthRecord
+            {
+                Id = Guid.NewGuid(),
+                LastPollUtc = now,
+                LastError = "authentication failed",
+                FailingSinceUtc = now.AddMinutes(-10)
+            });
+            Assert.That(failing, Is.True);
+            Assert.That(failingText, Does.Contain("failing since").And.Contain("authentication failed"));
+
+            var (healthyText, healthyFailing) = WorkflowConfigurationEditorService.MailboxHealth(new TriggerHealthRecord
+            {
+                Id = Guid.NewGuid(),
+                LastPollUtc = now,
+                LastSuccessUtc = now,
+                LastDispatchUtc = now.AddMinutes(-3)
+            });
+            Assert.That(healthyFailing, Is.False);
+            Assert.That(healthyText, Does.Contain("checked").And.Contain("last mail"));
+        });
+    }
+
+    [Test]
+    public void ScheduleHealth_ReportsDisabled_DueNow_AndNextDue()
+    {
+        var now = DateTimeOffset.UtcNow;
+        ScheduledTriggerRecord Schedule(bool enabled, DateTimeOffset? last) => new()
+        {
+            Id = Guid.NewGuid(),
+            WorkflowType = "t",
+            WorkflowPackageUri = "docker://t:1",
+            IntervalSeconds = 3600,
+            Enabled = enabled,
+            LastDispatchedUtc = last
+        };
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(WorkflowConfigurationEditorService.ScheduleHealth(Schedule(false, null), now).Text,
+                Is.EqualTo("disabled"));
+            Assert.That(WorkflowConfigurationEditorService.ScheduleHealth(Schedule(true, null), now).Text,
+                Is.EqualTo("due now"));
+            Assert.That(WorkflowConfigurationEditorService.ScheduleHealth(
+                    Schedule(true, now.AddHours(-2)), now).Text,
+                Is.EqualTo("due now"), "an overdue schedule reads as due now");
+            Assert.That(WorkflowConfigurationEditorService.ScheduleHealth(
+                    Schedule(true, now.AddMinutes(-30)), now).Text,
+                Does.StartWith("next due in"));
+        });
+    }
+
+    [Test]
+    public async Task List_TriggerSummaries_CarryTheMailboxHealth()
+    {
+        await SeedProviderAsync();
+        await SeedInstanceAsync();
+        await SeedConfigurationAsync(); // "team-review"
+        var trigger = new MailboxTriggerRecord
+        {
+            Id = Guid.NewGuid(),
+            WorkflowConfigurationId = WorkflowConfigurationRecord.IdFor("team-review"),
+            SlotInstanceId = SlotInstanceRecord.IdFor("team-mailbox")
+        };
+        await _mailboxTriggerRecords.SaveAsync(trigger);
+        await _triggerHealth.SaveAsync(new TriggerHealthRecord
+        {
+            Id = trigger.Id,
+            LastPollUtc = DateTimeOffset.UtcNow,
+            LastError = "IMAP host unreachable",
+            FailingSinceUtc = DateTimeOffset.UtcNow.AddMinutes(-5)
+        });
+
+        var overview = (await _sut.ListAsync()).Single(o => o.Name == "team-review");
+
+        var summary = overview.TriggerSummaries.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(summary.Label, Does.Contain("Mailbox 'Team mailbox'"));
+            Assert.That(summary.Failing, Is.True);
+            Assert.That(summary.Health, Does.Contain("IMAP host unreachable"));
         });
     }
 

@@ -1003,6 +1003,27 @@ select { cursor: pointer; }
 .flow-drop-hover { outline: 2px dashed #d9822b; outline-offset: 2px; }
 .flow-drop-hint { font-style: italic; }
 
+/* Live per-trigger health: green dot = polling fine, red = failing (with the reason). */
+.trigger-health {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.trigger-health-dot {
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #2f9e6e;
+}
+
+.trigger-health-failing { color: var(--error-text); }
+.trigger-health-failing .trigger-health-dot { background: #c0392b; }
+
 .flow-consumers { display: flex; flex-direction: column; gap: 0.35rem; }
 
 .flow-consumer {

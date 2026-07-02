@@ -64,6 +64,13 @@ else
                                 <span class="flow-node-title">@trigger.Label</span>
                             </div>
                         </div>
+                        @if (trigger.Health is { Length: > 0 })
+                        {
+                            <span class="trigger-health @(trigger.Failing ? "trigger-health-failing" : null)"
+                                  title="@trigger.Health">
+                                <span class="trigger-health-dot"></span>@trigger.Health
+                            </span>
+                        }
                     </div>
                 }
 

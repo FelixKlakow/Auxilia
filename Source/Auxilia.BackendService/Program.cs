@@ -115,6 +115,7 @@ try
     builder.Services.AddPlatformEntity<WorkflowSchemaRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<SlotInstanceRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<MailboxTriggerRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<TriggerHealthRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<DashboardRecord>(platformDataSettings);
     builder.Services.AddSingleton(TimeProvider.System);
     builder.Services.AddSingleton<AuditLog>();

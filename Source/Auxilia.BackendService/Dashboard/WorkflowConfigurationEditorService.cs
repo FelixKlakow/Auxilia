@@ -90,8 +90,11 @@ public sealed record WorkflowConfigurationOverview(
     bool Enabled,
     DateTimeOffset UpdatedUtc,
     IReadOnlyList<(string SlotName, string ProviderType)> Bindings,
-    IReadOnlyList<string> TriggerSummaries,
+    IReadOnlyList<TriggerSummary> TriggerSummaries,
     WorkflowInstanceRecord? LastRun);
+
+/// <summary>One trigger of a configuration with its live health: what it is, and how it is doing.</summary>
+public sealed record TriggerSummary(string Label, string? Health, bool Failing);
 
 /// <summary>Known values offered as picker suggestions (free-text stays allowed).</summary>
 public sealed record KnownWorkflowValues(
@@ -140,10 +143,12 @@ public sealed class WorkflowConfigurationEditorService(
     IDataAccess<WorkflowSchemaRecord> workflowSchemas,
     IDataAccess<SlotInstanceRecord> slotInstances,
     IDataAccess<MailboxTriggerRecord> mailboxTriggers,
+    IDataAccess<TriggerHealthRecord> triggerHealth,
     ProviderCatalogService catalog,
     ISettingsProtector protector,
     IMessageBusClient messageBus,
-    AuditLog auditLog)
+    AuditLog auditLog,
+    TimeProvider timeProvider)
 {
     internal const string SeedExchangeName = "slot-configurations";
 
@@ -157,7 +162,9 @@ public sealed class WorkflowConfigurationEditorService(
         var mailboxes = (await mailboxTriggers.ReadAsync(ct)).ToList();
         var instanceNames = (await slotInstances.ReadAsync(ct)).ToList()
             .ToDictionary(i => i.Id, i => i.DisplayName);
+        var healthById = (await triggerHealth.ReadAsync(ct)).ToList().ToDictionary(h => h.Id);
         var runs = (await instances.ReadAsync(ct)).ToList();
+        var now = timeProvider.GetUtcNow();
 
         return records
             .OrderBy(r => r.DisplayName, StringComparer.OrdinalIgnoreCase)
@@ -166,32 +173,71 @@ public sealed class WorkflowConfigurationEditorService(
                 record.Enabled, record.UpdatedUtc,
                 ParseBindings(record.SlotBindingsJson)
                     .Select(b => (b.SlotName, b.ProviderType)).ToList(),
-                TriggerSummariesOf(record.Id, schedules, chains, mailboxes, instanceNames),
+                TriggerSummariesOf(record.Id, schedules, chains, mailboxes, instanceNames, healthById, now),
                 runs.Where(r => r.WorkflowConfigurationId == record.Id)
                     .OrderByDescending(r => r.CreatedUtc)
                     .FirstOrDefault()))
             .ToList();
     }
 
-    private static IReadOnlyList<string> TriggerSummariesOf(
+    private static IReadOnlyList<TriggerSummary> TriggerSummariesOf(
         Guid configurationId,
         IReadOnlyList<ScheduledTriggerRecord> schedules,
         IReadOnlyList<ArtifactTriggerRecord> chains,
         IReadOnlyList<MailboxTriggerRecord> mailboxes,
-        IReadOnlyDictionary<Guid, string> instanceNames)
+        IReadOnlyDictionary<Guid, string> instanceNames,
+        IReadOnlyDictionary<Guid, TriggerHealthRecord> healthById,
+        DateTimeOffset now)
     {
-        var summaries = new List<string>();
+        var summaries = new List<TriggerSummary>();
         summaries.AddRange(schedules
             .Where(t => t.WorkflowConfigurationId == configurationId)
-            .Select(t => $"Schedule · every {TimeText.Interval(t.IntervalSeconds)}"));
+            .Select(t =>
+            {
+                var (health, failing) = ScheduleHealth(t, now);
+                return new TriggerSummary($"Schedule · every {TimeText.Interval(t.IntervalSeconds)}", health, failing);
+            }));
         summaries.AddRange(chains
             .Where(t => t.WorkflowConfigurationId == configurationId)
-            .Select(t => $"Artifact chain · after every '{t.ArtifactType}' artifact"));
+            .Select(t => new TriggerSummary(
+                $"Artifact chain · after every '{t.ArtifactType}' artifact", null, false)));
         summaries.AddRange(mailboxes
             .Where(t => t.WorkflowConfigurationId == configurationId)
             .Select(t =>
-                $"Mailbox '{instanceNames.GetValueOrDefault(t.SlotInstanceId, "(deleted instance)")}' · every {TimeText.Interval(t.PollIntervalSeconds)}"));
+            {
+                var (health, failing) = MailboxHealth(healthById.GetValueOrDefault(t.Id));
+                return new TriggerSummary(
+                    $"Mailbox '{instanceNames.GetValueOrDefault(t.SlotInstanceId, "(deleted instance)")}' · every {TimeText.Interval(t.PollIntervalSeconds)}",
+                    health, failing);
+            }));
         return summaries;
+    }
+
+    /// <summary>How a mailbox trigger is doing, from its polling adapter's health sidecar.</summary>
+    internal static (string Text, bool Failing) MailboxHealth(TriggerHealthRecord? health)
+    {
+        if (health?.LastPollUtc is null)
+            return ("not polled yet", false);
+        if (health.LastError is { } error)
+            return ($"failing since {TimeText.Relative(health.FailingSinceUtc ?? health.LastPollUtc.Value)} — {error}", true);
+
+        var text = $"checked {TimeText.Relative(health.LastPollUtc.Value)}";
+        if (health.LastDispatchUtc is { } dispatch)
+            text += $" · last mail {TimeText.Relative(dispatch)}";
+        return (text, false);
+    }
+
+    /// <summary>When a schedule fires next, from its dispatch bookkeeping.</summary>
+    internal static (string Text, bool Failing) ScheduleHealth(ScheduledTriggerRecord schedule, DateTimeOffset now)
+    {
+        if (!schedule.Enabled)
+            return ("disabled", false);
+        if (schedule.LastDispatchedUtc is null)
+            return ("due now", false);
+        var due = schedule.LastDispatchedUtc.Value.AddSeconds(schedule.IntervalSeconds);
+        return due <= now
+            ? ("due now", false)
+            : ($"next due in {TimeText.Interval((int)(due - now).TotalSeconds)}", false);
     }
 
     // ------------------------------------------------------------------ draft
@@ -411,7 +457,8 @@ public sealed class WorkflowConfigurationEditorService(
         IReadOnlyList<FlowOutput> Outputs,
         IReadOnlyList<FlowPaletteEntry> Palette);
 
-    public sealed record FlowTrigger(TriggerKind Kind, string Label);
+    public sealed record FlowTrigger(
+        TriggerKind Kind, string Label, string? Health = null, bool Failing = false);
 
     /// <summary>A declared output, the configurations chained to run after it, and the chainable candidates.</summary>
     public sealed record FlowOutput(
@@ -458,16 +505,28 @@ public sealed class WorkflowConfigurationEditorService(
 
         var instanceNames = (await slotInstances.ReadAsync(ct)).ToList()
             .ToDictionary(i => i.Id, i => i.DisplayName);
+        var healthById = (await triggerHealth.ReadAsync(ct)).ToList().ToDictionary(h => h.Id);
+        var now = timeProvider.GetUtcNow();
         var triggers = new List<FlowTrigger>();
         triggers.AddRange((await scheduledTriggers.ReadAsync(ct)).ToList()
             .Where(t => t.WorkflowConfigurationId == id)
-            .Select(t => new FlowTrigger(TriggerKind.Schedule, $"every {TimeText.Interval(t.IntervalSeconds)}")));
+            .Select(t =>
+            {
+                var (health, failing) = ScheduleHealth(t, now);
+                return new FlowTrigger(TriggerKind.Schedule,
+                    $"every {TimeText.Interval(t.IntervalSeconds)}", health, failing);
+            }));
         triggers.AddRange((await mailboxTriggers.ReadAsync(ct)).ToList()
             .Where(t => t.WorkflowConfigurationId == id)
-            .Select(t => new FlowTrigger(TriggerKind.Mailbox,
-                instanceNames.GetValueOrDefault(t.SlotInstanceId, "(deleted instance)")
-                + (t.SubjectContains.Length > 0 ? $" · subject ~ \"{t.SubjectContains}\"" : "")
-                + (t.FromContains.Length > 0 ? $" · from ~ \"{t.FromContains}\"" : ""))));
+            .Select(t =>
+            {
+                var (health, failing) = MailboxHealth(healthById.GetValueOrDefault(t.Id));
+                return new FlowTrigger(TriggerKind.Mailbox,
+                    instanceNames.GetValueOrDefault(t.SlotInstanceId, "(deleted instance)")
+                    + (t.SubjectContains.Length > 0 ? $" · subject ~ \"{t.SubjectContains}\"" : "")
+                    + (t.FromContains.Length > 0 ? $" · from ~ \"{t.FromContains}\"" : ""),
+                    health, failing);
+            }));
         var chains = (await artifactTriggers.ReadAsync(ct)).ToList();
         triggers.AddRange(chains
             .Where(t => t.WorkflowConfigurationId == id)
