@@ -1,0 +1,13 @@
+{
+  "ProviderType": "coding-session-workspace",
+  "ContentHashBase64": "",
+  "SignatureBase64": "",
+  "PublicKeyBase64": "",
+  "Contracts": [
+    "Auxilia.Workflows.SourceControl.ISourceControlAccess",
+    "Auxilia.Workflows.TaskSource.IWorkItemAccess"
+  ],
+  "Category": "coding-session",
+  "Description": "Backs a live coding session with the mounted workspace directory.",
+  "Settings": []
+}

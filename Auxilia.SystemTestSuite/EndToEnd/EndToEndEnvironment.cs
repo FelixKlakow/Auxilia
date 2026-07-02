@@ -117,6 +117,12 @@ public class EndToEndEnvironment
         await PublishProjectAsync(
             "Auxilia.Slots.ClaudeCode/Auxilia.Slots.ClaudeCode.csproj",
             _publishDir);
+        // Light-dependency source-control/work-items provider for the live coding session: its
+        // only refs are assemblies baked into the coding-session image, so the shipped DLL's
+        // types resolve at load time (unlike the code-review fake, which drags CodeReview.Workflow).
+        await PublishProjectAsync(
+            "Auxilia.Slots.CodingSession/Auxilia.Slots.CodingSession.csproj",
+            _publishDir);
 
         // Sequential on purpose: parallel docker builds have wedged Docker Desktop daemons
         // (see FailoverEnvironment); the .prebuilt-images marker skips them locally anyway.
@@ -201,6 +207,9 @@ public class EndToEndEnvironment
             .WithEnvironment("WorkflowDispatcher__SlotActivationQueueName", "workflow-slot-activation-e2e")
             .WithEnvironment("WorkflowDispatcher__RunOutputDirectory",      ContainerRunOutput)
             .WithEnvironment("WorkflowDispatcher__RunOutputHostDirectory",  _runOutputDir)
+            // Long-living workflows need operator approval to register (ARCHITECTURE §6); the
+            // interactive coding session is the platform's one long-living type.
+            .WithEnvironment("WorkflowDispatcher__ApprovedLongLivingWorkflowTypes__0", CodingSessionWorkflowType)
             .WithEnvironment("PlatformData__Backend",               "MongoDb")
             .WithEnvironment("PlatformData__MongoConnectionString", $"mongodb://{MongoAlias}:27017")
             .WithWaitStrategy(Wait.ForUnixContainer()
@@ -294,6 +303,14 @@ public class EndToEndEnvironment
                 "claude-code-cli",
                 $"{ContainerPluginsDir}/Auxilia.Slots.ClaudeCode.slothandler.dll",
                 claudeManifest.Settings, claudeManifest.Contracts, claudeManifest.Category, claudeManifest.Description));
+        var codingSessionManifest = System.Text.Json.JsonSerializer.Deserialize<Auxilia.Workflows.PluginManifest>(
+            await File.ReadAllTextAsync(Path.Combine(_publishDir, "Auxilia.Slots.CodingSession.slothandler.manifest.json")))!;
+        await MessageBusClient.PublishAsync(seedBase + ".register",
+            new RegisterSlotProviderCommand(
+                "coding-session-workspace",
+                $"{ContainerPluginsDir}/Auxilia.Slots.CodingSession.slothandler.dll",
+                codingSessionManifest.Settings, codingSessionManifest.Contracts,
+                codingSessionManifest.Category, codingSessionManifest.Description));
         await MessageBusClient.PublishAsync(seedBase + ".upsert",
             new UpsertSlotConfigurationCommand(
                 ClaudeWorkflowType, "coding-agent", "claude-code-cli",
@@ -366,15 +383,20 @@ public class EndToEndEnvironment
                 }.Concat(dependencyBindings).ToList(),
                 RunAsPrincipalId));
 
-        // The live coding-session configuration: its only required slot is the repository
-        // (the fake provides ISourceControlAccess); work-items is optional and left unbound.
+        // The live coding-session configuration. Both slots use the dedicated coding-session
+        // provider whose only dependencies are assemblies baked into the coding-session image
+        // (repository -> the mounted workspace path; work-items is optional but the SDK activates
+        // every DECLARED slot, so it must be bound). The code-review/Email providers are unusable
+        // here: their plugin DLLs drag CodeReview.Workflow / the mail stack, which the leaner
+        // coding-session image doesn't carry, so the plugin loader's type scan would fail.
         await MessageBusClient.PublishAsync(seedBase + ".upsert-configuration",
             new UpsertWorkflowConfigurationCommand(
                 CodingSessionConfigurationName, "Live coding session",
                 CodingSessionWorkflowType, CodingSessionPackageUri, Enabled: true,
                 new List<SlotBindingSeed>
                 {
-                    new("repository", "fake-code-review-happy", new Dictionary<string, string>())
+                    new("repository", "coding-session-workspace", new Dictionary<string, string>()),
+                    new("work-items", "coding-session-workspace", new Dictionary<string, string>())
                 },
                 RunAsPrincipalId));
 

@@ -68,6 +68,7 @@
     <Project Path="Auxilia.ImplementationWorkflow.Tests/Auxilia.ImplementationWorkflow.Tests.csproj" />
     <Project Path="Auxilia.Slots.ClaudeCode.Tests\Auxilia.Slots.ClaudeCode.Tests.csproj" />
     <Project Path="Auxilia.Slots.ClaudeCode\Auxilia.Slots.ClaudeCode.csproj" />
+    <Project Path="Auxilia.Slots.CodingSession\Auxilia.Slots.CodingSession.csproj" />
     <Project Path="Auxilia.Slots.Email.Tests\Auxilia.Slots.Email.Tests.csproj" />
     <Project Path="Auxilia.Slots.Email\Auxilia.Slots.Email.csproj" />
     <Project Path="Source/Auxilia.ClaudeCode.Workflow/Auxilia.ClaudeCode.Workflow.csproj" />

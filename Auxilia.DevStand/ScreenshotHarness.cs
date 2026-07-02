@@ -268,27 +268,76 @@ internal static class ScreenshotHarness
     private static async Task CaptureSessionTerminalAsync(
         IPage page, string dashboardUrl, Guid runId, string outputDir, List<string> captured)
     {
-        var url = $"{dashboardUrl}/sessions/{runId}/terminal/";
-        for (var attempt = 0; attempt < 12; attempt++)
+        // The headless terminal is the subtlest link (dashboard proxy -> ttyd -> tty WebSocket).
+        // Record renderer-independent ground truth — HTTP statuses, WebSocket frames, console
+        // errors — so a blank capture is diagnosable without another full run.
+        var httpResponses = new List<string>();
+        var failed = new List<string>();
+        var consoleMsgs = new List<string>();
+        var wsLog = new List<string>();
+        var wsFrames = 0;
+        void OnConsole(object? _, IConsoleMessage m) { if (m.Type is "error" or "warning") consoleMsgs.Add($"{m.Type}: {m.Text}"); }
+        void OnFailed(object? _, IRequest r) { failed.Add($"{r.Method} {r.Url} -> {r.Failure}"); }
+        void OnResponse(object? _, IResponse r) { if (r.Url.Contains("/terminal/")) httpResponses.Add($"{r.Status} {r.Url}"); }
+        void OnWebSocket(object? _, IWebSocket ws)
         {
-            try
-            {
-                await page.GotoAsync(url,
-                    new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 15000 });
-                await page.WaitForSelectorAsync(".xterm-screen, .xterm",
-                    new PageWaitForSelectorOptions { Timeout = 6000 });
-                break;
-            }
-            catch
-            {
-                await Task.Delay(TimeSpan.FromSeconds(2));
-            }
+            wsLog.Add($"open {ws.Url}");
+            ws.FrameReceived += (_, __) => Interlocked.Increment(ref wsFrames);
+            ws.SocketError += (_, e) => wsLog.Add($"error {e}");
+            ws.Close += (_, __) => wsLog.Add("close");
         }
+        page.Console += OnConsole;
+        page.RequestFailed += OnFailed;
+        page.Response += OnResponse;
+        page.WebSocket += OnWebSocket;
 
-        await Task.Delay(TimeSpan.FromSeconds(4)); // let the pane content and cursor paint
-        var path = Path.Combine(outputDir, "22-live-session-terminal.png");
-        await page.ScreenshotAsync(new PageScreenshotOptions { Path = path, FullPage = true });
-        captured.Add(path);
+        var url = $"{dashboardUrl}/sessions/{runId}/terminal/";
+        try
+        {
+            IResponse? gotoResponse = null;
+            for (var attempt = 0; attempt < 12; attempt++)
+            {
+                try
+                {
+                    gotoResponse = await page.GotoAsync(url,
+                        new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 15000 });
+                    await page.WaitForSelectorAsync(".xterm-screen, .xterm",
+                        new PageWaitForSelectorOptions { Timeout = 6000 });
+                    break;
+                }
+                catch
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(2));
+                }
+            }
+
+            // Ready when the tty WebSocket has actually streamed session output — renderer-
+            // independent, unlike probing the (canvas-rendered) xterm DOM for text.
+            for (var i = 0; i < 20 && Volatile.Read(ref wsFrames) == 0; i++)
+                await Task.Delay(TimeSpan.FromSeconds(1));
+
+            Console.WriteLine($"  [terminal] goto={gotoResponse?.Status} wsFrames={Volatile.Read(ref wsFrames)}");
+            foreach (var r in httpResponses) Console.WriteLine($"  [terminal] http {r}");
+            foreach (var w in wsLog) Console.WriteLine($"  [terminal] ws {w}");
+            foreach (var f in failed) Console.WriteLine($"  [terminal] FAILED {f}");
+            foreach (var c in consoleMsgs) Console.WriteLine($"  [terminal] console {c}");
+
+            await Task.Delay(TimeSpan.FromSeconds(2)); // let the pane paint after first frames
+            var path = Path.Combine(outputDir, "22-live-session-terminal.png");
+            var xterm = await page.QuerySelectorAsync(".xterm");
+            if (xterm is not null)
+                await xterm.ScreenshotAsync(new ElementHandleScreenshotOptions { Path = path });
+            else
+                await page.ScreenshotAsync(new PageScreenshotOptions { Path = path, FullPage = true });
+            captured.Add(path);
+        }
+        finally
+        {
+            page.Console -= OnConsole;
+            page.RequestFailed -= OnFailed;
+            page.Response -= OnResponse;
+            page.WebSocket -= OnWebSocket;
+        }
     }
 
     /// <summary>

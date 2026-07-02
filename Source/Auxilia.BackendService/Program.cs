@@ -53,6 +53,9 @@ try
             builder.Configuration["RabbitMq:Password"] ?? "guest"
         ).GetAwaiter().GetResult());
 
+    // --- HTTP client factory (used by the session-terminal reverse proxy to reach ttyd) ---
+    builder.Services.AddHttpClient("session-terminal");
+
     // --- OpenTelemetry (tracing + metrics) ---
     var otlpEndpoint = builder.Configuration["Otlp:Endpoint"];
     var serviceVersion = Assembly.GetExecutingAssembly()
