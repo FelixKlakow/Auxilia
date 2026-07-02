@@ -66,11 +66,13 @@ else
         {
             var count = CountOf(state);
             <button class="chip @(_stateFilter == state ? "active" : null)"
-                    @onclick="() => _stateFilter = state">
+                    @onclick="() => { _stateFilter = state; _visible = PageSize; }">
                 @state
                 <span class="chip-count">@count</span>
             </button>
         }
+        <input class="chip-search" placeholder="Search workflow, configuration, run ID, error …"
+               @bind="_search" @bind:event="oninput" @bind:after="() => _visible = PageSize"/>
     </div>
 
     <div class="card">
@@ -137,7 +139,15 @@ else
         </table>
         @if (!FilteredRuns.Any())
         {
-            <div class="card-body"><p class="muted view-empty">No runs in this state.</p></div>
+            <div class="card-body"><p class="muted view-empty">No runs match the current filter.</p></div>
+        }
+        @if (FilteredCount > _visible)
+        {
+            <div class="card-body table-more">
+                <button class="btn btn-secondary" @onclick="() => _visible += PageSize">
+                    Show more (@_visible of @FilteredCount)
+                </button>
+            </div>
         }
     </div>
 }
@@ -156,10 +166,14 @@ else
 
     // Backplane-less v1: the component polls the data layer every 2 s instead of
     // subscribing to the SignalR fan-out hub from its own circuit.
+    private const int PageSize = 50;
+
     private IReadOnlyList<WorkflowInstanceRecord> _runs = [];
     private readonly CancellationTokenSource _cts = new();
     private PeriodicTimer? _timer;
     private string _stateFilter = "All";
+    private string _search = "";
+    private int _visible = PageSize;
     private string? _error;
     private string? _rerunNotice;
     private bool _busy;
@@ -169,8 +183,24 @@ else
     private string? ConfigurationDisplayName
         => _runs.FirstOrDefault(r => r.WorkflowConfigurationName is not null)?.WorkflowConfigurationName;
 
-    private IEnumerable<WorkflowInstanceRecord> FilteredRuns
-        => _stateFilter == "All" ? _runs : _runs.Where(r => r.State == _stateFilter);
+    private IEnumerable<WorkflowInstanceRecord> AllFilteredRuns
+        => (_stateFilter == "All" ? _runs : _runs.Where(r => r.State == _stateFilter))
+            .Where(MatchesSearch);
+
+    private int FilteredCount => AllFilteredRuns.Count();
+
+    private IEnumerable<WorkflowInstanceRecord> FilteredRuns => AllFilteredRuns.Take(_visible);
+
+    private bool MatchesSearch(WorkflowInstanceRecord run)
+    {
+        if (string.IsNullOrWhiteSpace(_search))
+            return true;
+        var needle = _search.Trim();
+        return run.WorkflowType.Contains(needle, StringComparison.OrdinalIgnoreCase)
+               || (run.WorkflowConfigurationName?.Contains(needle, StringComparison.OrdinalIgnoreCase) ?? false)
+               || run.Id.ToString("N").StartsWith(needle, StringComparison.OrdinalIgnoreCase)
+               || (run.ErrorMessage?.Contains(needle, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
 
     private int CountOf(string state)
         => state == "All" ? _runs.Count : _runs.Count(r => r.State == state);
@@ -209,7 +239,7 @@ else
         var query = all.OrderByDescending(r => r.CreatedUtc).AsEnumerable();
         if (Configuration is { } configurationId)
             query = query.Where(r => r.WorkflowConfigurationId == configurationId);
-        _runs = query.Take(200).ToList();
+        _runs = query.Take(1000).ToList();
 
         if (Configuration is { } id)
             _configuration = await Configurations.ReadAsync(id, _cts.Token);

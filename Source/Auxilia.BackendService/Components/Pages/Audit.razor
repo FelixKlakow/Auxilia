@@ -1,6 +1,7 @@
 @page "/audit"
 @attribute [Authorize]
 @inject IDataAccess<AuditRecord> AuditRecords
+@inject IDataAccess<PrincipalRecord> Principals
 @inject IPolicyEngine PolicyEngine
 
 <PageTitle>Audit — Auxilia</PageTitle>
@@ -18,12 +19,20 @@ else if (!_allowed)
 }
 else
 {
-    <div class="toolbar">
+    <div class="toolbar audit-toolbar">
         <label>
-            Filter (action / actor)
+            Filter (action / actor / subject)
             <input @bind="_filter" @bind:event="oninput" placeholder="e.g. policy.allowed"/>
         </label>
-        <button class="btn btn-secondary" @onclick="LoadAsync">Apply</button>
+        <label>
+            From
+            <input type="date" @bind="_from"/>
+        </label>
+        <label>
+            To
+            <input type="date" @bind="_to"/>
+        </label>
+        <button class="btn btn-secondary" @onclick="ApplyAsync">Apply</button>
     </div>
 
     @if (_entries.Count == 0)
@@ -46,11 +55,11 @@ else
                 </tr>
                 </thead>
                 <tbody>
-                @foreach (var entry in _entries)
+                @foreach (var entry in _entries.Take(_visible))
                 {
                     <tr>
                         <td class="cell-mono">@entry.TimestampUtc.ToString("yyyy-MM-dd HH:mm:ss")</td>
-                        <td><span class="cell-mono cell-truncate" title="@entry.Actor">@entry.Actor</span></td>
+                        <td><span class="cell-truncate" title="@entry.Actor">@ActorName(entry.Actor)</span></td>
                         <td class="cell-strong">@entry.Action</td>
                         <td><span class="cell-mono cell-truncate" title="@entry.Subject">@entry.Subject</span></td>
                         <td>@entry.Outcome</td>
@@ -59,13 +68,22 @@ else
                 }
                 </tbody>
             </table>
+            @if (_entries.Count > _visible)
+            {
+                <div class="card-body table-more">
+                    <button class="btn btn-secondary" @onclick="() => _visible += PageSize">
+                        Show more (@_visible of @_entries.Count)
+                    </button>
+                </div>
+            }
         </div>
     }
 }
 
 @code {
 
-    private const int MaxRows = 500;
+    private const int MaxRows = 2000;
+    private const int PageSize = 100;
 
     [CascadingParameter]
     public Task<AuthenticationState>? AuthState { get; set; }
@@ -74,7 +92,11 @@ else
     private bool _allowed;
     private string _denyReason = "";
     private string _filter = "";
+    private DateTime? _from;
+    private DateTime? _to;
+    private int _visible = PageSize;
     private IReadOnlyList<AuditRecord> _entries = [];
+    private Dictionary<Guid, string> _principalNames = [];
 
     protected override async Task OnInitializedAsync()
     {
@@ -97,16 +119,37 @@ else
         _loaded = true;
     }
 
+    private Task ApplyAsync()
+    {
+        _visible = PageSize;
+        return LoadAsync();
+    }
+
+    /// <summary>GUID actors become the principal's display name; service actors stay as written.</summary>
+    private string ActorName(string actor)
+        => Guid.TryParse(actor, out var id) && _principalNames.TryGetValue(id, out var name)
+            ? name
+            : actor;
+
     private async Task LoadAsync()
     {
+        _principalNames = (await Principals.ReadAsync()).ToList()
+            .ToDictionary(p => p.Id, p => p.DisplayName);
+
         var all = await AuditRecords.ReadAsync();
         var query = all.OrderByDescending(a => a.TimestampUtc).AsEnumerable();
+        if (_from is { } from)
+            query = query.Where(a => a.TimestampUtc >= new DateTimeOffset(from, TimeSpan.Zero));
+        if (_to is { } to)
+            query = query.Where(a => a.TimestampUtc < new DateTimeOffset(to.AddDays(1), TimeSpan.Zero));
         if (!string.IsNullOrWhiteSpace(_filter))
         {
             var needle = _filter.Trim();
             query = query.Where(a =>
                 a.Action.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
-                a.Actor.Contains(needle, StringComparison.OrdinalIgnoreCase));
+                a.Actor.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                ActorName(a.Actor).Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                a.Subject.Contains(needle, StringComparison.OrdinalIgnoreCase));
         }
 
         _entries = query.Take(MaxRows).ToList();

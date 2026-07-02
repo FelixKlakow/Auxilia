@@ -1024,6 +1024,21 @@ select { cursor: pointer; }
 .trigger-health-failing { color: var(--error-text); }
 .trigger-health-failing .trigger-health-dot { background: #c0392b; }
 
+/* Free-text search sitting at the end of a chip bar. */
+.chip-search {
+    margin-left: auto;
+    min-width: 20rem;
+    padding: 0.35rem 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 0.85rem;
+    background: var(--surface);
+}
+
+.table-more { display: flex; justify-content: center; }
+
+.audit-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 1rem; }
+
 .flow-consumers { display: flex; flex-direction: column; gap: 0.35rem; }
 
 .flow-consumer {
