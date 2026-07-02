@@ -110,11 +110,31 @@ else
                     </div>
                 </div>
             </div>
+            @if (_runCandidate == configuration.Id)
+            {
+                <div class="card-body run-now-form">
+                    <label>
+                        Instruction
+                        <textarea rows="3" @bind="_runInstruction"
+                                  placeholder="What should this run do? (becomes the run's input, like a triggering mail's body)"></textarea>
+                        <span class="field-hint">
+                            Every run needs input — for a coding session this is the task; for a review, the context.
+                        </span>
+                    </label>
+                    <div class="button-row">
+                        <button class="btn btn-primary btn-sm"
+                                disabled="@(_busy || string.IsNullOrWhiteSpace(_runInstruction))"
+                                @onclick="() => StartRunAsync(configuration)">Start run</button>
+                        <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                @onclick="() => _runCandidate = null">Cancel</button>
+                    </div>
+                </div>
+            }
             <div class="card-footer">
                 <div class="cell-actions">
                     <button class="btn btn-primary btn-sm" disabled="@(_busy || !configuration.Enabled)"
-                            title="@(configuration.Enabled ? "Dispatch one run of this configuration now" : "Enable the configuration first")"
-                            @onclick="() => RunNowAsync(configuration.Id)">Run now</button>
+                            title="@(configuration.Enabled ? "Start a run with an instruction" : "Enable the configuration first")"
+                            @onclick="() => BeginRun(configuration.Id)">Run…</button>
                     <a class="btn btn-secondary btn-sm" href="workflows/@configuration.Id/flow">Flow</a>
                     <a class="btn btn-secondary btn-sm" href="workflows/@configuration.Id/edit">Edit</a>
                     <button class="btn btn-secondary btn-sm" disabled="@_busy"
@@ -159,10 +179,20 @@ else
     private string? _error;
     private Guid? _principalId;
     private Guid? _deleteCandidate;
+    private Guid? _runCandidate;
+    private string _runInstruction = "";
     private string? _runNotice;
     private IReadOnlyList<WorkflowConfigurationOverview> _configurations = [];
 
-    private async Task RunNowAsync(Guid configurationId)
+    private void BeginRun(Guid configurationId)
+    {
+        _error = null;
+        _runNotice = null;
+        _runInstruction = "";
+        _runCandidate = configurationId;
+    }
+
+    private async Task StartRunAsync(WorkflowConfigurationOverview configuration)
     {
         _error = null;
         _runNotice = null;
@@ -170,7 +200,9 @@ else
         try
         {
             await Editor.RunNowAsync(
-                _principalId!.Value.ToString("D"), _principalId, configurationId, _cts.Token);
+                _principalId!.Value.ToString("D"), _principalId, configuration.Id,
+                title: $"Run of '{configuration.DisplayName}'", instruction: _runInstruction, _cts.Token);
+            _runCandidate = null;
             _runNotice = "Run dispatched — it appears under Runs within a few seconds.";
         }
         catch (Exception ex)

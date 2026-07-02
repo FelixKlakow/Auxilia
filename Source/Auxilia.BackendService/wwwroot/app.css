@@ -1041,6 +1041,10 @@ select { cursor: pointer; }
 
 .provider-description { font-size: 0.8rem; color: var(--text-secondary); }
 
+/* Inline "start a run with an instruction" form on a workflow card. */
+.run-now-form { display: flex; flex-direction: column; gap: 0.6rem; }
+.run-now-form textarea { width: 100%; resize: vertical; }
+
 /* Global flows board: nodes are links; edges carry their artifact type as a label. */
 .flow-node-link { text-decoration: none; color: inherit; }
 .flow-node-link:hover { border-color: var(--border-strong); box-shadow: 0 3px 10px rgba(15, 18, 34, 0.12); }

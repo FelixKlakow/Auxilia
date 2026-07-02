@@ -814,7 +814,8 @@ public class WorkflowConfigurationEditorServiceTests
         var actor = Guid.NewGuid();
 
         var commandId = await _sut.RunNowAsync(
-            actor.ToString("D"), actor, WorkflowConfigurationRecord.IdFor("team-review"));
+            actor.ToString("D"), actor, WorkflowConfigurationRecord.IdFor("team-review"),
+            title: "Session A", instruction: "Refactor the parser");
 
         var (topic, message) = _bus.Published.Single(p => p.Message is RunWorkflowCommand);
         var command = (RunWorkflowCommand)message;
@@ -828,8 +829,29 @@ public class WorkflowConfigurationEditorServiceTests
             Assert.That(command.WorkflowConfigurationId,
                 Is.EqualTo(WorkflowConfigurationRecord.IdFor("team-review")));
             Assert.That(command.RequestedBy, Is.EqualTo(actor));
+            Assert.That(command.Context["Title"], Is.EqualTo("Session A"));
+            Assert.That(command.Context["Body"], Is.EqualTo("Refactor the parser"),
+                "the operator's instruction becomes the run's input");
             Assert.That((await _audit.ReadAsync()).Any(a => a.Action == "workflow-configuration.run-now"),
                 Is.True);
+        });
+    }
+
+    [Test]
+    public async Task RunNow_WithoutInstruction_IsRejected()
+    {
+        await SeedProviderAsync();
+        await SeedConfigurationAsync(); // enabled
+
+        var exception = Assert.ThrowsAsync<ArgumentException>(() => _sut.RunNowAsync(
+            "actor", Guid.NewGuid(), WorkflowConfigurationRecord.IdFor("team-review"),
+            title: "x", instruction: "   "));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(exception!.Message, Does.Contain("instruction is required"));
+            Assert.That(_bus.Published.OfType<(string, object)>()
+                .Select(p => p.Item2).OfType<RunWorkflowCommand>(), Is.Empty);
         });
     }
 
@@ -840,7 +862,8 @@ public class WorkflowConfigurationEditorServiceTests
         await SeedConfigurationAsync(enabled: false);
 
         var exception = Assert.ThrowsAsync<InvalidOperationException>(() => _sut.RunNowAsync(
-            "actor", Guid.NewGuid(), WorkflowConfigurationRecord.IdFor("team-review")));
+            "actor", Guid.NewGuid(), WorkflowConfigurationRecord.IdFor("team-review"),
+            title: "x", instruction: "do the thing"));
 
         Assert.Multiple(() =>
         {

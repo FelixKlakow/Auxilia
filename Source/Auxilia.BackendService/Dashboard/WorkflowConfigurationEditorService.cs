@@ -550,17 +550,21 @@ public sealed class WorkflowConfigurationEditorService(
     }
 
     /// <summary>
-    /// Dispatches one run of a configuration straight from the dashboard: the command carries
-    /// only the configuration reference — the Steering Instance resolves workflow, package,
-    /// and slots exactly like a trigger dispatch. Policy-checked and audited.
+    /// Dispatches one run of a configuration straight from the dashboard with the operator's
+    /// instruction as its input — the same Title/Body context a triggering mail would carry, so
+    /// a run never starts blank. The command references the configuration; the Steering Instance
+    /// resolves workflow, package, and slots exactly like a trigger dispatch. Policy-checked and audited.
     /// </summary>
     public async Task<Guid> RunNowAsync(
-        string actor, Guid? actorPrincipalId, Guid configurationId, CancellationToken ct = default)
+        string actor, Guid? actorPrincipalId, Guid configurationId,
+        string title, string instruction, CancellationToken ct = default)
     {
         var record = await configurations.ReadAsync(configurationId, ct)
                      ?? throw new InvalidOperationException("Unknown workflow configuration.");
         if (!record.Enabled)
             throw new InvalidOperationException("This configuration is disabled — enable it first.");
+        if (string.IsNullOrWhiteSpace(instruction))
+            throw new ArgumentException("An instruction is required — a run always needs input.", nameof(instruction));
 
         if (actorPrincipalId is { } principalId)
         {
@@ -575,12 +579,13 @@ public sealed class WorkflowConfigurationEditorService(
             Guid.NewGuid(), null, null,
             new Dictionary<string, string>
             {
-                ["Title"] = $"Manual run of '{record.DisplayName}'",
-                ["Body"] = "Started from the dashboard."
+                ["Title"] = string.IsNullOrWhiteSpace(title) ? $"Run of '{record.DisplayName}'" : title.Trim(),
+                ["Body"] = instruction.Trim()
             },
             actorPrincipalId, configurationId);
         await messageBus.PublishAsync(dashboardSettings.CommandQueueName, command, ct);
 
+        // The instruction is user input, not a secret — but keep the audit to the reference.
         await auditLog.AppendAsync(actor, "workflow-configuration.run-now",
             record.Name, command.CommandId.ToString(), ct: ct);
         return command.CommandId;
