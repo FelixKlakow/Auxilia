@@ -182,6 +182,10 @@ else
                                    @onchange="() => SelectProvider(entry)"/>
                             <span class="provider-name">@entry.ProviderType</span>
                             <span class="provider-category">@(entry.Category.Length == 0 ? "uncategorized" : entry.Category)</span>
+                            @if (entry.Description is { Length: > 0 })
+                            {
+                                <span class="provider-description">@entry.Description</span>
+                            }
                         </label>
                     }
                 </div>

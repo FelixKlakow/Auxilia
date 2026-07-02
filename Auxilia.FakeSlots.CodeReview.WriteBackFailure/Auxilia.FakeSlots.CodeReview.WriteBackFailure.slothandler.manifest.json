@@ -10,5 +10,6 @@
     "Auxilia.Workflows.AiAgent.IAiAgent"
   ],
   "Category": "test-fake",
+  "Description": "Test fake: behaves like the happy code-review fake but fails on write-back.",
   "Settings": []
 }

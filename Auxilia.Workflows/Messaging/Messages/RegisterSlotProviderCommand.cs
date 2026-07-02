@@ -5,4 +5,5 @@ public sealed record RegisterSlotProviderCommand(
     string DllPath,
     IReadOnlyList<SettingDescriptor>? Settings = null,
     IReadOnlyList<string>? Contracts = null,
-    string? Category = null);
+    string? Category = null,
+    string? Description = null);

@@ -16,4 +16,7 @@ public sealed record PluginManifest(
 
     /// <summary>Human slot-kind tag (e.g. "task-source"); admins may override it in the catalog.</summary>
     public string? Category { get; init; }
+
+    /// <summary>One plain-language sentence describing what the provider does, shown to admins and configurators.</summary>
+    public string? Description { get; init; }
 }

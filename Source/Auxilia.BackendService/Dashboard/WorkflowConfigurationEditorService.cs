@@ -495,6 +495,15 @@ public sealed class WorkflowConfigurationEditorService(
         Incompatible
     }
 
+    /// <summary>Every artifact type any registered workflow declares as an output — the chaining vocabulary.</summary>
+    public async Task<IReadOnlyList<string>> KnownArtifactTypesAsync(CancellationToken ct = default)
+        => (await workflowSchemas.ReadAsync(ct)).ToList()
+            .SelectMany(record => ParseSchema(record.SchemaJson)?.Outputs ?? [])
+            .Select(output => output.Name)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
     /// <summary>Assembles the flow graph of one configuration from triggers, schema outputs, and chaining records.</summary>
     public async Task<WorkflowFlow?> FlowAsync(Guid id, CancellationToken ct = default)
     {

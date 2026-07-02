@@ -1039,6 +1039,8 @@ select { cursor: pointer; }
 
 .audit-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 1rem; }
 
+.provider-description { font-size: 0.8rem; color: var(--text-secondary); }
+
 .flow-consumers { display: flex; flex-direction: column; gap: 0.35rem; }
 
 .flow-consumer {

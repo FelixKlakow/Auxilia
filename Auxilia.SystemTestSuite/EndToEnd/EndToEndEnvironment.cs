@@ -222,14 +222,14 @@ public class EndToEndEnvironment
             new RegisterSlotProviderCommand(
                 "fake-code-review-happy",
                 $"{ContainerPluginsDir}/Auxilia.FakeSlots.CodeReview.Happy.slothandler.dll",
-                fakeManifest.Settings, fakeManifest.Contracts, fakeManifest.Category));
+                fakeManifest.Settings, fakeManifest.Contracts, fakeManifest.Category, fakeManifest.Description));
         var emailManifest = System.Text.Json.JsonSerializer.Deserialize<Auxilia.Workflows.PluginManifest>(
             await File.ReadAllTextAsync(Path.Combine(_publishDir, "Auxilia.Slots.Email.slothandler.manifest.json")))!;
         await MessageBusClient.PublishAsync(seedBase + ".register",
             new RegisterSlotProviderCommand(
                 "email-work-items",
                 $"{ContainerPluginsDir}/Auxilia.Slots.Email.slothandler.dll",
-                emailManifest.Settings, emailManifest.Contracts, emailManifest.Category));
+                emailManifest.Settings, emailManifest.Contracts, emailManifest.Category, emailManifest.Description));
 
         foreach (var slotName in new[] { "repository", "pull-request", "primary-reviewer",
                                           "secondary-reviewer", "workflow-bootstrap" })
@@ -265,7 +265,7 @@ public class EndToEndEnvironment
             new RegisterSlotProviderCommand(
                 "claude-code-cli",
                 $"{ContainerPluginsDir}/Auxilia.Slots.ClaudeCode.slothandler.dll",
-                claudeManifest.Settings, claudeManifest.Contracts, claudeManifest.Category));
+                claudeManifest.Settings, claudeManifest.Contracts, claudeManifest.Category, claudeManifest.Description));
         await MessageBusClient.PublishAsync(seedBase + ".upsert",
             new UpsertSlotConfigurationCommand(
                 ClaudeWorkflowType, "coding-agent", "claude-code-cli",

@@ -10,5 +10,6 @@
     "Auxilia.Workflows.AiAgent.IAiAgent"
   ],
   "Category": "test-fake",
+  "Description": "Test fake: answers every code-review capability with canned happy-path data.",
   "Settings": []
 }

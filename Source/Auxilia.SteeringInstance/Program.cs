@@ -202,7 +202,8 @@ try
             }
         }
         await providerRegistry.UpsertAsync(
-            providerType, dllPath, sidecar?.Settings, sidecar?.Contracts, sidecar?.Category);
+            providerType, dllPath, sidecar?.Settings, sidecar?.Contracts, sidecar?.Category,
+            sidecar?.Description);
     }
 
     var slotConfigSettings = app.Services.GetRequiredService<IOptions<SlotConfigurationsSettings>>().Value;

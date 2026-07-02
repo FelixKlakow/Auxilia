@@ -94,7 +94,8 @@ public sealed class SlotConfigurationSeedHandler(
 
     private async Task HandleRegisterProviderAsync(RegisterSlotProviderCommand cmd, CancellationToken ct)
     {
-        await providerRegistry.UpsertAsync(cmd.ProviderType, cmd.DllPath, cmd.Settings, cmd.Contracts, cmd.Category, ct);
+        await providerRegistry.UpsertAsync(
+            cmd.ProviderType, cmd.DllPath, cmd.Settings, cmd.Contracts, cmd.Category, cmd.Description, ct);
         logger.LogInformation(
             "Registered slot provider. ProviderType={ProviderType} DllPath={DllPath}",
             cmd.ProviderType, cmd.DllPath);

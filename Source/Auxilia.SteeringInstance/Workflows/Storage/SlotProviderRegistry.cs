@@ -12,6 +12,7 @@ public sealed class SlotProviderRegistry(IDataAccess<SlotProviderRecord> dataAcc
         string providerType, string dllPath,
         IReadOnlyList<SettingDescriptor>? settings = null,
         IReadOnlyList<string>? contracts = null, string? category = null,
+        string? description = null,
         CancellationToken ct = default)
         => dataAccess.SaveAsync(new SlotProviderRecord
         {
@@ -20,7 +21,8 @@ public sealed class SlotProviderRegistry(IDataAccess<SlotProviderRecord> dataAcc
             DllPath = dllPath,
             SettingDescriptorsJson = settings is { Count: > 0 } ? JsonSerializer.Serialize(settings) : null,
             ContractsJson = contracts is { Count: > 0 } ? JsonSerializer.Serialize(contracts) : null,
-            Category = string.IsNullOrWhiteSpace(category) ? null : category.Trim()
+            Category = string.IsNullOrWhiteSpace(category) ? null : category.Trim(),
+            Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim()
         }, ct);
 
     public async Task<string?> GetDllPathAsync(string providerType, CancellationToken ct = default)

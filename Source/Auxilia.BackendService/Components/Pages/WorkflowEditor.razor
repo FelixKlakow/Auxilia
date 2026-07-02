@@ -268,8 +268,18 @@ else
                             <div class="form-grid setting-grid">
                                 <label>
                                     Artifact type
-                                    <input @bind="trigger.ArtifactType" placeholder="e.g. code-review-result"/>
-                                    <span class="field-hint">Each time any workflow persists an artifact of this type, this workflow runs.</span>
+                                    <input @bind="trigger.ArtifactType" list="known-artifact-types"
+                                           placeholder="e.g. code-review-result"/>
+                                    <datalist id="known-artifact-types">
+                                        @foreach (var artifactType in _knownArtifactTypes)
+                                        {
+                                            <option value="@artifactType"></option>
+                                        }
+                                    </datalist>
+                                    <span class="field-hint">
+                                        Each time any workflow persists an artifact of this type, this workflow runs.
+                                        The list offers every output type declared by a registered workflow.
+                                    </span>
                                 </label>
                             </div>
                             break;
@@ -360,6 +370,7 @@ else
     private IReadOnlyDictionary<string, IReadOnlyList<ProviderCatalogEntry>> _availableByCategory =
         new Dictionary<string, IReadOnlyList<ProviderCatalogEntry>>();
     private IReadOnlyList<ProviderCatalogEntry> _allProviders = [];
+    private IReadOnlyList<string> _knownArtifactTypes = [];
 
     private bool IsEdit => ConfigurationId is not null;
 
@@ -396,6 +407,7 @@ else
         {
             _registered = await Editor.RegisteredWorkflowsAsync();
             _known = await Editor.KnownValuesAsync();
+            _knownArtifactTypes = await Editor.KnownArtifactTypesAsync();
             _availableByCategory = await Catalog.ListAvailableByCategoryAsync();
             _allProviders = await Catalog.ListAsync();
             _instances = await Instances.AccessibleAsync(_principalId!.Value);
@@ -554,6 +566,10 @@ else
                                @onchange="() => SelectProvider(binding, entry)"/>
                         <span class="provider-name">@entry.ProviderType</span>
                         <span class="provider-category">@(entry.Category.Length == 0 ? "uncategorized" : entry.Category)</span>
+                        @if (entry.Description is { Length: > 0 })
+                        {
+                            <span class="provider-description">@entry.Description</span>
+                        }
                     </label>
                 }
             </div>

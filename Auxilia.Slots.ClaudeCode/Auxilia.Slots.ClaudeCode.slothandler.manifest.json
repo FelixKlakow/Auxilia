@@ -5,6 +5,7 @@
   "PublicKeyBase64": "",
   "Contracts": ["Auxilia.ClaudeCode.Workflow.ICodingAgent"],
   "Category": "coding-agent",
+  "Description": "Runs the Claude Code CLI as the coding agent of a workflow; the API key reaches the agent container just-in-time.",
   "Settings": [
     {
       "Key": "ApiKey",

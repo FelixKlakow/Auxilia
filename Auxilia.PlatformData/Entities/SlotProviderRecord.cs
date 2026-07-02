@@ -15,5 +15,8 @@ public sealed record SlotProviderRecord : IEntity
     /// <summary>Manifest-declared slot-kind tag; the provider catalog may override it.</summary>
     public string? Category { get; init; }
 
+    /// <summary>Manifest-declared plain-language description of what the provider does.</summary>
+    public string? Description { get; init; }
+
     public static Guid IdFor(string providerType) => DeterministicGuid.For("slot-provider", providerType);
 }

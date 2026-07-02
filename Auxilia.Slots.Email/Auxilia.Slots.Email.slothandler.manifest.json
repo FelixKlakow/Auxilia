@@ -5,6 +5,7 @@
   "PublicKeyBase64": "",
   "Contracts": ["Auxilia.Workflows.TaskSource.IWorkItemAccess"],
   "Category": "task-source",
+  "Description": "Serves work items from a mailbox: incoming mails become work items over IMAP, and replies go back to the sender over SMTP.",
   "Settings": [
     {
       "Key": "ImapHost",

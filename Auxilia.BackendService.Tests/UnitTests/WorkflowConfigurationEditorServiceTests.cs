@@ -768,6 +768,25 @@ public class WorkflowConfigurationEditorServiceTests
         });
     }
 
+    [Test]
+    public async Task KnownArtifactTypes_CollectDeclaredOutputsAcrossSchemas()
+    {
+        await SeedOutputSchemaAsync(); // outputs "code-review-result"
+        await _schemas.SaveAsync(new WorkflowSchemaRecord
+        {
+            Id = WorkflowSchemaRecord.IdFor("report-workflow"),
+            WorkflowType = "report-workflow",
+            SchemaJson = JsonSerializer.Serialize(new WorkflowSchema("report-workflow", [], [])
+            {
+                Outputs = [new WorkflowOutputDescriptor("weekly-report", "report.json", null)]
+            })
+        });
+
+        var types = await _sut.KnownArtifactTypesAsync();
+
+        Assert.That(types, Is.EqualTo(new[] { "code-review-result", "weekly-report" }));
+    }
+
     // ------------------------------------------------------------------ trigger health
 
     [Test]

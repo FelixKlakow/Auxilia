@@ -12,5 +12,6 @@
     "Auxilia.Workflows.PullRequestAccess.IPullRequestAccess"
   ],
   "Category": "test-fake",
+  "Description": "Test fake: behaves like the happy implementation fake but the agent step fails.",
   "Settings": []
 }

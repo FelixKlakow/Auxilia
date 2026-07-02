@@ -21,7 +21,8 @@ public sealed record ProviderCatalogEntry(
     string Category,
     IReadOnlyList<SettingDescriptor> Descriptors,
     IReadOnlyList<SettingDescriptorOverride> Overrides,
-    IReadOnlyList<string> Contracts)
+    IReadOnlyList<string> Contracts,
+    string? Description = null)
 {
     /// <summary>Whether this provider declares it can back a slot expecting <paramref name="contract"/>; unclassified providers match nothing.</summary>
     public bool Implements(string contract)
@@ -129,7 +130,8 @@ public sealed class ProviderCatalogService(
             category,
             Merge(ParseDescriptors(provider.SettingDescriptorsJson), overrides),
             overrides,
-            ParseContracts(provider.ContractsJson));
+            ParseContracts(provider.ContractsJson),
+            provider.Description);
     }
 
     private static IReadOnlyList<string> ParseContracts(string? json)

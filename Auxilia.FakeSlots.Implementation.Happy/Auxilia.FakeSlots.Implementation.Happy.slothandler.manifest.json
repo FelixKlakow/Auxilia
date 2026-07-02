@@ -12,5 +12,6 @@
     "Auxilia.Workflows.PullRequestAccess.IPullRequestAccess"
   ],
   "Category": "test-fake",
+  "Description": "Test fake: answers every implementation capability with canned happy-path data.",
   "Settings": []
 }

@@ -50,7 +50,13 @@ else
                 @foreach (var entry in _entries)
                 {
                     <tr>
-                        <td class="cell-strong">@entry.ProviderType</td>
+                        <td>
+                            <span class="cell-strong">@entry.ProviderType</span>
+                            @if (entry.Description is { Length: > 0 })
+                            {
+                                <span class="cell-sub">@entry.Description</span>
+                            }
+                        </td>
                         <td>
                             @if (entry.Category.Length == 0)
                             {
