@@ -49,6 +49,15 @@ internal static class TestStores
     public static WorkflowPackageStore NewWorkflowPackageStore()
         => new(new InMemoryDataAccess<WorkflowPackageRecord>(), TimeProvider.System);
 
+    public static IArtifactStore NewArtifactStore()
+        => new FileSystemArtifactStore(
+            new InMemoryDataAccess<ArtifactRecord>(),
+            TimeProvider.System,
+            new PlatformDataSettings
+            {
+                JsonDirectory = Path.Combine(Path.GetTempPath(), $"auxilia-artifacts-{Guid.NewGuid():N}")
+            });
+
     public static DirtyConfigurationDetector NewDirtyDetector()
         => new(NewWorkflowSchemaStore(), NewSlotConfigurationStore());
 

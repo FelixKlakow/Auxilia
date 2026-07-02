@@ -42,6 +42,7 @@ public sealed class WorkflowDispatcher(
     WorkflowStatusPublisher statusPublisher,
     WorkflowSchemaStore schemaStore,
     WorkflowPackageStore packageStore,
+    Auxilia.PlatformData.Artifacts.IArtifactStore artifactStore,
     NetworkPolicyResolver networkPolicyResolver,
     WorkspaceManager workspaceManager,
     AuditLog auditLog,
@@ -166,6 +167,24 @@ public sealed class WorkflowDispatcher(
 
         foreach (var (key, value) in command.Context)
             env[$"WORKFLOW_CONTEXT__{key.ToUpperInvariant()}"] = value;
+
+        // Chained runs consume their predecessor's artifact from the run directory: the bus
+        // carries only the reference (ArtifactId); the payload rides the output bind. The
+        // 'consumed' subdirectory is never a declared output, so it is never re-persisted.
+        if (command.Context.TryGetValue("ArtifactId", out var artifactIdRaw)
+            && Guid.TryParse(artifactIdRaw, out var consumedArtifactId)
+            && await artifactStore.OpenReadAsync(consumedArtifactId, ct) is { } artifactPayload)
+        {
+            await using (artifactPayload)
+            {
+                var consumedDir = Path.Combine(outputDirectory, "consumed");
+                Directory.CreateDirectory(consumedDir);
+                var fileName = (command.Context.GetValueOrDefault("ArtifactType") ?? "artifact") + ".json";
+                await using var file = File.Create(Path.Combine(consumedDir, fileName));
+                await artifactPayload.CopyToAsync(file, ct);
+                env["WORKFLOW_CONSUMED_ARTIFACT"] = $"/workflow-output/consumed/{fileName}";
+            }
+        }
 
         // Merge extra environment variables (e.g. AUXILIA_DEVELOPER_MODE)
         if (settings.ExtraEnvironmentVariables is not null)

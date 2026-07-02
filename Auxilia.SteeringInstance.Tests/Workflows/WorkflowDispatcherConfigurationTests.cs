@@ -96,6 +96,7 @@ public class WorkflowDispatcherConfigurationTests
             TestStores.NewStatusPublisher(_mockBus.Object),
             TestStores.NewWorkflowSchemaStore(),
             TestStores.NewWorkflowPackageStore(),
+            TestStores.NewArtifactStore(),
             new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
             TestStores.NewWorkspaceManager(),
             new AuditLog(_auditRecords, TimeProvider.System),

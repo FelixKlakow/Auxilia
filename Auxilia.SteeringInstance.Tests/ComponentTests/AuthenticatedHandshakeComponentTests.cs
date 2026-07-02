@@ -94,6 +94,7 @@ public class AuthenticatedHandshakeComponentTests
                 services.AddSingleton<WorkflowAnnouncementHandler>();
                 services.AddSingleton<NetworkPolicyResolver>();
                 services.AddSingleton<WorkspaceManager>();
+                services.AddSingleton(TestStores.NewArtifactStore());
                 services.AddSingleton<WorkflowDispatcher>();
             })
             .Build();

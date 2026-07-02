@@ -104,6 +104,7 @@ public class WorkflowConfigurationDispatchComponentTests
                 services.AddSingleton<LongLivingDrainCoordinator>();
                 services.AddSingleton<NetworkPolicyResolver>();
                 services.AddSingleton<WorkspaceManager>();
+                services.AddSingleton(TestStores.NewArtifactStore());
                 services.AddSingleton<WorkflowDispatcher>();
             })
             .Build();
