@@ -1,7 +1,9 @@
 using System.Text.Json;
 using Auxilia.Adapters.Email;
 using Auxilia.BackendService.Dashboard;
+using Auxilia.Governance.Policy;
 using Auxilia.Messaging;
+using Moq;
 using Auxilia.PlatformData;
 using Auxilia.PlatformData.Entities;
 using Auxilia.PlatformData.Protection;
@@ -69,11 +71,16 @@ public class WorkflowConfigurationEditorServiceTests
         _audit = new InMemoryDataAccess<AuditRecord>();
         _protector = new NullSettingsProtector();
         var auditLog = new AuditLog(_audit, TimeProvider.System);
+        var policyEngine = new Mock<IPolicyEngine>(MockBehavior.Strict);
+        policyEngine
+            .Setup(p => p.EvaluateAsync(It.IsAny<PolicyContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PolicyDecision.Allow("test"));
         _sut = new WorkflowConfigurationEditorService(
             _configurations, _instances, _schedules, _chains, _slots, _providers,
             _packages, _schemas, _slotInstances, _mailboxTriggerRecords, _triggerHealth,
             new ProviderCatalogService(_providers, new InMemoryDataAccess<ProviderCatalogRecord>(), auditLog),
-            _protector, _bus, auditLog, TimeProvider.System);
+            _protector, _bus, auditLog, TimeProvider.System,
+            policyEngine.Object, new DashboardSettings());
     }
 
     [TearDown]
@@ -796,6 +803,50 @@ public class WorkflowConfigurationEditorServiceTests
             Assert.That(edge.ProducerId, Is.EqualTo(WorkflowConfigurationRecord.IdFor("team-review")));
             Assert.That(edge.ConsumerId, Is.EqualTo(WorkflowConfigurationRecord.IdFor("implementer")));
             Assert.That(edge.ArtifactType, Is.EqualTo("code-review-result"));
+        });
+    }
+
+    [Test]
+    public async Task RunNow_DispatchesTheConfigurationByReference_AndAudits()
+    {
+        await SeedProviderAsync();
+        await SeedConfigurationAsync(); // enabled "team-review"
+        var actor = Guid.NewGuid();
+
+        var commandId = await _sut.RunNowAsync(
+            actor.ToString("D"), actor, WorkflowConfigurationRecord.IdFor("team-review"));
+
+        var (topic, message) = _bus.Published.Single(p => p.Message is RunWorkflowCommand);
+        var command = (RunWorkflowCommand)message;
+        Assert.Multiple(async () =>
+        {
+            Assert.That(topic, Is.EqualTo(new DashboardSettings().CommandQueueName));
+            Assert.That(command.CommandId, Is.EqualTo(commandId));
+            Assert.That(command.WorkflowType, Is.Null,
+                "the configuration is the single source of truth — no coordinates in the command");
+            Assert.That(command.WorkflowPackageUri, Is.Null);
+            Assert.That(command.WorkflowConfigurationId,
+                Is.EqualTo(WorkflowConfigurationRecord.IdFor("team-review")));
+            Assert.That(command.RequestedBy, Is.EqualTo(actor));
+            Assert.That((await _audit.ReadAsync()).Any(a => a.Action == "workflow-configuration.run-now"),
+                Is.True);
+        });
+    }
+
+    [Test]
+    public async Task RunNow_OfADisabledConfiguration_IsRejected()
+    {
+        await SeedProviderAsync();
+        await SeedConfigurationAsync(enabled: false);
+
+        var exception = Assert.ThrowsAsync<InvalidOperationException>(() => _sut.RunNowAsync(
+            "actor", Guid.NewGuid(), WorkflowConfigurationRecord.IdFor("team-review")));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(exception!.Message, Does.Contain("disabled"));
+            Assert.That(_bus.Published.OfType<(string, object)>()
+                .Select(p => p.Item2).OfType<RunWorkflowCommand>(), Is.Empty);
         });
     }
 

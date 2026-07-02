@@ -23,6 +23,10 @@ else
     {
         <div class="panel denied">@_error</div>
     }
+    @if (_runNotice is not null)
+    {
+        <div class="panel success">@_runNotice</div>
+    }
     @if (Saved)
     {
         <div class="panel success">Configuration saved — the Steering Instance is applying it; the card below updates automatically.</div>
@@ -108,6 +112,9 @@ else
             </div>
             <div class="card-footer">
                 <div class="cell-actions">
+                    <button class="btn btn-primary btn-sm" disabled="@(_busy || !configuration.Enabled)"
+                            title="@(configuration.Enabled ? "Dispatch one run of this configuration now" : "Enable the configuration first")"
+                            @onclick="() => RunNowAsync(configuration.Id)">Run now</button>
                     <a class="btn btn-secondary btn-sm" href="workflows/@configuration.Id/flow">Flow</a>
                     <a class="btn btn-secondary btn-sm" href="workflows/@configuration.Id/edit">Edit</a>
                     <button class="btn btn-secondary btn-sm" disabled="@_busy"
@@ -152,7 +159,29 @@ else
     private string? _error;
     private Guid? _principalId;
     private Guid? _deleteCandidate;
+    private string? _runNotice;
     private IReadOnlyList<WorkflowConfigurationOverview> _configurations = [];
+
+    private async Task RunNowAsync(Guid configurationId)
+    {
+        _error = null;
+        _runNotice = null;
+        _busy = true;
+        try
+        {
+            await Editor.RunNowAsync(
+                _principalId!.Value.ToString("D"), _principalId, configurationId, _cts.Token);
+            _runNotice = "Run dispatched — it appears under Runs within a few seconds.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {

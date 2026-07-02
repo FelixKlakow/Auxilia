@@ -53,17 +53,20 @@ public class NotifierApplicationTests
     }
 
     [Test]
-    public void Run_WithoutWorkItem_OrWithoutArtifact_Fails()
+    public void Run_WithoutWorkItem_CompletesQuietly_ManualSessionsHaveNoRecipient()
     {
-        Assert.Multiple(() =>
-        {
-            Assert.ThrowsAsync<InvalidOperationException>(() => new NotifierApplication(
-                    _workItems.Object, null, new NotifierRunContext(_artifactPath, null))
-                .RunAsync(CancellationToken.None), "no work item");
-            Assert.ThrowsAsync<InvalidOperationException>(() => new NotifierApplication(
-                    _workItems.Object, null, new NotifierRunContext("/nonexistent.json", "mail-42"))
-                .RunAsync(CancellationToken.None), "no materialized artifact");
-        });
+        Assert.DoesNotThrowAsync(() => new NotifierApplication(
+                _workItems.Object, null, new NotifierRunContext(_artifactPath, null))
+            .RunAsync(CancellationToken.None));
+        _workItems.VerifyNoOtherCalls();
+    }
+
+    [Test]
+    public void Run_WithoutMaterializedArtifact_Fails()
+    {
+        Assert.ThrowsAsync<InvalidOperationException>(() => new NotifierApplication(
+                _workItems.Object, null, new NotifierRunContext("/nonexistent.json", "mail-42"))
+            .RunAsync(CancellationToken.None));
     }
 
     [Test]

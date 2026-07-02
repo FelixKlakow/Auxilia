@@ -64,8 +64,15 @@ public sealed class NotifierApplication(
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         if (context.WorkItemId is not { Length: > 0 } workItemId)
-            throw new InvalidOperationException(
-                "The dispatch context carries no WorkItemId — nothing to reply to.");
+        {
+            // Manually started sessions have no originating mail — nothing to reply to is a
+            // clean outcome, not a failure.
+            await PublishAsync("notify",
+                "The session had no originating work item — no summary mail to send.",
+                cancellationToken);
+            return;
+        }
+
         if (context.ConsumedArtifactPath is not { Length: > 0 } artifactPath
             || !File.Exists(artifactPath))
             throw new InvalidOperationException(

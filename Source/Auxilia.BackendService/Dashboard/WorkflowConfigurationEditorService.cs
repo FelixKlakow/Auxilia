@@ -1,5 +1,7 @@
 using System.Text;
 using System.Text.Json;
+using Auxilia.Governance;
+using Auxilia.Governance.Policy;
 using Auxilia.Messaging;
 using Auxilia.PlatformData;
 using Auxilia.PlatformData.Entities;
@@ -148,7 +150,9 @@ public sealed class WorkflowConfigurationEditorService(
     ISettingsProtector protector,
     IMessageBusClient messageBus,
     AuditLog auditLog,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IPolicyEngine policyEngine,
+    DashboardSettings dashboardSettings)
 {
     internal const string SeedExchangeName = "slot-configurations";
 
@@ -543,6 +547,43 @@ public sealed class WorkflowConfigurationEditorService(
         }
 
         return new GlobalFlow(nodes, edges.Distinct().ToList());
+    }
+
+    /// <summary>
+    /// Dispatches one run of a configuration straight from the dashboard: the command carries
+    /// only the configuration reference — the Steering Instance resolves workflow, package,
+    /// and slots exactly like a trigger dispatch. Policy-checked and audited.
+    /// </summary>
+    public async Task<Guid> RunNowAsync(
+        string actor, Guid? actorPrincipalId, Guid configurationId, CancellationToken ct = default)
+    {
+        var record = await configurations.ReadAsync(configurationId, ct)
+                     ?? throw new InvalidOperationException("Unknown workflow configuration.");
+        if (!record.Enabled)
+            throw new InvalidOperationException("This configuration is disabled — enable it first.");
+
+        if (actorPrincipalId is { } principalId)
+        {
+            var decision = await policyEngine.EvaluateAsync(
+                new PolicyContext(principalId, PermissionActions.WorkflowTrigger, record.Name)
+                    { WorkflowType = record.WorkflowType }, ct);
+            if (!decision.Allowed)
+                throw new InvalidOperationException($"workflow.trigger denied: {decision.Reason}");
+        }
+
+        var command = new RunWorkflowCommand(
+            Guid.NewGuid(), null, null,
+            new Dictionary<string, string>
+            {
+                ["Title"] = $"Manual run of '{record.DisplayName}'",
+                ["Body"] = "Started from the dashboard."
+            },
+            actorPrincipalId, configurationId);
+        await messageBus.PublishAsync(dashboardSettings.CommandQueueName, command, ct);
+
+        await auditLog.AppendAsync(actor, "workflow-configuration.run-now",
+            record.Name, command.CommandId.ToString(), ct: ct);
+        return command.CommandId;
     }
 
     /// <summary>Every artifact type any registered workflow declares as an output — the chaining vocabulary.</summary>
