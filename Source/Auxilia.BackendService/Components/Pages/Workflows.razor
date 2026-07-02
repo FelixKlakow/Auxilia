@@ -1,11 +1,8 @@
 @page "/workflows"
 @attribute [Authorize]
-@using Auxilia.Adapters.Email
-@using Microsoft.Extensions.Options
 @implements IDisposable
 @inject WorkflowConfigurationEditorService Editor
 @inject IPolicyEngine PolicyEngine
-@inject IOptions<EmailTaskSourceSettings> EmailSettings
 
 <PageTitle>Workflows — Auxilia</PageTitle>
 
@@ -74,14 +71,14 @@ else
                         </ul>
                     </div>
                     <div>
-                        <h3 class="fact-label">Trigger</h3>
-                        @foreach (var trigger in TriggerSummaries(configuration))
+                        <h3 class="fact-label">@(configuration.TriggerSummaries.Count == 1 ? "Trigger" : "Triggers")</h3>
+                        @foreach (var trigger in configuration.TriggerSummaries)
                         {
                             <p class="fact-line">@trigger</p>
                         }
-                        @if (!TriggerSummaries(configuration).Any())
+                        @if (configuration.TriggerSummaries.Count == 0)
                         {
-                            <p class="muted">None — runs only via rerun or chaining from elsewhere.</p>
+                            <p class="muted">None — runs start via rerun or manual dispatch only.</p>
                         }
                     </div>
                     <div>
@@ -126,22 +123,6 @@ else
         </section>
     }
 
-    @if (EmailSettings.Value.Enabled)
-    {
-        <section class="card">
-            <div class="card-header">
-                <h2>Deployment mailbox trigger <span class="type-chip">read-only</span></h2>
-            </div>
-            <div class="card-body">
-                <p class="fact-line">
-                    Watches <span class="cell-strong">@EmailSettings.Value.Username</span>
-                    every @EmailSettings.Value.PollIntervalSeconds s — each new mail starts a
-                    <span class="cell-strong">@EmailSettings.Value.WorkflowType</span> run.
-                </p>
-                <p class="muted">This mailbox is configured per deployment (appsettings), not in this editor.</p>
-            </div>
-        </section>
-    }
 }
 
 @code {
@@ -212,17 +193,6 @@ else
     }
 
     private async Task LoadAsync() => _configurations = await Editor.ListAsync(_cts.Token);
-
-    private IEnumerable<string> TriggerSummaries(WorkflowConfigurationOverview configuration)
-    {
-        if (configuration.Schedule is { } schedule)
-            yield return $"Schedule · every {TimeText.Interval(schedule.IntervalSeconds)}";
-        if (configuration.ArtifactChain is { } chain)
-            yield return $"Artifact chain · after every '{chain.ArtifactType}' artifact";
-        var email = EmailSettings.Value;
-        if (email.Enabled && email.WorkflowType == configuration.WorkflowType)
-            yield return $"Mailbox {email.Username} · every {email.PollIntervalSeconds} s (deployment-configured)";
-    }
 
     private Task ToggleEnabledAsync(WorkflowConfigurationOverview configuration)
         => RunAsync(() => Editor.SetEnabledAsync(Actor, configuration.Id, !configuration.Enabled));

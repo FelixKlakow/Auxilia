@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.Json;
-using Auxilia.Adapters.Email;
 using Auxilia.Messaging;
 using Auxilia.PlatformData;
 using Auxilia.PlatformData.Entities;
@@ -12,12 +11,33 @@ using Microsoft.Extensions.Options;
 
 namespace Auxilia.BackendService.Dashboard;
 
-/// <summary>How a workflow configuration's runs are started.</summary>
+/// <summary>The kinds of trigger a workflow configuration can wire (any number of each).</summary>
 public enum TriggerKind
 {
-    None,
     Schedule,
-    ArtifactChain
+    ArtifactChain,
+    Mailbox
+}
+
+/// <summary>One trigger being edited; only the fields of its <see cref="Kind"/> apply.</summary>
+public sealed class TriggerDraft
+{
+    /// <summary>The stored record this draft edits; null when newly added.</summary>
+    public Guid? ExistingId { get; set; }
+
+    public TriggerKind Kind { get; set; }
+
+    // Schedule
+    public int IntervalSeconds { get; set; } = 3600;
+    public string ContextJson { get; set; } = "";
+
+    // Artifact chain
+    public string ArtifactType { get; set; } = "";
+
+    // Mailbox
+    /// <summary>The email slot instance whose mailbox is polled.</summary>
+    public Guid? MailboxInstanceId { get; set; }
+    public int PollIntervalSeconds { get; set; } = 15;
 }
 
 /// <summary>One slot binding being edited; secret values are write-only (see <see cref="StoredSecretKeys"/>).</summary>
@@ -53,10 +73,8 @@ public sealed class WorkflowConfigurationDraft
     public bool Enabled { get; set; } = true;
     public List<SlotBindingDraft> Bindings { get; } = [];
 
-    public TriggerKind Trigger { get; set; } = TriggerKind.None;
-    public int ScheduleIntervalSeconds { get; set; } = 3600;
-    public string ScheduleContextJson { get; set; } = "";
-    public string ArtifactType { get; set; } = "";
+    /// <summary>All triggers of this configuration — a run starts when ANY of them fires.</summary>
+    public List<TriggerDraft> Triggers { get; } = [];
 }
 
 /// <summary>One configured workflow on the list page, joined with its triggers and latest run.</summary>
@@ -69,8 +87,7 @@ public sealed record WorkflowConfigurationOverview(
     bool Enabled,
     DateTimeOffset UpdatedUtc,
     IReadOnlyList<(string SlotName, string ProviderType)> Bindings,
-    ScheduledTriggerRecord? Schedule,
-    ArtifactTriggerRecord? ArtifactChain,
+    IReadOnlyList<string> TriggerSummaries,
     WorkflowInstanceRecord? LastRun);
 
 /// <summary>Known values offered as picker suggestions (free-text stays allowed).</summary>
@@ -117,11 +134,11 @@ public sealed class WorkflowConfigurationEditorService(
     IDataAccess<WorkflowPackageRecord> workflowPackages,
     IDataAccess<WorkflowSchemaRecord> workflowSchemas,
     IDataAccess<SlotInstanceRecord> slotInstances,
+    IDataAccess<MailboxTriggerRecord> mailboxTriggers,
     ProviderCatalogService catalog,
     ISettingsProtector protector,
     IMessageBusClient messageBus,
-    AuditLog auditLog,
-    IOptions<EmailTaskSourceSettings> emailSettings)
+    AuditLog auditLog)
 {
     internal const string SeedExchangeName = "slot-configurations";
 
@@ -132,6 +149,9 @@ public sealed class WorkflowConfigurationEditorService(
         var records = (await configurations.ReadAsync(ct)).ToList();
         var schedules = (await scheduledTriggers.ReadAsync(ct)).ToList();
         var chains = (await artifactTriggers.ReadAsync(ct)).ToList();
+        var mailboxes = (await mailboxTriggers.ReadAsync(ct)).ToList();
+        var instanceNames = (await slotInstances.ReadAsync(ct)).ToList()
+            .ToDictionary(i => i.Id, i => i.DisplayName);
         var runs = (await instances.ReadAsync(ct)).ToList();
 
         return records
@@ -141,12 +161,32 @@ public sealed class WorkflowConfigurationEditorService(
                 record.Enabled, record.UpdatedUtc,
                 ParseBindings(record.SlotBindingsJson)
                     .Select(b => (b.SlotName, b.ProviderType)).ToList(),
-                schedules.FirstOrDefault(t => t.WorkflowConfigurationId == record.Id),
-                chains.FirstOrDefault(t => t.WorkflowConfigurationId == record.Id),
+                TriggerSummariesOf(record.Id, schedules, chains, mailboxes, instanceNames),
                 runs.Where(r => r.WorkflowConfigurationId == record.Id)
                     .OrderByDescending(r => r.CreatedUtc)
                     .FirstOrDefault()))
             .ToList();
+    }
+
+    private static IReadOnlyList<string> TriggerSummariesOf(
+        Guid configurationId,
+        IReadOnlyList<ScheduledTriggerRecord> schedules,
+        IReadOnlyList<ArtifactTriggerRecord> chains,
+        IReadOnlyList<MailboxTriggerRecord> mailboxes,
+        IReadOnlyDictionary<Guid, string> instanceNames)
+    {
+        var summaries = new List<string>();
+        summaries.AddRange(schedules
+            .Where(t => t.WorkflowConfigurationId == configurationId)
+            .Select(t => $"Schedule · every {TimeText.Interval(t.IntervalSeconds)}"));
+        summaries.AddRange(chains
+            .Where(t => t.WorkflowConfigurationId == configurationId)
+            .Select(t => $"Artifact chain · after every '{t.ArtifactType}' artifact"));
+        summaries.AddRange(mailboxes
+            .Where(t => t.WorkflowConfigurationId == configurationId)
+            .Select(t =>
+                $"Mailbox '{instanceNames.GetValueOrDefault(t.SlotInstanceId, "(deleted instance)")}' · every {TimeText.Interval(t.PollIntervalSeconds)}"));
+        return summaries;
     }
 
     // ------------------------------------------------------------------ draft
@@ -202,19 +242,32 @@ public sealed class WorkflowConfigurationEditorService(
             draft.Bindings.Add(bindingDraft);
         }
 
-        var schedule = (await scheduledTriggers.ReadAsync(ct)).FirstOrDefault(t => t.WorkflowConfigurationId == id);
-        var chain = (await artifactTriggers.ReadAsync(ct)).FirstOrDefault(t => t.WorkflowConfigurationId == id);
-        if (schedule is not null)
-        {
-            draft.Trigger = TriggerKind.Schedule;
-            draft.ScheduleIntervalSeconds = schedule.IntervalSeconds;
-            draft.ScheduleContextJson = schedule.ContextJson ?? "";
-        }
-        else if (chain is not null)
-        {
-            draft.Trigger = TriggerKind.ArtifactChain;
-            draft.ArtifactType = chain.ArtifactType;
-        }
+        foreach (var schedule in (await scheduledTriggers.ReadAsync(ct))
+                     .Where(t => t.WorkflowConfigurationId == id).ToList())
+            draft.Triggers.Add(new TriggerDraft
+            {
+                ExistingId = schedule.Id,
+                Kind = TriggerKind.Schedule,
+                IntervalSeconds = schedule.IntervalSeconds,
+                ContextJson = schedule.ContextJson ?? ""
+            });
+        foreach (var chain in (await artifactTriggers.ReadAsync(ct))
+                     .Where(t => t.WorkflowConfigurationId == id).ToList())
+            draft.Triggers.Add(new TriggerDraft
+            {
+                ExistingId = chain.Id,
+                Kind = TriggerKind.ArtifactChain,
+                ArtifactType = chain.ArtifactType
+            });
+        foreach (var mailbox in (await mailboxTriggers.ReadAsync(ct))
+                     .Where(t => t.WorkflowConfigurationId == id).ToList())
+            draft.Triggers.Add(new TriggerDraft
+            {
+                ExistingId = mailbox.Id,
+                Kind = TriggerKind.Mailbox,
+                MailboxInstanceId = mailbox.SlotInstanceId,
+                PollIntervalSeconds = mailbox.PollIntervalSeconds
+            });
 
         return draft;
     }
@@ -272,7 +325,7 @@ public sealed class WorkflowConfigurationEditorService(
                 workflowType = command.WorkflowType,
                 packageUri = command.PackageUri,
                 enabled = command.Enabled,
-                trigger = draft.Trigger.ToString(),
+                triggers = draft.Triggers.Select(t => t.Kind.ToString()),
                 slotBindings = bindings.Select(b => new { b.SlotName, b.ProviderType })
             }), ct);
 
@@ -298,6 +351,9 @@ public sealed class WorkflowConfigurationEditorService(
         foreach (var trigger in (await artifactTriggers.ReadAsync(ct))
                      .Where(t => t.WorkflowConfigurationId == id).ToList())
             await artifactTriggers.SaveAsync(trigger with { Enabled = enabled }, ct);
+        foreach (var trigger in (await mailboxTriggers.ReadAsync(ct))
+                     .Where(t => t.WorkflowConfigurationId == id).ToList())
+            await mailboxTriggers.SaveAsync(trigger with { Enabled = enabled }, ct);
 
         await auditLog.AppendAsync(actor, "workflow-configuration.enabled-changed",
             record.Name, enabled ? "enabled" : "disabled", ct: ct);
@@ -334,7 +390,7 @@ public sealed class WorkflowConfigurationEditorService(
         await messageBus.DeclareExchangeAsync(SeedExchangeName, ct);
         await messageBus.PublishToExchangeAsync(SeedExchangeName, new RemoveWorkflowConfigurationCommand(record.Name), ct);
 
-        await RemoveTriggerRecordsAsync(actor, id, removeSchedule: true, removeChain: true, ct);
+        await RemoveTriggerRecordsAsync(actor, id, ct);
 
         await auditLog.AppendAsync(actor, "workflow-configuration.deleted", record.Name, "removed", ct: ct);
     }
@@ -401,7 +457,6 @@ public sealed class WorkflowConfigurationEditorService(
         var chains = (await artifactTriggers.ReadAsync(ct)).ToList();
         var slots = (await slotConfigurations.ReadAsync(ct)).ToList();
         var providers = (await slotProviders.ReadAsync(ct)).ToList();
-        var email = emailSettings.Value;
 
         var libraryProviderTypes = providers
             .Where(p => !p.DllPath.EndsWith(".slothandler.dll", StringComparison.OrdinalIgnoreCase))
@@ -412,7 +467,6 @@ public sealed class WorkflowConfigurationEditorService(
             .Concat(schedules.Select(t => t.WorkflowType))
             .Concat(chains.Select(t => t.WorkflowType))
             .Concat(slots.Select(s => s.WorkflowType))
-            .Concat(email.Enabled && !string.IsNullOrWhiteSpace(email.WorkflowType) ? [email.WorkflowType] : Array.Empty<string>())
             .Where(t => !string.IsNullOrWhiteSpace(t))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(t => t, StringComparer.Ordinal)
@@ -421,7 +475,6 @@ public sealed class WorkflowConfigurationEditorService(
         var packageUris = records.Select(r => r.PackageUri)
             .Concat(schedules.Select(t => t.WorkflowPackageUri))
             .Concat(chains.Select(t => t.WorkflowPackageUri))
-            .Concat(email.Enabled && !string.IsNullOrWhiteSpace(email.WorkflowPackageUri) ? [email.WorkflowPackageUri] : Array.Empty<string>())
             .Where(u => !string.IsNullOrWhiteSpace(u))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(u => u, StringComparer.Ordinal)
@@ -536,25 +589,41 @@ public sealed class WorkflowConfigurationEditorService(
             }
         }
 
-        switch (draft.Trigger)
+        foreach (var trigger in draft.Triggers)
         {
-            case TriggerKind.Schedule when draft.ScheduleIntervalSeconds < 1:
-                errors.Add("Schedule interval must be at least 1 second.");
-                break;
-            case TriggerKind.Schedule when !string.IsNullOrWhiteSpace(draft.ScheduleContextJson):
-                try
-                {
-                    if (JsonSerializer.Deserialize<Dictionary<string, string>>(draft.ScheduleContextJson) is null)
+            switch (trigger.Kind)
+            {
+                case TriggerKind.Schedule when trigger.IntervalSeconds < 1:
+                    errors.Add("Schedule interval must be at least 1 second.");
+                    break;
+                case TriggerKind.Schedule when !string.IsNullOrWhiteSpace(trigger.ContextJson):
+                    try
+                    {
+                        if (JsonSerializer.Deserialize<Dictionary<string, string>>(trigger.ContextJson) is null)
+                            errors.Add("Schedule context must be a JSON object of string values.");
+                    }
+                    catch (JsonException)
+                    {
                         errors.Add("Schedule context must be a JSON object of string values.");
-                }
-                catch (JsonException)
-                {
-                    errors.Add("Schedule context must be a JSON object of string values.");
-                }
-                break;
-            case TriggerKind.ArtifactChain when string.IsNullOrWhiteSpace(draft.ArtifactType):
-                errors.Add("Artifact type is required for an artifact-chain trigger.");
-                break;
+                    }
+                    break;
+                case TriggerKind.ArtifactChain when string.IsNullOrWhiteSpace(trigger.ArtifactType):
+                    errors.Add("Artifact type is required for an artifact-chain trigger.");
+                    break;
+                case TriggerKind.Mailbox when trigger.MailboxInstanceId is null:
+                    errors.Add("Pick the mailbox slot instance the mailbox trigger polls.");
+                    break;
+                case TriggerKind.Mailbox when !instancesById.ContainsKey(trigger.MailboxInstanceId.Value):
+                    errors.Add("The mailbox trigger's slot instance no longer exists.");
+                    break;
+                case TriggerKind.Mailbox when trigger.PollIntervalSeconds < 1:
+                    errors.Add("Mailbox poll interval must be at least 1 second.");
+                    break;
+                case TriggerKind.Mailbox when actorPrincipalId is { } actor
+                                              && !InstanceAccessible(instancesById[trigger.MailboxInstanceId.Value], actor):
+                    errors.Add("You have no access to the mailbox trigger's slot instance.");
+                    break;
+            }
         }
 
         if (errors.Count > 0)
@@ -573,82 +642,137 @@ public sealed class WorkflowConfigurationEditorService(
            || (JsonSerializer.Deserialize<List<Guid>>(instance.AssignedPrincipalIdsJson) ?? [])
                .Contains(principalId);
 
+    /// <summary>
+    /// Reconciles the draft's trigger list against the stored records: kept drafts update
+    /// their record in place (a schedule keeps its <c>LastDispatchedUtc</c> so editing never
+    /// causes a surprise dispatch), new drafts create records, and records without a draft
+    /// are deleted. Every change is audited.
+    /// </summary>
     private async Task ApplyTriggerWiringAsync(
         string actor, Guid? actorPrincipalId, string name, WorkflowConfigurationDraft draft, CancellationToken ct)
     {
         var configurationId = WorkflowConfigurationRecord.IdFor(name);
+        var keptIds = draft.Triggers
+            .Where(t => t.ExistingId is not null)
+            .Select(t => t.ExistingId!.Value)
+            .ToHashSet();
 
-        await RemoveTriggerRecordsAsync(actor, configurationId,
-            removeSchedule: draft.Trigger != TriggerKind.Schedule,
-            removeChain: draft.Trigger != TriggerKind.ArtifactChain, ct);
-
-        switch (draft.Trigger)
+        // Deletions first so a removed trigger cannot fire while its replacement is written.
+        foreach (var trigger in (await scheduledTriggers.ReadAsync(ct))
+                     .Where(t => t.WorkflowConfigurationId == configurationId && !keptIds.Contains(t.Id)).ToList())
         {
-            case TriggerKind.Schedule:
+            if (await scheduledTriggers.RemoveAsync(trigger.Id, ct))
+                await auditLog.AppendAsync(actor, "trigger.scheduled.deleted", trigger.Id.ToString(), "deleted", ct: ct);
+        }
+        foreach (var trigger in (await artifactTriggers.ReadAsync(ct))
+                     .Where(t => t.WorkflowConfigurationId == configurationId && !keptIds.Contains(t.Id)).ToList())
+        {
+            if (await artifactTriggers.RemoveAsync(trigger.Id, ct))
+                await auditLog.AppendAsync(actor, "trigger.artifact.deleted", trigger.Id.ToString(), "deleted", ct: ct);
+        }
+        foreach (var trigger in (await mailboxTriggers.ReadAsync(ct))
+                     .Where(t => t.WorkflowConfigurationId == configurationId && !keptIds.Contains(t.Id)).ToList())
+        {
+            if (await mailboxTriggers.RemoveAsync(trigger.Id, ct))
+                await auditLog.AppendAsync(actor, "trigger.mailbox.deleted", trigger.Id.ToString(), "deleted", ct: ct);
+        }
+
+        foreach (var trigger in draft.Triggers)
+        {
+            switch (trigger.Kind)
             {
-                var existing = (await scheduledTriggers.ReadAsync(ct))
-                    .FirstOrDefault(t => t.WorkflowConfigurationId == configurationId);
-                var record = new ScheduledTriggerRecord
+                case TriggerKind.Schedule:
                 {
-                    Id = existing?.Id ?? ScheduledTriggerRecord.IdForConfiguration(name),
-                    WorkflowType = draft.WorkflowType.Trim(),
-                    WorkflowPackageUri = draft.PackageUri.Trim(),
-                    IntervalSeconds = draft.ScheduleIntervalSeconds,
-                    ContextJson = string.IsNullOrWhiteSpace(draft.ScheduleContextJson)
-                        ? null
-                        : draft.ScheduleContextJson.Trim(),
-                    Enabled = draft.Enabled,
-                    RunAsPrincipalId = actorPrincipalId ?? existing?.RunAsPrincipalId,
-                    LastDispatchedUtc = existing?.LastDispatchedUtc,
-                    WorkflowConfigurationId = configurationId
-                };
-                var updated = await scheduledTriggers.SaveAsync(record, ct);
-                await auditLog.AppendAsync(actor,
-                    updated ? "trigger.scheduled.updated" : "trigger.scheduled.created",
-                    record.Id.ToString(), record.WorkflowType, ct: ct);
-                break;
-            }
-            case TriggerKind.ArtifactChain:
-            {
-                var existing = (await artifactTriggers.ReadAsync(ct))
-                    .FirstOrDefault(t => t.WorkflowConfigurationId == configurationId);
-                var record = new ArtifactTriggerRecord
+                    var existing = trigger.ExistingId is { } id
+                        ? await scheduledTriggers.ReadAsync(id, ct)
+                        : null;
+                    var record = new ScheduledTriggerRecord
+                    {
+                        Id = existing?.Id ?? Guid.NewGuid(),
+                        WorkflowType = draft.WorkflowType.Trim(),
+                        WorkflowPackageUri = draft.PackageUri.Trim(),
+                        IntervalSeconds = trigger.IntervalSeconds,
+                        ContextJson = string.IsNullOrWhiteSpace(trigger.ContextJson)
+                            ? null
+                            : trigger.ContextJson.Trim(),
+                        Enabled = draft.Enabled,
+                        RunAsPrincipalId = actorPrincipalId ?? existing?.RunAsPrincipalId,
+                        LastDispatchedUtc = existing?.LastDispatchedUtc,
+                        WorkflowConfigurationId = configurationId
+                    };
+                    await scheduledTriggers.SaveAsync(record, ct);
+                    await auditLog.AppendAsync(actor,
+                        existing is not null ? "trigger.scheduled.updated" : "trigger.scheduled.created",
+                        record.Id.ToString(), record.WorkflowType, ct: ct);
+                    break;
+                }
+                case TriggerKind.ArtifactChain:
                 {
-                    Id = existing?.Id ?? ArtifactTriggerRecord.IdForConfiguration(name),
-                    ArtifactType = draft.ArtifactType.Trim(),
-                    WorkflowType = draft.WorkflowType.Trim(),
-                    WorkflowPackageUri = draft.PackageUri.Trim(),
-                    Enabled = draft.Enabled,
-                    RunAsPrincipalId = actorPrincipalId ?? existing?.RunAsPrincipalId,
-                    WorkflowConfigurationId = configurationId
-                };
-                var updated = await artifactTriggers.SaveAsync(record, ct);
-                await auditLog.AppendAsync(actor,
-                    updated ? "trigger.artifact.updated" : "trigger.artifact.created",
-                    record.Id.ToString(), $"{record.ArtifactType} → {record.WorkflowType}", ct: ct);
-                break;
+                    var existing = trigger.ExistingId is { } id
+                        ? await artifactTriggers.ReadAsync(id, ct)
+                        : null;
+                    var record = new ArtifactTriggerRecord
+                    {
+                        Id = existing?.Id ?? Guid.NewGuid(),
+                        ArtifactType = trigger.ArtifactType.Trim(),
+                        WorkflowType = draft.WorkflowType.Trim(),
+                        WorkflowPackageUri = draft.PackageUri.Trim(),
+                        Enabled = draft.Enabled,
+                        RunAsPrincipalId = actorPrincipalId ?? existing?.RunAsPrincipalId,
+                        WorkflowConfigurationId = configurationId
+                    };
+                    await artifactTriggers.SaveAsync(record, ct);
+                    await auditLog.AppendAsync(actor,
+                        existing is not null ? "trigger.artifact.updated" : "trigger.artifact.created",
+                        record.Id.ToString(), $"{record.ArtifactType} → {record.WorkflowType}", ct: ct);
+                    break;
+                }
+                case TriggerKind.Mailbox:
+                {
+                    var existing = trigger.ExistingId is { } id
+                        ? await mailboxTriggers.ReadAsync(id, ct)
+                        : null;
+                    var record = new MailboxTriggerRecord
+                    {
+                        Id = existing?.Id ?? Guid.NewGuid(),
+                        WorkflowConfigurationId = configurationId,
+                        SlotInstanceId = trigger.MailboxInstanceId!.Value,
+                        PollIntervalSeconds = trigger.PollIntervalSeconds,
+                        Enabled = draft.Enabled,
+                        RunAsPrincipalId = actorPrincipalId ?? existing?.RunAsPrincipalId
+                    };
+                    await mailboxTriggers.SaveAsync(record, ct);
+                    await auditLog.AppendAsync(actor,
+                        existing is not null ? "trigger.mailbox.updated" : "trigger.mailbox.created",
+                        record.Id.ToString(), record.SlotInstanceId.ToString(), ct: ct);
+                    break;
+                }
             }
         }
     }
 
-    private async Task RemoveTriggerRecordsAsync(
-        string actor, Guid configurationId, bool removeSchedule, bool removeChain, CancellationToken ct)
+    private async Task RemoveTriggerRecordsAsync(string actor, Guid configurationId, CancellationToken ct)
     {
-        if (removeSchedule)
-            foreach (var trigger in (await scheduledTriggers.ReadAsync(ct))
-                         .Where(t => t.WorkflowConfigurationId == configurationId).ToList())
-            {
-                if (await scheduledTriggers.RemoveAsync(trigger.Id, ct))
-                    await auditLog.AppendAsync(actor, "trigger.scheduled.deleted", trigger.Id.ToString(), "deleted", ct: ct);
-            }
+        foreach (var trigger in (await scheduledTriggers.ReadAsync(ct))
+                     .Where(t => t.WorkflowConfigurationId == configurationId).ToList())
+        {
+            if (await scheduledTriggers.RemoveAsync(trigger.Id, ct))
+                await auditLog.AppendAsync(actor, "trigger.scheduled.deleted", trigger.Id.ToString(), "deleted", ct: ct);
+        }
 
-        if (removeChain)
-            foreach (var trigger in (await artifactTriggers.ReadAsync(ct))
-                         .Where(t => t.WorkflowConfigurationId == configurationId).ToList())
-            {
-                if (await artifactTriggers.RemoveAsync(trigger.Id, ct))
-                    await auditLog.AppendAsync(actor, "trigger.artifact.deleted", trigger.Id.ToString(), "deleted", ct: ct);
-            }
+        foreach (var trigger in (await artifactTriggers.ReadAsync(ct))
+                     .Where(t => t.WorkflowConfigurationId == configurationId).ToList())
+        {
+            if (await artifactTriggers.RemoveAsync(trigger.Id, ct))
+                await auditLog.AppendAsync(actor, "trigger.artifact.deleted", trigger.Id.ToString(), "deleted", ct: ct);
+        }
+
+        foreach (var trigger in (await mailboxTriggers.ReadAsync(ct))
+                     .Where(t => t.WorkflowConfigurationId == configurationId).ToList())
+        {
+            if (await mailboxTriggers.RemoveAsync(trigger.Id, ct))
+                await auditLog.AppendAsync(actor, "trigger.mailbox.deleted", trigger.Id.ToString(), "deleted", ct: ct);
+        }
     }
 
     /// <summary>Derives a unique natural-key name from the display name ("Code Review" → "code-review").</summary>

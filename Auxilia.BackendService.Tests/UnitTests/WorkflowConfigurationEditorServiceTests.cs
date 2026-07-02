@@ -45,6 +45,7 @@ public class WorkflowConfigurationEditorServiceTests
     private IDataAccess<WorkflowPackageRecord> _packages = null!;
     private IDataAccess<WorkflowSchemaRecord> _schemas = null!;
     private IDataAccess<SlotInstanceRecord> _slotInstances = null!;
+    private IDataAccess<MailboxTriggerRecord> _mailboxTriggerRecords = null!;
     private IDataAccess<AuditRecord> _audit = null!;
     private NullSettingsProtector _protector = null!;
     private WorkflowConfigurationEditorService _sut = null!;
@@ -62,15 +63,15 @@ public class WorkflowConfigurationEditorServiceTests
         _packages = new InMemoryDataAccess<WorkflowPackageRecord>();
         _schemas = new InMemoryDataAccess<WorkflowSchemaRecord>();
         _slotInstances = new InMemoryDataAccess<SlotInstanceRecord>();
+        _mailboxTriggerRecords = new InMemoryDataAccess<MailboxTriggerRecord>();
         _audit = new InMemoryDataAccess<AuditRecord>();
         _protector = new NullSettingsProtector();
         var auditLog = new AuditLog(_audit, TimeProvider.System);
         _sut = new WorkflowConfigurationEditorService(
             _configurations, _instances, _schedules, _chains, _slots, _providers,
-            _packages, _schemas, _slotInstances,
+            _packages, _schemas, _slotInstances, _mailboxTriggerRecords,
             new ProviderCatalogService(_providers, new InMemoryDataAccess<ProviderCatalogRecord>(), auditLog),
-            _protector, _bus, auditLog,
-            Options.Create(new EmailTaskSourceSettings()));
+            _protector, _bus, auditLog);
     }
 
     [TearDown]
@@ -85,6 +86,7 @@ public class WorkflowConfigurationEditorServiceTests
         (_packages as IDisposable)?.Dispose();
         (_schemas as IDisposable)?.Dispose();
         (_slotInstances as IDisposable)?.Dispose();
+        (_mailboxTriggerRecords as IDisposable)?.Dispose();
         (_audit as IDisposable)?.Dispose();
     }
 
@@ -544,8 +546,7 @@ public class WorkflowConfigurationEditorServiceTests
         await SeedProviderAsync();
         var actor = Guid.NewGuid();
         var draft = NewDraft();
-        draft.Trigger = TriggerKind.Schedule;
-        draft.ScheduleIntervalSeconds = 600;
+        draft.Triggers.Add(new TriggerDraft { Kind = TriggerKind.Schedule, IntervalSeconds = 600 });
 
         var name = await _sut.SaveAsync(actor.ToString("D"), actor, draft);
 
@@ -561,42 +562,69 @@ public class WorkflowConfigurationEditorServiceTests
     }
 
     [Test]
-    public async Task Save_WithArtifactTrigger_WiresTheChainingRecord()
+    public async Task Save_WithSeveralTriggers_WiresThemAll()
     {
         await SeedProviderAsync();
+        await SeedInstanceAsync();
         var draft = NewDraft();
-        draft.Trigger = TriggerKind.ArtifactChain;
-        draft.ArtifactType = "code-review-result";
+        draft.Triggers.Add(new TriggerDraft { Kind = TriggerKind.Schedule, IntervalSeconds = 600 });
+        draft.Triggers.Add(new TriggerDraft { Kind = TriggerKind.Schedule, IntervalSeconds = 86400 });
+        draft.Triggers.Add(new TriggerDraft { Kind = TriggerKind.ArtifactChain, ArtifactType = "code-review-result" });
+        draft.Triggers.Add(new TriggerDraft
+        {
+            Kind = TriggerKind.Mailbox,
+            MailboxInstanceId = SlotInstanceRecord.IdFor("team-mailbox"),
+            PollIntervalSeconds = 30
+        });
 
         var name = await _sut.SaveAsync("actor", null, draft);
 
-        var trigger = (await _chains.ReadAsync()).Single();
-        Assert.Multiple(() =>
+        Assert.Multiple(async () =>
         {
-            Assert.That(trigger.WorkflowConfigurationId, Is.EqualTo(WorkflowConfigurationRecord.IdFor(name)));
-            Assert.That(trigger.ArtifactType, Is.EqualTo("code-review-result"));
+            Assert.That((await _schedules.ReadAsync()).Select(t => t.IntervalSeconds),
+                Is.EquivalentTo(new[] { 600, 86400 }), "one configuration can carry several schedules");
+            Assert.That((await _chains.ReadAsync()).Single().ArtifactType, Is.EqualTo("code-review-result"));
+            var mailbox = (await _mailboxTriggerRecords.ReadAsync()).Single();
+            Assert.That(mailbox.WorkflowConfigurationId, Is.EqualTo(WorkflowConfigurationRecord.IdFor(name)));
+            Assert.That(mailbox.SlotInstanceId, Is.EqualTo(SlotInstanceRecord.IdFor("team-mailbox")));
+            Assert.That(mailbox.PollIntervalSeconds, Is.EqualTo(30));
         });
     }
 
     [Test]
-    public async Task Save_SwitchingTriggerToNone_RemovesThePreviousTriggerRecord()
+    public async Task Save_RemovedTrigger_DeletesItsRecord_AndKeptOneSurvivesWithLastDispatch()
     {
         await SeedProviderAsync();
         var draft = NewDraft();
-        draft.Trigger = TriggerKind.Schedule;
+        draft.Triggers.Add(new TriggerDraft { Kind = TriggerKind.Schedule, IntervalSeconds = 600 });
+        draft.Triggers.Add(new TriggerDraft { Kind = TriggerKind.ArtifactChain, ArtifactType = "result" });
         var name = await _sut.SaveAsync("actor", null, draft);
         await SeedConfigurationAsync(); // the SI has applied the upsert by now
 
+        // Simulate the scheduler having dispatched once.
+        var stored = (await _schedules.ReadAsync()).Single();
+        var lastDispatched = DateTimeOffset.UtcNow.AddMinutes(-1);
+        await _schedules.SaveAsync(stored with { LastDispatchedUtc = lastDispatched });
+
         var edit = NewDraft();
         edit.ExistingName = name;
-        edit.Trigger = TriggerKind.None;
+        edit.Triggers.Add(new TriggerDraft
+        {
+            ExistingId = stored.Id,
+            Kind = TriggerKind.Schedule,
+            IntervalSeconds = 1200
+        }); // the artifact chain is gone
         await _sut.SaveAsync("actor", null, edit);
 
         Assert.Multiple(async () =>
         {
-            Assert.That(await _schedules.ReadAsync(), Is.Empty);
+            var schedule = (await _schedules.ReadAsync()).Single();
+            Assert.That(schedule.IntervalSeconds, Is.EqualTo(1200));
+            Assert.That(schedule.LastDispatchedUtc, Is.EqualTo(lastDispatched),
+                "editing must never reset the dispatch clock — no surprise runs");
+            Assert.That(await _chains.ReadAsync(), Is.Empty);
             var audit = await _audit.ReadAsync();
-            Assert.That(audit.Any(a => a.Action == "trigger.scheduled.deleted"), Is.True);
+            Assert.That(audit.Any(a => a.Action == "trigger.artifact.deleted"), Is.True);
         });
     }
 
@@ -605,10 +633,21 @@ public class WorkflowConfigurationEditorServiceTests
     {
         await SeedProviderAsync();
         var draft = NewDraft();
-        draft.Trigger = TriggerKind.Schedule;
-        draft.ScheduleIntervalSeconds = 0;
+        draft.Triggers.Add(new TriggerDraft { Kind = TriggerKind.Schedule, IntervalSeconds = 0 });
 
         Assert.ThrowsAsync<ArgumentException>(() => _sut.SaveAsync("actor", null, draft));
+    }
+
+    [Test]
+    public async Task Save_MailboxTriggerWithoutInstance_IsRejected()
+    {
+        await SeedProviderAsync();
+        var draft = NewDraft();
+        draft.Triggers.Add(new TriggerDraft { Kind = TriggerKind.Mailbox });
+
+        var exception = Assert.ThrowsAsync<ArgumentException>(() => _sut.SaveAsync("actor", null, draft));
+
+        Assert.That(exception!.Message, Does.Contain("mailbox"));
     }
 
     // ------------------------------------------------------------------ delete

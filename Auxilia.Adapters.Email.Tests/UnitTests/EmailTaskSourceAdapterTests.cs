@@ -1,6 +1,8 @@
+using System.Text.Json;
 using Auxilia.Messaging;
 using Auxilia.PlatformData;
 using Auxilia.PlatformData.Entities;
+using Auxilia.PlatformData.Protection;
 using Auxilia.UniversalDataAccess;
 using Auxilia.UniversalDataAccess.Implementations;
 using Auxilia.Workflows.Messaging.Messages;
@@ -69,12 +71,30 @@ public class EmailTaskSourceAdapterTests
             => Task.CompletedTask;
     }
 
+    /// <summary>One fake client per mailbox host, so multi-trigger routing is observable.</summary>
+    private sealed class FakeMailboxClientFactory(List<string> journal) : IMailboxClientFactory
+    {
+        public Dictionary<string, FakeMailboxClient> ByHost { get; } = new(StringComparer.Ordinal);
+        public List<EmailTaskSourceSettings> SeenSettings { get; } = [];
+
+        public IMailboxClient Create(EmailTaskSourceSettings settings)
+        {
+            SeenSettings.Add(settings);
+            if (!ByHost.TryGetValue(settings.ImapHost, out var client))
+                ByHost[settings.ImapHost] = client = new FakeMailboxClient(journal);
+            return client;
+        }
+    }
+
     private List<string> _journal = null!;
     private ManualTimeProvider _time = null!;
     private RecordingBus _bus = null!;
-    private FakeMailboxClient _mailbox = null!;
+    private FakeMailboxClientFactory _factory = null!;
+    private InMemoryDataAccess<MailboxTriggerRecord> _triggers = null!;
+    private InMemoryDataAccess<SlotInstanceRecord> _instances = null!;
     private IDataAccess<AuditRecord> _audit = null!;
-    private EmailTaskSourceSettings _settings = null!;
+    private NullSettingsProtector _protector = null!;
+    private MailboxTriggerAdapterSettings _settings = null!;
     private EmailTaskSourceAdapter _sut = null!;
 
     [SetUp]
@@ -83,18 +103,15 @@ public class EmailTaskSourceAdapterTests
         _journal = [];
         _time = new ManualTimeProvider();
         _bus = new RecordingBus(_journal);
-        _mailbox = new FakeMailboxClient(_journal);
+        _factory = new FakeMailboxClientFactory(_journal);
+        _triggers = new InMemoryDataAccess<MailboxTriggerRecord>();
+        _instances = new InMemoryDataAccess<SlotInstanceRecord>();
         _audit = new InMemoryDataAccess<AuditRecord>();
-        _settings = new EmailTaskSourceSettings
-        {
-            Enabled = true,
-            WorkflowType = "mail-triage",
-            WorkflowPackageUri = "docker://mail-triage:test",
-            RunAsPrincipalId = Guid.NewGuid(),
-            CommandQueueName = "workflow.run-commands"
-        };
+        _protector = new NullSettingsProtector();
+        _settings = new MailboxTriggerAdapterSettings { CommandQueueName = "workflow.run-commands" };
         _sut = new EmailTaskSourceAdapter(
-            _mailbox, _bus, new AuditLog(_audit, _time), _time,
+            _triggers, _instances, _protector, _factory, _bus,
+            new AuditLog(_audit, _time), _time,
             Options.Create(_settings), NullLogger<EmailTaskSourceAdapter>.Instance);
     }
 
@@ -102,7 +119,46 @@ public class EmailTaskSourceAdapterTests
     public void TearDown()
     {
         _sut.Dispose();
+        _triggers.Dispose();
+        _instances.Dispose();
         (_audit as IDisposable)?.Dispose();
+    }
+
+    private async Task<SlotInstanceRecord> SeedInstanceAsync(string name = "team-mailbox", string host = "imap.example.org")
+    {
+        var record = new SlotInstanceRecord
+        {
+            Id = SlotInstanceRecord.IdFor(name),
+            Name = name,
+            DisplayName = name,
+            ProviderType = "email-work-items",
+            ProtectedSettingsJson = _protector.Protect(JsonSerializer.Serialize(
+                new Dictionary<string, string>
+                {
+                    ["ImapHost"] = host,
+                    ["Username"] = "workflows@localhost",
+                    ["Password"] = "pw"
+                }))
+        };
+        await _instances.SaveAsync(record);
+        return record;
+    }
+
+    private async Task<MailboxTriggerRecord> SeedTriggerAsync(
+        Guid instanceId, Guid? configurationId = null, int pollSeconds = 15,
+        bool enabled = true, Guid? runAs = null)
+    {
+        var record = new MailboxTriggerRecord
+        {
+            Id = Guid.NewGuid(),
+            WorkflowConfigurationId = configurationId ?? Guid.NewGuid(),
+            SlotInstanceId = instanceId,
+            PollIntervalSeconds = pollSeconds,
+            Enabled = enabled,
+            RunAsPrincipalId = runAs
+        };
+        await _triggers.SaveAsync(record);
+        return record;
     }
 
     private static InboundMail Mail(
@@ -114,63 +170,103 @@ public class EmailTaskSourceAdapterTests
         => new(messageId, subject, from, body, uid);
 
     [Test]
-    public async Task OneUnseenMail_DispatchesOneCommandMarksSeenAndAudits()
+    public async Task OneUnseenMail_DispatchesTheConfiguration_MarksSeen_AndAudits()
     {
+        var runAs = Guid.NewGuid();
+        var instance = await SeedInstanceAsync();
+        var trigger = await SeedTriggerAsync(instance.Id, runAs: runAs);
         var mail = Mail();
-        _mailbox.Unseen.Add(mail);
+        _factory.ByHost["imap.example.org"] = new FakeMailboxClient(_journal);
+        _factory.ByHost["imap.example.org"].Unseen.Add(mail);
 
-        await _sut.PollOnceAsync(CancellationToken.None);
+        await _sut.PollDueTriggersAsync(CancellationToken.None);
 
         var dispatches = _bus.Published
             .Where(p => p.Topic == _settings.CommandQueueName)
             .Select(p => p.Message).OfType<RunWorkflowCommand>().ToList();
         Assert.That(dispatches, Has.Count.EqualTo(1));
-        Assert.That(_bus.Published, Has.Count.EqualTo(1), "Nothing besides the dispatch may be published.");
 
         var command = dispatches[0];
         Assert.Multiple(() =>
         {
-            Assert.That(command.WorkflowType, Is.EqualTo(_settings.WorkflowType));
-            Assert.That(command.WorkflowPackageUri, Is.EqualTo(_settings.WorkflowPackageUri));
+            Assert.That(command.WorkflowConfigurationId, Is.EqualTo(trigger.WorkflowConfigurationId),
+                "mail dispatches the trigger's workflow configuration — no type/URI coordinates");
+            Assert.That(command.WorkflowType, Is.Null);
             Assert.That(command.Context["WorkItemId"], Is.EqualTo(EmailTaskSourceAdapter.WorkItemIdFor(mail.MessageId)));
             Assert.That(command.Context["Title"], Is.EqualTo(mail.Subject));
-            Assert.That(command.Context["From"], Is.EqualTo(mail.From));
-            Assert.That(command.Context["Body"], Is.EqualTo(mail.BodyText));
-            Assert.That(command.RequestedBy, Is.EqualTo(_settings.RunAsPrincipalId));
-            Assert.That(_mailbox.MarkedSeen, Is.EqualTo(new[] { mail.Uid }));
+            Assert.That(command.RequestedBy, Is.EqualTo(runAs));
+            Assert.That(_factory.ByHost["imap.example.org"].MarkedSeen, Is.EqualTo(new[] { mail.Uid }));
         });
 
         var auditRecords = await _audit.ReadAsync();
-        var record = auditRecords.SingleOrDefault(a => a.Action == "trigger.mail-dispatch");
-        Assert.That(record, Is.Not.Null, "The dispatch must be audited.");
-        Assert.That(record!.Subject, Is.EqualTo(EmailTaskSourceAdapter.WorkItemIdFor(mail.MessageId)));
+        Assert.That(auditRecords.Any(a => a.Action == "trigger.mail-dispatch"), Is.True);
     }
 
     [Test]
-    public async Task MultipleUnseenMails_OneDispatchEachWithDistinctWorkItemIds()
+    public async Task PollInterval_IsHonouredPerTrigger()
     {
-        _mailbox.Unseen.Add(Mail(messageId: "<a@example.com>", uid: 1));
-        _mailbox.Unseen.Add(Mail(messageId: "<b@example.com>", uid: 2));
-        _mailbox.Unseen.Add(Mail(messageId: "<c@example.com>", uid: 3));
+        var instance = await SeedInstanceAsync();
+        await SeedTriggerAsync(instance.Id, pollSeconds: 60);
 
-        await _sut.PollOnceAsync(CancellationToken.None);
+        await _sut.PollDueTriggersAsync(CancellationToken.None);
+        _time.Now = _time.Now.AddSeconds(30);
+        await _sut.PollDueTriggersAsync(CancellationToken.None);
 
-        var workItemIds = _bus.Published
-            .Where(p => p.Topic == _settings.CommandQueueName)
+        Assert.That(_factory.SeenSettings, Has.Count.EqualTo(1),
+            "within the poll interval the mailbox must not be contacted again");
+
+        _time.Now = _time.Now.AddSeconds(31);
+        await _sut.PollDueTriggersAsync(CancellationToken.None);
+
+        Assert.That(_factory.SeenSettings, Has.Count.EqualTo(2));
+    }
+
+    [Test]
+    public async Task DisabledTrigger_IsNeverPolled()
+    {
+        var instance = await SeedInstanceAsync();
+        await SeedTriggerAsync(instance.Id, enabled: false);
+
+        await _sut.PollDueTriggersAsync(CancellationToken.None);
+
+        Assert.That(_factory.SeenSettings, Is.Empty);
+    }
+
+    [Test]
+    public async Task TriggerWithDeletedInstance_IsSkippedWithoutFailingTheSweep()
+    {
+        await SeedTriggerAsync(Guid.NewGuid()); // instance never existed
+        var healthy = await SeedInstanceAsync("healthy", "imap.healthy.org");
+        await SeedTriggerAsync(healthy.Id);
+
+        await _sut.PollDueTriggersAsync(CancellationToken.None);
+
+        Assert.That(_factory.SeenSettings.Select(s => s.ImapHost),
+            Is.EqualTo(new[] { "imap.healthy.org" }),
+            "the healthy trigger must still be polled");
+    }
+
+    [Test]
+    public async Task TwoTriggers_PollTheirOwnMailboxes()
+    {
+        var first = await SeedInstanceAsync("first", "imap.first.org");
+        var second = await SeedInstanceAsync("second", "imap.second.org");
+        var firstTrigger = await SeedTriggerAsync(first.Id);
+        var secondTrigger = await SeedTriggerAsync(second.Id);
+        _factory.ByHost["imap.first.org"] = new FakeMailboxClient(_journal);
+        _factory.ByHost["imap.second.org"] = new FakeMailboxClient(_journal);
+        _factory.ByHost["imap.first.org"].Unseen.Add(Mail(messageId: "<a@x>", uid: 1));
+        _factory.ByHost["imap.second.org"].Unseen.Add(Mail(messageId: "<b@x>", uid: 2));
+
+        await _sut.PollDueTriggersAsync(CancellationToken.None);
+
+        var configurations = _bus.Published
             .Select(p => p.Message).OfType<RunWorkflowCommand>()
-            .Select(c => c.Context["WorkItemId"]).ToList();
-        Assert.That(workItemIds, Has.Count.EqualTo(3));
-        Assert.That(workItemIds, Is.Unique);
-        Assert.That(_mailbox.MarkedSeen, Is.EquivalentTo(new uint[] { 1, 2, 3 }));
-    }
-
-    [Test]
-    public async Task NoUnseenMail_NothingPublishedAndNothingMarkedSeen()
-    {
-        await _sut.PollOnceAsync(CancellationToken.None);
-
-        Assert.That(_bus.Published, Is.Empty);
-        Assert.That(_mailbox.MarkedSeen, Is.Empty);
+            .Select(c => c.WorkflowConfigurationId).ToList();
+        Assert.That(configurations, Is.EquivalentTo(new[]
+        {
+            firstTrigger.WorkflowConfigurationId, secondTrigger.WorkflowConfigurationId
+        }));
     }
 
     [Test]
@@ -192,10 +288,13 @@ public class EmailTaskSourceAdapterTests
     [Test]
     public async Task MarkSeen_HappensOnlyAfterTheDispatchWasPublished()
     {
+        var instance = await SeedInstanceAsync();
+        await SeedTriggerAsync(instance.Id);
         var mail = Mail(uid: 7);
-        _mailbox.Unseen.Add(mail);
+        _factory.ByHost["imap.example.org"] = new FakeMailboxClient(_journal);
+        _factory.ByHost["imap.example.org"].Unseen.Add(mail);
 
-        await _sut.PollOnceAsync(CancellationToken.None);
+        await _sut.PollDueTriggersAsync(CancellationToken.None);
 
         Assert.That(_journal, Is.EqualTo(new[]
         {

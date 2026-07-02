@@ -174,8 +174,6 @@ internal static class ScreenshotHarness
             ($"/runs/{run.Id}",             "06-run-detail.png"),
             ("/trigger",                    "07-trigger.png"),
             ("/operator/slots",             "08-operator-slots.png"),
-            ("/operator/schedules",         "09-operator-schedules.png"),
-            ("/operator/artifact-triggers", "10-operator-artifact-triggers.png"),
             ("/admin",                      "11-admin.png"),
             ("/admin/bundles",              "12-admin-bundles.png"),
             ("/admin/provider-catalog",     "13-admin-provider-catalog.png"),
@@ -234,17 +232,10 @@ internal static class ScreenshotHarness
                 DemoConfigurationName, "Team code review", WorkflowType, WorkflowPackageUri,
                 Enabled: true,
                 [
-                    new SlotBindingSeed("work-items", "email-work-items", new Dictionary<string, string>
-                    {
-                        ["ImapHost"] = "greenmail",
-                        ["ImapPort"] = "3143",
-                        ["UseSsl"]   = "false",
-                        ["Username"] = "workflows@localhost",
-                        ["Password"] = "pw",
-                        ["SmtpHost"] = "greenmail",
-                        ["SmtpPort"] = "3025",
-                        ["Folder"]   = "INBOX"
-                    }),
+                    // The mailbox is bound via the reusable "team-mailbox" slot instance the
+                    // environment seeded — configure once, reference everywhere.
+                    new SlotBindingSeed("work-items", "", new Dictionary<string, string>(),
+                        SlotInstanceRecord.IdFor("team-mailbox")),
                     new SlotBindingSeed("repository", "fake-code-review-happy", new Dictionary<string, string>())
                 ]));
 

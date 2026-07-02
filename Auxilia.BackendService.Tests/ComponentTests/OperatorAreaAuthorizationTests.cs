@@ -11,8 +11,6 @@ namespace Auxilia.BackendService.Tests.ComponentTests;
 public class OperatorAreaAuthorizationTests : DashboardComponentTestBase
 {
     [TestCase("/operator/slots")]
-    [TestCase("/operator/schedules")]
-    [TestCase("/operator/artifact-triggers")]
     [TestCase("/admin/bundles")]
     [TestCase("/admin/provider-catalog")]
     [TestCase("/admin/identity-sources")]
@@ -28,8 +26,6 @@ public class OperatorAreaAuthorizationTests : DashboardComponentTestBase
     }
 
     [TestCase("/operator/slots", "Slot instances")]
-    [TestCase("/operator/schedules", "Create schedule")]
-    [TestCase("/operator/artifact-triggers", "Create chaining rule")]
     public async Task OperatorPage_AsOperator_RendersContent(string path, string expectedSection)
     {
         using var client = CreateClient();
@@ -46,8 +42,6 @@ public class OperatorAreaAuthorizationTests : DashboardComponentTestBase
     }
 
     [TestCase("/operator/slots")]
-    [TestCase("/operator/schedules")]
-    [TestCase("/operator/artifact-triggers")]
     public async Task OperatorPage_AsUser_IsDeniedByPolicy(string path)
     {
         using var client = CreateClient();

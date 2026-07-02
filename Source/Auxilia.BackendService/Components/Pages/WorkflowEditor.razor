@@ -217,57 +217,88 @@ else
 
     <section class="card">
         <div class="card-header">
-            <h2><span class="step-number">3</span> Trigger</h2>
-            <p class="card-subtitle">How runs of this workflow start. Manual reruns of finished runs are always possible from the run pages.</p>
+            <h2><span class="step-number">3</span> Triggers</h2>
+            <p class="card-subtitle">A run starts when any of these fires — wire as many as the workflow needs. Manual reruns of finished runs are always possible from the run pages.</p>
         </div>
         <div class="card-body">
-            <div class="provider-grid trigger-grid">
-                <label class="provider-card @(_draft.Trigger == TriggerKind.None ? "selected" : null)">
-                    <input type="radio" name="trigger" checked="@(_draft.Trigger == TriggerKind.None)"
-                           @onchange="() => _draft.Trigger = TriggerKind.None"/>
-                    <span class="provider-name">No trigger</span>
-                    <span class="provider-category">runs start via rerun or other systems</span>
-                </label>
-                <label class="provider-card @(_draft.Trigger == TriggerKind.Schedule ? "selected" : null)">
-                    <input type="radio" name="trigger" checked="@(_draft.Trigger == TriggerKind.Schedule)"
-                           @onchange="() => _draft.Trigger = TriggerKind.Schedule"/>
-                    <span class="provider-name">Schedule</span>
-                    <span class="provider-category">run on a fixed interval</span>
-                </label>
-                <label class="provider-card @(_draft.Trigger == TriggerKind.ArtifactChain ? "selected" : null)">
-                    <input type="radio" name="trigger" checked="@(_draft.Trigger == TriggerKind.ArtifactChain)"
-                           @onchange="() => _draft.Trigger = TriggerKind.ArtifactChain"/>
-                    <span class="provider-name">Artifact chain</span>
-                    <span class="provider-category">run after another workflow's result</span>
-                </label>
-            </div>
+            @if (_draft.Triggers.Count == 0)
+            {
+                <p class="muted">No triggers — runs start via rerun or manual dispatch only.</p>
+            }
+            @foreach (var trigger in _draft.Triggers)
+            {
+                <div class="slot-binding">
+                    <div class="slot-binding-header">
+                        <span class="cell-strong">@TriggerLabel(trigger.Kind)</span>
+                        <button class="btn btn-danger btn-sm" @onclick="() => _draft.Triggers.Remove(trigger)">
+                            Remove trigger
+                        </button>
+                    </div>
+                    @switch (trigger.Kind)
+                    {
+                        case TriggerKind.Schedule:
+                            <div class="form-grid setting-grid">
+                                <label>
+                                    Interval (seconds)
+                                    <input type="number" @bind="trigger.IntervalSeconds"/>
+                                    <span class="field-hint">= every @TimeText.Interval(trigger.IntervalSeconds)</span>
+                                </label>
+                                <label>
+                                    Context (optional)
+                                    <input @bind="trigger.ContextJson" placeholder='{"WorkItemId":"42"}'/>
+                                    <span class="field-hint">Key/value map handed to every scheduled run.</span>
+                                </label>
+                            </div>
+                            break;
+                        case TriggerKind.ArtifactChain:
+                            <div class="form-grid setting-grid">
+                                <label>
+                                    Artifact type
+                                    <input @bind="trigger.ArtifactType" placeholder="e.g. code-review-result"/>
+                                    <span class="field-hint">Each time any workflow persists an artifact of this type, this workflow runs.</span>
+                                </label>
+                            </div>
+                            break;
+                        case TriggerKind.Mailbox:
+                            <div class="form-grid setting-grid">
+                                <label>
+                                    Mailbox
+                                    <select @bind="trigger.MailboxInstanceId">
+                                        <option value="">Pick a mailbox slot instance…</option>
+                                        @foreach (var instance in MailboxInstances)
+                                        {
+                                            <option value="@instance.Id">@instance.DisplayName (@instance.ProviderType)</option>
+                                        }
+                                    </select>
+                                    <span class="field-hint">
+                                        Each unseen mail in this mailbox starts a run (subject and body become the
+                                        run's context). Mailboxes are configured as slot instances on the
+                                        <a href="operator/slots">Slots page</a>.
+                                    </span>
+                                </label>
+                                <label>
+                                    Poll interval (seconds)
+                                    <input type="number" @bind="trigger.PollIntervalSeconds"/>
+                                    <span class="field-hint">= every @TimeText.Interval(trigger.PollIntervalSeconds)</span>
+                                </label>
+                            </div>
+                            break;
+                    }
+                </div>
+            }
 
-            @if (_draft.Trigger == TriggerKind.Schedule)
-            {
-                <div class="form-grid setting-grid">
-                    <label>
-                        Interval (seconds)
-                        <input type="number" @bind="_draft.ScheduleIntervalSeconds"/>
-                        <span class="field-hint">e.g. 3600 = once per hour.</span>
-                    </label>
-                    <label>
-                        Context (optional)
-                        <input @bind="_draft.ScheduleContextJson" placeholder='{"WorkItemId":"42"}'/>
-                        <span class="field-hint">Key/value map handed to every scheduled run.</span>
-                    </label>
-                </div>
-            }
-            @if (_draft.Trigger == TriggerKind.ArtifactChain)
-            {
-                <div class="form-grid setting-grid">
-                    <label>
-                        Artifact type
-                        <input @bind="_draft.ArtifactType" placeholder="e.g. code-review-result"/>
-                        <span class="field-hint">Each time any workflow persists an artifact of this type, this workflow runs.</span>
-                    </label>
-                </div>
-            }
-            @if (_draft.Trigger != TriggerKind.None)
+            <div class="button-row slot-add-row">
+                <button class="btn btn-secondary btn-sm" @onclick="() => AddTrigger(TriggerKind.Schedule)">
+                    + Schedule
+                </button>
+                <button class="btn btn-secondary btn-sm" @onclick="() => AddTrigger(TriggerKind.ArtifactChain)">
+                    + Artifact chain
+                </button>
+                <button class="btn btn-secondary btn-sm" @onclick="() => AddTrigger(TriggerKind.Mailbox)">
+                    + Mailbox
+                </button>
+            </div>
+            @if (_draft.Triggers.Count > 0)
             {
                 <p class="field-hint">Triggered runs are dispatched on your behalf and pass the same policy checks as manual ones.</p>
             }
@@ -567,6 +598,21 @@ else
 
     private void AddSlot(string slotName)
         => _draft.Bindings.Add(new SlotBindingDraft { SlotName = slotName });
+
+    private void AddTrigger(TriggerKind kind)
+        => _draft.Triggers.Add(new TriggerDraft { Kind = kind });
+
+    private static string TriggerLabel(TriggerKind kind) => kind switch
+    {
+        TriggerKind.Schedule => "Schedule",
+        TriggerKind.ArtifactChain => "Artifact chain",
+        TriggerKind.Mailbox => "Mailbox",
+        _ => kind.ToString()
+    };
+
+    /// <summary>Accessible slot instances that look like mailboxes (declare an IMAP host setting).</summary>
+    private IReadOnlyList<SlotInstanceOverview> MailboxInstances
+        => _instances.Where(i => i.SettingKeys.Contains("ImapHost", StringComparer.Ordinal)).ToList();
 
     private bool IsAvailable(string providerType)
         => _availableByCategory.Values.Any(entries => entries.Any(e => e.ProviderType == providerType));

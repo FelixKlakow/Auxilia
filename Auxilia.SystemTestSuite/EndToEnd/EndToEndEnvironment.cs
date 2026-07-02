@@ -42,6 +42,9 @@ public class EndToEndEnvironment
     public   const string ClaudeStubCliPath        = "/usr/local/bin/claude-stub";
     internal const string BackendImageName    = "auxilia-backendservice:system-test";
     public   const string CommandQueue        = "workflow.run-commands-e2e";
+    /// <summary>The configuration the mailbox trigger dispatches (single source of truth — no appsettings workflow).</summary>
+    internal const string MailReviewConfigurationName = "mail-review";
+    private static readonly Guid MailboxTriggerId = new("aaaaaaaa-e2e0-4000-8000-000000000001");
     internal const string AdapterMailbox      = "workflows@localhost";
     internal const string MailboxPassword     = "pw";
 
@@ -194,20 +197,10 @@ public class EndToEndEnvironment
             .WithEnvironment("PlatformHost__CommandQueueName",      CommandQueue)
             .WithEnvironment("Governance__BootstrapAdminUsername",  "admin")
             .WithEnvironment("Governance__BootstrapAdminPassword",  "e2e-admin-pw")
-            .WithEnvironment("EmailTaskSource__Enabled",             "true")
-            .WithEnvironment("EmailTaskSource__ImapHost",            GreenMailAlias)
-            .WithEnvironment("EmailTaskSource__ImapPort",            ImapPort.ToString())
-            .WithEnvironment("EmailTaskSource__UseSsl",              "false")
-            .WithEnvironment("EmailTaskSource__Username",            AdapterMailbox)
-            .WithEnvironment("EmailTaskSource__Password",            MailboxPassword)
-            .WithEnvironment("EmailTaskSource__SmtpHost",            GreenMailAlias)
-            .WithEnvironment("EmailTaskSource__SmtpPort",            SmtpPort.ToString())
-            .WithEnvironment("EmailTaskSource__Folder",              "INBOX")
-            .WithEnvironment("EmailTaskSource__PollIntervalSeconds", "3")
-            .WithEnvironment("EmailTaskSource__WorkflowType",        WorkflowType)
-            .WithEnvironment("EmailTaskSource__WorkflowPackageUri",  WorkflowPackageUri)
-            .WithEnvironment("EmailTaskSource__CommandQueueName",    CommandQueue)
-            .WithEnvironment("EmailTaskSource__RunAsPrincipalId",    RunAsPrincipalId.ToString("D"))
+            // Which mailboxes exist is platform data (mailbox trigger records referencing
+            // email slot instances) — only the dispatch queue and sweep tick are deployment config.
+            .WithEnvironment("MailboxTriggers__CommandQueueName",    CommandQueue)
+            .WithEnvironment("MailboxTriggers__TickSeconds",         "1")
             .WithWaitStrategy(Wait.ForUnixContainer()
                 .UntilMessageIsLogged("HeartbeatMonitor started")
                 .UntilMessageIsLogged("Email task source started"))
@@ -262,7 +255,7 @@ public class EndToEndEnvironment
                     ["Folder"]   = "INBOX"
                 }));
 
-        await SeedEmailSlotDependenciesAsync(seedBase);
+        var dependencyBindings = await SeedEmailSlotDependenciesAsync(seedBase);
 
         // The Claude Code workflow: the REAL claude-code-cli provider, pointed at the
         // in-image stub CLI (cost rule — a real key run stays a manual dev-stand exercise).
@@ -299,6 +292,49 @@ public class EndToEndEnvironment
                     ["SmtpPort"] = SmtpPort.ToString(),
                     ["Folder"]   = "INBOX"
                 }));
+
+        // The configuration upsert validates the referenced instance — wait until the SI has
+        // applied the instance upsert (separate seed queues give no ordering guarantee).
+        await using (var provider = BuildPlatformDataProvider())
+        {
+            var instanceRecords = provider.GetRequiredService<IDataAccess<SlotInstanceRecord>>();
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+            while (DateTime.UtcNow < deadline
+                   && await instanceRecords.ReadAsync(SlotInstanceRecord.IdFor("team-mailbox")) is null)
+                await Task.Delay(200);
+        }
+
+        // The mail-triggered path is configuration-first: a named configuration binds the
+        // fakes plus the reusable mailbox instance, and a mailbox trigger record points the
+        // adapter at it. No workflow lives in appsettings.
+        await MessageBusClient.PublishAsync(seedBase + ".upsert-configuration",
+            new UpsertWorkflowConfigurationCommand(
+                MailReviewConfigurationName, "Mail-triggered code review",
+                WorkflowType, WorkflowPackageUri, Enabled: true,
+                new List<SlotBindingSeed>
+                {
+                    new("repository", "fake-code-review-happy", new Dictionary<string, string>()),
+                    new("pull-request", "fake-code-review-happy", new Dictionary<string, string>()),
+                    new("primary-reviewer", "fake-code-review-happy", new Dictionary<string, string>()),
+                    new("secondary-reviewer", "fake-code-review-happy", new Dictionary<string, string>()),
+                    new("work-items", "", new Dictionary<string, string>(),
+                        SlotInstanceRecord.IdFor("team-mailbox"))
+                }.Concat(dependencyBindings).ToList(),
+                RunAsPrincipalId));
+
+        await using (var provider = BuildPlatformDataProvider())
+        {
+            await provider.GetRequiredService<IDataAccess<MailboxTriggerRecord>>()
+                .SaveAsync(new MailboxTriggerRecord
+                {
+                    Id = MailboxTriggerId,
+                    WorkflowConfigurationId = WorkflowConfigurationRecord.IdFor(MailReviewConfigurationName),
+                    SlotInstanceId = SlotInstanceRecord.IdFor("team-mailbox"),
+                    PollIntervalSeconds = 2,
+                    Enabled = true,
+                    RunAsPrincipalId = RunAsPrincipalId
+                });
+        }
 
         // Workflow registry: register both baked packages with their emitted schemas so the
         // configuration editor offers them (slots included) before any run happened.
@@ -357,7 +393,7 @@ public class EndToEndEnvironment
     /// registered as an auxiliary provider wired to an unused slot name; the dispatcher then
     /// ships the file with the launch and plugin discovery ignores it (not *.slothandler.dll).
     /// </summary>
-    private async Task SeedEmailSlotDependenciesAsync(string seedBase)
+    private async Task<List<SlotBindingSeed>> SeedEmailSlotDependenciesAsync(string seedBase)
     {
         string[] dependencyAssemblies =
         [
@@ -368,6 +404,7 @@ public class EndToEndEnvironment
             "System.Formats.Asn1.dll"
         ];
 
+        var bindings = new List<SlotBindingSeed>();
         var index = 0;
         foreach (var assembly in dependencyAssemblies)
         {
@@ -388,8 +425,12 @@ public class EndToEndEnvironment
                 new UpsertSlotConfigurationCommand(
                     WorkflowType, $"e2e-dependency-{index}", providerType,
                     new Dictionary<string, string>()));
+            bindings.Add(new SlotBindingSeed(
+                $"e2e-dependency-{index}", providerType, new Dictionary<string, string>()));
             index++;
         }
+
+        return bindings;
     }
 
     /// <summary>
@@ -411,6 +452,8 @@ public class EndToEndEnvironment
         AddEntity<IdentitySourceRecord>(services);
         AddEntity<WorkflowConfigurationRecord>(services);
         AddEntity<ScheduledTriggerRecord>(services);
+        AddEntity<MailboxTriggerRecord>(services);
+        AddEntity<SlotInstanceRecord>(services);
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<AuditLog>();
         services.AddSingleton<PrincipalDirectory>();

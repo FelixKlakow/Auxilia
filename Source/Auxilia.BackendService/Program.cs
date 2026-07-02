@@ -114,6 +114,7 @@ try
     builder.Services.AddPlatformEntity<WorkflowPackageRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<WorkflowSchemaRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<SlotInstanceRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<MailboxTriggerRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<DashboardRecord>(platformDataSettings);
     builder.Services.AddSingleton(TimeProvider.System);
     builder.Services.AddSingleton<AuditLog>();
@@ -154,7 +155,6 @@ try
     builder.Services.AddSignalR();
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.LiveViewBroker>();
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.DashboardComposer>();
-    builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.TriggerAdministration>();
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.ProviderCatalogService>();
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.WorkflowConfigurationEditorService>();
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.SlotInstanceService>();
@@ -185,11 +185,12 @@ try
     builder.Services.AddHostedService<TriggerScheduler>();
     builder.Services.AddHostedService<ArtifactTriggerHandler>();
 
-    // --- Email task source (the v1 integration adapter) ---
-    builder.Services.Configure<Auxilia.Adapters.Email.EmailTaskSourceSettings>(
-        builder.Configuration.GetSection("EmailTaskSource"));
-    builder.Services.AddSingleton<Auxilia.Adapters.Email.IMailboxClient,
-        Auxilia.Adapters.Email.MailKitMailboxClient>();
+    // --- Mailbox triggers (the v1 integration adapter): mailboxes are platform data
+    //     (email slot instances referenced by trigger records), not deployment settings ---
+    builder.Services.Configure<Auxilia.Adapters.Email.MailboxTriggerAdapterSettings>(
+        builder.Configuration.GetSection("MailboxTriggers"));
+    builder.Services.AddSingleton<Auxilia.Adapters.Email.IMailboxClientFactory,
+        Auxilia.Adapters.Email.MailKitMailboxClientFactory>();
     builder.Services.AddHostedService<Auxilia.Adapters.Email.EmailTaskSourceAdapter>();
 
     // --- Hosted services ---
