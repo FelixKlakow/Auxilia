@@ -10,13 +10,17 @@ public sealed class SlotProviderRegistry(IDataAccess<SlotProviderRecord> dataAcc
 {
     public Task UpsertAsync(
         string providerType, string dllPath,
-        IReadOnlyList<SettingDescriptor>? settings = null, CancellationToken ct = default)
+        IReadOnlyList<SettingDescriptor>? settings = null,
+        IReadOnlyList<string>? contracts = null, string? category = null,
+        CancellationToken ct = default)
         => dataAccess.SaveAsync(new SlotProviderRecord
         {
             Id = SlotProviderRecord.IdFor(providerType),
             ProviderType = providerType,
             DllPath = dllPath,
-            SettingDescriptorsJson = settings is { Count: > 0 } ? JsonSerializer.Serialize(settings) : null
+            SettingDescriptorsJson = settings is { Count: > 0 } ? JsonSerializer.Serialize(settings) : null,
+            ContractsJson = contracts is { Count: > 0 } ? JsonSerializer.Serialize(contracts) : null,
+            Category = string.IsNullOrWhiteSpace(category) ? null : category.Trim()
         }, ct);
 
     public async Task<string?> GetDllPathAsync(string providerType, CancellationToken ct = default)

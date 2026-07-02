@@ -42,6 +42,8 @@ public class WorkflowConfigurationEditorServiceTests
     private IDataAccess<ArtifactTriggerRecord> _chains = null!;
     private IDataAccess<SlotConfigurationRecord> _slots = null!;
     private IDataAccess<SlotProviderRecord> _providers = null!;
+    private IDataAccess<WorkflowPackageRecord> _packages = null!;
+    private IDataAccess<WorkflowSchemaRecord> _schemas = null!;
     private IDataAccess<AuditRecord> _audit = null!;
     private NullSettingsProtector _protector = null!;
     private WorkflowConfigurationEditorService _sut = null!;
@@ -56,11 +58,14 @@ public class WorkflowConfigurationEditorServiceTests
         _chains = new InMemoryDataAccess<ArtifactTriggerRecord>();
         _slots = new InMemoryDataAccess<SlotConfigurationRecord>();
         _providers = new InMemoryDataAccess<SlotProviderRecord>();
+        _packages = new InMemoryDataAccess<WorkflowPackageRecord>();
+        _schemas = new InMemoryDataAccess<WorkflowSchemaRecord>();
         _audit = new InMemoryDataAccess<AuditRecord>();
         _protector = new NullSettingsProtector();
         var auditLog = new AuditLog(_audit, TimeProvider.System);
         _sut = new WorkflowConfigurationEditorService(
             _configurations, _instances, _schedules, _chains, _slots, _providers,
+            _packages, _schemas,
             new ProviderCatalogService(_providers, new InMemoryDataAccess<ProviderCatalogRecord>(), auditLog),
             _protector, _bus, auditLog,
             Options.Create(new EmailTaskSourceSettings()));
@@ -75,6 +80,8 @@ public class WorkflowConfigurationEditorServiceTests
         (_chains as IDisposable)?.Dispose();
         (_slots as IDisposable)?.Dispose();
         (_providers as IDisposable)?.Dispose();
+        (_packages as IDisposable)?.Dispose();
+        (_schemas as IDisposable)?.Dispose();
         (_audit as IDisposable)?.Dispose();
     }
 
@@ -142,6 +149,99 @@ public class WorkflowConfigurationEditorServiceTests
         => _bus.Published
             .Where(p => p.Topic == WorkflowConfigurationEditorService.SeedExchangeName)
             .Select(p => p.Message).OfType<UpsertWorkflowConfigurationCommand>().Single();
+
+    // ------------------------------------------------------------------ registry
+
+    private Task SeedPackageAsync(
+        string workflowType = "pull-request-code-review", string packageUri = "docker://review:1",
+        string displayName = "Pull-request code review")
+        => _packages.SaveAsync(new WorkflowPackageRecord
+        {
+            Id = WorkflowPackageRecord.IdFor(workflowType),
+            WorkflowType = workflowType,
+            PackageUri = packageUri,
+            DisplayName = displayName
+        });
+
+    private Task SeedSchemaAsync(string workflowType = "pull-request-code-review", params SlotDefinition[] slots)
+        => _schemas.SaveAsync(new WorkflowSchemaRecord
+        {
+            Id = WorkflowSchemaRecord.IdFor(workflowType),
+            WorkflowType = workflowType,
+            SchemaJson = JsonSerializer.Serialize(new WorkflowSchema(workflowType, slots, []) { Version = "1.2" })
+        });
+
+    [Test]
+    public async Task RegisteredWorkflows_JoinPackagesWithStoredSchemas()
+    {
+        await SeedPackageAsync();
+        await SeedSchemaAsync(slots:
+        [
+            new SlotDefinition("work-items", null, "where work comes from")
+                { Contract = "Auxilia.Workflows.TaskSource.IWorkItemAccess" },
+            new SlotDefinition("reviewer", null) { Optional = true }
+        ]);
+
+        var workflows = await _sut.RegisteredWorkflowsAsync();
+
+        var workflow = workflows.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(workflow.DisplayName, Is.EqualTo("Pull-request code review"));
+            Assert.That(workflow.PackageUri, Is.EqualTo("docker://review:1"));
+            Assert.That(workflow.SchemaKnown, Is.True);
+            Assert.That(workflow.Version, Is.EqualTo("1.2"), "the schema's version wins over the registry's");
+            Assert.That(workflow.Slots.Select(s => s.SlotName), Is.EqualTo(new[] { "work-items", "reviewer" }));
+            Assert.That(workflow.Slots[0].Contract, Is.EqualTo("Auxilia.Workflows.TaskSource.IWorkItemAccess"));
+            Assert.That(workflow.Slots[0].Optional, Is.False);
+            Assert.That(workflow.Slots[1].Optional, Is.True);
+        });
+    }
+
+    [Test]
+    public async Task RegisteredWorkflows_WithoutSchema_AreOfferedWithUnknownSlots()
+    {
+        await SeedPackageAsync(displayName: "");
+
+        var workflow = (await _sut.RegisteredWorkflowsAsync()).Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(workflow.DisplayName, Is.EqualTo("pull-request-code-review"));
+            Assert.That(workflow.SchemaKnown, Is.False);
+            Assert.That(workflow.Slots, Is.Empty);
+        });
+    }
+
+    [Test]
+    public async Task Save_SchemaKnown_MissingRequiredSlot_IsRejected()
+    {
+        await SeedProviderAsync();
+        await SeedSchemaAsync(slots:
+        [
+            new SlotDefinition("work-items", null),
+            new SlotDefinition("repository", null)
+        ]);
+
+        // NewDraft binds only "work-items" — "repository" stays unbound.
+        var exception = Assert.ThrowsAsync<ArgumentException>(() => _sut.SaveAsync("actor", null, NewDraft()));
+
+        Assert.That(exception!.Message, Does.Contain("Slot 'repository' is required"));
+    }
+
+    [Test]
+    public async Task Save_SchemaKnown_UnboundOptionalSlot_IsAccepted()
+    {
+        await SeedProviderAsync();
+        await SeedSchemaAsync(slots:
+        [
+            new SlotDefinition("work-items", null),
+            new SlotDefinition("reviewer", null) { Optional = true }
+        ]);
+
+        var name = await _sut.SaveAsync("actor", null, NewDraft());
+
+        Assert.That(name, Is.EqualTo("team-review"));
+    }
 
     // ------------------------------------------------------------------ save & validation
 
@@ -223,8 +323,7 @@ public class WorkflowConfigurationEditorServiceTests
         Assert.Multiple(() =>
         {
             Assert.That(exception!.Message, Does.Contain("Display name"));
-            Assert.That(exception.Message, Does.Contain("Workflow type"));
-            Assert.That(exception.Message, Does.Contain("Package URI"));
+            Assert.That(exception.Message, Does.Contain("Pick the workflow"));
         });
     }
 

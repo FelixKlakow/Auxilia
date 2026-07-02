@@ -64,6 +64,7 @@ try
     builder.Services.AddSingleton(platformDataSettings);
     builder.Services.AddSettingsProtection(platformDataSettings);
     builder.Services.AddPlatformEntity<WorkflowSchemaRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<WorkflowPackageRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<SlotConfigurationRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<SlotProviderRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<WorkflowConfigurationRecord>(platformDataSettings);
@@ -88,6 +89,7 @@ try
 
     // --- Workflow services ---
     builder.Services.AddSingleton<WorkflowSchemaStore>();
+    builder.Services.AddSingleton<WorkflowPackageStore>();
     builder.Services.AddSingleton<PendingWorkflowPackageStore>();
     builder.Services.AddSingleton<SlotConfigurationStore>();
     builder.Services.AddSingleton<WorkflowConfigurationStore>();
@@ -181,22 +183,24 @@ try
     var providerRegistry = app.Services.GetRequiredService<SlotProviderRegistry>();
     foreach (var (providerType, dllPath) in launcherSettings.SlotPackages)
     {
-        // The plugin's manifest sidecar is the source of truth for its setting descriptors.
-        IReadOnlyList<SettingDescriptor>? descriptorSettings = null;
+        // The plugin's manifest sidecar is the source of truth for its setting descriptors,
+        // capability contracts, and category.
+        PluginManifest? sidecar = null;
         var manifestPath = Path.ChangeExtension(dllPath, null) + ".manifest.json";
         if (File.Exists(manifestPath))
         {
             try
             {
-                descriptorSettings = System.Text.Json.JsonSerializer.Deserialize<PluginManifest>(
-                    await File.ReadAllTextAsync(manifestPath))?.Settings;
+                sidecar = System.Text.Json.JsonSerializer.Deserialize<PluginManifest>(
+                    await File.ReadAllTextAsync(manifestPath));
             }
             catch (System.Text.Json.JsonException)
             {
                 // Malformed sidecar — register the provider without descriptors.
             }
         }
-        await providerRegistry.UpsertAsync(providerType, dllPath, descriptorSettings);
+        await providerRegistry.UpsertAsync(
+            providerType, dllPath, sidecar?.Settings, sidecar?.Contracts, sidecar?.Category);
     }
 
     var slotConfigSettings = app.Services.GetRequiredService<IOptions<SlotConfigurationsSettings>>().Value;

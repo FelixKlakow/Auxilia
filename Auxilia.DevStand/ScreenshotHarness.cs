@@ -408,15 +408,10 @@ internal static class ScreenshotHarness
         // @bind commits on the change event — Tab after each fill.
         await page.FillAsync("input[placeholder='e.g. Code review for team mailbox']", "Code review via team mailbox");
         await page.Keyboard.PressAsync("Tab");
-        await page.FillAsync("input[list='known-workflow-types']", WorkflowType);
-        await page.Keyboard.PressAsync("Tab");
-        await Task.Delay(SettleDelay); // slot suggestions depend on the committed workflow type
-        await page.FillAsync("input[list='known-package-uris']", WorkflowPackageUri);
-        await page.Keyboard.PressAsync("Tab");
+        // Picking the registered workflow lays out its declared slots (required ones pre-bound).
+        await page.SelectOptionAsync("#workflow-select", WorkflowType);
         await Task.Delay(SettleDelay);
 
-        await page.ClickAsync("button:has-text('Add slot \"work-items\"')");
-        await Task.Delay(SettleDelay);
         await page.ClickAsync(".provider-card:has-text('email-work-items')");
         await Task.Delay(SettleDelay);
 

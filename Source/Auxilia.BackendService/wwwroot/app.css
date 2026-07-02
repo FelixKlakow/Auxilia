@@ -892,6 +892,8 @@ select { cursor: pointer; }
     margin-bottom: 0.8rem;
 }
 
+.slot-description { margin: 0.25rem 0 0; font-size: 0.85rem; }
+
 .slot-name-label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.86rem; font-weight: 500; color: var(--text-secondary); }
 .slot-name-input { max-width: 16rem; min-width: 12rem; }
 

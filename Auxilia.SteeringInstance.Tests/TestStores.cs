@@ -41,6 +41,12 @@ internal static class TestStores
     public static WorkflowSchemaStore NewWorkflowSchemaStore()
         => new(new InMemoryDataAccess<WorkflowSchemaRecord>());
 
+    public static WorkflowPackageStore NewWorkflowPackageStore()
+        => new(new InMemoryDataAccess<WorkflowPackageRecord>(), TimeProvider.System);
+
+    public static DirtyConfigurationDetector NewDirtyDetector()
+        => new(NewWorkflowSchemaStore(), NewSlotConfigurationStore());
+
     public static SlotProviderRegistry NewSlotProviderRegistry()
         => new(new InMemoryDataAccess<SlotProviderRecord>());
 

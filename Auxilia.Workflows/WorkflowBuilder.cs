@@ -47,11 +47,17 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
         return new WorkflowBuilder(name);
     }
 
-    public IWorkflowBuilder Requires<TService>(string name, ICapability capabilities, string? description = null)
+    public IWorkflowBuilder Requires<TService>(
+        string name, ICapability capabilities, string? description = null, bool optional = false)
     {
         if (_slots.Any(s => s.SlotName == name))
             throw new InvalidOperationException($"A slot with name '{name}' has already been declared.");
-        _slots.Add(new SlotDefinition(name, capabilities, description) { ServiceType = typeof(TService) });
+        _slots.Add(new SlotDefinition(name, capabilities, description)
+        {
+            ServiceType = typeof(TService),
+            Contract = typeof(TService).FullName,
+            Optional = optional
+        });
         return this;
     }
 
@@ -136,6 +142,14 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
 
     public async Task Run(string[] args)
     {
+        // Registry support: print the schema and exit without touching the message bus, so
+        // deployment tooling can register a package's slots before it ever runs.
+        if (args.Contains("--emit-schema"))
+        {
+            Console.Out.WriteLine(JsonSerializer.Serialize(BuildSchema()));
+            return;
+        }
+
         if (args.Contains("--test-harness") && TestContext is { } testCtx)
         {
             await Run(args, testCtx);

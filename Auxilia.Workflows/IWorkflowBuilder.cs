@@ -5,7 +5,13 @@ namespace Auxilia.Workflows;
 
 public interface IWorkflowBuilder
 {
-    IWorkflowBuilder Requires<TService>(string name, ICapability capabilities, string? description = null);
+    /// <summary>
+    /// Declares a capability slot. The contract type name of <typeparamref name="TService"/> is
+    /// published in the schema so configuration tooling offers only matching providers; an
+    /// <paramref name="optional"/> slot may stay unbound in a workflow configuration.
+    /// </summary>
+    IWorkflowBuilder Requires<TService>(
+        string name, ICapability capabilities, string? description = null, bool optional = false);
 
     IWorkflowBuilder RequiresEnvironment(Action<IEnvironmentBuilder> configure);
 

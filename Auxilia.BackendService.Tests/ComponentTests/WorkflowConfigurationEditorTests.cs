@@ -222,6 +222,53 @@ public class WorkflowConfigurationEditorTests : DashboardComponentTestBase
         });
     }
 
+    [Test]
+    public async Task EditorPage_OffersRegisteredWorkflows_InsteadOfFreeTextCoordinates()
+    {
+        var packages = Factory.Services.GetRequiredService<IDataAccess<WorkflowPackageRecord>>();
+        await packages.SaveAsync(new WorkflowPackageRecord
+        {
+            Id = WorkflowPackageRecord.IdFor("pull-request-code-review"),
+            WorkflowType = "pull-request-code-review",
+            PackageUri = "docker://review:1",
+            DisplayName = "Pull-request code review"
+        });
+        var schemas = Factory.Services.GetRequiredService<IDataAccess<WorkflowSchemaRecord>>();
+        await schemas.SaveAsync(new WorkflowSchemaRecord
+        {
+            Id = WorkflowSchemaRecord.IdFor("pull-request-code-review"),
+            WorkflowType = "pull-request-code-review",
+            SchemaJson = JsonSerializer.Serialize(new WorkflowSchema(
+                "pull-request-code-review",
+                [new SlotDefinition("work-items", null, "Where reviewed work items come from.")],
+                []))
+        });
+
+        using var client = CreateClient();
+        var (_, username, password) = await CreatePrincipalAsync("Operator");
+        var (cookie, _) = await LoginAsync(client, username, password);
+
+        var html = await GetHtmlAsync(client, "/workflows/new", cookie);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(html, Does.Contain("Pick a workflow"));
+            Assert.That(html, Does.Contain("Pull-request code review"));
+            Assert.That(html, Does.Not.Contain("Package URI"),
+                "package coordinates are registry-resolved, never typed");
+        });
+
+        try
+        {
+            await packages.RemoveAsync(WorkflowPackageRecord.IdFor("pull-request-code-review"));
+            await schemas.RemoveAsync(WorkflowSchemaRecord.IdFor("pull-request-code-review"));
+        }
+        catch
+        {
+            // Shared-host cleanup is best-effort.
+        }
+    }
+
     // ------------------------------------------------------------------ runs filter & rerun
 
     [Test]

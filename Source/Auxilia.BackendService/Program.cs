@@ -111,6 +111,8 @@ try
     builder.Services.AddPlatformEntity<SlotConfigurationRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<ProviderCatalogRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<WorkflowConfigurationRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<WorkflowPackageRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<WorkflowSchemaRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<DashboardRecord>(platformDataSettings);
     builder.Services.AddSingleton(TimeProvider.System);
     builder.Services.AddSingleton<AuditLog>();

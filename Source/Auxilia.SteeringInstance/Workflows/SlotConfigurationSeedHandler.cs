@@ -11,6 +11,8 @@ public sealed class SlotConfigurationSeedHandler(
     SlotConfigurationStore slotStore,
     SlotProviderRegistry providerRegistry,
     WorkflowConfigurationStore configurationStore,
+    WorkflowPackageStore packageStore,
+    DirtyConfigurationDetector dirtyDetector,
     LongLivingDrainCoordinator drainCoordinator,
     IOptions<WorkflowDispatcherSettings> dispatcherSettings,
     ILogger<SlotConfigurationSeedHandler> logger)
@@ -24,6 +26,8 @@ public sealed class SlotConfigurationSeedHandler(
         await messageBus.SubscribeToExchangeAsync<RemoveSlotProviderCommand>("slot-configurations", HandleRemoveProviderAsync, ct);
         await messageBus.SubscribeToExchangeAsync<UpsertWorkflowConfigurationCommand>("slot-configurations", HandleUpsertWorkflowConfigurationAsync, ct);
         await messageBus.SubscribeToExchangeAsync<RemoveWorkflowConfigurationCommand>("slot-configurations", HandleRemoveWorkflowConfigurationAsync, ct);
+        await messageBus.SubscribeToExchangeAsync<RegisterWorkflowPackageCommand>("slot-configurations", HandleRegisterPackageAsync, ct);
+        await messageBus.SubscribeToExchangeAsync<RemoveWorkflowPackageCommand>("slot-configurations", HandleRemovePackageAsync, ct);
 
         // Per-instance seed queues: one sub-queue per command type so that each typed consumer
         // only receives messages it can deserialize. Using a single queue with multiple competing
@@ -36,6 +40,8 @@ public sealed class SlotConfigurationSeedHandler(
         var removeProviderQueue      = seedBase + ".remove-provider";
         var upsertConfigurationQueue = seedBase + ".upsert-configuration";
         var removeConfigurationQueue = seedBase + ".remove-configuration";
+        var registerPackageQueue     = seedBase + ".register-package";
+        var removePackageQueue       = seedBase + ".remove-package";
 
         await messageBus.DeclareQueueAsync(upsertQueue,              ct);
         await messageBus.DeclareQueueAsync(removeQueue,              ct);
@@ -43,6 +49,8 @@ public sealed class SlotConfigurationSeedHandler(
         await messageBus.DeclareQueueAsync(removeProviderQueue,      ct);
         await messageBus.DeclareQueueAsync(upsertConfigurationQueue, ct);
         await messageBus.DeclareQueueAsync(removeConfigurationQueue, ct);
+        await messageBus.DeclareQueueAsync(registerPackageQueue,     ct);
+        await messageBus.DeclareQueueAsync(removePackageQueue,       ct);
 
         await messageBus.SubscribeAsync<UpsertSlotConfigurationCommand>(upsertQueue,         HandleUpsertAsync,          ct);
         await messageBus.SubscribeAsync<RemoveSlotConfigurationCommand>(removeQueue,         HandleRemoveSlotAsync,      ct);
@@ -50,6 +58,8 @@ public sealed class SlotConfigurationSeedHandler(
         await messageBus.SubscribeAsync<RemoveSlotProviderCommand>     (removeProviderQueue, HandleRemoveProviderAsync,  ct);
         await messageBus.SubscribeAsync<UpsertWorkflowConfigurationCommand>(upsertConfigurationQueue, HandleUpsertWorkflowConfigurationAsync, ct);
         await messageBus.SubscribeAsync<RemoveWorkflowConfigurationCommand>(removeConfigurationQueue, HandleRemoveWorkflowConfigurationAsync, ct);
+        await messageBus.SubscribeAsync<RegisterWorkflowPackageCommand>(registerPackageQueue, HandleRegisterPackageAsync, ct);
+        await messageBus.SubscribeAsync<RemoveWorkflowPackageCommand>  (removePackageQueue,   HandleRemovePackageAsync,   ct);
 
         logger.LogInformation("SlotConfigurationSeedHandler started — subscribed to slot-configurations exchange.");
     }
@@ -75,7 +85,7 @@ public sealed class SlotConfigurationSeedHandler(
 
     private async Task HandleRegisterProviderAsync(RegisterSlotProviderCommand cmd, CancellationToken ct)
     {
-        await providerRegistry.UpsertAsync(cmd.ProviderType, cmd.DllPath, cmd.Settings, ct);
+        await providerRegistry.UpsertAsync(cmd.ProviderType, cmd.DllPath, cmd.Settings, cmd.Contracts, cmd.Category, ct);
         logger.LogInformation(
             "Registered slot provider. ProviderType={ProviderType} DllPath={DllPath}",
             cmd.ProviderType, cmd.DllPath);
@@ -110,6 +120,54 @@ public sealed class SlotConfigurationSeedHandler(
             "Upserted workflow configuration. Name={Name} WorkflowType={WorkflowType} Bindings={BindingCount}",
             cmd.Name, cmd.WorkflowType, cmd.SlotBindings.Count);
         await drainCoordinator.DrainRunningInstancesAsync(cmd.WorkflowType, ct);
+    }
+
+    private async Task HandleRegisterPackageAsync(RegisterWorkflowPackageCommand cmd, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(cmd.WorkflowType) || string.IsNullOrWhiteSpace(cmd.PackageUri))
+        {
+            logger.LogWarning("Rejected workflow package registration without type or package URI.");
+            return;
+        }
+
+        await packageStore.RegisterAsync(
+            cmd.WorkflowType.Trim(), cmd.PackageUri.Trim(), cmd.DisplayName, cmd.Version, ct);
+
+        if (!string.IsNullOrWhiteSpace(cmd.SchemaJson))
+        {
+            Auxilia.Workflows.WorkflowSchema? schema = null;
+            try
+            {
+                schema = System.Text.Json.JsonSerializer.Deserialize<Auxilia.Workflows.WorkflowSchema>(cmd.SchemaJson);
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                // Registration without a usable schema is still valid — slots stay unknown
+                // until the workflow's first run announces them.
+            }
+
+            if (schema is not null)
+                await dirtyDetector.DetectAsync(cmd.WorkflowType.Trim(), schema, ct);
+            else
+                logger.LogWarning(
+                    "Workflow package registration for {WorkflowType} carried an unreadable schema — ignored.",
+                    cmd.WorkflowType);
+        }
+
+        logger.LogInformation(
+            "Registered workflow package. WorkflowType={WorkflowType} PackageUri={PackageUri} SchemaIncluded={SchemaIncluded}",
+            cmd.WorkflowType, cmd.PackageUri, !string.IsNullOrWhiteSpace(cmd.SchemaJson));
+    }
+
+    private async Task HandleRemovePackageAsync(RemoveWorkflowPackageCommand cmd, CancellationToken ct)
+    {
+        if (!await packageStore.RemoveAsync(cmd.WorkflowType, ct))
+        {
+            logger.LogWarning("Workflow package to remove not found. WorkflowType={WorkflowType}", cmd.WorkflowType);
+            return;
+        }
+
+        logger.LogInformation("Removed workflow package. WorkflowType={WorkflowType}", cmd.WorkflowType);
     }
 
     private async Task HandleRemoveWorkflowConfigurationAsync(

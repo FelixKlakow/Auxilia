@@ -61,6 +61,65 @@ public class WorkflowBuilderTests
     }
 
     [Test]
+    public void Requires_ContractIsTheServiceTypeFullName_AndPersistsInSchemaJson()
+    {
+        var builder = WorkflowBuilder.Create("test");
+        builder.Requires<IStubService>("s", new NoCapabilities());
+        var schema = ((WorkflowBuilder)builder).BuildSchema();
+
+        var roundTripped = System.Text.Json.JsonSerializer.Deserialize<WorkflowSchema>(
+            System.Text.Json.JsonSerializer.Serialize(schema))!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(schema.Slots[0].Contract, Is.EqualTo(typeof(IStubService).FullName));
+            Assert.That(roundTripped.Slots[0].Contract, Is.EqualTo(typeof(IStubService).FullName));
+        });
+    }
+
+    [Test]
+    public void Requires_DefaultsToRequired_OptionalFlagPropagatesToSchema()
+    {
+        var builder = WorkflowBuilder.Create("test");
+        builder.Requires<IStubService>("must", new NoCapabilities());
+        builder.Requires<IStubService>("may", new NoCapabilities(), optional: true);
+        var schema = ((WorkflowBuilder)builder).BuildSchema();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(schema.Slots[0].Optional, Is.False);
+            Assert.That(schema.Slots[1].Optional, Is.True);
+        });
+    }
+
+    [Test]
+    public async Task Run_WithEmitSchemaArg_PrintsSchemaJsonAndExitsWithoutBus()
+    {
+        var builder = WorkflowBuilder.Create("emit-test");
+        builder.Requires<IStubService>("s", new NoCapabilities(), "the stub slot");
+
+        var originalOut = Console.Out;
+        var captured = new StringWriter();
+        Console.SetOut(captured);
+        try
+        {
+            // No message bus, no environment — must not throw and must not block.
+            await builder.Run(["--emit-schema"]);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+
+        var schema = System.Text.Json.JsonSerializer.Deserialize<WorkflowSchema>(captured.ToString())!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(schema.WorkflowName, Is.EqualTo("emit-test"));
+            Assert.That(schema.Slots.Single().SlotName, Is.EqualTo("s"));
+            Assert.That(schema.Slots.Single().Contract, Is.EqualTo(typeof(IStubService).FullName));
+        });
+    }
+
+    [Test]
     public void Requires_Capabilities_EqualsPassedObject()
     {
         var builder = WorkflowBuilder.Create("test");

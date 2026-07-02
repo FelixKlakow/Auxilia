@@ -20,6 +20,9 @@ public class SlotConfigurationSeedHandlerTests
     private InMemoryDataAccess<SlotProviderRecord> _providerRecords = null!;
     private SlotProviderRegistry _providerRegistry = null!;
     private WorkflowConfigurationStore _configurationStore = null!;
+    private WorkflowPackageStore _packageStore = null!;
+    private WorkflowSchemaStore _schemaStore = null!;
+    private DirtyConfigurationDetector _dirtyDetector = null!;
     private SlotConfigurationSeedHandler _sut = null!;
 
     [SetUp]
@@ -30,11 +33,16 @@ public class SlotConfigurationSeedHandlerTests
         _providerRecords = new InMemoryDataAccess<SlotProviderRecord>();
         _providerRegistry = new SlotProviderRegistry(_providerRecords);
         _configurationStore = TestStores.NewWorkflowConfigurationStore();
+        _packageStore = TestStores.NewWorkflowPackageStore();
+        _schemaStore = TestStores.NewWorkflowSchemaStore();
+        _dirtyDetector = new DirtyConfigurationDetector(_schemaStore, _slotStore);
         _sut = new SlotConfigurationSeedHandler(
             _fakeBus,
             _slotStore,
             _providerRegistry,
             _configurationStore,
+            _packageStore,
+            _dirtyDetector,
             TestStores.NewDrainCoordinator(_fakeBus),
             Options.Create(new WorkflowDispatcherSettings { CommandQueueName = "test-queue" }),
             NullLogger<SlotConfigurationSeedHandler>.Instance);
@@ -111,6 +119,91 @@ public class SlotConfigurationSeedHandlerTests
 
         var record = (await _providerRecords.ReadAsync(SlotProviderRecord.IdFor("legacy-provider")))!;
         Assert.That(record.SettingDescriptorsJson, Is.Null);
+    }
+
+    [Test]
+    public async Task WhenRegisterProviderCommandCarriesContractsAndCategory_TheyLandOnTheRecord()
+    {
+        await _fakeBus.SimulateReceivedAsync("slot-configurations",
+            new RegisterSlotProviderCommand("email-work-items", "/plugins/email.slothandler.dll",
+                Settings: null,
+                Contracts: ["Auxilia.Workflows.TaskSource.IWorkItemAccess"],
+                Category: "task-source"));
+
+        var record = (await _providerRecords.ReadAsync(SlotProviderRecord.IdFor("email-work-items")))!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                JsonSerializer.Deserialize<List<string>>(record.ContractsJson!),
+                Is.EqualTo(new[] { "Auxilia.Workflows.TaskSource.IWorkItemAccess" }));
+            Assert.That(record.Category, Is.EqualTo("task-source"));
+        });
+    }
+
+    [Test]
+    public async Task WhenRegisterPackageCommandReceived_PackageIsStored()
+    {
+        await _fakeBus.SimulateReceivedAsync("slot-configurations",
+            new RegisterWorkflowPackageCommand(
+                "code-review", "docker://review:1", "Code review", "2.0"));
+
+        var record = await _packageStore.GetAsync("code-review");
+        Assert.Multiple(() =>
+        {
+            Assert.That(record!.PackageUri, Is.EqualTo("docker://review:1"));
+            Assert.That(record.DisplayName, Is.EqualTo("Code review"));
+            Assert.That(record.Source, Is.EqualTo("seed"));
+        });
+    }
+
+    [Test]
+    public async Task WhenRegisterPackageCommandCarriesSchema_SchemaIsStored()
+    {
+        var schemaJson = JsonSerializer.Serialize(
+            new WorkflowSchema("code-review", [new SlotDefinition("work-items", null)], []));
+
+        await _fakeBus.SimulateReceivedAsync("slot-configurations",
+            new RegisterWorkflowPackageCommand(
+                "code-review", "docker://review:1", SchemaJson: schemaJson));
+
+        var schema = await _schemaStore.GetSchemaAsync("code-review");
+        Assert.That(schema!.Slots.Single().SlotName, Is.EqualTo("work-items"));
+    }
+
+    [Test]
+    public async Task WhenRegisterPackageCommandCarriesUnreadableSchema_PackageIsStillStored()
+    {
+        await _fakeBus.SimulateReceivedAsync("slot-configurations",
+            new RegisterWorkflowPackageCommand(
+                "code-review", "docker://review:1", SchemaJson: "not json"));
+
+        Assert.Multiple(async () =>
+        {
+            Assert.That(await _packageStore.GetAsync("code-review"), Is.Not.Null);
+            Assert.That(await _schemaStore.GetSchemaAsync("code-review"), Is.Null);
+        });
+    }
+
+    [Test]
+    public async Task WhenRegisterPackageCommandLacksCoordinates_ItIsRejected()
+    {
+        await _fakeBus.SimulateReceivedAsync("slot-configurations",
+            new RegisterWorkflowPackageCommand("", "docker://x"));
+        await _fakeBus.SimulateReceivedAsync("slot-configurations",
+            new RegisterWorkflowPackageCommand("type", " "));
+
+        Assert.That(await _packageStore.GetAllAsync(), Is.Empty);
+    }
+
+    [Test]
+    public async Task WhenRemovePackageCommandReceived_PackageIsRemoved()
+    {
+        await _packageStore.RegisterAsync("code-review", "docker://review:1", null, null);
+
+        await _fakeBus.SimulateReceivedAsync("slot-configurations",
+            new RemoveWorkflowPackageCommand("code-review"));
+
+        Assert.That(await _packageStore.GetAsync("code-review"), Is.Null);
     }
 
     [Test]

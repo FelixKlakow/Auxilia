@@ -72,6 +72,22 @@ public sealed record KnownWorkflowValues(
     IReadOnlyList<string> PackageUris,
     IReadOnlyDictionary<string, IReadOnlyList<string>> SlotNamesByWorkflowType);
 
+/// <summary>One slot a registered workflow declares in its schema.</summary>
+public sealed record RegisteredWorkflowSlot(
+    string SlotName, string? Description, string? Contract, bool Optional);
+
+/// <summary>
+/// One workflow package from the platform registry, joined with its stored schema. The
+/// editor offers exactly these — package coordinates are never typed by hand.
+/// </summary>
+public sealed record RegisteredWorkflow(
+    string WorkflowType,
+    string PackageUri,
+    string DisplayName,
+    string Version,
+    bool SchemaKnown,
+    IReadOnlyList<RegisteredWorkflowSlot> Slots);
+
 /// <summary>
 /// Backing service of the visual workflow configuration editor (#20).
 ///
@@ -91,6 +107,8 @@ public sealed class WorkflowConfigurationEditorService(
     IDataAccess<ArtifactTriggerRecord> artifactTriggers,
     IDataAccess<SlotConfigurationRecord> slotConfigurations,
     IDataAccess<SlotProviderRecord> slotProviders,
+    IDataAccess<WorkflowPackageRecord> workflowPackages,
+    IDataAccess<WorkflowSchemaRecord> workflowSchemas,
     ProviderCatalogService catalog,
     ISettingsProtector protector,
     IMessageBusClient messageBus,
@@ -197,7 +215,10 @@ public sealed class WorkflowConfigurationEditorService(
         string actor, Guid? actorPrincipalId, WorkflowConfigurationDraft draft, CancellationToken ct = default)
     {
         var descriptorsByProvider = await DescriptorsByProviderAsync(ct);
-        Validate(draft, descriptorsByProvider);
+        var schemaSlots = string.IsNullOrWhiteSpace(draft.WorkflowType)
+            ? null
+            : await SchemaSlotsOfAsync(draft.WorkflowType.Trim(), ct);
+        Validate(draft, descriptorsByProvider, schemaSlots);
 
         var name = draft.ExistingName ?? await NewUniqueNameAsync(draft.DisplayName, ct);
         var existing = draft.ExistingName is null
@@ -299,6 +320,59 @@ public sealed class WorkflowConfigurationEditorService(
         await auditLog.AppendAsync(actor, "workflow-configuration.deleted", record.Name, "removed", ct: ct);
     }
 
+    // ------------------------------------------------------------------ registry
+
+    /// <summary>The workflow packages registered on this platform, joined with their stored schemas.</summary>
+    public async Task<IReadOnlyList<RegisteredWorkflow>> RegisteredWorkflowsAsync(CancellationToken ct = default)
+    {
+        var packageRecords = (await workflowPackages.ReadAsync(ct)).ToList();
+        var schemasByType = (await workflowSchemas.ReadAsync(ct)).ToList()
+            .ToDictionary(r => r.WorkflowType, r => r.SchemaJson, StringComparer.Ordinal);
+
+        return packageRecords
+            .Select(p => ToRegisteredWorkflow(p, schemasByType.GetValueOrDefault(p.WorkflowType)))
+            .OrderBy(w => w.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static RegisteredWorkflow ToRegisteredWorkflow(WorkflowPackageRecord package, string? schemaJson)
+    {
+        var schema = ParseSchema(schemaJson);
+        return new RegisteredWorkflow(
+            package.WorkflowType,
+            package.PackageUri,
+            package.DisplayName.Length > 0 ? package.DisplayName : package.WorkflowType,
+            schema?.Version is { Length: > 0 } version ? version : package.Version,
+            schema is not null,
+            (schema?.Slots ?? [])
+                .Select(s => new RegisteredWorkflowSlot(s.SlotName, s.Description, s.Contract, s.Optional))
+                .ToList());
+    }
+
+    private static WorkflowSchema? ParseSchema(string? schemaJson)
+    {
+        if (string.IsNullOrWhiteSpace(schemaJson))
+            return null;
+        try
+        {
+            return JsonSerializer.Deserialize<WorkflowSchema>(schemaJson);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private async Task<IReadOnlyList<RegisteredWorkflowSlot>?> SchemaSlotsOfAsync(
+        string workflowType, CancellationToken ct)
+    {
+        var record = await workflowSchemas.ReadAsync(WorkflowSchemaRecord.IdFor(workflowType), ct);
+        var schema = ParseSchema(record?.SchemaJson);
+        return schema?.Slots
+            .Select(s => new RegisteredWorkflowSlot(s.SlotName, s.Description, s.Contract, s.Optional))
+            .ToList();
+    }
+
     // ------------------------------------------------------------------ known values
 
     public async Task<KnownWorkflowValues> KnownValuesAsync(CancellationToken ct = default)
@@ -386,15 +460,22 @@ public sealed class WorkflowConfigurationEditorService(
 
     private void Validate(
         WorkflowConfigurationDraft draft,
-        IReadOnlyDictionary<string, IReadOnlyList<SettingDescriptor>> descriptorsByProvider)
+        IReadOnlyDictionary<string, IReadOnlyList<SettingDescriptor>> descriptorsByProvider,
+        IReadOnlyList<RegisteredWorkflowSlot>? schemaSlots)
     {
         var errors = new List<string>();
         if (string.IsNullOrWhiteSpace(draft.DisplayName))
             errors.Add("Display name is required.");
-        if (string.IsNullOrWhiteSpace(draft.WorkflowType))
-            errors.Add("Workflow type is required.");
-        if (string.IsNullOrWhiteSpace(draft.PackageUri))
-            errors.Add("Package URI is required.");
+        if (string.IsNullOrWhiteSpace(draft.WorkflowType) || string.IsNullOrWhiteSpace(draft.PackageUri))
+            errors.Add("Pick the workflow this configuration runs.");
+
+        // The stored schema knows which slots the workflow requires — every non-optional slot
+        // must be bound before the configuration can dispatch successfully.
+        foreach (var slot in schemaSlots ?? [])
+        {
+            if (!slot.Optional && draft.Bindings.All(b => b.SlotName.Trim() != slot.SlotName))
+                errors.Add($"Slot '{slot.SlotName}' is required by this workflow.");
+        }
 
         var slotNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (var binding in draft.Bindings)

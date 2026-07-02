@@ -62,6 +62,7 @@ public class AuthenticatedHandshakeComponentTests
 
                 var platformData = new PlatformDataSettings { Backend = PlatformDataBackend.InMemory };
                 services.AddPlatformEntity<WorkflowSchemaRecord>(platformData);
+                services.AddPlatformEntity<WorkflowPackageRecord>(platformData);
                 services.AddPlatformEntity<SlotConfigurationRecord>(platformData);
                 services.AddPlatformEntity<SlotProviderRecord>(platformData);
                 services.AddPlatformEntity<WorkflowConfigurationRecord>(platformData);
@@ -81,9 +82,11 @@ public class AuthenticatedHandshakeComponentTests
                 services.AddSingleton<SlotProviderRegistry>();
                 services.AddSingleton<SignalHandlerStore>();
                 services.AddSingleton<WorkflowSchemaStore>();
+                services.AddSingleton<WorkflowPackageStore>();
                 services.AddSingleton<PendingWorkflowPackageStore>();
                 services.AddSingleton<WorkflowInstanceRegistry>();
                 services.AddSingleton<EnvironmentValidator>();
+                services.AddSingleton<DirtyConfigurationDetector>();
                 services.AddSingleton<ConfigurationResolver>();
                 services.AddSingleton<WorkflowRegistrationHandler>();
                 services.AddSingleton<WorkflowAnnouncementHandler>();

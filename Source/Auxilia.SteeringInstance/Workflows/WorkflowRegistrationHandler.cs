@@ -15,6 +15,7 @@ public sealed class WorkflowRegistrationHandler(
     ConfigurationResolver configResolver,
     WorkflowInstanceRegistry instanceRegistry,
     WorkflowInstanceTokenRegistry tokenRegistry,
+    DirtyConfigurationDetector dirtyDetector,
     AuditLog auditLog,
     WorkflowStatusPublisher statusPublisher,
     IOptions<WorkflowDispatcherSettings> dispatcherSettings,
@@ -102,6 +103,11 @@ public sealed class WorkflowRegistrationHandler(
             return;
         }
 
+        // The manifest is the authoritative schema of this package version: persist it so the
+        // registry knows the slots of docker-baked workflows too, and mark slot configurations
+        // dirty when a new version adds required capability fields.
+        await dirtyDetector.DetectAsync(request.Manifest.WorkflowName, SchemaOf(request.Manifest), cancellationToken);
+
         // Workflows that declare no slots need no configuration resolution.
         if (request.Manifest.Slots.Count == 0)
         {
@@ -180,4 +186,17 @@ public sealed class WorkflowRegistrationHandler(
             "steering-instance", "workflow.registration.accepted",
             request.WorkflowInstanceId.ToString(), "success", ct: cancellationToken);
     }
+
+    private static Auxilia.Workflows.WorkflowSchema SchemaOf(Auxilia.Workflows.WorkflowManifest manifest)
+        => new(manifest.WorkflowName, manifest.Slots, manifest.EnvironmentRequirements)
+        {
+            Version = manifest.Version,
+            Tags = manifest.Tags,
+            Outputs = manifest.Outputs,
+            Signals = manifest.Signals,
+            Lifetime = manifest.Lifetime,
+            Views = manifest.Views,
+            NetworkEndpoints = manifest.NetworkEndpoints,
+            Repositories = manifest.Repositories
+        };
 }

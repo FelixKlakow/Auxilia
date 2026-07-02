@@ -21,7 +21,8 @@ public class WorkflowRegistrationHandlerTests
         WorkflowInstanceRegistry? instanceRegistry = null,
         WorkflowInstanceTokenRegistry? tokenRegistry = null,
         bool requireInstanceToken = false,
-        List<string>? approvedLongLivingWorkflowTypes = null)
+        List<string>? approvedLongLivingWorkflowTypes = null,
+        DirtyConfigurationDetector? dirtyDetector = null)
     {
         var profile = new RunnerProfile
         {
@@ -52,6 +53,7 @@ public class WorkflowRegistrationHandlerTests
             resolver,
             instanceRegistry ?? TestStores.NewWorkflowInstanceRegistry(),
             tokenRegistry ?? new WorkflowInstanceTokenRegistry(settings, TimeProvider.System),
+            dirtyDetector ?? TestStores.NewDirtyDetector(),
             TestStores.NewAuditLog(),
             TestStores.NewStatusPublisher(messageBus),
             settings,
@@ -86,6 +88,49 @@ public class WorkflowRegistrationHandlerTests
         var response = (WorkflowConfigurationResponse)msg;
         Assert.That(response.Success, Is.False);
         Assert.That(response.ErrorMessage, Does.Contain("git"));
+    }
+
+    [Test]
+    public async Task HandleAsync_AcceptedRegistration_PersistsTheManifestSchema()
+    {
+        var schemaStore = TestStores.NewWorkflowSchemaStore();
+        var detector = new DirtyConfigurationDetector(schemaStore, TestStores.NewSlotConfigurationStore());
+        var manifest = new WorkflowManifest(
+            "TestWorkflow", Guid.NewGuid().ToString(), [], [], "3.1", ["tag-a"], []);
+        var request = new WorkflowRegistrationRequest(
+            Guid.NewGuid(), manifest, ValidPublicKey(), "reply-topic");
+
+        var bus = new CapturingFakeMessageBusClient();
+        var handler = MakeHandler(bus, dirtyDetector: detector);
+        await handler.StartAsync(CancellationToken.None);
+        await bus.InvokeAsync(request, CancellationToken.None);
+
+        var schema = await schemaStore.GetSchemaAsync("TestWorkflow");
+        Assert.Multiple(() =>
+        {
+            Assert.That(schema, Is.Not.Null, "the registration manifest is the package's schema of record");
+            Assert.That(schema!.Version, Is.EqualTo("3.1"));
+            Assert.That(schema.Tags, Is.EqualTo(new[] { "tag-a" }));
+        });
+    }
+
+    [Test]
+    public async Task HandleAsync_RejectedEnvironment_DoesNotPersistASchema()
+    {
+        var schemaStore = TestStores.NewWorkflowSchemaStore();
+        var detector = new DirtyConfigurationDetector(schemaStore, TestStores.NewSlotConfigurationStore());
+        var manifest = new WorkflowManifest(
+            "TestWorkflow", Guid.NewGuid().ToString(), [],
+            [new ToolRequirement("git")], string.Empty, [], []);
+        var request = new WorkflowRegistrationRequest(
+            Guid.NewGuid(), manifest, ValidPublicKey(), "reply-topic");
+
+        var bus = new CapturingFakeMessageBusClient();
+        var handler = MakeHandler(bus, dirtyDetector: detector);
+        await handler.StartAsync(CancellationToken.None);
+        await bus.InvokeAsync(request, CancellationToken.None);
+
+        Assert.That(await schemaStore.GetSchemaAsync("TestWorkflow"), Is.Null);
     }
 
     [Test]

@@ -105,7 +105,7 @@ public class SignalDispatchPhaseTests
         var validator = new EnvironmentValidator(Options.Create(profile), NullLogger<EnvironmentValidator>.Instance);
         var settings = Options.Create(new WorkflowDispatcherSettings { RequireInstanceToken = false });
         var handler = new WorkflowRegistrationHandler(bus, validator, resolver, registry,
-            new WorkflowInstanceTokenRegistry(settings, TimeProvider.System), TestStores.NewAuditLog(),
+            new WorkflowInstanceTokenRegistry(settings, TimeProvider.System), TestStores.NewDirtyDetector(), TestStores.NewAuditLog(),
             TestStores.NewStatusPublisher(bus), settings,
             NullLogger<WorkflowRegistrationHandler>.Instance);
 

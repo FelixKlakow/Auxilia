@@ -3,6 +3,8 @@
   "ContentHashBase64": "",
   "SignatureBase64": "",
   "PublicKeyBase64": "",
+  "Contracts": ["Auxilia.ClaudeCode.Workflow.ICodingAgent"],
+  "Category": "coding-agent",
   "Settings": [
     {
       "Key": "ApiKey",

@@ -41,6 +41,7 @@ public sealed class WorkflowDispatcher(
     WorkflowInstanceRegistry instanceRegistry,
     WorkflowStatusPublisher statusPublisher,
     WorkflowSchemaStore schemaStore,
+    WorkflowPackageStore packageStore,
     NetworkPolicyResolver networkPolicyResolver,
     WorkspaceManager workspaceManager,
     AuditLog auditLog,
@@ -279,7 +280,7 @@ public sealed class WorkflowDispatcher(
                     WorkspaceDirectoryBind = workspaceRoot
                 },
                 ct);
-            await MarkQueuedAsync(instanceId, workflowType, ct);
+            await MarkQueuedAsync(instanceId, workflowType, packageUri, ct);
             return;
         }
 
@@ -330,7 +331,7 @@ public sealed class WorkflowDispatcher(
             NetworkPolicy = networkPolicy,
             WorkspaceDirectoryBind = workspaceRoot
         }, ct);
-        await MarkQueuedAsync(instanceId, workflowType, ct);
+        await MarkQueuedAsync(instanceId, workflowType, packageUri, ct);
     }
 
     /// <summary>
@@ -359,8 +360,11 @@ public sealed class WorkflowDispatcher(
         tokenRegistry.Consume(instanceId);
     }
 
-    private async Task MarkQueuedAsync(Guid instanceId, string workflowType, CancellationToken ct)
+    private async Task MarkQueuedAsync(Guid instanceId, string workflowType, string packageUri, CancellationToken ct)
     {
+        // Every successfully dispatched package is known to the registry from then on, so the
+        // configuration editor can offer it without a separate deployment registration.
+        await packageStore.LearnAsync(workflowType, packageUri, ct);
         await instanceRegistry.SetStateAsync(instanceId, "Queued", ct: ct);
         await statusPublisher.PublishAsync(instanceId, workflowType, "Queued", ct: ct);
     }

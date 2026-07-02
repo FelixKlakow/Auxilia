@@ -3,5 +3,14 @@
   "ContentHashBase64": "",
   "SignatureBase64": "",
   "PublicKeyBase64": "",
+  "Contracts": [
+    "Auxilia.Workflows.SourceControl.ISourceControlWriteAccess",
+    "Auxilia.Workflows.SourceControl.ISourceControlAccess",
+    "Auxilia.Workflows.TaskSource.ITaskSourceAccess",
+    "Auxilia.Workflows.AiAgent.IAiAgent",
+    "Auxilia.Workflows.TestRunner.ITestRunner",
+    "Auxilia.Workflows.PullRequestAccess.IPullRequestAccess"
+  ],
+  "Category": "test-fake",
   "Settings": []
 }

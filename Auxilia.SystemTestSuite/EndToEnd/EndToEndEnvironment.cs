@@ -221,19 +221,22 @@ public class EndToEndEnvironment
         // Seed slot providers and configurations via the SI's per-instance seed queues
         // (targeted delivery — no fanout collisions with other environments).
         var seedBase = CommandQueue + "-slot-seed";
+        // The published manifest sidecars are the source of truth for setting descriptors,
+        // capability contracts, and categories — registration carries them into the records.
+        var fakeManifest = System.Text.Json.JsonSerializer.Deserialize<Auxilia.Workflows.PluginManifest>(
+            await File.ReadAllTextAsync(Path.Combine(_publishDir, "Auxilia.FakeSlots.CodeReview.Happy.slothandler.manifest.json")))!;
         await MessageBusClient.PublishAsync(seedBase + ".register",
             new RegisterSlotProviderCommand(
                 "fake-code-review-happy",
-                $"{ContainerPluginsDir}/Auxilia.FakeSlots.CodeReview.Happy.slothandler.dll"));
-        // The published manifest sidecar is the source of truth for the email provider's
-        // setting descriptors — registration carries them into the provider record (#19).
+                $"{ContainerPluginsDir}/Auxilia.FakeSlots.CodeReview.Happy.slothandler.dll",
+                fakeManifest.Settings, fakeManifest.Contracts, fakeManifest.Category));
         var emailManifest = System.Text.Json.JsonSerializer.Deserialize<Auxilia.Workflows.PluginManifest>(
             await File.ReadAllTextAsync(Path.Combine(_publishDir, "Auxilia.Slots.Email.slothandler.manifest.json")))!;
         await MessageBusClient.PublishAsync(seedBase + ".register",
             new RegisterSlotProviderCommand(
                 "email-work-items",
                 $"{ContainerPluginsDir}/Auxilia.Slots.Email.slothandler.dll",
-                emailManifest.Settings));
+                emailManifest.Settings, emailManifest.Contracts, emailManifest.Category));
 
         foreach (var slotName in new[] { "repository", "pull-request", "primary-reviewer",
                                           "secondary-reviewer", "workflow-bootstrap" })
@@ -269,7 +272,7 @@ public class EndToEndEnvironment
             new RegisterSlotProviderCommand(
                 "claude-code-cli",
                 $"{ContainerPluginsDir}/Auxilia.Slots.ClaudeCode.slothandler.dll",
-                claudeManifest.Settings));
+                claudeManifest.Settings, claudeManifest.Contracts, claudeManifest.Category));
         await MessageBusClient.PublishAsync(seedBase + ".upsert",
             new UpsertSlotConfigurationCommand(
                 ClaudeWorkflowType, "coding-agent", "claude-code-cli",
@@ -280,7 +283,52 @@ public class EndToEndEnvironment
                     ["MaxTurns"] = "5"
                 }));
 
+        // Workflow registry: register both baked packages with their emitted schemas so the
+        // configuration editor offers them (slots included) before any run happened.
+        await MessageBusClient.PublishAsync(seedBase + ".register-package",
+            new RegisterWorkflowPackageCommand(
+                WorkflowType, WorkflowPackageUri, "Pull-request code review",
+                SchemaJson: await EmitSchemaAsync(WorkflowImageName)));
+        await MessageBusClient.PublishAsync(seedBase + ".register-package",
+            new RegisterWorkflowPackageCommand(
+                ClaudeWorkflowType, ClaudeWorkflowPackageUri, "Claude Code",
+                SchemaJson: await EmitSchemaAsync(ClaudeWorkflowImageName)));
+
         await Task.Delay(TimeSpan.FromMilliseconds(500)); // seed propagation window
+    }
+
+    /// <summary>
+    /// Captures a baked workflow image's schema via its SDK <c>--emit-schema</c> mode (prints
+    /// the schema JSON and exits without touching the message bus). Returns null when the run
+    /// fails — package registration then simply carries no schema.
+    /// </summary>
+    private static async Task<string?> EmitSchemaAsync(string imageName)
+    {
+        var psi = new ProcessStartInfo("docker", $"run --rm {imageName} --emit-schema")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError  = true,
+            UseShellExecute        = false
+        };
+
+        using var process = Process.Start(psi);
+        if (process is null)
+            return null;
+
+        var stdout = await process.StandardOutput.ReadToEndAsync();
+        _ = await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        if (process.ExitCode != 0)
+        {
+            await Console.Error.WriteLineAsync(
+                $"--emit-schema for {imageName} exited with {process.ExitCode}; registering without schema.");
+            return null;
+        }
+
+        // The schema is the last JSON line — anything before it is incidental startup output.
+        return stdout
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .LastOrDefault(line => line.StartsWith('{'));
     }
 
     /// <summary>

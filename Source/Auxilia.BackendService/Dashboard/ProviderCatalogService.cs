@@ -20,7 +20,13 @@ public sealed record ProviderCatalogEntry(
     bool Available,
     string Category,
     IReadOnlyList<SettingDescriptor> Descriptors,
-    IReadOnlyList<SettingDescriptorOverride> Overrides);
+    IReadOnlyList<SettingDescriptorOverride> Overrides,
+    IReadOnlyList<string> Contracts)
+{
+    /// <summary>Whether this provider declares it can back a slot expecting <paramref name="contract"/>; unclassified providers match nothing.</summary>
+    public bool Implements(string contract)
+        => Contracts.Contains(contract, StringComparer.Ordinal);
+}
 
 /// <summary>
 /// Admin curation of the slot-provider catalog (#19): which registered providers users may
@@ -154,14 +160,22 @@ public sealed class ProviderCatalogService(
     {
         curation ??= NewCuration(provider.ProviderType);
         var overrides = ParseOverrides(curation.DescriptorOverridesJson);
+        // The manifest-declared category is the default; the admin's curation wins when set.
+        var category = curation.Category.Length > 0 ? curation.Category : provider.Category ?? "";
         return new ProviderCatalogEntry(
             provider.ProviderType,
             provider.DllPath,
             curation.Available,
-            curation.Category,
+            category,
             Merge(ParseDescriptors(provider.SettingDescriptorsJson), overrides),
-            overrides);
+            overrides,
+            ParseContracts(provider.ContractsJson));
     }
+
+    private static IReadOnlyList<string> ParseContracts(string? json)
+        => string.IsNullOrWhiteSpace(json)
+            ? []
+            : JsonSerializer.Deserialize<List<string>>(json) ?? [];
 
     private static IReadOnlyList<SettingDescriptor> ParseDescriptors(string? json)
         => string.IsNullOrWhiteSpace(json)
