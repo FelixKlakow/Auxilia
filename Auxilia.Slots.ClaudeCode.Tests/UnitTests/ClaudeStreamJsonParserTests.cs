@@ -109,7 +109,21 @@ public sealed class ClaudeStreamJsonParserTests
             Assert.That(entries[0].ToolName, Is.EqualTo("Read"));
             Assert.That(entries[0].ToolState, Is.EqualTo("Success"));
             Assert.That(entries[0].Content, Is.EqualTo("file content"));
+            Assert.That(entries[0].ToolUseId, Is.EqualTo("toolu_1"),
+                "start and result carry the same id so the renderer shows ONE card");
         });
+    }
+
+    [Test]
+    public void ToolUse_CarriesItsUseId_ForStartResultPairing()
+    {
+        var parser = new ClaudeStreamJsonParser();
+
+        var entries = parser.ParseLine(
+            """{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_9","name":"Bash","input":{"command":"ls"}}]}}""",
+            Timestamp);
+
+        Assert.That(entries.Single().ToolUseId, Is.EqualTo("toolu_9"));
     }
 
     [Test]

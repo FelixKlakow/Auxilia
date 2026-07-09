@@ -94,8 +94,11 @@ public sealed class ClaudeStreamJsonParser
                     var toolName = item.TryGetProperty("name", out var nameProperty)
                         ? nameProperty.GetString() ?? "tool"
                         : "tool";
-                    if (item.TryGetProperty("id", out var idProperty) &&
-                        idProperty.GetString() is { Length: > 0 } useId)
+                    var useId = item.TryGetProperty("id", out var idProperty) &&
+                                idProperty.GetString() is { Length: > 0 } rawId
+                        ? rawId
+                        : null;
+                    if (useId is not null)
                         _toolNamesByUseId[useId] = toolName;
                     var input = item.TryGetProperty("input", out var inputProperty)
                         ? Truncate(inputProperty.GetRawText())
@@ -103,20 +106,24 @@ public sealed class ClaudeStreamJsonParser
                     entries.Add(new AgentChatEntry(
                         AgentChatRole.Tool, input, timestampUtc,
                         Label: item.TryGetProperty("input", out var labelInput) ? LabelOf(labelInput) : null,
-                        ToolName: toolName, ToolState: "Running"));
+                        ToolName: toolName, ToolState: "Running", ToolUseId: useId));
                     break;
 
                 case "tool_result" when !isAssistant:
-                    var resolvedName = item.TryGetProperty("tool_use_id", out var useIdProperty) &&
-                                       useIdProperty.GetString() is { Length: > 0 } id &&
-                                       _toolNamesByUseId.TryGetValue(id, out var known)
+                    var resultUseId = item.TryGetProperty("tool_use_id", out var useIdProperty) &&
+                                      useIdProperty.GetString() is { Length: > 0 } id
+                        ? id
+                        : null;
+                    var resolvedName = resultUseId is not null &&
+                                       _toolNamesByUseId.TryGetValue(resultUseId, out var known)
                         ? known
                         : "tool";
                     var isError = item.TryGetProperty("is_error", out var errorProperty) &&
                                   errorProperty.ValueKind == JsonValueKind.True;
                     entries.Add(new AgentChatEntry(
                         AgentChatRole.Tool, Truncate(FlattenContent(item)), timestampUtc,
-                        ToolName: resolvedName, ToolState: isError ? "Error" : "Success"));
+                        ToolName: resolvedName, ToolState: isError ? "Error" : "Success",
+                        ToolUseId: resultUseId));
                     break;
             }
         }

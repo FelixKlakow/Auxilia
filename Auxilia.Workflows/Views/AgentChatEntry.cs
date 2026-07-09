@@ -14,7 +14,9 @@ public sealed record AgentChatEntry(
     string? Label = null,
     string? ToolName = null,
     /// <summary>Tool lifecycle state ("Running", "Success", "Error"); only for tool entries.</summary>
-    string? ToolState = null)
+    string? ToolState = null,
+    /// <summary>Correlates a tool's start and result entries so renderers show ONE card.</summary>
+    string? ToolUseId = null)
 {
     /// <summary>The dashboard renderer plug-in key this contract pairs with.</summary>
     public const string RendererKey = "agent-chat";

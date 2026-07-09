@@ -29,22 +29,50 @@
     public bool IsLive { get; set; }
 
     protected override void OnParametersSet()
-        => _messages = Items.Select(ToChatMessage).Where(m => m is not null).Select(m => m!).ToList();
-
-    private static ChatMessage? ToChatMessage(ViewDataRecord item)
     {
-        AgentChatEntry? entry;
+        // A tool's start (input) and result (output) arrive as two correlated entries; the
+        // conversation shows them as ONE card — input and output in their own sections.
+        var messages = new List<ChatMessage>();
+        var openToolCards = new Dictionary<string, ToolCall>(StringComparer.Ordinal);
+        foreach (var item in Items)
+        {
+            var entry = Deserialize(item);
+            if (entry is null)
+                continue;
+
+            if (entry.Role == AgentChatRole.Tool
+                && entry.ToolUseId is { Length: > 0 } useId
+                && openToolCards.Remove(useId, out var started))
+            {
+                started.Output = entry.Content;
+                started.State = ToolStateOf(entry.ToolState);
+                continue;
+            }
+
+            var message = ToChatMessage(item, entry);
+            if (entry.Role == AgentChatRole.Tool && entry.ToolUseId is { Length: > 0 } startedId
+                && ToolStateOf(entry.ToolState) == ToolState.Running)
+                openToolCards[startedId] = message.ToolCalls[0];
+            messages.Add(message);
+        }
+
+        _messages = messages;
+    }
+
+    private static AgentChatEntry? Deserialize(ViewDataRecord item)
+    {
         try
         {
-            entry = JsonSerializer.Deserialize<AgentChatEntry>(item.PayloadJson);
+            return JsonSerializer.Deserialize<AgentChatEntry>(item.PayloadJson);
         }
         catch (JsonException)
         {
             return null;
         }
-        if (entry is null)
-            return null;
+    }
 
+    private static ChatMessage ToChatMessage(ViewDataRecord item, AgentChatEntry entry)
+    {
         var message = new ChatMessage
         {
             Id = item.Sequence.ToString(),
@@ -56,14 +84,21 @@
             RoleLabel = entry.Role == AgentChatRole.Tool ? null : entry.Label
         };
         if (entry.Role == AgentChatRole.Tool)
+        {
+            // A running tool's content is its INPUT; a finished standalone entry
+            // (legacy, or a result whose start was never seen) carries the output.
+            var running = ToolStateOf(entry.ToolState) == ToolState.Running;
             message.ToolCalls.Add(new ToolCall
             {
                 Id = item.Sequence.ToString(),
                 ToolName = entry.ToolName ?? "tool",
                 Subtitle = entry.Label ?? "",
-                Output = entry.Content,
+                Input = running ? entry.Content : "",
+                Output = running ? "" : entry.Content,
                 State = ToolStateOf(entry.ToolState)
             });
+        }
+
         return message;
     }
 
