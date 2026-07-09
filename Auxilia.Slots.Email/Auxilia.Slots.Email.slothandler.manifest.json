@@ -41,6 +41,7 @@
       "Label": "Password",
       "Kind": "Secret",
       "Required": true,
+      "ConnectFlow": "google-gmail",
       "HelpText": "Mailbox password; stored encrypted at rest and never displayed back."
     },
     {

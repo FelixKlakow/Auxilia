@@ -188,6 +188,8 @@ try
     builder.Services.AddSingleton(gitHubConnectSettings);
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.Connect.IConnectFlow,
         Auxilia.BackendService.Dashboard.Connect.GitHubConnectFlow>();
+    builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.Connect.IConnectFlow,
+        Auxilia.BackendService.Dashboard.Connect.GmailConnectFlow>();
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.Connect.ConnectFlowRegistry>();
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.ConnectorService>();
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.WorkflowConfigurationEditorService>();

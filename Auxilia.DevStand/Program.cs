@@ -17,6 +17,16 @@ using MailKit.Security;
 if (args.Length > 0 && args[0] == "--screenshots")
     return await ScreenshotHarness.RunAsync(args.Length > 1 ? args[1] : null);
 
+// Preview of the mail [s] would send (parsed from demo-session-mail.md) — no stack boot.
+if (args.Contains("--print-session-mail"))
+{
+    var (previewSubject, previewBody, previewSource) = DemoMail.LoadSessionMail(1);
+    Console.WriteLine($"source : {previewSource ?? "(built-in fallback)"}");
+    Console.WriteLine($"subject: {previewSubject}");
+    Console.WriteLine(previewBody);
+    return 0;
+}
+
 // Presentation stand: platform ready (providers, team mailbox, demo-able packages), but
 // NO pre-built workflow configurations — the coding-session workflow is configured live.
 var presentation = args.Contains("--presentation");
@@ -78,6 +88,7 @@ try
         Console.WriteLine("  3. Flow -> drag 'Session summary mail' onto the coding-session-result output,");
         Console.WriteLine("     then bind its work-items to 'Team mailbox' in its editor.");
         Console.WriteLine("  4. Press [s] (or mail workflows@localhost, subject containing 'session').");
+        Console.WriteLine($"     The mail [s] sends is yours to edit: {DemoMail.SessionMailFileName} in the repo root.");
         Console.WriteLine("  5. Runs -> Open live session -> work -> /exit -> reply mail lands.");
         Console.WriteLine("  (Own mailbox instead? Create a slot instance with imap.gmail.com + app password.)");
         Console.WriteLine();
@@ -123,10 +134,11 @@ try
                     _ = WatchForReplyAsync(subject, cts.Token);
                     break;
                 case ConsoleKey.S:
-                    var sessionSubject = $"session #{++demoCounter}: live coding";
-                    await DemoMail.SendAsync(sessionSubject, cts.Token);
-                    Console.WriteLine($"  -> mail sent: \"{sessionSubject}\" — the session run starts once the trigger polls; " +
-                                      "open the run and click 'Open live session'.");
+                    var (sessionSubject, sessionBody, mailSource) = DemoMail.LoadSessionMail(++demoCounter);
+                    await DemoMail.SendAsync(sessionSubject, sessionBody, cts.Token);
+                    Console.WriteLine($"  -> mail sent: \"{sessionSubject}\" " +
+                                      $"({(mailSource is null ? "built-in mail" : mailSource)}) — the session run " +
+                                      "starts once the trigger polls; open the run and click 'Open live session'.");
                     _ = WatchForReplyAsync(sessionSubject, cts.Token);
                     break;
                 case ConsoleKey.C when !presentation:
