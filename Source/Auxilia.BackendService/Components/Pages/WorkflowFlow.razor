@@ -1,5 +1,6 @@
 @page "/workflows/{ConfigurationId:guid}/flow"
 @attribute [Authorize]
+@using Auxilia.Workflows
 @inject WorkflowConfigurationEditorService Editor
 @inject IPolicyEngine PolicyEngine
 
@@ -316,12 +317,12 @@ else
         => FormattableString.Invariant(
             $"left:{box.X}px; top:{box.Y}px; width:{box.W}px; min-height:{box.H}px;");
 
-    private static string TriggerKindLabel(TriggerKind kind) => kind switch
+    private static string TriggerKindLabel(string kind) => kind switch
     {
-        TriggerKind.Schedule => "schedule",
-        TriggerKind.ArtifactChain => "artifact",
-        TriggerKind.Mailbox => "mailbox",
-        _ => kind.ToString().ToLowerInvariant()
+        TriggerDeclaration.Schedule => "schedule",
+        TriggerDeclaration.Artifact => "artifact",
+        TriggerDeclaration.Mailbox => "mailbox",
+        _ => kind.ToLowerInvariant()
     };
 
     private static string PaletteHint(WorkflowConfigurationEditorService.FlowPaletteMatch match) => match switch
@@ -354,11 +355,11 @@ else
     private static readonly MarkupString GripIcon = new(
         """<svg width="14" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="9" cy="5" r="1.7"/><circle cx="15" cy="5" r="1.7"/><circle cx="9" cy="12" r="1.7"/><circle cx="15" cy="12" r="1.7"/><circle cx="9" cy="19" r="1.7"/><circle cx="15" cy="19" r="1.7"/></svg>""");
 
-    private static MarkupString TriggerIcon(TriggerKind kind) => kind switch
+    private static MarkupString TriggerIcon(string kind) => kind switch
     {
-        TriggerKind.Schedule => ClockIcon,
-        TriggerKind.ArtifactChain => ArtifactIcon,
-        TriggerKind.Mailbox => MailIcon,
+        TriggerDeclaration.Schedule => ClockIcon,
+        TriggerDeclaration.Artifact => ArtifactIcon,
+        TriggerDeclaration.Mailbox => MailIcon,
         _ => GhostIcon
     };
 

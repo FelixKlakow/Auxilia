@@ -61,6 +61,14 @@ public class EndToEndEnvironment
     /// workflow live in the editor.
     /// </summary>
     public static bool PresentationMode { get; set; }
+
+    /// <summary>
+    /// Base name of named Docker volumes for durable state (set by the DevStand's
+    /// --keep-data, never by tests): Mongo data and the backend's data-protection keys
+    /// survive stand restarts, so slot instances, configurations, and the login cookie do
+    /// too. Null (the default) keeps everything ephemeral.
+    /// </summary>
+    public static string? DataVolumeName { get; set; }
     private static readonly Guid MailboxTriggerId = new("aaaaaaaa-e2e0-4000-8000-000000000001");
     internal const string AdapterMailbox      = "workflows@localhost";
     internal const string MailboxPassword     = "pw";
@@ -74,6 +82,7 @@ public class EndToEndEnvironment
     private const string DockerSocket         = "/var/run/docker.sock";
     private const string ContainerPluginsDir  = "/slot-plugins";
     private const string ContainerRunOutput   = "/run-output";
+    private const string ContainerWorkspaces  = "/workspaces";
 
     private static readonly string NetworkName =
         $"auxilia-e2e-{Guid.NewGuid():N}".Substring(0, 30);
@@ -87,6 +96,7 @@ public class EndToEndEnvironment
     private IContainer        _greenMail  = null!;
     private string            _publishDir = null!;
     private string            _runOutputDir = null!;
+    private string            _workspaceDir = null!;
 
     public static IContainer SteeringInstance { get; private set; } = null!;
     public static IContainer Backend          { get; private set; } = null!;
@@ -103,8 +113,10 @@ public class EndToEndEnvironment
     {
         _publishDir   = Path.Combine(Path.GetTempPath(), $"auxilia-e2e-plugins-{Guid.NewGuid():N}");
         _runOutputDir = Path.Combine(Path.GetTempPath(), $"auxilia-e2e-output-{Guid.NewGuid():N}");
+        _workspaceDir = Path.Combine(Path.GetTempPath(), $"auxilia-e2e-workspaces-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_publishDir);
         Directory.CreateDirectory(_runOutputDir);
+        Directory.CreateDirectory(_workspaceDir);
 
         // Host-side publishes share a dependency graph — run sequentially to avoid obj/
         // contention (CS2012). Both slot providers land in ONE plugins directory.
@@ -122,6 +134,11 @@ public class EndToEndEnvironment
         // types resolve at load time (unlike the code-review fake, which drags CodeReview.Workflow).
         await PublishProjectAsync(
             "Auxilia.Slots.CodingSession/Auxilia.Slots.CodingSession.csproj",
+            _publishDir);
+        // The simple GitHub workspace connector — like the coding-session provider it only
+        // references assemblies baked into the workflow images.
+        await PublishProjectAsync(
+            "Auxilia.Slots.GitHub/Auxilia.Slots.GitHub.csproj",
             _publishDir);
 
         // Sequential on purpose: parallel docker builds have wedged Docker Desktop daemons
@@ -159,10 +176,12 @@ public class EndToEndEnvironment
             .WithUsername("guest").WithPassword("guest")
             .WithNetwork(_network).WithNetworkAliases(RabbitMqAlias)
             .Build();
-        _mongoDb = new MongoDbBuilder("mongo:8.0")
+        var mongoBuilder = new MongoDbBuilder("mongo:8.0")
             .WithNetwork(_network).WithNetworkAliases(MongoAlias)
-            .WithUsername(string.Empty).WithPassword(string.Empty) // no auth — test only
-            .Build();
+            .WithUsername(string.Empty).WithPassword(string.Empty); // no auth — test only
+        if (DataVolumeName is { Length: > 0 } dataVolume)
+            mongoBuilder = mongoBuilder.WithVolumeMount(dataVolume + "-mongo", "/data/db");
+        _mongoDb = mongoBuilder.Build();
         await Task.WhenAll(_greenMail.StartAsync(), _rabbitMq.StartAsync(), _mongoDb.StartAsync());
 
         MongoConnectionString = _mongoDb.GetConnectionString();
@@ -171,13 +190,24 @@ public class EndToEndEnvironment
         MappedSmtp = _greenMail.GetMappedPublicPort(SmtpPort);
 
         // The run-as principal must exist BEFORE the Backend Service starts dispatching:
-        // seed it directly into the shared Mongo over the mapped port.
+        // seed it directly into the shared Mongo over the mapped port. A durable stand
+        // (--keep-data) reuses the one from the last boot instead of piling up duplicates.
         await using (var provider = BuildPlatformDataProvider())
         {
-            var directory = provider.GetRequiredService<PrincipalDirectory>();
-            var (principal, _) = await directory.CreateApiKeyPrincipalAsync("E2E Mail Trigger", "Service");
-            await directory.AssignRoleAsync(principal.Id, BuiltInRoles.User);
-            RunAsPrincipalId = principal.Id;
+            var existing = (await provider.GetRequiredService<IDataAccess<PrincipalRecord>>()
+                    .ReadAsync()).ToList()
+                .FirstOrDefault(p => p is { DisplayName: "E2E Mail Trigger", Kind: "Service" });
+            if (existing is not null)
+            {
+                RunAsPrincipalId = existing.Id;
+            }
+            else
+            {
+                var directory = provider.GetRequiredService<PrincipalDirectory>();
+                var (principal, _) = await directory.CreateApiKeyPrincipalAsync("E2E Mail Trigger", "Service");
+                await directory.AssignRoleAsync(principal.Id, BuiltInRoles.User);
+                RunAsPrincipalId = principal.Id;
+            }
         }
 
         SteeringInstance = new ContainerBuilder(WorkflowDispatchEnvironment.SteeringImageName)
@@ -187,6 +217,8 @@ public class EndToEndEnvironment
             // Shared run-output root: the SI sees /run-output, the Docker daemon (and thus
             // workflow containers) see the same directory via its HOST path.
             .WithBindMount(_runOutputDir, ContainerRunOutput)
+            // Shared workspace root (ARCHITECTURE §9): same split for per-run repository clones.
+            .WithBindMount(_workspaceDir, ContainerWorkspaces)
             .WithEnvironment("RabbitMq__Host",     RabbitMqAlias)
             .WithEnvironment("RabbitMq__Port",     "5672")
             .WithEnvironment("RabbitMq__UserName", "guest")
@@ -207,6 +239,8 @@ public class EndToEndEnvironment
             .WithEnvironment("WorkflowDispatcher__SlotActivationQueueName", "workflow-slot-activation-e2e")
             .WithEnvironment("WorkflowDispatcher__RunOutputDirectory",      ContainerRunOutput)
             .WithEnvironment("WorkflowDispatcher__RunOutputHostDirectory",  _runOutputDir)
+            .WithEnvironment("WorkflowDispatcher__WorkspaceRootDirectory",     ContainerWorkspaces)
+            .WithEnvironment("WorkflowDispatcher__WorkspaceRootHostDirectory", _workspaceDir)
             // Long-living workflows need operator approval to register (ARCHITECTURE §6); the
             // interactive coding session is the platform's one long-living type.
             .WithEnvironment("WorkflowDispatcher__ApprovedLongLivingWorkflowTypes__0", CodingSessionWorkflowType)
@@ -217,7 +251,7 @@ public class EndToEndEnvironment
                 .UntilMessageIsLogged("SlotConfigurationSeedHandler started"))
             .Build();
 
-        Backend = new ContainerBuilder(BackendImageName)
+        var backendBuilder = new ContainerBuilder(BackendImageName)
             .WithNetwork(_network)
             // The dashboard is host-reachable so an operator (or Scripts/Run-SystemTests.ps1)
             // can watch a run live in the browser while the test executes.
@@ -237,8 +271,13 @@ public class EndToEndEnvironment
             .WithEnvironment("MailboxTriggers__TickSeconds",         "1")
             .WithWaitStrategy(Wait.ForUnixContainer()
                 .UntilMessageIsLogged("HeartbeatMonitor started")
-                .UntilMessageIsLogged("Email task source started"))
-            .Build();
+                .UntilMessageIsLogged("Email task source started"));
+        if (DataVolumeName is { Length: > 0 } keysVolume)
+            backendBuilder = backendBuilder
+                // Login cookies stay valid across restarts only when the signing keys do.
+                .WithVolumeMount(keysVolume + "-dpkeys", "/keys")
+                .WithEnvironment("DataProtection__KeysPath", "/keys");
+        Backend = backendBuilder.Build();
 
         await Task.WhenAll(SteeringInstance.StartAsync(), Backend.StartAsync());
 
@@ -311,6 +350,13 @@ public class EndToEndEnvironment
                 $"{ContainerPluginsDir}/Auxilia.Slots.CodingSession.slothandler.dll",
                 codingSessionManifest.Settings, codingSessionManifest.Contracts,
                 codingSessionManifest.Category, codingSessionManifest.Description));
+        var gitHubManifest = System.Text.Json.JsonSerializer.Deserialize<Auxilia.Workflows.PluginManifest>(
+            await File.ReadAllTextAsync(Path.Combine(_publishDir, "Auxilia.Slots.GitHub.slothandler.manifest.json")))!;
+        await MessageBusClient.PublishAsync(seedBase + ".register",
+            new RegisterSlotProviderCommand(
+                "github-repository",
+                $"{ContainerPluginsDir}/Auxilia.Slots.GitHub.slothandler.dll",
+                gitHubManifest.Settings, gitHubManifest.Contracts, gitHubManifest.Category, gitHubManifest.Description));
         await MessageBusClient.PublishAsync(seedBase + ".upsert",
             new UpsertSlotConfigurationCommand(
                 ClaudeWorkflowType, "coding-agent", "claude-code-cli",
@@ -350,7 +396,8 @@ public class EndToEndEnvironment
         }
 
         // Presentation stand: stop after the reusable instance — no pre-built configuration,
-        // no mail-review trigger, and only the coding-session package pair registered below.
+        // no mail-review trigger; the demo-able packages (session pair + Claude Code) are
+        // registered so the editor can configure them live.
         if (PresentationMode)
         {
             await MessageBusClient.PublishAsync(seedBase + ".register-package",
@@ -361,6 +408,34 @@ public class EndToEndEnvironment
                 new RegisterWorkflowPackageCommand(
                     SessionNotifierWorkflowType, SessionNotifierPackageUri, "Session summary mail",
                     SchemaJson: await EmitSchemaAsync(SessionNotifierImageName)));
+            await MessageBusClient.PublishAsync(seedBase + ".register-package",
+                new RegisterWorkflowPackageCommand(
+                    ClaudeWorkflowType, ClaudeWorkflowPackageUri, "Claude Code",
+                    SchemaJson: await EmitSchemaAsync(ClaudeWorkflowImageName)));
+
+            // "Platform ready" means the demo providers are already available in the catalog
+            // (availability is deny-by-default). Existing records are left untouched so a
+            // --keep-data stand keeps the admin's curation across restarts; the code-review
+            // fakes stay hidden — they are test scaffolding, not part of the presentation.
+            await using (var provider = BuildPlatformDataProvider())
+            {
+                var catalogRecords = provider.GetRequiredService<IDataAccess<ProviderCatalogRecord>>();
+                foreach (var providerType in new[]
+                         {
+                             "claude-code-cli", "coding-session-workspace",
+                             "email-work-items", "github-repository"
+                         })
+                {
+                    if (await catalogRecords.ReadAsync(ProviderCatalogRecord.IdFor(providerType)) is null)
+                        await catalogRecords.SaveAsync(new ProviderCatalogRecord
+                        {
+                            Id = ProviderCatalogRecord.IdFor(providerType),
+                            ProviderType = providerType,
+                            Available = true
+                        });
+                }
+            }
+
             await Task.Delay(TimeSpan.FromMilliseconds(500)); // seed propagation window
             return;
         }
@@ -396,7 +471,14 @@ public class EndToEndEnvironment
                 new List<SlotBindingSeed>
                 {
                     new("repository", "coding-session-workspace", new Dictionary<string, string>()),
-                    new("work-items", "coding-session-workspace", new Dictionary<string, string>())
+                    new("work-items", "coding-session-workspace", new Dictionary<string, string>()),
+                    // The session's account slot; the CODING_SESSION_CLI launcher env keeps
+                    // the stub CLI in charge, so the stub key is never exercised.
+                    new("coding-agent", "claude-code-cli", new Dictionary<string, string>
+                    {
+                        ["ApiKey"] = "e2e-stub-key",
+                        ["CliPath"] = ClaudeStubCliPath
+                    })
                 },
                 RunAsPrincipalId));
 

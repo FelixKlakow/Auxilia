@@ -71,6 +71,8 @@
     <Project Path="Auxilia.Slots.CodingSession\Auxilia.Slots.CodingSession.csproj" />
     <Project Path="Auxilia.Slots.Email.Tests\Auxilia.Slots.Email.Tests.csproj" />
     <Project Path="Auxilia.Slots.Email\Auxilia.Slots.Email.csproj" />
+    <Project Path="Auxilia.Slots.GitHub.Tests\Auxilia.Slots.GitHub.Tests.csproj" />
+    <Project Path="Auxilia.Slots.GitHub\Auxilia.Slots.GitHub.csproj" />
     <Project Path="Source/Auxilia.ClaudeCode.Workflow/Auxilia.ClaudeCode.Workflow.csproj" />
     <Project Path="Source/Auxilia.CodingSession.Workflow/Auxilia.CodingSession.Workflow.csproj" />
     <Project Path="Source/Auxilia.SessionNotifier.Workflow/Auxilia.SessionNotifier.Workflow.csproj" />

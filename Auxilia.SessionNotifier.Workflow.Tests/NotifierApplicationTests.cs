@@ -70,6 +70,47 @@ public class NotifierApplicationTests
     }
 
     [Test]
+    public async Task Run_PostsTheFormattedAgentReport_ForSessionReportArtifacts()
+    {
+        File.WriteAllText(_artifactPath, JsonSerializer.Serialize(new AgentSessionReport(
+            "Fix the flaky test", Success: true, "Stabilized the retry loop.",
+            TurnCount: 12, TotalCostUsd: 1.5m, DurationMs: 65_000, ErrorMessage: null)));
+        string? posted = null;
+        _workItems
+            .Setup(w => w.PostCommentAsync("mail-7", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, CancellationToken>((_, comment, _) => posted = comment)
+            .Returns(Task.CompletedTask);
+
+        await new NotifierApplication(
+                _workItems.Object, null, new NotifierRunContext(_artifactPath, "mail-7"))
+            .RunAsync(CancellationToken.None);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(posted, Does.Contain("finished"));
+            Assert.That(posted, Does.Contain("Fix the flaky test"));
+            Assert.That(posted, Does.Contain("Stabilized the retry loop."));
+            Assert.That(posted, Does.Contain("Turns: 12").And.Contain("Duration: 00:01:05").And.Contain("Cost: $1.50"));
+        });
+    }
+
+    [Test]
+    public void FormatReport_FailedRun_CarriesTheErrorAndSkipsAbsentFigures()
+    {
+        var text = NotifierApplication.FormatReport(new AgentSessionReport(
+            "Do the thing", Success: false, Summary: null,
+            TurnCount: 3, TotalCostUsd: null, DurationMs: null, ErrorMessage: "CLI exited 1"));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(text, Does.Contain("failed"));
+            Assert.That(text, Does.Contain("CLI exited 1"));
+            Assert.That(text, Does.Contain("Turns: 3"));
+            Assert.That(text, Does.Not.Contain("Duration:").And.Not.Contain("Cost:"));
+        });
+    }
+
+    [Test]
     public void FormatSummary_MentionsTheTimeout_AndHandlesNoChanges()
     {
         var text = NotifierApplication.FormatSummary(

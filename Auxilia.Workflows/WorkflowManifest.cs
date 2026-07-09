@@ -17,6 +17,7 @@ public sealed record WorkflowManifest(
     public IReadOnlyList<Network.NetworkEndpointDeclaration> NetworkEndpoints { get; init; } = [];
     public IReadOnlyList<Workspace.RepositoryDeclaration> Repositories { get; init; } = [];
     public IReadOnlyList<TriggerDeclaration> Triggers { get; init; } = [];
+    public IReadOnlyList<WorkflowInputDescriptor> Inputs { get; init; } = [];
     public IReadOnlyList<string> ConsumedArtifacts { get; init; } = [];
 
     /// <summary>Container port of the interactive web terminal, when the workflow hosts one.</summary>

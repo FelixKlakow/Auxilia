@@ -64,8 +64,10 @@ public sealed class WorkflowTestHarness
 
             var registrationMsg = await registrationTcs.Task.WaitAsync(timeoutCts.Token);
 
+            // Optional slots may stay unbound — production configuration validation applies
+            // the same rule, so the harness must not be stricter than the platform.
             var missingSlots = registrationMsg.Manifest.Slots
-                .Where(s => !_slots.Any(ps => ps.Name == s.SlotName))
+                .Where(s => !s.Optional && !_slots.Any(ps => ps.Name == s.SlotName))
                 .Select(s => s.SlotName)
                 .ToList();
 

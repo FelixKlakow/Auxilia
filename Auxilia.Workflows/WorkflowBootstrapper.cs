@@ -36,8 +36,13 @@ public sealed class WorkflowBootstrapper(
             foreach (var definition in slotDefinitions)
             {
                 if (!activatedConfigurations.TryGetValue(definition.SlotName, out var config))
+                {
+                    // Optional slots may stay unbound — the capability simply isn't registered.
+                    if (definition.Optional)
+                        continue;
                     throw new InvalidOperationException(
                         $"No activated configuration for slot '{definition.SlotName}'.");
+                }
 
                 var handler = resolver.Resolve(config.ProviderType);
                 handler.Register(services, definition.SlotName, definition.ServiceType, config);

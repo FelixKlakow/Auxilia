@@ -5,14 +5,22 @@
   "PublicKeyBase64": "",
   "Contracts": ["Auxilia.ClaudeCode.Workflow.ICodingAgent"],
   "Category": "coding-agent",
-  "Description": "Runs the Claude Code CLI as the coding agent of a workflow; the API key reaches the agent container just-in-time.",
+  "Description": "Runs the Claude Code CLI as the coding agent of a workflow; credentials reach the agent container just-in-time.",
   "Settings": [
     {
-      "Key": "ApiKey",
-      "Label": "Anthropic API key",
+      "Key": "OAuthToken",
+      "Label": "Claude account",
       "Kind": "Secret",
-      "Required": true,
-      "HelpText": "Delivered to the agent container just-in-time and passed to the CLI only via its process environment; stored encrypted at rest and never displayed back."
+      "Required": false,
+      "ConnectFlow": "anthropic-claude",
+      "HelpText": "The connected Claude account (company or personal) the CLI runs with. Preferred over an API key; stored encrypted and never displayed back."
+    },
+    {
+      "Key": "ApiKey",
+      "Label": "Anthropic API key (fallback)",
+      "Kind": "Secret",
+      "Required": false,
+      "HelpText": "Fallback when no Claude account is connected. Delivered to the agent container just-in-time and passed to the CLI only via its process environment."
     },
     {
       "Key": "Model",
@@ -20,14 +28,6 @@
       "Kind": "Text",
       "Required": false,
       "HelpText": "Optional model override (e.g. claude-sonnet-4-6); the CLI's default model is used when empty."
-    },
-    {
-      "Key": "MaxTurns",
-      "Label": "Maximum turns",
-      "Kind": "Number",
-      "Required": false,
-      "HelpText": "Hard cap on agent turns per run.",
-      "DefaultValue": "25"
     },
     {
       "Key": "CliPath",

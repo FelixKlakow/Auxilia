@@ -72,6 +72,22 @@ public class SlotConfigurationSeedHandlerTests
         Assert.That(configs[0].Status, Is.EqualTo(ConfigurationStatus.Valid));
     }
 
+    [TestCase(null, "repository")]
+    [TestCase("wf", null)]
+    [TestCase("", "repository")]
+    [TestCase("wf", "   ")]
+    public async Task WhenUpsertCommandHasMissingKeys_ItIsRejected(string? workflowType, string? slotName)
+    {
+        // A command with a null/blank key (as produced when a foreign command is coerced into
+        // an UpsertSlotConfigurationCommand) must never write a poison record — such a record
+        // breaks every subsequent read of the collection under the real Mongo provider.
+        await _fakeBus.SimulateReceivedAsync("slot-configurations",
+            new UpsertSlotConfigurationCommand(
+                workflowType!, slotName!, "coding-session-workspace", new Dictionary<string, string>()));
+
+        Assert.That(await _slotStore.GetConfigurationsAsync(workflowType!), Is.Empty);
+    }
+
     [Test]
     public async Task WhenRemoveCommandReceived_SlotIsRemovedFromStore()
     {

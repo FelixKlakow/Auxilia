@@ -3,6 +3,7 @@
 @using Auxilia.Workflows
 @inject SlotInstanceService Instances
 @inject ProviderCatalogService Catalog
+@inject WorkflowConfigurationEditorService Editor
 
 <PageTitle>My slots — Auxilia</PageTitle>
 
@@ -54,7 +55,6 @@ else
                     <th>Instance</th>
                     <th>Provider</th>
                     <th>Origin</th>
-                    <th>Settings</th>
                     <th>Used by</th>
                     <th>Actions</th>
                 </tr>
@@ -80,16 +80,6 @@ else
                             else
                             {
                                 <span class="badge badge-state" title="An administrator assigned this instance to you; its settings stay managed there.">assigned to you</span>
-                            }
-                        </td>
-                        <td>
-                            @if (instance.Settings.Count == 0)
-                            {
-                                <span class="muted">(none)</span>
-                            }
-                            @foreach (var setting in instance.Settings)
-                            {
-                                <span class="badge badge-secret">@setting.Key = @(setting.Value ?? "•••")</span>
                             }
                         </td>
                         <td>
@@ -151,14 +141,16 @@ else
             </div>
             <div class="card-body">
                 <div class="provider-grid">
-                    @foreach (var entry in _providers)
+                    @foreach (var entry in OfferedProviders)
                     {
                         <label class="provider-card @(_draft.ProviderType == entry.ProviderType ? "selected" : null)">
                             <input type="radio" name="my-instance-provider"
                                    checked="@(_draft.ProviderType == entry.ProviderType)"
                                    @onchange="() => SelectProvider(entry)"/>
                             <span class="provider-name">@entry.ProviderType</span>
-                            <span class="provider-category">@(entry.Category.Length == 0 ? "uncategorized" : entry.Category)</span>
+                            <span class="provider-category">
+                                @string.Join(" · ", TargetsOf(entry).Select(t => $"{t.SlotName} ({t.WorkflowDisplayName})"))
+                            </span>
                             @if (entry.Description is { Length: > 0 })
                             {
                                 <span class="provider-description">@entry.Description</span>
@@ -166,9 +158,12 @@ else
                         </label>
                     }
                 </div>
-                @if (_providers.Count == 0)
+                @if (OfferedProviders.Count == 0)
                 {
-                    <p class="muted">No providers are available — an administrator curates them in the provider catalog.</p>
+                    <p class="muted">
+                        No available provider can back a slot of an installed workflow —
+                        an administrator curates them in the provider catalog.
+                    </p>
                 }
 
                 @if (_draft.ProviderType.Length > 0)
@@ -190,9 +185,9 @@ else
                                     @switch (descriptor.Kind)
                                     {
                                         case SettingKind.Secret:
-                                            <input type="password" autocomplete="new-password"
-                                                   @bind="_draft.Settings[descriptor.Key]"
-                                                   placeholder="@(_draft.StoredSecretKeys.Contains(descriptor.Key) ? "set — leave empty to keep unchanged" : "")"/>
+                                            <ConnectSecretInput Descriptor="descriptor" Settings="_draft.Settings"
+                                                                PrincipalId="_principalId"
+                                                                StoredSet="_draft.StoredSecretKeys.Contains(descriptor.Key)"/>
                                             break;
                                         case SettingKind.Number:
                                             <input type="number" @bind="_draft.Settings[descriptor.Key]"/>
@@ -251,10 +246,21 @@ else
     private Guid? _deleteCandidate;
     private IReadOnlyList<SlotInstanceOverview> _mine = [];
     private IReadOnlyList<ProviderCatalogEntry> _providers = [];
+    private IReadOnlyDictionary<string, IReadOnlyList<ProviderSlotTarget>> _slotTargets =
+        new Dictionary<string, IReadOnlyList<ProviderSlotTarget>>();
     private SlotInstanceDraft? _draft;
 
     private IReadOnlyList<SettingDescriptor> Descriptors
-        => _providers.FirstOrDefault(p => p.ProviderType == _draft?.ProviderType)?.Descriptors ?? [];
+        => _providers.FirstOrDefault(p => p.ProviderType == _draft?.ProviderType)?.EnabledDescriptors ?? [];
+
+    private IReadOnlyList<ProviderSlotTarget> TargetsOf(ProviderCatalogEntry entry)
+        => _slotTargets.GetValueOrDefault(entry.ProviderType) ?? [];
+
+    /// <summary>Available providers that can back at least one installed workflow's slot (contract match).</summary>
+    private IReadOnlyList<ProviderCatalogEntry> OfferedProviders
+        => _providers
+            .Where(p => TargetsOf(p).Count > 0 || p.ProviderType == _draft?.ProviderType)
+            .ToList();
 
     protected override async Task OnInitializedAsync()
     {
@@ -263,6 +269,7 @@ else
         if (_principalId is not null)
         {
             _providers = (await Catalog.ListAsync()).Where(p => p.Available).ToList();
+            _slotTargets = await Editor.SlotTargetsByProviderAsync();
             await LoadAsync();
         }
 

@@ -2,6 +2,7 @@
 @page "/workflows/{ConfigurationId:guid}/edit"
 @attribute [Authorize]
 @using Auxilia.Workflows
+@using Auxilia.BackendService.Dashboard.Triggers
 @inject WorkflowConfigurationEditorService Editor
 @inject ProviderCatalogService Catalog
 @inject SlotInstanceService Instances
@@ -54,10 +55,10 @@ else
                 Workflow
                 <select id="workflow-select" @bind="SelectedWorkflowType">
                     <option value="">Pick a workflow…</option>
-                    @foreach (var workflow in _registered)
+                    @foreach (var workflow in _registered.Where(w => w.Enabled || w.WorkflowType == _draft.WorkflowType))
                     {
                         <option value="@workflow.WorkflowType">
-                            @workflow.DisplayName (@workflow.WorkflowType)@(workflow.Version.Length > 0 ? $" · v{workflow.Version}" : "")
+                            @workflow.DisplayName (@workflow.WorkflowType)@(workflow.Version.Length > 0 ? $" · v{workflow.Version}" : "")@(workflow.Enabled ? "" : " · disabled by admin")
                         </option>
                     }
                     @if (UnregisteredLegacySelection)
@@ -95,6 +96,19 @@ else
         </div>
     </section>
 
+    @if (!WorkflowChosen)
+    {
+        <section class="card">
+            <div class="card-body">
+                <p class="muted view-empty">
+                    Pick a workflow above first — its capability slots and the triggers it
+                    supports appear here.
+                </p>
+            </div>
+        </section>
+    }
+    else
+    {
     <section class="card">
         <div class="card-header">
             <h2><span class="step-number">2</span> Slots &amp; providers</h2>
@@ -218,126 +232,122 @@ else
     <section class="card">
         <div class="card-header">
             <h2><span class="step-number">3</span> Triggers</h2>
-            <p class="card-subtitle">A run starts when any of these fires — wire as many as the workflow needs. Manual reruns of finished runs are always possible from the run pages.</p>
+            <p class="card-subtitle">How this workflow's runs start. Only trigger kinds the workflow itself supports can be wired.</p>
         </div>
         <div class="card-body">
-            @if (SelectedWorkflow is { DeclaredTriggers.Count: > 0 } declaring)
+            @if (SupportsManual)
             {
-                <p class="field-hint">
-                    This workflow declares it is driven by:
-                    @foreach (var declared in declaring.DeclaredTriggers)
-                    {
-                        <span class="type-chip">@declared.Kind</span>
-                        @if (declared.Description is { Length: > 0 })
-                        {
-                            <span class="muted"> @declared.Description </span>
-                        }
-                    }
-                </p>
+                <div class="slot-binding manual-trigger">
+                    <div class="slot-binding-header">
+                        <div>
+                            <span class="cell-strong">Manual</span>
+                            <span class="type-chip">always available</span>
+                        </div>
+                    </div>
+                    <p class="muted">
+                        @(DeclaredDescriptionOf(TriggerDeclaration.Manual)
+                          ?? "Run it any time from the workflows page or the dashboard — every manual run asks for an instruction.")
+                    </p>
+                </div>
             }
-            @if (_draft.Triggers.Count == 0)
+            @if (_draft.Triggers.Count == 0 && !SupportsManual)
             {
-                <p class="muted">No triggers — runs start via rerun or manual dispatch only.</p>
+                <p class="muted">No triggers — runs start via rerun only.</p>
             }
             @foreach (var trigger in _draft.Triggers)
             {
+                var descriptor = Editor.TriggerKinds.Find(trigger.Kind);
                 <div class="slot-binding">
                     <div class="slot-binding-header">
-                        <span class="cell-strong">@TriggerLabel(trigger.Kind)</span>
+                        <span class="cell-strong">@(descriptor?.Label ?? trigger.Kind)</span>
                         <button class="btn btn-danger btn-sm" @onclick="() => _draft.Triggers.Remove(trigger)">
                             Remove trigger
                         </button>
                     </div>
-                    @switch (trigger.Kind)
+                    @if (descriptor is not null)
                     {
-                        case TriggerKind.Schedule:
-                            <div class="form-grid setting-grid">
+                        <div class="form-grid setting-grid">
+                            @foreach (var setting in descriptor.Settings)
+                            {
                                 <label>
-                                    Interval (seconds)
-                                    <input type="number" @bind="trigger.IntervalSeconds"/>
-                                    <span class="field-hint">= every @TimeText.Interval(trigger.IntervalSeconds)</span>
+                                    @setting.Label@(setting.Required ? " *" : "")
+                                    @switch (setting.Kind)
+                                    {
+                                        case SettingKind.Number:
+                                            <input type="number" @bind="trigger.Settings[setting.Key]"/>
+                                            break;
+                                        case SettingKind.Boolean:
+                                            <select @bind="trigger.Settings[setting.Key]">
+                                                <option value="">(default)</option>
+                                                <option value="true">Yes</option>
+                                                <option value="false">No</option>
+                                            </select>
+                                            break;
+                                        case SettingKind.Choice:
+                                            <select @bind="trigger.Settings[setting.Key]">
+                                                <option value="">(choose)</option>
+                                                @foreach (var choice in setting.Choices ?? [])
+                                                {
+                                                    <option value="@choice">@choice</option>
+                                                }
+                                            </select>
+                                            break;
+                                        case SettingKind.SlotInstance:
+                                            <select @bind="trigger.Settings[setting.Key]">
+                                                <option value="">Pick a slot instance…</option>
+                                                @foreach (var instance in InstancesOfCategory(setting.InstanceCategory))
+                                                {
+                                                    <option value="@instance.Id">@instance.DisplayName (@instance.ProviderType)</option>
+                                                }
+                                            </select>
+                                            break;
+                                        default:
+                                            <input @bind="trigger.Settings[setting.Key]"
+                                                   list="@(SuggestionsFor(setting.Key) is not null ? $"suggest-{setting.Key}" : null)"/>
+                                            break;
+                                    }
+                                    @if (SettingHint(trigger, setting) is { Length: > 0 } hint)
+                                    {
+                                        <span class="field-hint">@hint</span>
+                                    }
                                 </label>
-                                <label>
-                                    Context (optional)
-                                    <input @bind="trigger.ContextJson" placeholder='{"WorkItemId":"42"}'/>
-                                    <span class="field-hint">Key/value map handed to every scheduled run.</span>
-                                </label>
-                            </div>
-                            break;
-                        case TriggerKind.ArtifactChain:
-                            <div class="form-grid setting-grid">
-                                <label>
-                                    Artifact type
-                                    <input @bind="trigger.ArtifactType" list="known-artifact-types"
-                                           placeholder="e.g. code-review-result"/>
-                                    <datalist id="known-artifact-types">
-                                        @foreach (var artifactType in _knownArtifactTypes)
-                                        {
-                                            <option value="@artifactType"></option>
-                                        }
-                                    </datalist>
-                                    <span class="field-hint">
-                                        Each time any workflow persists an artifact of this type, this workflow runs.
-                                        The list offers every output type declared by a registered workflow.
-                                    </span>
-                                </label>
-                            </div>
-                            break;
-                        case TriggerKind.Mailbox:
-                            <div class="form-grid setting-grid">
-                                <label>
-                                    Mailbox
-                                    <select @bind="trigger.MailboxInstanceId">
-                                        <option value="">Pick a mailbox slot instance…</option>
-                                        @foreach (var instance in MailboxInstances)
-                                        {
-                                            <option value="@instance.Id">@instance.DisplayName (@instance.ProviderType)</option>
-                                        }
-                                    </select>
-                                    <span class="field-hint">
-                                        Each unseen mail in this mailbox starts a run (subject and body become the
-                                        run's context). Mailboxes are configured as slot instances on the
-                                        <a href="operator/slots">Slots page</a>.
-                                    </span>
-                                </label>
-                                <label>
-                                    Poll interval (seconds)
-                                    <input type="number" @bind="trigger.PollIntervalSeconds"/>
-                                    <span class="field-hint">= every @TimeText.Interval(trigger.PollIntervalSeconds)</span>
-                                </label>
-                                <label>
-                                    Subject filter (optional)
-                                    <input @bind="trigger.SubjectContains" placeholder="e.g. [review]"/>
-                                    <span class="field-hint">Only mails whose subject contains this text start a run.</span>
-                                </label>
-                                <label>
-                                    Sender filter (optional)
-                                    <input @bind="trigger.FromContains" placeholder="e.g. @@yourcompany.com"/>
-                                    <span class="field-hint">Only mails from matching senders start a run; others are marked read and skipped.</span>
-                                </label>
-                            </div>
-                            break;
+                            }
+                        </div>
                     }
                 </div>
             }
 
-            <div class="button-row slot-add-row">
-                <button class="btn btn-secondary btn-sm" @onclick="() => AddTrigger(TriggerKind.Schedule)">
-                    + Schedule
-                </button>
-                <button class="btn btn-secondary btn-sm" @onclick="() => AddTrigger(TriggerKind.ArtifactChain)">
-                    + Artifact chain
-                </button>
-                <button class="btn btn-secondary btn-sm" @onclick="() => AddTrigger(TriggerKind.Mailbox)">
-                    + Mailbox
-                </button>
-            </div>
+            @if (OfferedTriggerKinds.Count > 0)
+            {
+                <div class="button-row slot-add-row">
+                    @foreach (var kind in OfferedTriggerKinds)
+                    {
+                        <button class="btn btn-secondary btn-sm" @onclick="() => AddTrigger(kind)">
+                            + @kind.Label
+                        </button>
+                    }
+                </div>
+            }
+            else if (!SupportsManual && _draft.Triggers.Count == 0)
+            {
+                <p class="field-hint">This workflow declares no wireable trigger kinds.</p>
+            }
             @if (_draft.Triggers.Count > 0)
             {
                 <p class="field-hint">Triggered runs are dispatched on your behalf and pass the same policy checks as manual ones.</p>
             }
+            @foreach (var (key, suggestions) in SettingSuggestions)
+            {
+                <datalist id="suggest-@key">
+                    @foreach (var suggestion in suggestions)
+                    {
+                        <option value="@suggestion"></option>
+                    }
+                </datalist>
+            }
         </div>
     </section>
+    }
 
     <div class="button-row editor-actions">
         <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_busy">
@@ -423,6 +433,8 @@ else
                     EnsureSchemaSlotBindings();
                     foreach (var binding in _draft.Bindings)
                         EnsureSettingKeys(binding);
+                    foreach (var trigger in _draft.Triggers)
+                        EnsureTriggerSettingKeys(trigger);
                 }
             }
         }
@@ -526,7 +538,7 @@ else
     private RenderFragment RenderInstanceSettings(SlotInstanceDraft draft) => __builder =>
     {
         var descriptors = _allProviders
-            .FirstOrDefault(p => p.ProviderType == draft.ProviderType)?.Descriptors ?? [];
+            .FirstOrDefault(p => p.ProviderType == draft.ProviderType)?.EnabledDescriptors ?? [];
         @if (descriptors.Count > 0)
         {
             <div class="form-grid setting-grid">
@@ -537,8 +549,7 @@ else
                         @switch (descriptor.Kind)
                         {
                             case SettingKind.Secret:
-                                <input type="password" autocomplete="new-password"
-                                       @bind="draft.Settings[descriptor.Key]"/>
+                                <ConnectSecretInput Descriptor="descriptor" Settings="draft.Settings"/>
                                 break;
                             case SettingKind.Number:
                                 <input type="number" @bind="draft.Settings[descriptor.Key]"/>
@@ -635,8 +646,7 @@ else
         else
         {
             <p class="muted">
-                No reusable slot instance matches this slot yet — create one right here, or
-                configure the slot inline below.
+                No slot instance matches this slot yet — create one right here.
             </p>
         }
 
@@ -703,14 +713,21 @@ else
             </div>
         }
 
-        <details class="advanced-section" open="@(binding.SlotInstanceId is null && binding.ProviderType.Length > 0)">
-            <summary>@(binding.SlotInstanceId is null && binding.ProviderType.Length > 0
-                         ? "Configured inline (advanced)"
-                         : "Configure inline instead (advanced)")</summary>
-            <div class="advanced-body">
-                @RenderProviderChoice(binding, ProvidersFor(slot))
-            </div>
-        </details>
+        @* Legacy inline-configured bindings stay editable, but the inline path is no longer
+           offered for new bindings — instances are the one way to configure a slot. *@
+        @if (binding.SlotInstanceId is null && binding.ProviderType.Length > 0)
+        {
+            <details class="advanced-section" open>
+                <summary>Configured inline (legacy)</summary>
+                <div class="advanced-body">
+                    <p class="field-hint">
+                        This binding carries its own settings. Prefer creating a slot instance —
+                        it is reusable and editable outside the workflow.
+                    </p>
+                    @RenderProviderChoice(binding, ProvidersFor(slot))
+                </div>
+            </details>
+        }
     };
 
     private RenderFragment RenderProviderChoice(
@@ -758,9 +775,8 @@ else
                         @switch (descriptor.Kind)
                         {
                             case SettingKind.Secret:
-                                <input type="password" autocomplete="new-password"
-                                       @bind="binding.Settings[descriptor.Key]"
-                                       placeholder="@(binding.StoredSecretKeys.Contains(descriptor.Key) ? "set — leave empty to keep unchanged" : "")"/>
+                                <ConnectSecretInput Descriptor="descriptor" Settings="binding.Settings"
+                                                    StoredSet="binding.StoredSecretKeys.Contains(descriptor.Key)"/>
                                 break;
                             case SettingKind.Number:
                                 <input type="number" @bind="binding.Settings[descriptor.Key]"/>
@@ -804,26 +820,85 @@ else
     private void AddSlot(string slotName)
         => _draft.Bindings.Add(new SlotBindingDraft { SlotName = slotName });
 
-    private void AddTrigger(TriggerKind kind)
-        => _draft.Triggers.Add(new TriggerDraft { Kind = kind });
+    // ------------------------------------------------------------------ triggers
 
-    private static string TriggerLabel(TriggerKind kind) => kind switch
+    private bool WorkflowChosen => _draft.WorkflowType.Trim().Length > 0;
+
+    /// <summary>The trigger kinds the selected workflow declares; empty = undeclared (legacy schema).</summary>
+    private IReadOnlyList<TriggerDeclaration> DeclaredTriggers
+        => SelectedWorkflow?.DeclaredTriggers ?? [];
+
+    /// <summary>Manual runs are offered unless the workflow declares triggers and leaves manual out.</summary>
+    private bool SupportsManual
+        => DeclaredTriggers.Count == 0
+           || DeclaredTriggers.Any(t => t.Kind == TriggerDeclaration.Manual);
+
+    private string? DeclaredDescriptionOf(string kind)
+        => DeclaredTriggers.FirstOrDefault(t => t.Kind == kind)?.Description;
+
+    /// <summary>
+    /// Wireable kinds from the runtime catalog, restricted to what the workflow declares —
+    /// a workflow can only be triggered in ways it supports.
+    /// </summary>
+    private IReadOnlyList<TriggerKindDescriptor> OfferedTriggerKinds
+        => Editor.TriggerKinds.All
+            .Where(d => d.Wireable)
+            .Where(d => DeclaredTriggers.Count == 0
+                        || DeclaredTriggers.Any(t => t.Kind == d.Kind))
+            .ToList();
+
+    private void AddTrigger(TriggerKindDescriptor descriptor)
     {
-        TriggerKind.Schedule => "Schedule",
-        TriggerKind.ArtifactChain => "Artifact chain",
-        TriggerKind.Mailbox => "Mailbox",
-        _ => kind.ToString()
-    };
+        var trigger = new TriggerDraft { Kind = descriptor.Kind };
+        foreach (var setting in descriptor.Settings)
+            trigger.Settings[setting.Key] = setting.DefaultValue ?? "";
+        _draft.Triggers.Add(trigger);
+    }
 
-    /// <summary>Accessible slot instances that look like mailboxes (declare an IMAP host setting).</summary>
-    private IReadOnlyList<SlotInstanceOverview> MailboxInstances
-        => _instances.Where(i => i.SettingKeys.Contains("ImapHost", StringComparer.Ordinal)).ToList();
+    /// <summary>Every descriptor key needs a dictionary entry for @bind; defaults pre-fill missing ones.</summary>
+    private void EnsureTriggerSettingKeys(TriggerDraft trigger)
+    {
+        foreach (var setting in Editor.TriggerKinds.Find(trigger.Kind)?.Settings ?? [])
+        {
+            if (!trigger.Settings.ContainsKey(setting.Key))
+                trigger.Settings[setting.Key] = setting.DefaultValue ?? "";
+        }
+    }
+
+    /// <summary>Accessible slot instances whose provider sits in the given catalog category.</summary>
+    private IReadOnlyList<SlotInstanceOverview> InstancesOfCategory(string? category)
+        => category is not { Length: > 0 }
+            ? _instances
+            : _instances
+                .Where(i => _allProviders.FirstOrDefault(p => p.ProviderType == i.ProviderType)?.Category == category)
+                .ToList();
+
+    /// <summary>Free-text suggestions per trigger-setting key (rendered as datalists).</summary>
+    private IReadOnlyDictionary<string, IReadOnlyList<string>> SettingSuggestions
+        => _knownArtifactTypes.Count == 0
+            ? new Dictionary<string, IReadOnlyList<string>>()
+            : new Dictionary<string, IReadOnlyList<string>> { ["ArtifactType"] = _knownArtifactTypes };
+
+    private IReadOnlyList<string>? SuggestionsFor(string key)
+        => SettingSuggestions.GetValueOrDefault(key);
+
+    /// <summary>The descriptor's help text, plus a live "= every X" hint for second intervals.</summary>
+    private static string? SettingHint(TriggerDraft trigger, SettingDescriptor setting)
+    {
+        if (setting.Kind == SettingKind.Number && setting.Key.EndsWith("Seconds", StringComparison.Ordinal)
+            && int.TryParse(trigger.Settings.GetValueOrDefault(setting.Key), out var seconds) && seconds > 0)
+        {
+            var interval = $"= every {TimeText.Interval(seconds)}";
+            return setting.HelpText is { Length: > 0 } help ? $"{help} {interval}" : interval;
+        }
+        return setting.HelpText;
+    }
 
     private bool IsAvailable(string providerType)
         => _availableByCategory.Values.Any(entries => entries.Any(e => e.ProviderType == providerType));
 
     private IReadOnlyList<SettingDescriptor> DescriptorsOf(string providerType)
-        => _allProviders.FirstOrDefault(e => e.ProviderType == providerType)?.Descriptors ?? [];
+        => _allProviders.FirstOrDefault(e => e.ProviderType == providerType)?.EnabledDescriptors ?? [];
 
     private void SelectProvider(SlotBindingDraft binding, ProviderCatalogEntry entry)
     {

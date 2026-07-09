@@ -31,10 +31,7 @@ public sealed class TmuxSessionHost : ISessionHost
 
     public async Task StartAsync(SessionRunContext context, CancellationToken cancellationToken)
     {
-        // '; tmux kill-server' makes the CLI's exit tear down the server — the auto-exit contract.
-        await RunAsync("tmux",
-            $"new-session -d -s {TmuxSessionName} -c \"{context.WorkspaceDirectory}\" " +
-            $"\"{context.SessionCommand}; tmux kill-server\"", cancellationToken);
+        await RunAsync(BuildTmuxStartInfo(context), cancellationToken);
 
         _ttyd = Process.Start(new ProcessStartInfo
         {
@@ -42,6 +39,27 @@ public sealed class TmuxSessionHost : ISessionHost
             Arguments = $"--writable --port {context.TerminalPort} tmux attach -t {TmuxSessionName}",
             UseShellExecute = false
         }) ?? throw new InvalidOperationException("Failed to start ttyd.");
+    }
+
+    /// <summary>
+    /// The tmux server inherits this process's environment — the session credential rides in
+    /// via <see cref="SessionRunContext.SessionEnvironment"/>, never on the command line.
+    /// '; tmux kill-server' makes the CLI's exit tear down the server — the auto-exit contract.
+    /// </summary>
+    internal static ProcessStartInfo BuildTmuxStartInfo(SessionRunContext context)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "tmux",
+            Arguments = $"new-session -d -s {TmuxSessionName} -c \"{context.WorkspaceDirectory}\" " +
+                        $"\"{context.SessionCommand}; tmux kill-server\"",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        foreach (var (key, value) in context.SessionEnvironment)
+            startInfo.Environment[key] = value;
+        return startInfo;
     }
 
     public async Task WaitForSessionEndAsync(CancellationToken cancellationToken)
@@ -71,22 +89,27 @@ public sealed class TmuxSessionHost : ISessionHost
         }
     }
 
-    private static async Task RunAsync(string fileName, string arguments, CancellationToken ct)
+    private static async Task RunAsync(ProcessStartInfo startInfo, CancellationToken ct)
     {
-        if (await TryRunAsync(fileName, arguments, ct) is var exitCode && exitCode != 0)
-            throw new InvalidOperationException($"'{fileName} {arguments}' exited with {exitCode}.");
+        if (await TryRunAsync(startInfo, ct) is var exitCode && exitCode != 0)
+            throw new InvalidOperationException(
+                $"'{startInfo.FileName} {startInfo.Arguments}' exited with {exitCode}.");
     }
 
-    private static async Task<int> TryRunAsync(string fileName, string arguments, CancellationToken ct)
-    {
-        using var process = Process.Start(new ProcessStartInfo
+    private static Task<int> TryRunAsync(string fileName, string arguments, CancellationToken ct)
+        => TryRunAsync(new ProcessStartInfo
         {
             FileName = fileName,
             Arguments = arguments,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true
-        }) ?? throw new InvalidOperationException($"Failed to start '{fileName}'.");
+        }, ct);
+
+    private static async Task<int> TryRunAsync(ProcessStartInfo startInfo, CancellationToken ct)
+    {
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException($"Failed to start '{startInfo.FileName}'.");
         await process.WaitForExitAsync(ct);
         return process.ExitCode;
     }

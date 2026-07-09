@@ -113,17 +113,27 @@ else
             @if (_runCandidate == configuration.Id)
             {
                 <div class="card-body run-now-form">
-                    <label>
-                        Instruction
-                        <textarea rows="3" @bind="_runInstruction"
-                                  placeholder="What should this run do? (becomes the run's input, like a triggering mail's body)"></textarea>
-                        <span class="field-hint">
-                            Every run needs input — for a coding session this is the task; for a review, the context.
-                        </span>
-                    </label>
+                    @* The workflow's declared inputs drive this form — nothing is hard-coded.
+                       Binding on input (not blur) so Start run enables while typing. *@
+                    @foreach (var input in configuration.Inputs)
+                    {
+                        <label>
+                            @input.Label@(input.Required ? " *" : " (optional)")
+                            <textarea rows="3" @bind="_runInputs[input.Name]" @bind:event="oninput"></textarea>
+                            @if (input.Description is { Length: > 0 })
+                            {
+                                <span class="field-hint">@input.Description</span>
+                            }
+                        </label>
+                    }
+                    @if (_error is not null)
+                    {
+                        @* The page-top panel can be scrolled out of view — fail where the user looks. *@
+                        <div class="panel denied">@_error</div>
+                    }
                     <div class="button-row">
                         <button class="btn btn-primary btn-sm"
-                                disabled="@(_busy || string.IsNullOrWhiteSpace(_runInstruction))"
+                                disabled="@(_busy || !RequiredInputsFilled(configuration))"
                                 @onclick="() => StartRunAsync(configuration)">Start run</button>
                         <button class="btn btn-secondary btn-sm" disabled="@_busy"
                                 @onclick="() => _runCandidate = null">Cancel</button>
@@ -133,8 +143,12 @@ else
             <div class="card-footer">
                 <div class="cell-actions">
                     <button class="btn btn-primary btn-sm" disabled="@(_busy || !configuration.Enabled)"
-                            title="@(configuration.Enabled ? "Start a run with an instruction" : "Enable the configuration first")"
-                            @onclick="() => BeginRun(configuration.Id)">Run…</button>
+                            title="@(configuration.Enabled
+                                       ? configuration.Inputs.Count > 0 ? "Start a run" : "Start a run — this workflow needs no input"
+                                       : "Enable the configuration first")"
+                            @onclick="() => BeginRunAsync(configuration)">
+                        @(configuration.Inputs.Count > 0 ? "Run…" : "Run")
+                    </button>
                     <a class="btn btn-secondary btn-sm" href="workflows/@configuration.Id/flow">Flow</a>
                     <a class="btn btn-secondary btn-sm" href="workflows/@configuration.Id/edit">Edit</a>
                     <button class="btn btn-secondary btn-sm" disabled="@_busy"
@@ -180,17 +194,30 @@ else
     private Guid? _principalId;
     private Guid? _deleteCandidate;
     private Guid? _runCandidate;
-    private string _runInstruction = "";
+    private readonly Dictionary<string, string> _runInputs = new(StringComparer.Ordinal);
     private string? _runNotice;
     private IReadOnlyList<WorkflowConfigurationOverview> _configurations = [];
 
-    private void BeginRun(Guid configurationId)
+    /// <summary>A workflow declaring inputs opens the form; one declaring none runs directly.</summary>
+    private async Task BeginRunAsync(WorkflowConfigurationOverview configuration)
     {
         _error = null;
         _runNotice = null;
-        _runInstruction = "";
-        _runCandidate = configurationId;
+        _runInputs.Clear();
+        if (configuration.Inputs.Count == 0)
+        {
+            await StartRunAsync(configuration);
+            return;
+        }
+        foreach (var input in configuration.Inputs)
+            _runInputs[input.Name] = "";
+        _runCandidate = configuration.Id;
     }
+
+    private bool RequiredInputsFilled(WorkflowConfigurationOverview configuration)
+        => configuration.Inputs
+            .Where(i => i.Required)
+            .All(i => !string.IsNullOrWhiteSpace(_runInputs.GetValueOrDefault(i.Name)));
 
     private async Task StartRunAsync(WorkflowConfigurationOverview configuration)
     {
@@ -201,7 +228,7 @@ else
         {
             await Editor.RunNowAsync(
                 _principalId!.Value.ToString("D"), _principalId, configuration.Id,
-                title: $"Run of '{configuration.DisplayName}'", instruction: _runInstruction, _cts.Token);
+                new Dictionary<string, string>(_runInputs), _cts.Token);
             _runCandidate = null;
             _runNotice = "Run dispatched — it appears under Runs within a few seconds.";
         }

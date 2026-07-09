@@ -50,7 +50,8 @@ public class WorkflowRerunServiceTests
         _sut = new WorkflowRerunService(
             _instances, _policyEngine.Object, _bus,
             new AuditLog(_audit, TimeProvider.System),
-            new DashboardSettings());
+            Microsoft.Extensions.Options.Options.Create(
+                new Auxilia.BackendService.PlatformHost.PlatformHostSettings()));
     }
 
     [TearDown]
@@ -102,7 +103,8 @@ public class WorkflowRerunServiceTests
         var command = (RunWorkflowCommand)published.Message;
         Assert.Multiple(() =>
         {
-            Assert.That(published.Topic, Is.EqualTo(new DashboardSettings().CommandQueueName));
+            Assert.That(published.Topic,
+                Is.EqualTo(new Auxilia.BackendService.PlatformHost.PlatformHostSettings().CommandQueueName));
             Assert.That(command.CommandId, Is.EqualTo(commandId));
             Assert.That(command.CommandId, Is.Not.EqualTo(original.CommandId), "a rerun gets a fresh command ID");
             Assert.That(command.RequestedBy, Is.EqualTo(actor), "the rerunning principal becomes the requester");

@@ -17,10 +17,15 @@ using MailKit.Security;
 if (args.Length > 0 && args[0] == "--screenshots")
     return await ScreenshotHarness.RunAsync(args.Length > 1 ? args[1] : null);
 
-// Presentation stand: platform ready (providers, team mailbox, session package pair), but
+// Presentation stand: platform ready (providers, team mailbox, demo-able packages), but
 // NO pre-built workflow configurations — the coding-session workflow is configured live.
 var presentation = args.Contains("--presentation");
 EndToEndEnvironment.PresentationMode = presentation;
+
+// Durable stand: Mongo data and the dashboard's cookie-signing keys live in named Docker
+// volumes, so configured slots/workflows and the login survive restarts.
+if (args.Contains("--keep-data"))
+    EndToEndEnvironment.DataVolumeName = "auxilia-devstand";
 
 var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
@@ -57,17 +62,23 @@ try
     Console.WriteLine($"  Claude    : {(claudeIsReal
         ? "REAL Claude Code CLI (ANTHROPIC_API_KEY found)"
         : "stub CLI (set ANTHROPIC_API_KEY before starting for real runs)")}");
+    Console.WriteLine($"  Data      : {(EndToEndEnvironment.DataVolumeName is null
+        ? "ephemeral (start with --keep-data to keep slots, workflows, and the login across restarts)"
+        : $"durable in Docker volumes '{EndToEndEnvironment.DataVolumeName}-*'")}");
     Console.WriteLine();
     if (presentation)
     {
         Console.WriteLine("  === PRESENTATION MODE — nothing is pre-configured; the manual steps: ===");
-        Console.WriteLine("  1. Workflows -> New workflow configuration -> 'Live coding session'");
-        Console.WriteLine("     repository -> inline 'fake-code-review-happy' | work-items -> instance 'Team mailbox'");
+        Console.WriteLine("  1. My slots -> New personal instance -> claude-code-cli -> 'Connect Claude account'");
+        Console.WriteLine("     (or paste an API key as the fallback).");
+        Console.WriteLine("  2. Workflows -> New workflow configuration -> 'Live coding session'");
+        Console.WriteLine("     repository -> new instance 'coding-session-workspace' | coding-agent -> your Claude account");
+        Console.WriteLine("     work-items -> instance 'Team mailbox'");
         Console.WriteLine("     Trigger: + Mailbox -> Team mailbox, poll 2 s, subject filter 'session'");
-        Console.WriteLine("  2. Flow -> drag 'Session summary mail' onto the coding-session-result output,");
+        Console.WriteLine("  3. Flow -> drag 'Session summary mail' onto the coding-session-result output,");
         Console.WriteLine("     then bind its work-items to 'Team mailbox' in its editor.");
-        Console.WriteLine("  3. Press [s] (or mail workflows@localhost, subject containing 'session').");
-        Console.WriteLine("  4. Runs -> Open live session -> work -> /exit -> reply mail lands.");
+        Console.WriteLine("  4. Press [s] (or mail workflows@localhost, subject containing 'session').");
+        Console.WriteLine("  5. Runs -> Open live session -> work -> /exit -> reply mail lands.");
         Console.WriteLine("  (Own mailbox instead? Create a slot instance with imap.gmail.com + app password.)");
         Console.WriteLine();
         Console.WriteLine("  [s] send a session mail   [o] open dashboard   [q] quit");

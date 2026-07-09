@@ -6,9 +6,9 @@ namespace Auxilia.Slots.ClaudeCode;
 
 /// <summary>
 /// Runs the Claude Code CLI headless (`-p --output-format stream-json`) in the run's
-/// workspace and streams every transcript event as a chat entry. The API key travels
-/// exclusively via the process environment — never on the command line, never in any
-/// error message or chat entry.
+/// workspace and streams every transcript event as a chat entry. The credential (account
+/// token or API key) travels exclusively via the process environment — never on the
+/// command line, never in any error message or chat entry.
 /// </summary>
 public sealed class ClaudeCodeCliAgent(
     ClaudeCodeCliOptions options,
@@ -93,11 +93,19 @@ public sealed class ClaudeCodeCliAgent(
             startInfo.ArgumentList.Add(model);
         }
 
-        startInfo.Environment["ANTHROPIC_API_KEY"] = options.ApiKey;
+        // Account token first, API key as the fallback — only the credential in use is
+        // exported, and only through the environment.
+        if (options.OAuthToken is { Length: > 0 } oauthToken)
+            startInfo.Environment["CLAUDE_CODE_OAUTH_TOKEN"] = oauthToken;
+        else if (options.ApiKey is { Length: > 0 } apiKey)
+            startInfo.Environment["ANTHROPIC_API_KEY"] = apiKey;
         // Keep egress within the workflow's declared allowlist: inference only, no
         // telemetry, error reporting, or auto-update traffic.
         startInfo.Environment["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1";
         startInfo.Environment["DISABLE_AUTOUPDATER"] = "1";
+        // The CLI refuses --dangerously-skip-permissions as root unless told it runs
+        // sandboxed — which it does: isolated container, default-deny egress, per-run workspace.
+        startInfo.Environment["IS_SANDBOX"] = "1";
         return startInfo;
     }
 

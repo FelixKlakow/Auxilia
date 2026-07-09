@@ -199,6 +199,10 @@ public sealed class WorkflowRegistrationHandler(
             NetworkEndpoints = manifest.NetworkEndpoints,
             Repositories = manifest.Repositories,
             Triggers = manifest.Triggers,
-            ConsumedArtifacts = manifest.ConsumedArtifacts
+            // Every field must ride along: a run-time registration REPLACES the stored
+            // schema, so anything omitted here is wiped by the workflow's first run.
+            Inputs = manifest.Inputs,
+            ConsumedArtifacts = manifest.ConsumedArtifacts,
+            InteractiveTerminalPort = manifest.InteractiveTerminalPort
         };
 }

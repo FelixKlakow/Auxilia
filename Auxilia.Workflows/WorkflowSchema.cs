@@ -21,6 +21,12 @@ public sealed record WorkflowSchema(
     public IReadOnlyList<TriggerDeclaration> Triggers { get; init; } = [];
 
     /// <summary>
+    /// The run inputs this workflow reads from its dispatch context (see
+    /// <see cref="WorkflowInputDescriptor"/>). Declaring none means runs start without input.
+    /// </summary>
+    public IReadOnlyList<WorkflowInputDescriptor> Inputs { get; init; } = [];
+
+    /// <summary>
     /// Artifact types this workflow can process as its input — the chaining criteria: another
     /// workflow's output of a listed type may be wired to dispatch this workflow. Empty means
     /// unconstrained (any chaining allowed).
@@ -38,11 +44,27 @@ public sealed record WorkflowSchema(
 /// <summary>
 /// A trigger kind a workflow declares it is driven by. The trigger itself lives OUTSIDE the
 /// workflow (wired per configuration); the declaration tells configurators what to wire.
-/// Kinds: <see cref="Mailbox"/>, <see cref="Schedule"/>, <see cref="Artifact"/>.
+/// A workflow can only be triggered in ways it declares here.
+/// Kinds: <see cref="Mailbox"/>, <see cref="Schedule"/>, <see cref="Artifact"/>, <see cref="Manual"/>.
 /// </summary>
 public sealed record TriggerDeclaration(string Kind, string? Description = null)
 {
     public const string Mailbox = "mailbox";
     public const string Schedule = "schedule";
     public const string Artifact = "artifact";
+
+    /// <summary>Started by a person from the dashboard with an instruction; needs no wiring.</summary>
+    public const string Manual = "manual";
 }
+
+/// <summary>
+/// One run input a workflow declares: free text that reaches the run as the dispatch-context
+/// entry named <paramref name="Name"/> (an input named "instruction" additionally lands as
+/// the mail-shaped Body). Dispatch UIs render these generically; a run of a workflow that
+/// declares no required input starts without any.
+/// </summary>
+public sealed record WorkflowInputDescriptor(
+    string Name,
+    string Label,
+    bool Required = false,
+    string? Description = null);

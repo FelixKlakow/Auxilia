@@ -199,6 +199,63 @@ public class ProviderCatalogServiceTests
         Assert.That(merged, Is.EqualTo(EmailDescriptors));
     }
 
+    // ------------------------------------------------------------------ setting curation
+
+    [Test]
+    public async Task SetSettingDisabled_RemovesItFromEnabledDescriptors_KeepsFullSet_AndAudits()
+    {
+        await SeedProviderAsync(descriptors: EmailDescriptors);
+
+        var entry = await _sut.SetSettingDisabledAsync("admin-1", "email-work-items", "Password", disabled: true);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(entry.IsSettingDisabled("Password"), Is.True);
+            Assert.That(entry.EnabledDescriptors.Select(d => d.Key),
+                Is.EqualTo(new[] { "ImapHost", "Folder" }), "editors no longer see the disabled setting");
+            Assert.That(entry.Descriptors.Select(d => d.Key),
+                Does.Contain("Password"), "the full manifest set stays intact for secret handling");
+        });
+        var audit = (await _auditRecords.ReadAsync()).Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(audit.Action, Is.EqualTo("provider-catalog.setting-changed"));
+            Assert.That(audit.Outcome, Is.EqualTo("Password: disabled"));
+        });
+    }
+
+    [Test]
+    public async Task SetSettingDisabled_ReEnable_RestoresTheDescriptor_AndKeepsPresentationOverrides()
+    {
+        await SeedProviderAsync(descriptors: EmailDescriptors);
+        await _catalog.SaveAsync(new ProviderCatalogRecord
+        {
+            Id = ProviderCatalogRecord.IdFor("email-work-items"),
+            ProviderType = "email-work-items",
+            DescriptorOverridesJson = JsonSerializer.Serialize(
+                new[] { new SettingDescriptorOverride("Password", Label: "Seat password") })
+        });
+
+        await _sut.SetSettingDisabledAsync("admin-1", "email-work-items", "Password", disabled: true);
+        var entry = await _sut.SetSettingDisabledAsync("admin-1", "email-work-items", "Password", disabled: false);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(entry.IsSettingDisabled("Password"), Is.False);
+            Assert.That(entry.EnabledDescriptors.Single(d => d.Key == "Password").Label,
+                Is.EqualTo("Seat password"), "presentation overrides survive the disable round-trip");
+        });
+    }
+
+    [Test]
+    public async Task SetSettingDisabled_UnknownSettingKey_IsRejected()
+    {
+        await SeedProviderAsync(descriptors: EmailDescriptors);
+
+        Assert.ThrowsAsync<InvalidOperationException>(
+            () => _sut.SetSettingDisabledAsync("admin-1", "email-work-items", "NoSuchKey", disabled: true));
+    }
+
     // ------------------------------------------------------------------ read path for #20
 
     private Task SeedProviderWithCategoryAsync(string providerType, string dllPath, string category,

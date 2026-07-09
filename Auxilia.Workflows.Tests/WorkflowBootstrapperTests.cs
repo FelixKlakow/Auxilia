@@ -99,6 +99,42 @@ public class WorkflowBootstrapperTests
         Assert.Throws<KeyNotFoundException>(() => bootstrapper.Apply(new ServiceCollection()));
     }
 
+    [Test]
+    public void Apply_JitDelivery_SkipsUnboundOptionalSlots_ButThrowsForRequiredOnes()
+    {
+        var providerType = $"bt-provider-{Guid.NewGuid()}";
+        using var keyPair = new EphemeralKeyPair();
+        var response = new WorkflowConfigurationResponse(
+            Guid.NewGuid(), true, null, new Dictionary<string, EncryptedSlotConfiguration>());
+
+        var spy = new SpySlotHandler();
+        var resolver = new SlotHandlerResolver();
+        resolver.Register(providerType, spy);
+
+        var activated = new Dictionary<string, SlotConfiguration>
+        {
+            ["bound"] = new(providerType, new Dictionary<string, string>())
+        };
+
+        var withOptional = new List<SlotDefinition>
+        {
+            new("bound", null) { ServiceType = typeof(object) },
+            new("unbound-optional", null) { ServiceType = typeof(object), Optional = true }
+        };
+        new WorkflowBootstrapper(response, keyPair, resolver, withOptional, Guid.NewGuid(), activated)
+            .Apply(new ServiceCollection());
+        Assert.That(spy.Calls.Select(c => c.SlotName), Is.EqualTo(new[] { "bound" }),
+            "the unbound optional slot is skipped, not an error");
+
+        var withRequired = new List<SlotDefinition>
+        {
+            new("unbound-required", null) { ServiceType = typeof(object) }
+        };
+        Assert.Throws<InvalidOperationException>(() =>
+            new WorkflowBootstrapper(response, keyPair, resolver, withRequired, Guid.NewGuid(), activated)
+                .Apply(new ServiceCollection()));
+    }
+
     private sealed class SpySlotHandler : ISlotHandler
     {
         public List<(string SlotName, Type ServiceType, SlotConfiguration Configuration)> Calls { get; } = new();

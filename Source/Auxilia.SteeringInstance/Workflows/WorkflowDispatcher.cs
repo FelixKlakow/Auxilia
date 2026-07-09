@@ -9,6 +9,7 @@ using Auxilia.Workflows;
 using Auxilia.Workflows.Crypto;
 using Auxilia.Workflows.Messaging;
 using Auxilia.Workflows.Messaging.Messages;
+using Auxilia.Workflows.Workspace;
 using Microsoft.Extensions.Options;
 
 namespace Auxilia.SteeringInstance.Workflows;
@@ -261,14 +262,18 @@ public sealed class WorkflowDispatcher(
             }), ct);
 
         // Per-run repository workspace (ARCHITECTURE §9): declared repos from the stored
-        // schema are prepared by the Workspace Manager and bind-mounted at /workspace.
+        // schema plus configuration-bound ones (any slot binding whose settings carry a
+        // RepositoryUrl) are prepared by the Workspace Manager and bind-mounted at /workspace.
         string? workspaceRoot = null;
-        var repositories = schema?.Repositories ?? [];
+        var repositories = (schema?.Repositories ?? [])
+            .Concat(ConfigurationRepositories(configuration))
+            .ToList();
         if (repositories.Count > 0)
         {
             try
             {
-                workspaceRoot = await workspaceManager.PrepareAsync(instanceId, repositories, ct);
+                await workspaceManager.PrepareAsync(instanceId, repositories, ct);
+                workspaceRoot = ResolveWorkspaceDirectoryBind(dispatcherSettings.Value, instanceId);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -390,6 +395,60 @@ public sealed class WorkflowDispatcher(
         var separator = root.Contains('\\') ? '\\' : '/';
         return $"{root}{separator}{instanceId:N}";
     }
+
+    /// <summary>Workspace bind source for the launcher — same host-view rule as the output bind.</summary>
+    internal static string ResolveWorkspaceDirectoryBind(WorkflowDispatcherSettings settings, Guid instanceId)
+    {
+        if (string.IsNullOrWhiteSpace(settings.WorkspaceRootHostDirectory))
+            return Path.Combine(settings.WorkspaceRootDirectory, instanceId.ToString("N"));
+
+        var root = settings.WorkspaceRootHostDirectory.TrimEnd('/', '\\');
+        var separator = root.Contains('\\') ? '\\' : '/';
+        return $"{root}{separator}{instanceId:N}";
+    }
+
+    /// <summary>
+    /// Repositories the run configuration asks to have in the workspace: any slot binding
+    /// whose resolved settings carry a <c>RepositoryUrl</c> and opt in via
+    /// <c>MountIntoWorkspace=true</c> is cloned to <c>/workspace/repos/&lt;slotName&gt;</c>
+    /// (API-only bindings simply omit the flag). A <c>Token</c> setting rides along as HTTPS
+    /// userinfo for the clone only — such clones never enter the warm cache, and the
+    /// Workspace Manager scrubs the credential from the clone's origin before launch.
+    /// </summary>
+    internal static IReadOnlyList<RepositoryDeclaration> ConfigurationRepositories(
+        StoredWorkflowConfiguration? configuration)
+    {
+        if (configuration is null)
+            return [];
+
+        var declarations = new List<RepositoryDeclaration>();
+        foreach (var binding in configuration.SlotBindings)
+        {
+            if (!string.Equals(binding.Settings.GetValueOrDefault("MountIntoWorkspace"), "true",
+                    StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (binding.Settings.GetValueOrDefault("RepositoryUrl") is not { Length: > 0 } repositoryUrl)
+                continue;
+            var token = binding.Settings.GetValueOrDefault("Token");
+            var branch = binding.Settings.GetValueOrDefault("Branch");
+            declarations.Add(new RepositoryDeclaration(
+                binding.SlotName,
+                CloneUrlWithToken(repositoryUrl.Trim(), token),
+                string.IsNullOrWhiteSpace(branch) ? null : branch.Trim(),
+                NoCache: !string.IsNullOrEmpty(token)));
+        }
+
+        return declarations;
+    }
+
+    /// <summary>The token becomes HTTPS userinfo; non-HTTP URLs and URLs already carrying userinfo stay untouched.</summary>
+    private static string CloneUrlWithToken(string repositoryUrl, string? token)
+        => string.IsNullOrEmpty(token)
+           || !Uri.TryCreate(repositoryUrl, UriKind.Absolute, out var uri)
+           || uri.Scheme is not ("http" or "https")
+           || !string.IsNullOrEmpty(uri.UserInfo)
+            ? repositoryUrl
+            : new UriBuilder(uri) { UserName = "x-access-token", Password = token }.Uri.ToString();
 
     private async Task FailPreFlightAsync(Guid instanceId, string workflowType, string reason, CancellationToken ct)
     {

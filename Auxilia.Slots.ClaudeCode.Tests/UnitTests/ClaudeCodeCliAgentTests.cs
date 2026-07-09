@@ -29,6 +29,27 @@ public sealed class ClaudeCodeCliAgentTests
     }
 
     [Test]
+    public void BuildStartInfo_AccountTokenWinsOverApiKey_AndStaysOffTheCommandLine()
+    {
+        var agent = new ClaudeCodeCliAgent(new ClaudeCodeCliOptions
+        {
+            OAuthToken = "sk-ant-oat-secret", ApiKey = "sk-fallback", CliPath = "claude"
+        });
+
+        var startInfo = agent.BuildStartInfo(Request);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(startInfo.Environment["CLAUDE_CODE_OAUTH_TOKEN"], Is.EqualTo("sk-ant-oat-secret"));
+            // ProcessStartInfo.Environment inherits the machine environment — assert the
+            // fallback key was not exported rather than that the variable is absent.
+            startInfo.Environment.TryGetValue("ANTHROPIC_API_KEY", out var apiKey);
+            Assert.That(apiKey, Is.Not.EqualTo("sk-fallback"), "only the credential in use may be exported");
+            Assert.That(startInfo.ArgumentList, Has.None.Contains("sk-ant-oat-secret"));
+        });
+    }
+
+    [Test]
     public void BuildStartInfo_UsesHeadlessStreamJsonArguments()
     {
         var agent = new ClaudeCodeCliAgent(Options());
@@ -48,6 +69,8 @@ public sealed class ClaudeCodeCliAgentTests
             Assert.That(startInfo.ArgumentList, Does.Contain("--dangerously-skip-permissions"));
             Assert.That(startInfo.ArgumentList, Does.Not.Contain("--model"));
             Assert.That(startInfo.Environment["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], Is.EqualTo("1"));
+            Assert.That(startInfo.Environment["IS_SANDBOX"], Is.EqualTo("1"),
+                "skip-permissions as root works only when the CLI knows it runs sandboxed");
         });
     }
 

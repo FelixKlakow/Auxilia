@@ -63,11 +63,19 @@ public sealed class WorkflowDispatcherSettings
 
     /// <summary>
     /// Directory under which each run gets its repository workspace ({dir}/{instanceId:N}).
-    /// Mounted into workflow containers at /workspace (ARCHITECTURE §9). Must be a path the
-    /// Docker daemon can bind-mount (host path) in container mode.
+    /// Mounted into workflow containers at /workspace (ARCHITECTURE §9).
     /// </summary>
     public string WorkspaceRootDirectory { get; set; } =
         Path.Combine(Path.GetTempPath(), "auxilia-workspaces");
+
+    /// <summary>
+    /// Host path of the directory mounted at <see cref="WorkspaceRootDirectory"/> when the
+    /// Steering Instance itself runs in a container — same split as
+    /// <see cref="RunOutputHostDirectory"/>: the dispatcher prepares under its own view, the
+    /// launcher binds the daemon's view. Null (default) means
+    /// <see cref="WorkspaceRootDirectory"/> is already a host path.
+    /// </summary>
+    public string? WorkspaceRootHostDirectory { get; set; }
 
     /// <summary>
     /// Warm repository cache (ARCHITECTURE §9): one entry per clone URL, host-only,

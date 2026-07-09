@@ -1,5 +1,6 @@
 using Auxilia.Workflows;
 using Auxilia.Workflows.AiAgent;
+using Auxilia.Workflows.SourceControl;
 using Auxilia.Workflows.Views;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -18,12 +19,24 @@ public static class ClaudeCodeWorkflow
             .Requires<ICodingAgent>("coding-agent",
                 new AiCapabilities { MinContextWindow = 128_000, SupportedModalities = [Modality.Text] },
                 "The autonomous coding agent executing the instruction (e.g. the Claude Code CLI)")
+            .Requires<ISourceControlAccess>("repository",
+                new SourceControlCapabilities { RequiredPermissions = [Permission.Read] },
+                "Optional: the repository the agent works on — prepared into the run's workspace before launch",
+                optional: true)
             .DeclaresView<AgentChatEntry>(ClaudeCodeApplication.ChatViewName,
                 ViewRendering.Custom, ViewLifecycle.LiveAndPersisted, AgentChatEntry.RendererKey)
             .DeclaresView<SessionProgressEntry>(ClaudeCodeApplication.ProgressViewName,
                 ViewRendering.Log, ViewLifecycle.LiveAndPersisted)
             .DeclaresOutput("session-report", SessionReportWriter.FileName,
                 "Final agent session result: summary, turn count, duration, and cost")
+            .DeclaresTrigger(TriggerDeclaration.Manual,
+                "Run from the dashboard with an instruction — the agent's task.")
+            .RequiresInput("instruction", "Instruction", required: true,
+                "The task the agent executes autonomously — a mail's subject/body for triggered runs.")
+            .DeclaresTrigger(TriggerDeclaration.Mailbox,
+                "A filtered mail starts a run; subject and body become the instruction.")
+            .DeclaresTrigger(TriggerDeclaration.Artifact,
+                "Another workflow's output artifact starts a run.")
             // Baseline egress policy (ARCHITECTURE §10). The CLI runs with nonessential
             // traffic disabled, so inference is the only endpoint it needs.
             .RequiresNetworkEndpoint("api.anthropic.com", "Claude API inference calls of the Claude Code CLI")
@@ -33,10 +46,18 @@ public static class ClaudeCodeWorkflow
     public static Task RunAsync() => Main(["--test-harness"]);
 
     private static Task ExecuteAsync(IServiceProvider provider, CancellationToken cancellationToken)
-        => new ClaudeCodeApplication(
+    {
+        var context = ClaudeCodeRunContext.FromEnvironment();
+        // A bound repository slot with a local working copy (the Workspace Manager's per-run
+        // clone) becomes the agent's working directory; without one the run keeps its default.
+        if (provider.GetService<ISourceControlAccess>()?.WorkingPath is { Length: > 0 } workingPath)
+            context = context with { WorkspaceDirectory = workingPath };
+
+        return new ClaudeCodeApplication(
                 provider.GetRequiredService<ICodingAgent>(),
                 provider.GetService<IViewPublisher>(),
-                ClaudeCodeRunContext.FromEnvironment(),
+                context,
                 TimeProvider.System)
             .RunAsync(cancellationToken);
+    }
 }

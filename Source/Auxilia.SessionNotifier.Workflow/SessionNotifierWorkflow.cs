@@ -7,9 +7,10 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Auxilia.SessionNotifier.Workflow;
 
 /// <summary>
-/// Chained consumer of <c>coding-session-result</c> artifacts: formats the finished live
-/// session (branch, changed-file names) and posts it as a comment on the originating work
-/// item — for mail-triggered sessions that is the reply to the sender.
+/// Chained consumer of session results: formats a finished <c>coding-session-result</c>
+/// (branch, changed-file names) or a Claude Code <c>session-report</c> (summary, turns,
+/// duration) and posts it as a comment on the originating work item — for mail-triggered
+/// sessions that is the reply to the sender.
 /// </summary>
 public static class SessionNotifierWorkflow
 {
@@ -21,8 +22,9 @@ public static class SessionNotifierWorkflow
                 new TaskSourceCapabilities { SupportedItemTypes = [ItemType.UserStory] },
                 "Where the session summary is posted — the mail sender for mail-triggered sessions")
             .ConsumesArtifact("coding-session-result")
+            .ConsumesArtifact("session-report")
             .DeclaresTrigger(TriggerDeclaration.Artifact,
-                "Runs after every coding-session-result artifact; chain it in the flow view.")
+                "Runs after every coding-session-result or session-report artifact; chain it in the flow view.")
             .DeclaresView<NotifierProgressEntry>(NotifierApplication.ProgressViewName,
                 ViewRendering.Log, ViewLifecycle.LiveAndPersisted)
             .WithApplication(ExecuteAsync)
@@ -54,6 +56,19 @@ public sealed record NotifierRunContext(string? ConsumedArtifactPath, string? Wo
 public sealed record SessionSummary(
     string Branch, IReadOnlyList<string> ChangedFiles, bool TimedOut);
 
+/// <summary>
+/// The Claude Code <c>session-report</c> JSON contract this notifier consumes — mirrored
+/// here (like <see cref="SessionSummary"/>) so the artifact stays the only coupling.
+/// </summary>
+public sealed record AgentSessionReport(
+    string Instruction,
+    bool Success,
+    string? Summary,
+    int TurnCount,
+    decimal? TotalCostUsd,
+    long? DurationMs,
+    string? ErrorMessage);
+
 public sealed class NotifierApplication(
     IWorkItemAccess workItems,
     IViewPublisher? views,
@@ -76,15 +91,29 @@ public sealed class NotifierApplication(
         if (context.ConsumedArtifactPath is not { Length: > 0 } artifactPath
             || !File.Exists(artifactPath))
             throw new InvalidOperationException(
-                "No consumed artifact was materialized — this workflow must be chained onto a coding-session-result output.");
+                "No consumed artifact was materialized — this workflow must be chained onto a "
+                + "coding-session-result or session-report output.");
 
-        var summary = JsonSerializer.Deserialize<SessionSummary>(
-                          await File.ReadAllTextAsync(artifactPath, cancellationToken))
-                      ?? throw new InvalidOperationException("The consumed artifact is not a session summary.");
+        var json = await File.ReadAllTextAsync(artifactPath, cancellationToken);
+        var (body, what) = FormatArtifact(json);
+        await workItems.PostCommentAsync(workItemId, body, cancellationToken);
+        await PublishAsync("notify", $"{what} posted to work item {workItemId}.", cancellationToken);
+    }
 
-        await workItems.PostCommentAsync(workItemId, FormatSummary(summary), cancellationToken);
-        await PublishAsync("notify",
-            $"Summary of branch '{summary.Branch}' posted to work item {workItemId}.", cancellationToken);
+    /// <summary>The two consumed artifact types share no schema; the shape decides the format.</summary>
+    internal static (string Body, string Description) FormatArtifact(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        if (document.RootElement.TryGetProperty(nameof(SessionSummary.ChangedFiles), out _))
+        {
+            var summary = JsonSerializer.Deserialize<SessionSummary>(json)
+                          ?? throw new InvalidOperationException("The consumed artifact is not a session summary.");
+            return (FormatSummary(summary), $"Summary of branch '{summary.Branch}'");
+        }
+
+        var report = JsonSerializer.Deserialize<AgentSessionReport>(json)
+                     ?? throw new InvalidOperationException("The consumed artifact is not a session report.");
+        return (FormatReport(report), "Agent session report");
     }
 
     /// <summary>Plain-text mail body: branch, file names, and the timeout note — never file contents.</summary>
@@ -100,6 +129,24 @@ public sealed class NotifierApplication(
             $"Your coding session finished.\n\n" +
             $"Branch: {summary.Branch}\n" +
             $"Changed files ({summary.ChangedFiles.Count}):\n{files}{timeoutNote}";
+    }
+
+    /// <summary>Plain-text mail body of a Claude Code run: instruction, outcome, and effort figures.</summary>
+    internal static string FormatReport(AgentSessionReport report)
+    {
+        var outcome = report.Success
+            ? report.Summary is { Length: > 0 } summary ? summary : "The agent finished without a summary."
+            : $"The run failed: {report.ErrorMessage ?? "(no error message)"}";
+        var figures = new List<string> { $"Turns: {report.TurnCount}" };
+        if (report.DurationMs is { } ms)
+            figures.Add($"Duration: {TimeSpan.FromMilliseconds(ms):hh\\:mm\\:ss}");
+        if (report.TotalCostUsd is { } cost)
+            figures.Add($"Cost: ${cost.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}");
+        return
+            $"Your Claude Code run {(report.Success ? "finished" : "failed")}.\n\n" +
+            $"Instruction: {report.Instruction}\n\n" +
+            $"{outcome}\n\n" +
+            string.Join(" · ", figures);
     }
 
     private Task PublishAsync(string phase, string message, CancellationToken ct)

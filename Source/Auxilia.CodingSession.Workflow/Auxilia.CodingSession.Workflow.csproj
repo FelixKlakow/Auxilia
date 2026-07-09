@@ -9,6 +9,9 @@
     <ProjectReference Include="..\..\Auxilia.Workflows\Auxilia.Workflows.csproj" />
     <ProjectReference Include="..\Auxilia.Workflows.SourceControl\Auxilia.Workflows.SourceControl.csproj" />
     <ProjectReference Include="..\Auxilia.Workflows.TaskSource\Auxilia.Workflows.TaskSource.csproj" />
+    <!-- ICodingAgent/CodingAgentCredentials: bakes the contract assemblies into the image so
+         the claude-code-cli slot plugin loads here and the coding-agent slot is bindable. -->
+    <ProjectReference Include="..\Auxilia.ClaudeCode.Workflow\Auxilia.ClaudeCode.Workflow.csproj" />
   </ItemGroup>
   <ItemGroup>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">

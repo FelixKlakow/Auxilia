@@ -17,6 +17,13 @@ public sealed record SessionRunContext(
     /// <summary>The container port ttyd serves the terminal on; published by the launcher.</summary>
     public const int DefaultTerminalPort = 7681;
 
+    /// <summary>
+    /// Extra environment for the session's CLI process (the JIT-delivered account
+    /// credential). Environment-only by contract: never arguments, never logged.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> SessionEnvironment { get; init; }
+        = new Dictionary<string, string>();
+
     public static SessionRunContext FromEnvironment()
         => FromValues(
             Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.WorkspaceDirectory),

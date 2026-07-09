@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using Auxilia.BackendService.Dashboard;
+using Auxilia.BackendService.PlatformHost;
 using Auxilia.Governance;
 using Auxilia.Governance.Policy;
 using Auxilia.Messaging;
@@ -23,7 +24,7 @@ namespace Auxilia.BackendService.Mcp;
 public sealed class AuxiliaMcpTools(
     IPolicyEngine policyEngine,
     IMessageBusClient messageBus,
-    DashboardSettings dashboardSettings,
+    Microsoft.Extensions.Options.IOptions<PlatformHostSettings> platformHostSettings,
     IDataAccess<WorkflowInstanceRecord> instances,
     IDataAccess<ViewDataRecord> viewData,
     IDataAccess<AuditRecord> auditRecords,
@@ -61,9 +62,9 @@ public sealed class AuxiliaMcpTools(
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), workflowType.Trim(), workflowPackageUri.Trim(),
             workflowContext, principalId);
-        await messageBus.PublishAsync(dashboardSettings.CommandQueueName, command, cancellationToken);
+        await messageBus.PublishAsync(platformHostSettings.Value.CommandQueueName, command, cancellationToken);
 
-        return Json(new { commandId = command.CommandId, queue = dashboardSettings.CommandQueueName });
+        return Json(new { commandId = command.CommandId, queue = platformHostSettings.Value.CommandQueueName });
     }
 
     [McpServerTool(Name = "get_workflow_status")]

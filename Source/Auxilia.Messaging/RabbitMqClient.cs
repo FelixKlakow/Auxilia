@@ -74,7 +74,12 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
         {
             Persistent = true,
             ContentType = "application/json",
-            Headers = headers
+            Headers = headers,
+            // Tag the CLR message type so fanout subscribers can reject messages that
+            // aren't theirs: a fanout exchange delivers every message to every bound queue,
+            // and lenient JSON deserialization would otherwise silently coerce a mismatched
+            // command into a record with null fields.
+            Type = message?.GetType().FullName
         };
 
         await _publishChannel.BasicPublishAsync(
@@ -109,7 +114,12 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
         {
             Persistent = true,
             ContentType = "application/json",
-            Headers = headers
+            Headers = headers,
+            // Tag the CLR message type so fanout subscribers can reject messages that
+            // aren't theirs: a fanout exchange delivers every message to every bound queue,
+            // and lenient JSON deserialization would otherwise silently coerce a mismatched
+            // command into a record with null fields.
+            Type = message?.GetType().FullName
         };
 
         await _publishChannel.BasicPublishAsync(
@@ -158,6 +168,18 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
 
             MessagingTelemetry.ReceiveCounter.Add(1, new TagList { { "messaging.queue", queueName } });
 
+            // A fanout exchange delivers a copy of every message to every bound queue, so a
+            // consumer typed as T can receive a message of a different type. Skip anything
+            // whose tagged type doesn't match T rather than let lenient deserialization
+            // fabricate a partially-null record. Untagged messages (Type == null) are
+            // processed as before, for backward compatibility.
+            var messageType = ea.BasicProperties.Type;
+            if (messageType is not null && messageType != typeof(T).FullName)
+            {
+                await channel.BasicAckAsync(ea.DeliveryTag, false);
+                return;
+            }
+
             var body = Encoding.UTF8.GetString(ea.Body.ToArray());
             var msg = JsonSerializer.Deserialize<T>(body);
             if (msg is not null)
@@ -198,6 +220,18 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
             activity?.SetTag("messaging.operation", "receive");
 
             MessagingTelemetry.ReceiveCounter.Add(1, new TagList { { "messaging.queue", queueName } });
+
+            // A fanout exchange delivers a copy of every message to every bound queue, so a
+            // consumer typed as T can receive a message of a different type. Skip anything
+            // whose tagged type doesn't match T rather than let lenient deserialization
+            // fabricate a partially-null record. Untagged messages (Type == null) are
+            // processed as before, for backward compatibility.
+            var messageType = ea.BasicProperties.Type;
+            if (messageType is not null && messageType != typeof(T).FullName)
+            {
+                await channel.BasicAckAsync(ea.DeliveryTag, false);
+                return;
+            }
 
             var body = Encoding.UTF8.GetString(ea.Body.ToArray());
             var msg = JsonSerializer.Deserialize<T>(body);

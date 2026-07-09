@@ -19,11 +19,15 @@ the CLI exits.
 ## Invariants
 
 - **No credentials in this container beyond the CLI's own token.** Git operations are
-  LOCAL ONLY (branch, diff); pushing is the Workspace Manager's job. The personal-account
-  OAuth token arrives as `CLAUDE_CODE_OAUTH_TOKEN` via JIT slot activation and must never
-  be logged, written to disk, or passed as a CLI argument.
+  LOCAL ONLY (branch, diff); pushing is the Workspace Manager's job. The account credential
+  arrives via JIT activation of the required `coding-agent` slot (bind a `claude-code-cli`
+  instance — the connected account): the handler registers `CodingAgentCredentials`, which
+  the session exports as `CLAUDE_CODE_OAUTH_TOKEN` (or `ANTHROPIC_API_KEY` fallback) into
+  the tmux process environment only — never logged, written to disk, or passed as a CLI
+  argument.
 - **System tests never run real AI**: `CODING_SESSION_CLI=claude-session-stub` selects
-  the baked stub script; the real `claude` binary is the dev-stand/manual path.
+  the baked stub script and overrides the slot's CliPath; the real `claude` binary is the
+  dev-stand/manual path.
 - Changed-file reporting carries file NAMES only — contents never leave the workspace
   through the artifact.
 - The Windows-container variant is a second registered package with its own image; do not

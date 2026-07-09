@@ -40,6 +40,7 @@ public class SlotInstanceServiceTests
     private IDataAccess<SlotProviderRecord> _providers = null!;
     private IDataAccess<ProviderCatalogRecord> _catalogRecords = null!;
     private IDataAccess<AuditRecord> _audit = null!;
+    private IDataAccess<ConnectorRecord> _connectors = null!;
     private NullSettingsProtector _protector = null!;
     private SlotInstanceService _sut = null!;
 
@@ -53,11 +54,15 @@ public class SlotInstanceServiceTests
         _providers = new InMemoryDataAccess<SlotProviderRecord>();
         _catalogRecords = new InMemoryDataAccess<ProviderCatalogRecord>();
         _audit = new InMemoryDataAccess<AuditRecord>();
+        _connectors = new InMemoryDataAccess<ConnectorRecord>();
         _protector = new NullSettingsProtector();
         var auditLog = new AuditLog(_audit, TimeProvider.System);
         _sut = new SlotInstanceService(
             _instances, _configurations, _mailboxTriggers,
             new ProviderCatalogService(_providers, _catalogRecords, auditLog),
+            new ConnectorService(
+                _connectors, new Auxilia.BackendService.Dashboard.Connect.ConnectFlowRegistry([]),
+                _protector, auditLog, TimeProvider.System),
             _protector, _bus, auditLog);
     }
 
@@ -70,6 +75,46 @@ public class SlotInstanceServiceTests
         (_providers as IDisposable)?.Dispose();
         (_catalogRecords as IDisposable)?.Dispose();
         (_audit as IDisposable)?.Dispose();
+        (_connectors as IDisposable)?.Dispose();
+    }
+
+    private Task SeedConnectorAsync(
+        string name = "my-claude", string scope = "Company", Guid? owner = null)
+        => _connectors.SaveAsync(new ConnectorRecord
+        {
+            Id = ConnectorRecord.IdFor(name),
+            Name = name,
+            DisplayName = "My Claude account",
+            FlowKey = "anthropic-claude",
+            ProtectedToken = _protector.Protect("oauth-token-value"),
+            Scope = scope,
+            OwnerPrincipalId = owner
+        });
+
+    [Test]
+    public async Task Save_WithConnectorReference_EmbedsTheResolvedToken()
+    {
+        await SeedProviderAsync();
+        await SeedConnectorAsync();
+        var draft = NewDraft();
+        draft.Settings["Password"] = ConnectorService.ReferenceFor(ConnectorRecord.IdFor("my-claude"));
+
+        await _sut.SaveAsync("tester", Guid.NewGuid(), draft);
+
+        Assert.That(PublishedUpsert().Settings["Password"], Is.EqualTo("oauth-token-value"),
+            "the picked connector's credential must travel instead of the reference");
+    }
+
+    [Test]
+    public async Task Save_WithForeignPersonalConnector_IsRefused()
+    {
+        await SeedProviderAsync();
+        await SeedConnectorAsync(scope: "Personal", owner: Guid.NewGuid());
+        var draft = NewDraft();
+        draft.Settings["Password"] = ConnectorService.ReferenceFor(ConnectorRecord.IdFor("my-claude"));
+
+        Assert.ThrowsAsync<InvalidOperationException>(
+            () => _sut.SaveAsync("tester", Guid.NewGuid(), draft));
     }
 
     private static readonly SettingDescriptor[] EmailDescriptors =

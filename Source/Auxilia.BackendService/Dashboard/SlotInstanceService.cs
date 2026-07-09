@@ -57,6 +57,7 @@ public sealed class SlotInstanceService(
     IDataAccess<WorkflowConfigurationRecord> configurations,
     IDataAccess<MailboxTriggerRecord> mailboxTriggers,
     ProviderCatalogService catalog,
+    ConnectorService connectorService,
     ISettingsProtector protector,
     IMessageBusClient messageBus,
     AuditLog auditLog)
@@ -226,8 +227,11 @@ public sealed class SlotInstanceService(
     public async Task<string> SaveAsync(
         string actor, Guid? actorPrincipalId, SlotInstanceDraft draft, CancellationToken ct = default)
     {
-        var descriptors = await DescriptorsOfAsync(draft.ProviderType, ct);
-        Validate(draft, descriptors);
+        var entry = (await catalog.ListAsync(ct))
+            .FirstOrDefault(e => e.ProviderType == draft.ProviderType);
+        var descriptors = entry?.Descriptors ?? [];
+        // Admin-disabled settings are neither offered nor required; stored values survive.
+        Validate(draft, entry?.EnabledDescriptors ?? []);
 
         var name = draft.ExistingName ?? await NewUniqueNameAsync(draft.DisplayName, ct);
         var existing = draft.ExistingName is null
@@ -245,6 +249,14 @@ public sealed class SlotInstanceService(
                 if (secretKeys.Contains(key) && !settings.ContainsKey(key) && !string.IsNullOrEmpty(value))
                     settings[key] = value; // keep-unchanged: the user typed nothing new
             }
+        }
+
+        // A picked connector travels as a reference; its current credential is embedded here
+        // (access-checked) so raw tokens keep flowing exactly like typed ones from now on.
+        foreach (var key in settings.Keys.ToList())
+        {
+            if (ConnectorService.ReferencedId(settings[key]) is { } connectorId)
+                settings[key] = await connectorService.ResolveTokenAsync(connectorId, actorPrincipalId, ct);
         }
 
         var command = new UpsertSlotInstanceCommand(

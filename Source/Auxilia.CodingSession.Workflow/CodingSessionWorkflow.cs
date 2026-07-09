@@ -1,4 +1,6 @@
+using Auxilia.ClaudeCode.Workflow;
 using Auxilia.Workflows;
+using Auxilia.Workflows.AiAgent;
 using Auxilia.Workflows.SourceControl;
 using Auxilia.Workflows.Views;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,6 +24,11 @@ public static class CodingSessionWorkflow
             .RequiresSourceControl("repository",
                 new SourceControlCapabilities { RequiredPermissions = [Permission.Read, Permission.Write] },
                 "The repository the live session works on (mounted by the Workspace Manager)")
+            // Fixed purpose, always bound: the session IS a Claude Code session, so the
+            // account it runs with is a required slot (bind a connected Claude account).
+            .Requires<ICodingAgent>("coding-agent",
+                new AiCapabilities { MinContextWindow = 128_000, SupportedModalities = [Modality.Text] },
+                "The Claude account the live session signs in with (connected account preferred, API key fallback)")
             .Requires<Auxilia.Workflows.TaskSource.IWorkItemAccess>("work-items",
                 new Auxilia.Workflows.TaskSource.TaskSourceCapabilities
                 {
@@ -33,6 +40,10 @@ public static class CodingSessionWorkflow
                 ViewRendering.Log, ViewLifecycle.LiveAndPersisted)
             .DeclaresOutput("coding-session-result", CodingSessionResult.FileName,
                 "Branch and changed-file names of the finished live session")
+            .DeclaresTrigger(TriggerDeclaration.Manual,
+                "Start a session from the dashboard, then open the live terminal.")
+            .RequiresInput("instruction", "Instruction", required: false,
+                "Optional context for the session — the operator drives the CLI live either way.")
             .DeclaresTrigger(TriggerDeclaration.Mailbox,
                 "A filtered mail starts the session; chain a notifier onto the result artifact for the reply.")
             // The CLI needs inference plus its account/session endpoints — nothing else.
@@ -46,10 +57,25 @@ public static class CodingSessionWorkflow
     private static async Task ExecuteAsync(IServiceProvider provider, CancellationToken cancellationToken)
     {
         var sourceControl = provider.GetRequiredService<ISourceControlAccess>();
+        // JIT-activated account credentials: exported to the CLI only via the session's
+        // process environment. The CODING_SESSION_CLI env override (system tests' stub)
+        // wins over the slot's CLI path.
+        var credentials = provider.GetService<CodingAgentCredentials>();
         var context = SessionRunContext.FromEnvironment() with
         {
             WorkspaceDirectory = sourceControl.WorkingPath
         };
+        if (credentials is not null)
+        {
+            context = context with
+            {
+                SessionCommand = string.IsNullOrWhiteSpace(
+                    Environment.GetEnvironmentVariable("CODING_SESSION_CLI"))
+                    ? credentials.CliPath
+                    : context.SessionCommand,
+                SessionEnvironment = credentials.ToEnvironment()
+            };
+        }
         await new CodingSessionApplication(
                 new TmuxSessionHost(),
                 new ProcessGitRunner(),

@@ -24,6 +24,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     private readonly List<SignalDescriptor> _signals = new();
     private readonly List<Views.ViewDescriptor> _views = new();
     private readonly List<TriggerDeclaration> _triggers = new();
+    private readonly List<WorkflowInputDescriptor> _inputs = new();
     private readonly List<string> _consumedArtifacts = new();
     private readonly WorkflowMetadata _metadata = new();
     private Action<IServiceCollection>? _configureServices;
@@ -96,6 +97,17 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
         if (_triggers.Any(t => t.Kind == kind))
             throw new InvalidOperationException($"Trigger kind '{kind}' has already been declared.");
         _triggers.Add(new TriggerDeclaration(kind, description));
+        return this;
+    }
+
+    public IWorkflowBuilder RequiresInput(
+        string name, string label, bool required = false, string? description = null)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        ArgumentException.ThrowIfNullOrEmpty(label);
+        if (_inputs.Any(i => i.Name == name))
+            throw new InvalidOperationException($"An input with name '{name}' has already been declared.");
+        _inputs.Add(new WorkflowInputDescriptor(name, label, required, description));
         return this;
     }
 
@@ -322,7 +334,17 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
 
                             var fetched = new Dictionary<string, SlotConfiguration>(_slots.Count);
                             foreach (var slot in _slots)
-                                fetched[slot.SlotName] = await slotActivator.FetchAsync(slot.SlotName, cts.Token);
+                            {
+                                try
+                                {
+                                    fetched[slot.SlotName] = await slotActivator.FetchAsync(slot.SlotName, cts.Token);
+                                }
+                                catch (InvalidOperationException) when (slot.Optional)
+                                {
+                                    // An unbound optional slot is a valid configuration — the run
+                                    // proceeds without the capability (its contract resolves to null).
+                                }
+                            }
                             activatedConfigs = fetched;
                         }
 
@@ -389,6 +411,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             NetworkEndpoints = _networkEndpoints.AsReadOnly(),
             Repositories = _repositories.AsReadOnly(),
             Triggers = _triggers.AsReadOnly(),
+            Inputs = _inputs.AsReadOnly(),
             ConsumedArtifacts = _consumedArtifacts.AsReadOnly(),
             InteractiveTerminalPort = _interactiveTerminalPort
         };
@@ -403,6 +426,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             NetworkEndpoints = _networkEndpoints.AsReadOnly(),
             Repositories = _repositories.AsReadOnly(),
             Triggers = _triggers.AsReadOnly(),
+            Inputs = _inputs.AsReadOnly(),
             ConsumedArtifacts = _consumedArtifacts.AsReadOnly(),
             InteractiveTerminalPort = _interactiveTerminalPort
         };

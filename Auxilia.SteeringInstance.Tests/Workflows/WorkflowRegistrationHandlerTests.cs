@@ -96,7 +96,13 @@ public class WorkflowRegistrationHandlerTests
         var schemaStore = TestStores.NewWorkflowSchemaStore();
         var detector = new DirtyConfigurationDetector(schemaStore, TestStores.NewSlotConfigurationStore());
         var manifest = new WorkflowManifest(
-            "TestWorkflow", Guid.NewGuid().ToString(), [], [], "3.1", ["tag-a"], []);
+            "TestWorkflow", Guid.NewGuid().ToString(), [], [], "3.1", ["tag-a"], [])
+        {
+            Inputs = [new WorkflowInputDescriptor("instruction", "Instruction", Required: true)],
+            Triggers = [new TriggerDeclaration(TriggerDeclaration.Manual)],
+            ConsumedArtifacts = ["session-report"],
+            InteractiveTerminalPort = 7681
+        };
         var request = new WorkflowRegistrationRequest(
             Guid.NewGuid(), manifest, ValidPublicKey(), "reply-topic");
 
@@ -111,6 +117,12 @@ public class WorkflowRegistrationHandlerTests
             Assert.That(schema, Is.Not.Null, "the registration manifest is the package's schema of record");
             Assert.That(schema!.Version, Is.EqualTo("3.1"));
             Assert.That(schema.Tags, Is.EqualTo(new[] { "tag-a" }));
+            // A run-time registration REPLACES the stored schema: any field dropped here is
+            // silently wiped by the workflow's first run (that bug hid the Run-input form).
+            Assert.That(schema.Inputs.Select(i => i.Name), Is.EqualTo(new[] { "instruction" }));
+            Assert.That(schema.Triggers.Select(t => t.Kind), Is.EqualTo(new[] { TriggerDeclaration.Manual }));
+            Assert.That(schema.ConsumedArtifacts, Is.EqualTo(new[] { "session-report" }));
+            Assert.That(schema.InteractiveTerminalPort, Is.EqualTo(7681));
         });
     }
 

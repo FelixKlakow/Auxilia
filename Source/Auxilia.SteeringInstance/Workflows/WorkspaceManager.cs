@@ -113,6 +113,14 @@ public sealed class WorkspaceManager(
         args.Add(targetDirectory);
 
         await RunGitAsync(args, repository.CloneUrl, ct);
+
+        // A tokened clone URL would otherwise sit in the copy's .git/config and ride into the
+        // workflow container — workflows never hold raw credentials (ARCHITECTURE §8).
+        var stripped = StripUserInfo(repository.CloneUrl);
+        if (!string.Equals(stripped, repository.CloneUrl, StringComparison.Ordinal))
+            await RunGitAsync(
+                ["-C", targetDirectory, "remote", "set-url", "origin", stripped],
+                repository.CloneUrl, ct);
     }
 
     /// <summary>

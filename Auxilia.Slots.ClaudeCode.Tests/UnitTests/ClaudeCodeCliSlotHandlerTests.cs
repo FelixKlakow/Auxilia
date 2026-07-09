@@ -27,7 +27,25 @@ public sealed class ClaudeCodeCliSlotHandlerTests
     }
 
     [Test]
-    public void MissingApiKey_FailsRegistration()
+    public void CodingAgentSlot_WithOnlyAccountToken_RegistersCliAgent()
+    {
+        var services = new ServiceCollection();
+        var handler = new ClaudeCodeCliSlotHandler();
+
+        handler.Register(services, "coding-agent", typeof(ICodingAgent),
+            new SlotConfiguration("claude-code-cli", new Dictionary<string, string>
+            {
+                ["OAuthToken"] = "sk-ant-oat-test"
+            }));
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        Assert.That(scope.ServiceProvider.GetRequiredService<ICodingAgent>(),
+            Is.InstanceOf<ClaudeCodeCliAgent>());
+    }
+
+    [Test]
+    public void MissingCredential_FailsRegistration()
     {
         var handler = new ClaudeCodeCliSlotHandler();
 
@@ -82,5 +100,23 @@ public sealed class ClaudeCodeCliSlotHandlerTests
         });
 
         Assert.That(options.MaxTurns, Is.EqualTo(25));
+    }
+
+    [Test]
+    public void OptionsFromSettings_CredentialPrecedence()
+    {
+        var both = ClaudeCodeCliOptions.FromSettings(new Dictionary<string, string>
+        {
+            ["OAuthToken"] = "sk-ant-oat-test",
+            ["ApiKey"] = "sk-test"
+        });
+        var neither = ClaudeCodeCliOptions.FromSettings(new Dictionary<string, string>());
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(both.HasCredential, Is.True);
+            Assert.That(both.OAuthToken, Is.EqualTo("sk-ant-oat-test"));
+            Assert.That(neither.HasCredential, Is.False);
+        });
     }
 }

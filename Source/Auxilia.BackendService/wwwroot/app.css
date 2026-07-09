@@ -1157,6 +1157,68 @@ select { cursor: pointer; }
 .provider-card.selected .provider-name { color: var(--accent); }
 .provider-category { font-size: 0.78rem; color: var(--muted); }
 
+/* ------------------------------------------------------------------ connectors */
+
+.connector-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 0.8rem;
+}
+
+.connector-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.8rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    padding: 0.85rem 1rem;
+}
+
+.connector-icon {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.4rem;
+    height: 2.4rem;
+    border-radius: 0.6rem;
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.connector-glyph { width: 1.35rem; height: 1.35rem; }
+
+.connector-main {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 0;
+    flex: 1;
+}
+
+.connector-name { font-weight: 600; color: var(--text); }
+.connector-provider { font-size: 0.8rem; color: var(--muted); }
+
+.connector-badges {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.8rem;
+}
+
+.connector-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.35rem;
+}
+
+.provider-card-head { display: flex; align-items: center; gap: 0.5rem; }
+.provider-card-head .connector-icon { width: 1.9rem; height: 1.9rem; border-radius: 0.5rem; }
+.provider-card-head .connector-glyph { width: 1.1rem; height: 1.1rem; }
+
 .setting-grid { margin-top: 0.4rem; }
 
 .slot-add-row { margin-top: 0.4rem; }
@@ -1281,6 +1343,39 @@ select { cursor: pointer; }
 
 /* Successor chips on the run detail header ("Rerun #… started"). */
 .rerun-successors { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+
+/* ------------------------------------------------------------------ connect flows */
+
+/* "Connect Claude account / GitHub" sign-in affordance replacing raw token entry. */
+.connect-box {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    padding: 0.7rem 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-muted);
+}
+
+.connect-idle { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; }
+
+.connect-steps { display: flex; flex-direction: column; gap: 0.55rem; }
+
+/* The short device code the user enters on the provider's page. */
+.connect-user-code {
+    align-self: flex-start;
+    padding: 0.35rem 0.9rem;
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    font-family: var(--mono);
+    font-size: 1.15rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    user-select: all;
+}
+
+.denied-hint { color: var(--error-text); }
 
 /* BlazorAgentView renders a content bubble even for tool-call-only messages. Our
    AgentChatRenderer always keeps tool-message content empty (the payload lives in the

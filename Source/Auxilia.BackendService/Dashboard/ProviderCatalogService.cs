@@ -6,12 +6,13 @@ using Auxilia.Workflows;
 
 namespace Auxilia.BackendService.Dashboard;
 
-/// <summary>Admin presentation override for one manifest-declared setting: label, help text, and default only — keys and kinds stay manifest-owned.</summary>
+/// <summary>Admin curation for one manifest-declared setting: presentation overrides plus <see cref="Disabled"/> — keys and kinds stay manifest-owned.</summary>
 public sealed record SettingDescriptorOverride(
     string Key,
     string? Label = null,
     string? HelpText = null,
-    string? DefaultValue = null);
+    string? DefaultValue = null,
+    bool Disabled = false);
 
 /// <summary>One curated catalog entry: the provider registration joined with its admin curation; <see cref="Descriptors"/> already carries the overrides merged in.</summary>
 public sealed record ProviderCatalogEntry(
@@ -27,6 +28,14 @@ public sealed record ProviderCatalogEntry(
     /// <summary>Whether this provider declares it can back a slot expecting <paramref name="contract"/>; unclassified providers match nothing.</summary>
     public bool Implements(string contract)
         => Contracts.Contains(contract, StringComparer.Ordinal);
+
+    /// <summary>An admin disabled this setting: editors neither show nor require it (stored values are kept).</summary>
+    public bool IsSettingDisabled(string key)
+        => Overrides.Any(o => o.Key == key && o.Disabled);
+
+    /// <summary>The descriptors editors offer — the manifest's set minus admin-disabled ones.</summary>
+    public IReadOnlyList<SettingDescriptor> EnabledDescriptors
+        => Descriptors.Where(d => !IsSettingDisabled(d.Key)).ToList();
 }
 
 /// <summary>
@@ -75,6 +84,33 @@ public sealed class ProviderCatalogService(
         await catalog.SaveAsync(updated, ct);
         await auditLog.AppendAsync(actor, "provider-catalog.availability-changed",
             providerType, available ? "available" : "unavailable", ct: ct);
+        return ToEntry(provider, updated);
+    }
+
+    /// <summary>
+    /// Disables (or re-enables) one manifest-declared setting of a provider: a disabled
+    /// setting disappears from every editor and is no longer required, so an administrator
+    /// can, for example, forbid entering an external API key and force preassigned
+    /// credentials. Stored values are untouched.
+    /// </summary>
+    public async Task<ProviderCatalogEntry> SetSettingDisabledAsync(
+        string actor, string providerType, string settingKey, bool disabled, CancellationToken ct = default)
+    {
+        var (provider, curation) = await RequireProviderAsync(providerType, ct);
+        var descriptors = ParseDescriptors(provider.SettingDescriptorsJson);
+        if (descriptors.All(d => d.Key != settingKey))
+            throw new InvalidOperationException(
+                $"'{providerType}' declares no setting '{settingKey}'.");
+
+        var overrides = ParseOverrides(curation.DescriptorOverridesJson).ToList();
+        var existing = overrides.FirstOrDefault(o => o.Key == settingKey);
+        overrides.Remove(existing!);
+        overrides.Add((existing ?? new SettingDescriptorOverride(settingKey)) with { Disabled = disabled });
+
+        var updated = curation with { DescriptorOverridesJson = JsonSerializer.Serialize(overrides) };
+        await catalog.SaveAsync(updated, ct);
+        await auditLog.AppendAsync(actor, "provider-catalog.setting-changed",
+            providerType, $"{settingKey}: {(disabled ? "disabled" : "enabled")}", ct: ct);
         return ToEntry(provider, updated);
     }
 

@@ -185,7 +185,8 @@ internal static class ScreenshotHarness
             ($"/workflows/{WorkflowConfigurationRecord.IdFor(EndToEndEnvironment.MailReviewConfigurationName)}/flow",
                 "18-workflow-flow.png"),
             ("/flows",                      "19-flows.png"),
-            ("/my-slots",                   "20-my-slots.png")
+            ("/my-slots",                   "20-my-slots.png"),
+            ("/connectors",                 "25-connectors.png")
         ];
         foreach (var (route, fileName) in pages)
             await CapturePageAsync(page, dashboardUrl, route, fileName, outputDir, captured);

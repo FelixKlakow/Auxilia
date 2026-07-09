@@ -109,7 +109,10 @@ public class ProviderCatalogAdminTests : DashboardComponentTestBase
         {
             Assert.That(html, Does.Contain("Registered providers"));
             Assert.That(html, Does.Contain("email-work-items"));
-            Assert.That(html, Does.Contain("Password · Secret"));
+            Assert.That(html, Does.Contain("Curate settings"),
+                "descriptor curation is offered per provider instead of a settings column");
+            Assert.That(html, Does.Contain("Registered workflows"),
+                "workflow enable/disable lives on this page");
             Assert.That(html, Does.Not.Contain("Access denied"));
         });
     }

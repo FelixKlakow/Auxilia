@@ -75,6 +75,17 @@ public sealed class SlotConfigurationSeedHandler(
 
     private async Task HandleUpsertAsync(UpsertSlotConfigurationCommand cmd, CancellationToken ct)
     {
+        // A slot configuration is keyed on (WorkflowType, SlotName); both are required and
+        // non-nullable on the record. Refuse to persist one with either missing so a malformed
+        // command can never write a poison document that breaks every subsequent read.
+        if (string.IsNullOrWhiteSpace(cmd.WorkflowType) || string.IsNullOrWhiteSpace(cmd.SlotName))
+        {
+            logger.LogWarning(
+                "Rejected slot configuration upsert with missing keys. WorkflowType={WorkflowType} SlotName={SlotName} ProviderType={ProviderType}",
+                cmd.WorkflowType, cmd.SlotName, cmd.ProviderType);
+            return;
+        }
+
         await slotStore.UpsertConfigurationAsync(cmd.WorkflowType,
             new StoredSlotConfiguration(cmd.SlotName, cmd.ProviderType, cmd.Settings, ConfigurationStatus.Valid), ct);
         logger.LogInformation(

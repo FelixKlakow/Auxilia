@@ -205,7 +205,7 @@ public class WorkflowConfigurationEditorTests : DashboardComponentTestBase
     }
 
     [Test]
-    public async Task EditorPage_AsOperator_RendersTheThreeSteps()
+    public async Task EditorPage_AsOperator_GatesSlotsAndTriggersOnWorkflowChoice()
     {
         using var client = CreateClient();
         var (_, username, password) = await CreatePrincipalAsync("Operator");
@@ -216,8 +216,8 @@ public class WorkflowConfigurationEditorTests : DashboardComponentTestBase
         Assert.Multiple(() =>
         {
             Assert.That(html, Does.Contain("Basics"));
-            Assert.That(html, Does.Contain("Slots"));
-            Assert.That(html, Does.Contain("Trigger"));
+            Assert.That(html, Does.Contain("Pick a workflow above first"),
+                "slots and triggers stay hidden until a workflow is chosen");
             Assert.That(html, Does.Not.Contain("Access denied"));
         });
     }

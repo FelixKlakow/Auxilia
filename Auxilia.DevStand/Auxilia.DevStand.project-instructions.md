@@ -8,6 +8,10 @@ running until quit, so the dashboard can be explored manually in a browser.
 
 - Visual Studio: set `Auxilia.DevStand` as startup project and F5, or
 - CLI: `dotnet run --project Auxilia.DevStand` (Docker Desktop must be running).
+- `--presentation` boots without pre-built configurations (configure live in the editor);
+  `--keep-data` persists Mongo and the dashboard's cookie-signing keys in named Docker
+  volumes (`auxilia-devstand-*`), so slots, workflows, and the login survive restarts
+  (delete the volumes for a factory reset).
 
 On startup it prints (and opens) the dashboard URL — login `admin` / `e2e-admin-pw` — plus
 the mapped GreenMail and MongoDB endpoints. Keys: `m` sends a demo mail that triggers a

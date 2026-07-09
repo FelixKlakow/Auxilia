@@ -1,0 +1,42 @@
+{
+  "ProviderType": "github-repository",
+  "ContentHashBase64": "",
+  "SignatureBase64": "",
+  "PublicKeyBase64": "",
+  "Contracts": ["Auxilia.Workflows.SourceControl.ISourceControlAccess"],
+  "Category": "workspace",
+  "Description": "A GitHub repository as the workflow's workspace: cloned into the run's workspace before launch, browsable over the GitHub API.",
+  "Settings": [
+    {
+      "Key": "RepositoryUrl",
+      "Label": "Repository URL",
+      "Kind": "Text",
+      "Required": true,
+      "HelpText": "HTTPS URL of the repository, e.g. https://github.com/acme/widget — cloned into the run's workspace before launch."
+    },
+    {
+      "Key": "Token",
+      "Label": "GitHub account",
+      "Kind": "Secret",
+      "Required": false,
+      "ConnectFlow": "github",
+      "HelpText": "The connected GitHub account (or a pasted personal access token); only needed for private repositories. Stored encrypted and never displayed back."
+    },
+    {
+      "Key": "Branch",
+      "Label": "Branch",
+      "Kind": "Text",
+      "Required": false,
+      "HelpText": "Branch the workflow reads from; the repository's 'main' branch is used when empty.",
+      "DefaultValue": "main"
+    },
+    {
+      "Key": "MountIntoWorkspace",
+      "Label": "Mount into workspace",
+      "Kind": "Boolean",
+      "Required": false,
+      "HelpText": "Clone the repository into the run's workspace so the workflow works on real files; turn off for API-only access.",
+      "DefaultValue": "true"
+    }
+  ]
+}

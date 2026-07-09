@@ -34,6 +34,14 @@ public interface IWorkflowBuilder
     IWorkflowBuilder DeclaresTrigger(string kind, string? description = null);
 
     /// <summary>
+    /// Declares a run input (<see cref="WorkflowInputDescriptor"/>) this workflow reads from
+    /// its dispatch context. Dispatch UIs render declared inputs generically; declaring no
+    /// required input lets runs start without any.
+    /// </summary>
+    IWorkflowBuilder RequiresInput(
+        string name, string label, bool required = false, string? description = null);
+
+    /// <summary>
     /// Declares an artifact type this workflow can process as input — the criteria used when
     /// chaining it after another workflow's typed output.
     /// </summary>

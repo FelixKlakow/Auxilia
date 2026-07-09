@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Auxilia.BackendService.PlatformHost;
 using Auxilia.Governance;
 using Auxilia.Governance.Policy;
 using Auxilia.Messaging;
@@ -6,6 +7,7 @@ using Auxilia.PlatformData;
 using Auxilia.PlatformData.Entities;
 using Auxilia.UniversalDataAccess;
 using Auxilia.Workflows.Messaging.Messages;
+using Microsoft.Extensions.Options;
 
 namespace Auxilia.BackendService.Dashboard;
 
@@ -21,7 +23,7 @@ public sealed class WorkflowRerunService(
     IPolicyEngine policyEngine,
     IMessageBusClient messageBus,
     AuditLog auditLog,
-    DashboardSettings settings)
+    IOptions<PlatformHostSettings> settings)
 {
     public const string RerunContextKey = "RERUN_OF";
 
@@ -48,7 +50,7 @@ public sealed class WorkflowRerunService(
             throw new InvalidOperationException($"workflow.trigger denied: {decision.Reason}");
 
         var command = BuildRerunCommand(original, instanceId, actorPrincipalId);
-        await messageBus.PublishAsync(settings.CommandQueueName, command, ct);
+        await messageBus.PublishAsync(settings.Value.CommandQueueName, command, ct);
 
         await auditLog.AppendAsync(actorPrincipalId.ToString("D"), "workflow.rerun",
             instanceId.ToString(), command.CommandId.ToString(),

@@ -8,6 +8,7 @@ using Auxilia.Messaging;
 using Auxilia.PlatformData;
 using Auxilia.PlatformData.Entities;
 using Auxilia.Workflows.Messaging;
+using Microsoft.AspNetCore.DataProtection;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -113,10 +114,12 @@ try
     builder.Services.AddPlatformEntity<SlotProviderRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<SlotConfigurationRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<ProviderCatalogRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<WorkflowCatalogRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<WorkflowConfigurationRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<WorkflowPackageRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<WorkflowSchemaRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<SlotInstanceRecord>(platformDataSettings);
+    builder.Services.AddPlatformEntity<ConnectorRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<MailboxTriggerRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<TriggerHealthRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<DashboardRecord>(platformDataSettings);
@@ -130,6 +133,10 @@ try
     builder.Services.AddGovernance(platformDataSettings, governanceSettings);
 
     // --- Dashboard: cookie sessions + SignalR fan-out ---
+    // Durable stands persist the data-protection keys so session cookies survive restarts.
+    if (builder.Configuration["DataProtection:KeysPath"] is { Length: > 0 } keysPath)
+        builder.Services.AddDataProtection()
+            .PersistKeysToFileSystem(new DirectoryInfo(keysPath));
     builder.Services.AddAuthentication(Microsoft.AspNetCore.Authentication.Cookies
             .CookieAuthenticationDefaults.AuthenticationScheme)
         .AddCookie(o =>
@@ -160,6 +167,29 @@ try
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.LiveViewBroker>();
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.DashboardComposer>();
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.ProviderCatalogService>();
+    // The platform's trigger vocabulary: assembled at runtime from these bindings — a new
+    // trigger kind is one additional registration, nothing else changes.
+    builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.Triggers.ITriggerKindBinding,
+        Auxilia.BackendService.Dashboard.Triggers.ScheduleTriggerBinding>();
+    builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.Triggers.ITriggerKindBinding,
+        Auxilia.BackendService.Dashboard.Triggers.ArtifactTriggerBinding>();
+    builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.Triggers.ITriggerKindBinding,
+        Auxilia.BackendService.Dashboard.Triggers.MailboxTriggerBinding>();
+    builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.Triggers.TriggerKindCatalog>();
+    // Connect flows: sign-in alternatives to pasting credentials, referenced from setting
+    // descriptors by key — like trigger kinds, one registration adds a flow.
+    var anthropicConnectSettings = new Auxilia.BackendService.Dashboard.Connect.AnthropicConnectSettings();
+    builder.Configuration.GetSection("Connect:AnthropicClaude").Bind(anthropicConnectSettings);
+    builder.Services.AddSingleton(anthropicConnectSettings);
+    builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.Connect.IConnectFlow,
+        Auxilia.BackendService.Dashboard.Connect.AnthropicClaudeConnectFlow>();
+    var gitHubConnectSettings = new Auxilia.BackendService.Dashboard.Connect.GitHubConnectSettings();
+    builder.Configuration.GetSection("Connect:GitHub").Bind(gitHubConnectSettings);
+    builder.Services.AddSingleton(gitHubConnectSettings);
+    builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.Connect.IConnectFlow,
+        Auxilia.BackendService.Dashboard.Connect.GitHubConnectFlow>();
+    builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.Connect.ConnectFlowRegistry>();
+    builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.ConnectorService>();
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.WorkflowConfigurationEditorService>();
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.SlotInstanceService>();
     builder.Services.AddSingleton<Auxilia.BackendService.Dashboard.WorkflowRerunService>();
@@ -174,9 +204,6 @@ try
     builder.Services.AddViewRenderer<Auxilia.BackendService.Components.AgentChatRenderer>(
         Auxilia.Workflows.Views.AgentChatEntry.RendererKey);
     builder.Services.AddCascadingAuthenticationState();
-    var dashboardSettings = new Auxilia.BackendService.Dashboard.DashboardSettings();
-    builder.Configuration.GetSection("Dashboard").Bind(dashboardSettings);
-    builder.Services.AddSingleton(dashboardSettings);
 
     // --- MCP server: AI-agent UI parity over Streamable HTTP, API-key authenticated ---
     builder.Services.AddMcpServer()

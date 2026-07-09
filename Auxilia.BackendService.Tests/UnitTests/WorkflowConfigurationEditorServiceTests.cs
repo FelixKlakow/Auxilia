@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Auxilia.Adapters.Email;
 using Auxilia.BackendService.Dashboard;
+using Auxilia.BackendService.Dashboard.Triggers;
 using Auxilia.Governance.Policy;
 using Auxilia.Messaging;
 using Moq;
@@ -49,6 +50,7 @@ public class WorkflowConfigurationEditorServiceTests
     private IDataAccess<SlotInstanceRecord> _slotInstances = null!;
     private IDataAccess<MailboxTriggerRecord> _mailboxTriggerRecords = null!;
     private IDataAccess<TriggerHealthRecord> _triggerHealth = null!;
+    private IDataAccess<WorkflowCatalogRecord> _workflowCatalog = null!;
     private IDataAccess<AuditRecord> _audit = null!;
     private NullSettingsProtector _protector = null!;
     private WorkflowConfigurationEditorService _sut = null!;
@@ -68,6 +70,7 @@ public class WorkflowConfigurationEditorServiceTests
         _slotInstances = new InMemoryDataAccess<SlotInstanceRecord>();
         _mailboxTriggerRecords = new InMemoryDataAccess<MailboxTriggerRecord>();
         _triggerHealth = new InMemoryDataAccess<TriggerHealthRecord>();
+        _workflowCatalog = new InMemoryDataAccess<WorkflowCatalogRecord>();
         _audit = new InMemoryDataAccess<AuditRecord>();
         _protector = new NullSettingsProtector();
         var auditLog = new AuditLog(_audit, TimeProvider.System);
@@ -75,12 +78,45 @@ public class WorkflowConfigurationEditorServiceTests
         policyEngine
             .Setup(p => p.EvaluateAsync(It.IsAny<PolicyContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(PolicyDecision.Allow("test"));
+        var triggerKinds = new TriggerKindCatalog(
+        [
+            new ScheduleTriggerBinding(_schedules, auditLog, TimeProvider.System),
+            new ArtifactTriggerBinding(_chains, auditLog),
+            new MailboxTriggerBinding(_mailboxTriggerRecords, _slotInstances, _triggerHealth, auditLog)
+        ]);
         _sut = new WorkflowConfigurationEditorService(
             _configurations, _instances, _schedules, _chains, _slots, _providers,
-            _packages, _schemas, _slotInstances, _mailboxTriggerRecords, _triggerHealth,
+            _packages, _schemas, _slotInstances, _workflowCatalog, triggerKinds,
             new ProviderCatalogService(_providers, new InMemoryDataAccess<ProviderCatalogRecord>(), auditLog),
-            _protector, _bus, auditLog, TimeProvider.System,
-            policyEngine.Object, new DashboardSettings());
+            _protector, _bus, auditLog,
+            policyEngine.Object,
+            Microsoft.Extensions.Options.Options.Create(
+                new Auxilia.BackendService.PlatformHost.PlatformHostSettings()));
+    }
+
+    private static TriggerDraft ScheduleDraft(int intervalSeconds, Guid? existingId = null)
+    {
+        var draft = new TriggerDraft { Kind = TriggerDeclaration.Schedule, ExistingId = existingId };
+        draft.Settings[ScheduleTriggerBinding.IntervalSecondsKey] = intervalSeconds.ToString();
+        return draft;
+    }
+
+    private static TriggerDraft ArtifactDraft(string artifactType)
+    {
+        var draft = new TriggerDraft { Kind = TriggerDeclaration.Artifact };
+        draft.Settings[ArtifactTriggerBinding.ArtifactTypeKey] = artifactType;
+        return draft;
+    }
+
+    private static TriggerDraft MailboxDraft(
+        Guid? instanceId = null, int pollIntervalSeconds = 15, string subjectContains = "", string fromContains = "")
+    {
+        var draft = new TriggerDraft { Kind = TriggerDeclaration.Mailbox };
+        draft.Settings[MailboxTriggerBinding.MailboxInstanceIdKey] = instanceId?.ToString() ?? "";
+        draft.Settings[MailboxTriggerBinding.PollIntervalSecondsKey] = pollIntervalSeconds.ToString();
+        draft.Settings[MailboxTriggerBinding.SubjectContainsKey] = subjectContains;
+        draft.Settings[MailboxTriggerBinding.FromContainsKey] = fromContains;
+        return draft;
     }
 
     [TearDown]
@@ -97,6 +133,7 @@ public class WorkflowConfigurationEditorServiceTests
         (_slotInstances as IDisposable)?.Dispose();
         (_triggerHealth as IDisposable)?.Dispose();
         (_mailboxTriggerRecords as IDisposable)?.Dispose();
+        (_workflowCatalog as IDisposable)?.Dispose();
         (_audit as IDisposable)?.Dispose();
     }
 
@@ -185,6 +222,18 @@ public class WorkflowConfigurationEditorServiceTests
             Id = WorkflowSchemaRecord.IdFor(workflowType),
             WorkflowType = workflowType,
             SchemaJson = JsonSerializer.Serialize(new WorkflowSchema(workflowType, slots, []) { Version = "1.2" })
+        });
+
+    private Task SeedSchemaWithTriggersAsync(
+        string workflowType = "pull-request-code-review", params string[] triggerKinds)
+        => _schemas.SaveAsync(new WorkflowSchemaRecord
+        {
+            Id = WorkflowSchemaRecord.IdFor(workflowType),
+            WorkflowType = workflowType,
+            SchemaJson = JsonSerializer.Serialize(new WorkflowSchema(workflowType, [], [])
+            {
+                Triggers = triggerKinds.Select(k => new TriggerDeclaration(k)).ToList()
+            })
         });
 
     [Test]
@@ -557,7 +606,7 @@ public class WorkflowConfigurationEditorServiceTests
         await SeedProviderAsync();
         var actor = Guid.NewGuid();
         var draft = NewDraft();
-        draft.Triggers.Add(new TriggerDraft { Kind = TriggerKind.Schedule, IntervalSeconds = 600 });
+        draft.Triggers.Add(ScheduleDraft(600));
 
         var name = await _sut.SaveAsync(actor.ToString("D"), actor, draft);
 
@@ -578,17 +627,12 @@ public class WorkflowConfigurationEditorServiceTests
         await SeedProviderAsync();
         await SeedInstanceAsync();
         var draft = NewDraft();
-        draft.Triggers.Add(new TriggerDraft { Kind = TriggerKind.Schedule, IntervalSeconds = 600 });
-        draft.Triggers.Add(new TriggerDraft { Kind = TriggerKind.Schedule, IntervalSeconds = 86400 });
-        draft.Triggers.Add(new TriggerDraft { Kind = TriggerKind.ArtifactChain, ArtifactType = "code-review-result" });
-        draft.Triggers.Add(new TriggerDraft
-        {
-            Kind = TriggerKind.Mailbox,
-            MailboxInstanceId = SlotInstanceRecord.IdFor("team-mailbox"),
-            PollIntervalSeconds = 30,
-            SubjectContains = "[review]",
-            FromContains = "@team.example"
-        });
+        draft.Triggers.Add(ScheduleDraft(600));
+        draft.Triggers.Add(ScheduleDraft(86400));
+        draft.Triggers.Add(ArtifactDraft("code-review-result"));
+        draft.Triggers.Add(MailboxDraft(
+            SlotInstanceRecord.IdFor("team-mailbox"), pollIntervalSeconds: 30,
+            subjectContains: "[review]", fromContains: "@team.example"));
 
         var name = await _sut.SaveAsync("actor", null, draft);
 
@@ -612,8 +656,8 @@ public class WorkflowConfigurationEditorServiceTests
     {
         await SeedProviderAsync();
         var draft = NewDraft();
-        draft.Triggers.Add(new TriggerDraft { Kind = TriggerKind.Schedule, IntervalSeconds = 600 });
-        draft.Triggers.Add(new TriggerDraft { Kind = TriggerKind.ArtifactChain, ArtifactType = "result" });
+        draft.Triggers.Add(ScheduleDraft(600));
+        draft.Triggers.Add(ArtifactDraft("result"));
         var name = await _sut.SaveAsync("actor", null, draft);
         await SeedConfigurationAsync(); // the SI has applied the upsert by now
 
@@ -624,12 +668,7 @@ public class WorkflowConfigurationEditorServiceTests
 
         var edit = NewDraft();
         edit.ExistingName = name;
-        edit.Triggers.Add(new TriggerDraft
-        {
-            ExistingId = stored.Id,
-            Kind = TriggerKind.Schedule,
-            IntervalSeconds = 1200
-        }); // the artifact chain is gone
+        edit.Triggers.Add(ScheduleDraft(1200, existingId: stored.Id)); // the artifact chain is gone
         await _sut.SaveAsync("actor", null, edit);
 
         Assert.Multiple(async () =>
@@ -649,7 +688,7 @@ public class WorkflowConfigurationEditorServiceTests
     {
         await SeedProviderAsync();
         var draft = NewDraft();
-        draft.Triggers.Add(new TriggerDraft { Kind = TriggerKind.Schedule, IntervalSeconds = 0 });
+        draft.Triggers.Add(ScheduleDraft(0));
 
         Assert.ThrowsAsync<ArgumentException>(() => _sut.SaveAsync("actor", null, draft));
     }
@@ -659,11 +698,197 @@ public class WorkflowConfigurationEditorServiceTests
     {
         await SeedProviderAsync();
         var draft = NewDraft();
-        draft.Triggers.Add(new TriggerDraft { Kind = TriggerKind.Mailbox });
+        draft.Triggers.Add(MailboxDraft());
 
         var exception = Assert.ThrowsAsync<ArgumentException>(() => _sut.SaveAsync("actor", null, draft));
 
         Assert.That(exception!.Message, Does.Contain("mailbox"));
+    }
+
+    // ------------------------------------------------------------------ provider slot targets
+
+    [Test]
+    public async Task SlotTargets_DeriveFromSchemaContracts_NotFromHandPickedKinds()
+    {
+        await _providers.SaveAsync(new SlotProviderRecord
+        {
+            Id = SlotProviderRecord.IdFor("email-work-items"),
+            ProviderType = "email-work-items",
+            DllPath = "/plugins/email.slothandler.dll",
+            ContractsJson = JsonSerializer.Serialize(new[] { "Auxilia.Workflows.TaskSource.IWorkItemAccess" })
+        });
+        await _providers.SaveAsync(new SlotProviderRecord
+        {
+            Id = SlotProviderRecord.IdFor("claude-code-cli"),
+            ProviderType = "claude-code-cli",
+            DllPath = "/plugins/claude.slothandler.dll",
+            ContractsJson = JsonSerializer.Serialize(new[] { "Auxilia.ClaudeCode.Workflow.ICodingAgent" })
+        });
+        await SeedPackageAsync();
+        await SeedSchemaAsync(slots:
+        [
+            new SlotDefinition("work-items", null)
+                { Contract = "Auxilia.Workflows.TaskSource.IWorkItemAccess" },
+            new SlotDefinition("repository", null)
+                { Contract = "Auxilia.Workflows.SourceControl.ISourceControlAccess" }
+        ]);
+
+        var targets = await _sut.SlotTargetsByProviderAsync();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(targets["email-work-items"].Single(),
+                Is.EqualTo(new ProviderSlotTarget("work-items", "Pull-request code review")));
+            Assert.That(targets["claude-code-cli"], Is.Empty,
+                "a coding agent can never be configured for a workspace slot");
+        });
+    }
+
+    [Test]
+    public async Task SlotTargets_OfAnAdminDisabledWorkflow_Disappear()
+    {
+        await _providers.SaveAsync(new SlotProviderRecord
+        {
+            Id = SlotProviderRecord.IdFor("email-work-items"),
+            ProviderType = "email-work-items",
+            DllPath = "/plugins/email.slothandler.dll",
+            ContractsJson = JsonSerializer.Serialize(new[] { "Auxilia.Workflows.TaskSource.IWorkItemAccess" })
+        });
+        await SeedPackageAsync();
+        await SeedSchemaAsync(slots:
+        [
+            new SlotDefinition("work-items", null)
+                { Contract = "Auxilia.Workflows.TaskSource.IWorkItemAccess" }
+        ]);
+        await _sut.SetWorkflowEnabledAsync("actor", "pull-request-code-review", enabled: false);
+
+        var targets = await _sut.SlotTargetsByProviderAsync();
+
+        Assert.That(targets["email-work-items"], Is.Empty);
+    }
+
+    // ------------------------------------------------------------------ declared trigger kinds
+
+    [Test]
+    public async Task Save_TriggerKindTheWorkflowDoesNotDeclare_IsRejected()
+    {
+        await SeedProviderAsync();
+        await SeedSchemaWithTriggersAsync(triggerKinds: TriggerDeclaration.Mailbox);
+        var draft = NewDraft();
+        draft.Triggers.Add(ScheduleDraft(600));
+
+        var exception = Assert.ThrowsAsync<ArgumentException>(() => _sut.SaveAsync("actor", null, draft));
+
+        Assert.That(exception!.Message, Does.Contain("does not support 'schedule' triggers"));
+    }
+
+    [Test]
+    public async Task Save_DeclaredTriggerKind_IsAccepted()
+    {
+        await SeedProviderAsync();
+        await SeedSchemaWithTriggersAsync(triggerKinds: [TriggerDeclaration.Schedule, TriggerDeclaration.Manual]);
+        var draft = NewDraft();
+        draft.Triggers.Add(ScheduleDraft(600));
+
+        var name = await _sut.SaveAsync("actor", null, draft);
+
+        Assert.That(name, Is.EqualTo("team-review"));
+    }
+
+    [Test]
+    public async Task Save_UnknownTriggerKind_IsRejected()
+    {
+        await SeedProviderAsync();
+        var draft = NewDraft();
+        draft.Triggers.Add(new TriggerDraft { Kind = "webhook" });
+
+        var exception = Assert.ThrowsAsync<ArgumentException>(() => _sut.SaveAsync("actor", null, draft));
+
+        Assert.That(exception!.Message, Does.Contain("Unknown trigger kind 'webhook'"));
+    }
+
+    [Test]
+    public async Task RunNow_WorkflowDeclaringTriggersWithoutManual_IsRejected()
+    {
+        await SeedProviderAsync();
+        await SeedSchemaWithTriggersAsync(triggerKinds: TriggerDeclaration.Mailbox);
+        await SeedConfigurationAsync();
+
+        var exception = Assert.ThrowsAsync<InvalidOperationException>(() => _sut.RunNowAsync(
+            "actor", Guid.NewGuid(), WorkflowConfigurationRecord.IdFor("team-review"),
+            new Dictionary<string, string> { ["instruction"] = "do the thing" }));
+
+        Assert.That(exception!.Message, Does.Contain("manual"));
+    }
+
+    [Test]
+    public async Task RunNow_WorkflowDeclaringManual_IsAccepted()
+    {
+        await SeedProviderAsync();
+        await SeedSchemaWithTriggersAsync(
+            triggerKinds: [TriggerDeclaration.Manual, TriggerDeclaration.Mailbox]);
+        await SeedConfigurationAsync();
+
+        var commandId = await _sut.RunNowAsync(
+            "actor", Guid.NewGuid(), WorkflowConfigurationRecord.IdFor("team-review"),
+            new Dictionary<string, string> { ["instruction"] = "do the thing" });
+
+        Assert.That(commandId, Is.Not.EqualTo(Guid.Empty));
+    }
+
+    // ------------------------------------------------------------------ workflow catalog
+
+    [Test]
+    public async Task SetWorkflowEnabled_False_HidesItFromTheRegistryAndAudits()
+    {
+        await SeedPackageAsync();
+
+        await _sut.SetWorkflowEnabledAsync("actor", "pull-request-code-review", enabled: false);
+
+        Assert.Multiple(async () =>
+        {
+            Assert.That((await _sut.RegisteredWorkflowsAsync()).Single().Enabled, Is.False);
+            Assert.That((await _audit.ReadAsync())
+                .Any(a => a.Action == "workflow-catalog.enabled-changed" && a.Outcome == "disabled"), Is.True);
+        });
+    }
+
+    [Test]
+    public async Task RunNow_OfAnAdminDisabledWorkflowType_IsRejected()
+    {
+        await SeedProviderAsync();
+        await SeedConfigurationAsync();
+        await _sut.SetWorkflowEnabledAsync("actor", "pull-request-code-review", enabled: false);
+
+        var exception = Assert.ThrowsAsync<InvalidOperationException>(() => _sut.RunNowAsync(
+            "actor", Guid.NewGuid(), WorkflowConfigurationRecord.IdFor("team-review"),
+            new Dictionary<string, string> { ["instruction"] = "do the thing" }));
+
+        Assert.That(exception!.Message, Does.Contain("administrator disabled"));
+    }
+
+    [Test]
+    public async Task Save_NewConfigurationOfAnAdminDisabledWorkflow_IsRejected()
+    {
+        await SeedProviderAsync();
+        await _sut.SetWorkflowEnabledAsync("actor", "pull-request-code-review", enabled: false);
+
+        var exception = Assert.ThrowsAsync<ArgumentException>(() => _sut.SaveAsync("actor", null, NewDraft()));
+
+        Assert.That(exception!.Message, Does.Contain("cannot be newly configured"));
+    }
+
+    [Test]
+    public async Task Save_ExistingConfigurationOfAnAdminDisabledWorkflow_StaysEditable()
+    {
+        await SeedProviderAsync();
+        await SeedConfigurationAsync();
+        await _sut.SetWorkflowEnabledAsync("actor", "pull-request-code-review", enabled: false);
+
+        var draft = NewDraft();
+        draft.ExistingName = "team-review";
+
+        Assert.That(await _sut.SaveAsync("actor", null, draft), Is.EqualTo("team-review"));
     }
 
     // ------------------------------------------------------------------ flow view
@@ -717,8 +942,8 @@ public class WorkflowConfigurationEditorServiceTests
         Assert.Multiple(() =>
         {
             Assert.That(flow!.Triggers.Select(t => t.Kind),
-                Is.EquivalentTo(new[] { TriggerKind.Schedule, TriggerKind.Mailbox }));
-            Assert.That(flow.Triggers.Single(t => t.Kind == TriggerKind.Mailbox).Label,
+                Is.EquivalentTo(new[] { TriggerDeclaration.Schedule, TriggerDeclaration.Mailbox }));
+            Assert.That(flow.Triggers.Single(t => t.Kind == TriggerDeclaration.Mailbox).Label,
                 Is.EqualTo("Team mailbox"));
             var output = flow.Outputs.Single();
             Assert.That(output.Name, Is.EqualTo("code-review-result"));
@@ -815,13 +1040,14 @@ public class WorkflowConfigurationEditorServiceTests
 
         var commandId = await _sut.RunNowAsync(
             actor.ToString("D"), actor, WorkflowConfigurationRecord.IdFor("team-review"),
-            title: "Session A", instruction: "Refactor the parser");
+            new Dictionary<string, string> { ["instruction"] = "Refactor the parser" });
 
         var (topic, message) = _bus.Published.Single(p => p.Message is RunWorkflowCommand);
         var command = (RunWorkflowCommand)message;
         Assert.Multiple(async () =>
         {
-            Assert.That(topic, Is.EqualTo(new DashboardSettings().CommandQueueName));
+            Assert.That(topic,
+                Is.EqualTo(new Auxilia.BackendService.PlatformHost.PlatformHostSettings().CommandQueueName));
             Assert.That(command.CommandId, Is.EqualTo(commandId));
             Assert.That(command.WorkflowType, Is.Null,
                 "the configuration is the single source of truth — no coordinates in the command");
@@ -829,30 +1055,72 @@ public class WorkflowConfigurationEditorServiceTests
             Assert.That(command.WorkflowConfigurationId,
                 Is.EqualTo(WorkflowConfigurationRecord.IdFor("team-review")));
             Assert.That(command.RequestedBy, Is.EqualTo(actor));
-            Assert.That(command.Context["Title"], Is.EqualTo("Session A"));
+            Assert.That(command.Context["Title"], Is.EqualTo("Run of 'Team review'"));
+            Assert.That(command.Context["instruction"], Is.EqualTo("Refactor the parser"),
+                "each input lands under its declared name");
             Assert.That(command.Context["Body"], Is.EqualTo("Refactor the parser"),
-                "the operator's instruction becomes the run's input");
+                "the instruction additionally lands as the mail-shaped Body");
             Assert.That((await _audit.ReadAsync()).Any(a => a.Action == "workflow-configuration.run-now"),
                 Is.True);
         });
     }
 
     [Test]
-    public async Task RunNow_WithoutInstruction_IsRejected()
+    public async Task RunNow_WorkflowWithoutDeclaredInputs_RunsWithoutAny()
     {
         await SeedProviderAsync();
-        await SeedConfigurationAsync(); // enabled
+        await SeedSchemaWithTriggersAsync(triggerKinds: TriggerDeclaration.Manual); // declares no inputs
+        await SeedConfigurationAsync();
+
+        await _sut.RunNowAsync(
+            "actor", Guid.NewGuid(), WorkflowConfigurationRecord.IdFor("team-review"));
+
+        var command = (RunWorkflowCommand)_bus.Published.Single(p => p.Message is RunWorkflowCommand).Message;
+        Assert.Multiple(() =>
+        {
+            Assert.That(command.Context["Title"], Is.EqualTo("Run of 'Team review'"));
+            Assert.That(command.Context.ContainsKey("Body"), Is.False, "no input, no body");
+        });
+    }
+
+    [Test]
+    public async Task RunNow_RequiredDeclaredInput_MustBeProvided()
+    {
+        await SeedProviderAsync();
+        await _schemas.SaveAsync(new WorkflowSchemaRecord
+        {
+            Id = WorkflowSchemaRecord.IdFor("pull-request-code-review"),
+            WorkflowType = "pull-request-code-review",
+            SchemaJson = JsonSerializer.Serialize(new WorkflowSchema("pull-request-code-review", [], [])
+            {
+                Inputs = [new WorkflowInputDescriptor("instruction", "Instruction", Required: true)]
+            })
+        });
+        await SeedConfigurationAsync();
 
         var exception = Assert.ThrowsAsync<ArgumentException>(() => _sut.RunNowAsync(
             "actor", Guid.NewGuid(), WorkflowConfigurationRecord.IdFor("team-review"),
-            title: "x", instruction: "   "));
+            new Dictionary<string, string> { ["instruction"] = "   " }));
 
         Assert.Multiple(() =>
         {
-            Assert.That(exception!.Message, Does.Contain("instruction is required"));
+            Assert.That(exception!.Message, Does.Contain("Instruction"));
             Assert.That(_bus.Published.OfType<(string, object)>()
                 .Select(p => p.Item2).OfType<RunWorkflowCommand>(), Is.Empty);
         });
+    }
+
+    [Test]
+    public async Task RunNow_UnknownSchema_TreatsInputAsOptional()
+    {
+        await SeedProviderAsync();
+        await SeedConfigurationAsync(); // no schema stored
+
+        await _sut.RunNowAsync(
+            "actor", Guid.NewGuid(), WorkflowConfigurationRecord.IdFor("team-review"));
+
+        Assert.That(_bus.Published.Any(p => p.Message is RunWorkflowCommand), Is.True,
+            "a workflow the platform knows nothing about must stay startable without input");
     }
 
     [Test]
@@ -863,7 +1131,7 @@ public class WorkflowConfigurationEditorServiceTests
 
         var exception = Assert.ThrowsAsync<InvalidOperationException>(() => _sut.RunNowAsync(
             "actor", Guid.NewGuid(), WorkflowConfigurationRecord.IdFor("team-review"),
-            title: "x", instruction: "do the thing"));
+            new Dictionary<string, string> { ["instruction"] = "do the thing" }));
 
         Assert.Multiple(() =>
         {
@@ -900,10 +1168,10 @@ public class WorkflowConfigurationEditorServiceTests
         var now = DateTimeOffset.UtcNow;
         Assert.Multiple(() =>
         {
-            Assert.That(WorkflowConfigurationEditorService.MailboxHealth(null),
+            Assert.That(MailboxTriggerBinding.Health(null),
                 Is.EqualTo(("not polled yet", false)));
 
-            var (failingText, failing) = WorkflowConfigurationEditorService.MailboxHealth(new TriggerHealthRecord
+            var (failingText, failing) = MailboxTriggerBinding.Health(new TriggerHealthRecord
             {
                 Id = Guid.NewGuid(),
                 LastPollUtc = now,
@@ -913,7 +1181,7 @@ public class WorkflowConfigurationEditorServiceTests
             Assert.That(failing, Is.True);
             Assert.That(failingText, Does.Contain("failing since").And.Contain("authentication failed"));
 
-            var (healthyText, healthyFailing) = WorkflowConfigurationEditorService.MailboxHealth(new TriggerHealthRecord
+            var (healthyText, healthyFailing) = MailboxTriggerBinding.Health(new TriggerHealthRecord
             {
                 Id = Guid.NewGuid(),
                 LastPollUtc = now,
@@ -941,14 +1209,14 @@ public class WorkflowConfigurationEditorServiceTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(WorkflowConfigurationEditorService.ScheduleHealth(Schedule(false, null), now).Text,
+            Assert.That(ScheduleTriggerBinding.Health(Schedule(false, null), now).Text,
                 Is.EqualTo("disabled"));
-            Assert.That(WorkflowConfigurationEditorService.ScheduleHealth(Schedule(true, null), now).Text,
+            Assert.That(ScheduleTriggerBinding.Health(Schedule(true, null), now).Text,
                 Is.EqualTo("due now"));
-            Assert.That(WorkflowConfigurationEditorService.ScheduleHealth(
+            Assert.That(ScheduleTriggerBinding.Health(
                     Schedule(true, now.AddHours(-2)), now).Text,
                 Is.EqualTo("due now"), "an overdue schedule reads as due now");
-            Assert.That(WorkflowConfigurationEditorService.ScheduleHealth(
+            Assert.That(ScheduleTriggerBinding.Health(
                     Schedule(true, now.AddMinutes(-30)), now).Text,
                 Does.StartWith("next due in"));
         });

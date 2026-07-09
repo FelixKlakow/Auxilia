@@ -2,12 +2,13 @@
 @attribute [Authorize]
 @using Auxilia.Workflows
 @inject ProviderCatalogService Catalog
+@inject WorkflowConfigurationEditorService Editor
 @inject IPolicyEngine PolicyEngine
 
 <PageTitle>Provider catalog — Auxilia</PageTitle>
 
 <PageHeader Title="Provider catalog"
-            Subtitle="Which registered slot providers may be picked when configuring slot instances and workflows. Availability is deny-by-default; everything else comes from the signed plugin manifest."/>
+            Subtitle="Which workflows may run on this platform and which slot providers may be configured for them. Provider availability is deny-by-default."/>
 
 @if (!_loaded)
 {
@@ -26,6 +27,56 @@ else
 
     <section class="card">
         <div class="card-header">
+            <h2>Registered workflows</h2>
+            <p class="card-subtitle">A disabled workflow is not offered for new configurations and manual runs of it are rejected.</p>
+        </div>
+        @if (_workflows.Count == 0)
+        {
+            <div class="card-body"><p class="muted view-empty">No workflows registered yet.</p></div>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                <tr>
+                    <th>Workflow</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var workflow in _workflows)
+                {
+                    <tr>
+                        <td>
+                            <span class="cell-strong">@workflow.DisplayName</span>
+                            <span class="cell-sub">@workflow.WorkflowType@(workflow.Version.Length > 0 ? $" · v{workflow.Version}" : "")</span>
+                        </td>
+                        <td>
+                            @if (workflow.Enabled)
+                            {
+                                <span class="badge badge-state badge-valid">enabled</span>
+                            }
+                            else
+                            {
+                                <span class="badge badge-state">disabled</span>
+                            }
+                        </td>
+                        <td>
+                            <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                    @onclick="() => ToggleWorkflowAsync(workflow)">
+                                @(workflow.Enabled ? "Disable" : "Enable")
+                            </button>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </section>
+
+    <section class="card">
+        <div class="card-header">
             <h2>Registered providers</h2>
             <p class="card-subtitle">A provider is offered in the editors only after it is made available here.</p>
         </div>
@@ -40,8 +91,7 @@ else
                 <tr>
                     <th>Provider type</th>
                     <th>Category</th>
-                    <th>Contracts</th>
-                    <th>Settings</th>
+                    <th>Usable in workflows</th>
                     <th>Availability</th>
                     <th>Actions</th>
                 </tr>
@@ -68,23 +118,14 @@ else
                             }
                         </td>
                         <td>
-                            @if (entry.Contracts.Count == 0)
+                            @{ var usable = UsableWorkflows(entry); }
+                            @if (usable.Count == 0)
                             {
-                                <span class="muted">(none declared)</span>
+                                <span class="muted">no workflow can use this provider</span>
                             }
-                            @foreach (var contract in entry.Contracts)
+                            @foreach (var workflow in usable)
                             {
-                                <span class="badge badge-secret" title="@contract">@ShortName(contract)</span>
-                            }
-                        </td>
-                        <td>
-                            @if (entry.Descriptors.Count == 0)
-                            {
-                                <span class="muted">(none declared)</span>
-                            }
-                            @foreach (var descriptor in entry.Descriptors)
-                            {
-                                <span class="badge badge-secret" title="@descriptor.Label">@descriptor.Key · @descriptor.Kind@(descriptor.Required ? " *" : "")</span>
+                                <span class="type-chip" title="@workflow.WorkflowType">@workflow.DisplayName</span>
                             }
                         </td>
                         <td>
@@ -98,12 +139,50 @@ else
                             }
                         </td>
                         <td>
-                            <button class="btn btn-secondary btn-sm" disabled="@_busy"
-                                    @onclick="() => ToggleAvailabilityAsync(entry)">
-                                @(entry.Available ? "Make unavailable" : "Make available")
-                            </button>
+                            <div class="cell-actions">
+                                <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                        @onclick="() => ToggleAvailabilityAsync(entry)">
+                                    @(entry.Available ? "Make unavailable" : "Make available")
+                                </button>
+                                @if (entry.Descriptors.Count > 0)
+                                {
+                                    <button class="btn btn-secondary btn-sm"
+                                            @onclick="() => _curatedProvider = _curatedProvider == entry.ProviderType ? null : entry.ProviderType">
+                                        @(_curatedProvider == entry.ProviderType ? "Close settings" : "Curate settings")
+                                    </button>
+                                }
+                            </div>
                         </td>
                     </tr>
+                    @if (_curatedProvider == entry.ProviderType)
+                    {
+                        <tr>
+                            <td colspan="5">
+                                <p class="field-hint">
+                                    A disabled setting disappears from every editor and is no longer
+                                    required — e.g. disable the external API key to only allow
+                                    preassigned credentials. Stored values are kept.
+                                </p>
+                                <div class="cell-actions">
+                                    @foreach (var descriptor in entry.Descriptors)
+                                    {
+                                        var disabled = entry.IsSettingDisabled(descriptor.Key);
+                                        <span class="badge badge-secret" title="@descriptor.HelpText">
+                                            @descriptor.Label (@descriptor.Kind)@(descriptor.Required ? " *" : "")
+                                            @if (disabled)
+                                            {
+                                                <em> — disabled</em>
+                                            }
+                                        </span>
+                                        <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                                @onclick="() => ToggleSettingAsync(entry, descriptor.Key, !disabled)">
+                                            @(disabled ? "Enable" : "Disable")
+                                        </button>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
                 }
                 </tbody>
             </table>
@@ -122,7 +201,9 @@ else
     private string _denyReason = "";
     private string? _error;
     private Guid? _principalId;
+    private string? _curatedProvider;
     private IReadOnlyList<ProviderCatalogEntry> _entries = [];
+    private IReadOnlyList<RegisteredWorkflow> _workflows = [];
 
     protected override async Task OnInitializedAsync()
     {
@@ -141,22 +222,43 @@ else
         }
 
         if (_allowed)
-            _entries = await Catalog.ListAsync();
+            await LoadAsync();
         _loaded = true;
     }
 
-    private static string ShortName(string contract)
-        => contract.LastIndexOf('.') is var dot and >= 0 ? contract[(dot + 1)..] : contract;
+    private async Task LoadAsync()
+    {
+        _entries = await Catalog.ListAsync();
+        _workflows = await Editor.RegisteredWorkflowsAsync();
+    }
+
+    /// <summary>Enabled workflows with a slot this provider can back (contract match).</summary>
+    private IReadOnlyList<RegisteredWorkflow> UsableWorkflows(ProviderCatalogEntry entry)
+        => _workflows
+            .Where(w => w.Enabled && w.Slots.Any(s =>
+                s.Contract is { Length: > 0 } contract && entry.Implements(contract)))
+            .ToList();
 
     private async Task ToggleAvailabilityAsync(ProviderCatalogEntry entry)
+        => await MutateAsync(() => Catalog.SetAvailabilityAsync(
+            _principalId!.Value.ToString("D"), entry.ProviderType, !entry.Available));
+
+    private async Task ToggleSettingAsync(ProviderCatalogEntry entry, string key, bool disabled)
+        => await MutateAsync(() => Catalog.SetSettingDisabledAsync(
+            _principalId!.Value.ToString("D"), entry.ProviderType, key, disabled));
+
+    private async Task ToggleWorkflowAsync(RegisteredWorkflow workflow)
+        => await MutateAsync(async () => await Editor.SetWorkflowEnabledAsync(
+            _principalId!.Value.ToString("D"), workflow.WorkflowType, !workflow.Enabled));
+
+    private async Task MutateAsync(Func<Task> action)
     {
         _error = null;
         _busy = true;
         try
         {
-            await Catalog.SetAvailabilityAsync(
-                _principalId!.Value.ToString("D"), entry.ProviderType, !entry.Available);
-            _entries = await Catalog.ListAsync();
+            await action();
+            await LoadAsync();
         }
         catch (Exception ex)
         {
