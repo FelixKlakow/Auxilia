@@ -4,7 +4,6 @@ namespace Auxilia.Slots.ClaudeCode;
 public sealed record ClaudeCodeCliOptions
 {
     public const string DefaultCliPath = "claude";
-    public const int DefaultMaxTurns = 25;
 
     /// <summary>
     /// Claude account token (from 'claude setup-token') — the preferred credential; reaches
@@ -20,8 +19,8 @@ public sealed record ClaudeCodeCliOptions
     /// <summary>Optional model override; the CLI's default model is used when unset.</summary>
     public string? Model { get; init; }
 
-    /// <summary>Safety cap on agent turns per run; deliberately not a manifest setting.</summary>
-    public int MaxTurns { get; init; } = DefaultMaxTurns;
+    /// <summary>Optional cap on agent turns per run; unset (default) lets the agent finish its task.</summary>
+    public int? MaxTurns { get; init; }
 
     public bool HasCredential
         => !string.IsNullOrWhiteSpace(OAuthToken) || !string.IsNullOrWhiteSpace(ApiKey);
@@ -34,6 +33,6 @@ public sealed record ClaudeCodeCliOptions
         Model = settings.GetValueOrDefault("Model") is { Length: > 0 } model ? model : null,
         MaxTurns = int.TryParse(settings.GetValueOrDefault("MaxTurns"), out var turns) && turns > 0
             ? turns
-            : DefaultMaxTurns
+            : null
     };
 }

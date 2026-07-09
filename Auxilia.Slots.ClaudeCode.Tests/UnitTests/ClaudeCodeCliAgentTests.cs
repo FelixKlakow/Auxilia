@@ -75,6 +75,17 @@ public sealed class ClaudeCodeCliAgentTests
     }
 
     [Test]
+    public void BuildStartInfo_WithoutMaxTurns_PassesNoCap()
+    {
+        var agent = new ClaudeCodeCliAgent(new ClaudeCodeCliOptions { ApiKey = "sk-test" });
+
+        var startInfo = agent.BuildStartInfo(Request);
+
+        Assert.That(startInfo.ArgumentList, Does.Not.Contain("--max-turns"),
+            "the agent runs uncapped unless a turn limit is explicitly configured");
+    }
+
+    [Test]
     public void BuildStartInfo_WithModelOverride_AddsModelArgument()
     {
         var agent = new ClaudeCodeCliAgent(Options(model: "claude-sonnet-4-6"));

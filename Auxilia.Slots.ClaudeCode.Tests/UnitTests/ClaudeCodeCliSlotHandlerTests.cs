@@ -83,7 +83,7 @@ public sealed class ClaudeCodeCliSlotHandlerTests
         {
             Assert.That(defaults.CliPath, Is.EqualTo("claude"));
             Assert.That(defaults.Model, Is.Null);
-            Assert.That(defaults.MaxTurns, Is.EqualTo(25));
+            Assert.That(defaults.MaxTurns, Is.Null, "no cap unless explicitly configured");
             Assert.That(overridden.CliPath, Is.EqualTo("/usr/local/bin/claude-stub"));
             Assert.That(overridden.Model, Is.EqualTo("claude-sonnet-4-6"));
             Assert.That(overridden.MaxTurns, Is.EqualTo(5));
@@ -91,7 +91,7 @@ public sealed class ClaudeCodeCliSlotHandlerTests
     }
 
     [Test]
-    public void OptionsFromSettings_InvalidMaxTurns_FallsBackToDefault()
+    public void OptionsFromSettings_InvalidMaxTurns_MeansNoCap()
     {
         var options = ClaudeCodeCliOptions.FromSettings(new Dictionary<string, string>
         {
@@ -99,7 +99,7 @@ public sealed class ClaudeCodeCliSlotHandlerTests
             ["MaxTurns"] = "not-a-number"
         });
 
-        Assert.That(options.MaxTurns, Is.EqualTo(25));
+        Assert.That(options.MaxTurns, Is.Null);
     }
 
     [Test]

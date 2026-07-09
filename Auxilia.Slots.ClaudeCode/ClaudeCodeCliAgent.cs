@@ -82,8 +82,11 @@ public sealed class ClaudeCodeCliAgent(
         startInfo.ArgumentList.Add("--output-format");
         startInfo.ArgumentList.Add("stream-json");
         startInfo.ArgumentList.Add("--verbose");
-        startInfo.ArgumentList.Add("--max-turns");
-        startInfo.ArgumentList.Add(options.MaxTurns.ToString());
+        if (options.MaxTurns is { } maxTurns)
+        {
+            startInfo.ArgumentList.Add("--max-turns");
+            startInfo.ArgumentList.Add(maxTurns.ToString());
+        }
         // The workflow container IS the sandbox (isolated network, scoped workspace) —
         // interactive permission prompts cannot be answered in a headless run.
         startInfo.ArgumentList.Add("--dangerously-skip-permissions");
