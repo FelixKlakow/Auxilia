@@ -210,3 +210,25 @@ Each phase ships independently and keeps the suite green. Test coverage follows 
 ## Appendix — naming
 
 Names are provisional: `Auxilia.Core.Api`, `Auxilia.Core.Runner`, `Auxilia.Core.Contracts`, `Auxilia.WorkflowStudio`. The solution's `02_FrontendDomain` folder becomes the Core admin console + Studio; `03_SteeringDomain` becomes the Core runner.
+
+---
+
+## 13. Implementation status (2026-07-24, branch `feature/core-platform-separation`)
+
+Delivered and tested (unit + component + system, all green):
+
+- **Phase 0 — Contracts ✅** — `Auxilia.Core.Contracts`: dependency-free run / configuration / connector / filter DTOs.
+- **Phase 1 — Core.Api (functional core) ✅** — standalone service with its **own isolated database** (Principle 4); hosts governance as the **single authentication + audit authority**; API-key bearer auth and per-action policy authorization on every REST endpoint and MCP tool; connectors with **secrets encrypted at rest, never returned by reads**; a Run API (inline "on the fly" dispatch, stored-configuration dispatch, startup static seeding); filterable run/configuration/connector queries; a bus-driven run view; run cancellation; and **first-class authenticated MCP** (`run_workflow`, `run_configuration`, `list_*`, `get_run`, `cancel_run`, `create_connector`). *Deferred:* the Core admin dashboard UI — the API + MCP are complete.
+- **Acceptance ✅** — `Auxilia.SystemTestSuite/CoreApiDispatch` boots RabbitMQ + the runner + Core.Api + the dummy image on real Docker and runs a dummy workflow to **Success through Core.Api**, both **dynamically configured (on the fly via REST)** and **statically configured (seeded at startup)**, then asserts the Core's run view recorded it.
+
+Phase 2 — Runner as the Core execution plane:
+
+- **Functionally achieved** — the runner is driven entirely by Core.Api over the bus with **no monolith involvement** (the acceptance topology contains no BackendService), and the Core resolves configurations locally into a self-contained `RunWorkflowCommand`, so the runner needs **no shared configuration store**. The Core authorizes and dispatches with `RequestedBy=null`; the runner trusts Core-authorized commands. Cancellation is wired end-to-end.
+- **Deferred (cosmetic / depth, no functional value blocked)** — the project rename `Auxilia.SteeringInstance` → `Auxilia.Core.Runner` (≈98-file churn, zero behaviour change); folding run-lifecycle + heartbeat into the shared Core database (runner as a true Core DB tier) with the failover monitor in Core.Api; and moving slot-credential resolution onto Core connector instances.
+
+Not yet started:
+
+- **Phase 3 — Workflow Studio extraction** — the workflow-config product still lives in `Auxilia.BackendService`. Path is defined: it becomes a pure Core client (config write path calls Core.Api, dispatch via the Run API, product MCP split out).
+- **Phase 4 — Finalise isolation & harden** — retire the monolith shell, first-class **groups** (the deferred user-management conversation), endpoint-granular network policy, Run-API quotas.
+
+Security posture already in place: separate Core database, secrets only in the Core (encrypted at rest), one authentication + audit authority, authenticated MCP, per-action policy checks on dispatch and cancel.
