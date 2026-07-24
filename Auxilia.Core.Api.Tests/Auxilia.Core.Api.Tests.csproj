@@ -27,6 +27,7 @@
         <ProjectReference Include="..\Source\Auxilia.Core.Api\Auxilia.Core.Api.csproj" />
         <ProjectReference Include="..\Source\Auxilia.Messaging\Auxilia.Messaging.csproj" />
         <ProjectReference Include="..\Auxilia.Core.Contracts\Auxilia.Core.Contracts.csproj" />
+        <ProjectReference Include="..\Auxilia.Core.Client\Auxilia.Core.Client.csproj" />
         <ProjectReference Include="..\Auxilia.Workflows\Auxilia.Workflows.csproj" />
         <ProjectReference Include="..\Auxilia.UniversalDataAccess\Auxilia.UniversalDataAccess.csproj" />
         <ProjectReference Include="..\Auxilia.PlatformData\Auxilia.PlatformData.csproj" />
