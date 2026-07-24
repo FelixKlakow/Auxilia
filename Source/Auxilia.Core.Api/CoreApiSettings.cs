@@ -6,6 +6,9 @@ public sealed class CoreApiSettings
     /// <summary>Queue the runner pool consumes run commands from (competing consumers).</summary>
     public string RunCommandQueue { get; set; } = "workflow.run-commands";
 
+    /// <summary>Queue the runner consumes cancellation commands from.</summary>
+    public string CancelCommandQueue { get; set; } = "workflow.cancel-commands";
+
     /// <summary>
     /// Configurations seeded at startup — the "statically configured" path. Idempotent by name:
     /// a configuration whose name already exists is left untouched.

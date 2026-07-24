@@ -89,6 +89,22 @@ public sealed class CoreApiRunTests : CoreApiComponentTestBase
     }
 
     [Test]
+    public async Task CancelRun_PublishesCancelCommand()
+    {
+        var client = CreateClient();
+        var runId = Guid.NewGuid();
+
+        var response = await client.PostAsync($"/api/runs/{runId}/cancel", null);
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
+
+        var command = MessageBus.PublishedMessages
+            .Where(m => m.Topic == "workflow.cancel-commands")
+            .Select(m => m.Message).OfType<CancelWorkflowCommand>()
+            .Single();
+        Assert.That(command.WorkflowInstanceId, Is.EqualTo(runId));
+    }
+
+    [Test]
     public async Task CreateConnector_ReadReturnsKeysNotSecretValues()
     {
         var client = CreateClient();

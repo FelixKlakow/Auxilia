@@ -111,6 +111,24 @@ public sealed class CoreMcpTools(
         return status is null ? Error("run not found.") : JsonResult(status);
     }
 
+    [McpServerTool(Name = "cancel_run")]
+    [Description("Requests cancellation of a running workflow by run id.")]
+    public async Task<CallToolResult> CancelRunAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Run id (GUID).")] string runId,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (!Guid.TryParse(runId, out var id))
+            return Error("runId must be a GUID.");
+        var run = await runView.GetAsync(id, cancellationToken);
+        if (await DenyAsync(principalId, PermissionActions.WorkflowCancel, run?.WorkflowType, cancellationToken) is { } denial)
+            return denial;
+        await runs.CancelAsync(id, cancellationToken);
+        return JsonResult(new { runId = id, cancelRequested = true });
+    }
+
     [McpServerTool(Name = "list_connectors")]
     [Description("Lists connectors (setting keys only — secret values are never returned).")]
     public async Task<CallToolResult> ListConnectorsAsync(

@@ -33,6 +33,13 @@ public sealed class RunService(
             new Dictionary<string, string>(config.Context), ct);
     }
 
+    /// <summary>Requests cancellation of a run; the runner consumes the command and stops the container.</summary>
+    public async Task CancelAsync(Guid runId, CancellationToken ct)
+    {
+        await bus.PublishAsync(settings.Value.CancelCommandQueue, new CancelWorkflowCommand(runId), ct);
+        logger.LogInformation("Requested cancel. RunId={RunId}", runId);
+    }
+
     private async Task<RunAccepted> DispatchAsync(
         string workflowType, string packageUri, Dictionary<string, string> context, CancellationToken ct)
     {

@@ -104,6 +104,22 @@ app.MapGet("/api/runs/{id:guid}", async (Guid id, RunReadService svc, Cancellati
         await svc.GetAsync(id, ct) is { } status ? Results.Ok(status) : Results.NotFound())
     .RequireAuthorization();
 
+app.MapPost("/api/runs/{id:guid}/cancel", async (
+        Guid id, HttpContext http, IPolicyEngine policy, RunService runs, RunReadService runView,
+        CancellationToken ct) =>
+{
+    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+        return Results.Unauthorized();
+    var run = await runView.GetAsync(id, ct);
+    var decision = await policy.EvaluateAsync(
+        new PolicyContext(principalId, PermissionActions.WorkflowCancel, id.ToString())
+        { WorkflowType = run?.WorkflowType }, ct);
+    if (!decision.Allowed)
+        return Results.Json(new { error = decision.Reason }, statusCode: StatusCodes.Status403Forbidden);
+    await runs.CancelAsync(id, ct);
+    return Results.Accepted($"/api/runs/{id}");
+}).RequireAuthorization();
+
 // --- Configurations ---
 app.MapPost("/api/configurations", async (
         CreateRunConfiguration request, RunConfigurationService svc, CancellationToken ct) =>
