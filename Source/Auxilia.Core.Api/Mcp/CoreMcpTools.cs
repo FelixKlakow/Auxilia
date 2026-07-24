@@ -22,7 +22,8 @@ public sealed class CoreMcpTools(
     RunService runs,
     RunConfigurationService configurations,
     RunReadService runView,
-    ConnectorService connectors)
+    ConnectorService connectors,
+    GroupDirectory groups)
 {
     private static readonly JsonSerializerOptions JsonOptions = JsonSerializerOptions.Web;
 
@@ -155,6 +156,86 @@ public sealed class CoreMcpTools(
         var connector = await connectors.CreateAsync(
             new CreateConnector(name, providerType, ParseObject(settingsJson)), cancellationToken);
         return JsonResult(connector);
+    }
+
+    [McpServerTool(Name = "create_group")]
+    [Description("Creates a first-class group (identity administration).")]
+    public async Task<CallToolResult> CreateGroupAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Group name.")] string name,
+        [Description("Optional description.")] string? description = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (await DenyAsync(principalId, PermissionActions.PrincipalAdminister, null, cancellationToken) is { } denial)
+            return denial;
+        var group = await groups.CreateAsync(name, description, cancellationToken);
+        return JsonResult(new { id = group.Id, name = group.Name });
+    }
+
+    [McpServerTool(Name = "list_groups")]
+    [Description("Lists groups with their members and roles.")]
+    public async Task<CallToolResult> ListGroupsAsync(
+        RequestContext<CallToolRequestParams> context, CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (await DenyAsync(principalId, PermissionActions.PrincipalAdminister, null, cancellationToken) is { } denial)
+            return denial;
+        var result = new List<object>();
+        foreach (var g in await groups.ListAsync(cancellationToken))
+            result.Add(new
+            {
+                id = g.Id,
+                name = g.Name,
+                members = await groups.MembersAsync(g.Id, cancellationToken),
+                roles = await groups.RolesAsync(g.Id, cancellationToken)
+            });
+        return JsonResult(new { groups = result });
+    }
+
+    [McpServerTool(Name = "add_group_member")]
+    [Description("Adds a principal to a group.")]
+    public async Task<CallToolResult> AddGroupMemberAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Group id (GUID).")] string groupId,
+        [Description("Principal id (GUID).")] string principalId,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } actor)
+            return NoPrincipal();
+        if (await DenyAsync(actor, PermissionActions.PrincipalAdminister, null, cancellationToken) is { } denial)
+            return denial;
+        if (!Guid.TryParse(groupId, out var gid) || !Guid.TryParse(principalId, out var pid))
+            return Error("groupId and principalId must be GUIDs.");
+        await groups.AddMemberAsync(gid, pid, cancellationToken);
+        return JsonResult(new { groupId = gid, principalId = pid, added = true });
+    }
+
+    [McpServerTool(Name = "assign_group_role")]
+    [Description("Grants a built-in role to every member of a group.")]
+    public async Task<CallToolResult> AssignGroupRoleAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Group id (GUID).")] string groupId,
+        [Description("Role name (Administrator, Operator, User, Auditor).")] string roleName,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } actor)
+            return NoPrincipal();
+        if (await DenyAsync(actor, PermissionActions.PrincipalAdminister, null, cancellationToken) is { } denial)
+            return denial;
+        if (!Guid.TryParse(groupId, out var gid))
+            return Error("groupId must be a GUID.");
+        try
+        {
+            await groups.AssignRoleAsync(gid, roleName, cancellationToken);
+            return JsonResult(new { groupId = gid, roleName, assigned = true });
+        }
+        catch (ArgumentException ex)
+        {
+            return Error(ex.Message);
+        }
     }
 
     private async Task<CallToolResult?> DenyAsync(

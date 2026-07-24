@@ -177,6 +177,56 @@ app.MapGet("/api/connectors/{id:guid}", async (Guid id, ConnectorService svc, Ca
         await svc.GetAsync(id, ct) is { } connector ? Results.Ok(connector) : Results.NotFound())
     .RequireAuthorization();
 
+// --- Groups (identity administration) ---
+app.MapPost("/api/groups", async (
+        CreateGroupRequest request, HttpContext http, IPolicyEngine policy,
+        GroupDirectory groups, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PrincipalAdminister, ct) is { } fail)
+        return fail;
+    var group = await groups.CreateAsync(request.Name, request.Description, ct);
+    return Results.Ok(new GroupDto(group.Id, group.Name, group.Description, [], []));
+}).RequireAuthorization();
+
+app.MapGet("/api/groups", async (
+        HttpContext http, IPolicyEngine policy, GroupDirectory groups, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PrincipalAdminister, ct) is { } fail)
+        return fail;
+    var result = new List<GroupDto>();
+    foreach (var g in await groups.ListAsync(ct))
+        result.Add(new GroupDto(g.Id, g.Name, g.Description,
+            await groups.MembersAsync(g.Id, ct), await groups.RolesAsync(g.Id, ct)));
+    return Results.Ok(result);
+}).RequireAuthorization();
+
+app.MapPost("/api/groups/{id:guid}/members", async (
+        Guid id, AddGroupMemberRequest request, HttpContext http, IPolicyEngine policy,
+        GroupDirectory groups, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PrincipalAdminister, ct) is { } fail)
+        return fail;
+    await groups.AddMemberAsync(id, request.PrincipalId, ct);
+    return Results.Accepted($"/api/groups/{id}");
+}).RequireAuthorization();
+
+app.MapPost("/api/groups/{id:guid}/roles", async (
+        Guid id, AssignGroupRoleRequest request, HttpContext http, IPolicyEngine policy,
+        GroupDirectory groups, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PrincipalAdminister, ct) is { } fail)
+        return fail;
+    try
+    {
+        await groups.AssignRoleAsync(id, request.RoleName, ct);
+        return Results.Accepted($"/api/groups/{id}");
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+}).RequireAuthorization();
+
 // --- MCP (authenticated) + health ---
 app.MapMcp("/mcp").RequireAuthorization();
 app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
