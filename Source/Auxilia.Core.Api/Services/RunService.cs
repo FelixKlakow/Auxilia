@@ -19,8 +19,7 @@ public sealed class RunService(
     public Task<RunAccepted> RunInlineAsync(RunRequest request, CancellationToken ct)
         => DispatchAsync(
             request.WorkflowType, request.PackageUri,
-            new Dictionary<string, string>(request.Context ?? new Dictionary<string, string>()),
-            request.RequestedBy, ct);
+            new Dictionary<string, string>(request.Context ?? new Dictionary<string, string>()), ct);
 
     public async Task<RunAccepted> RunConfigurationAsync(Guid configurationId, Guid? requestedBy, CancellationToken ct)
     {
@@ -31,15 +30,17 @@ public sealed class RunService(
 
         return await DispatchAsync(
             config.WorkflowType, config.PackageUri,
-            new Dictionary<string, string>(config.Context), requestedBy, ct);
+            new Dictionary<string, string>(config.Context), ct);
     }
 
     private async Task<RunAccepted> DispatchAsync(
-        string workflowType, string packageUri, Dictionary<string, string> context,
-        Guid? requestedBy, CancellationToken ct)
+        string workflowType, string packageUri, Dictionary<string, string> context, CancellationToken ct)
     {
+        // The Core is the single authorization authority: the caller was already authorized
+        // here, so the command is dispatched WITHOUT a RequestedBy principal. The runner trusts
+        // Core-dispatched commands and cannot resolve a Core-database principal against its own.
         var commandId = Guid.NewGuid();
-        var command = new RunWorkflowCommand(commandId, workflowType, packageUri, context, requestedBy);
+        var command = new RunWorkflowCommand(commandId, workflowType, packageUri, context, RequestedBy: null);
         await bus.PublishAsync(settings.Value.RunCommandQueue, command, ct);
         logger.LogInformation(
             "Dispatched run. CommandId={CommandId} WorkflowType={WorkflowType}", commandId, workflowType);

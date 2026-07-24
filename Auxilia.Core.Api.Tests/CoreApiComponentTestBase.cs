@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using Auxilia.Messaging;
 using Microsoft.AspNetCore.Hosting;
@@ -9,11 +10,13 @@ namespace Auxilia.Core.Api.Tests;
 
 /// <summary>
 /// Boots the Core API via <see cref="WebApplicationFactory{TEntryPoint}"/> with an in-memory
-/// database, AES-GCM settings protection, and a <see cref="FakeMessageBusClient"/>. A fresh
-/// factory per test keeps published-message assertions isolated.
+/// database, AES-GCM settings protection, a <see cref="FakeMessageBusClient"/>, and a bootstrap
+/// Administrator API key. A fresh factory per test keeps published-message assertions isolated.
 /// </summary>
 public abstract class CoreApiComponentTestBase
 {
+    protected const string TestApiKey = "aux-test-key-0123456789abcdef";
+
     protected WebApplicationFactory<Program> Factory = null!;
     protected FakeMessageBusClient MessageBus = null!;
 
@@ -28,6 +31,7 @@ public abstract class CoreApiComponentTestBase
             builder.UseSetting("PlatformData:Backend", "InMemory");
             builder.UseSetting("PlatformData:ProtectionKeyBase64",
                 Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
+            builder.UseSetting("CoreSecurity:BootstrapApiKey", TestApiKey);
             ConfigureHost(builder);
             builder.ConfigureServices(services =>
             {
@@ -46,5 +50,14 @@ public abstract class CoreApiComponentTestBase
     [TearDown]
     public void DisposeFactory() => Factory.Dispose();
 
-    protected HttpClient CreateClient() => Factory.CreateClient();
+    /// <summary>An HTTP client authenticated as the bootstrap Administrator.</summary>
+    protected HttpClient CreateClient()
+    {
+        var client = Factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", TestApiKey);
+        return client;
+    }
+
+    /// <summary>An unauthenticated HTTP client (for auth-gate assertions).</summary>
+    protected HttpClient CreateAnonymousClient() => Factory.CreateClient();
 }
