@@ -25,6 +25,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Source\Auxilia.Adapters.Email\Auxilia.Adapters.Email.csproj"/>
+        <ProjectReference Include="..\Auxilia.Core.Contracts\Auxilia.Core.Contracts.csproj"/>
         <ProjectReference Include="..\Auxilia.Governance\Auxilia.Governance.csproj"/>
         <ProjectReference Include="..\Auxilia.PlatformData\Auxilia.PlatformData.csproj"/>
         <ProjectReference Include="..\Auxilia.Workflows.Testing\Auxilia.Workflows.Testing.csproj" />
