@@ -79,5 +79,10 @@
     <Project Path="Source/Auxilia.ImplementationWorkflow/Auxilia.ImplementationWorkflow.csproj" />
     <Project Path="Source\Auxilia.CodeReview.Workflow\Auxilia.CodeReview.Workflow.csproj" />
   </Folder>
+  <Folder Name="/Source/">
+    <Project Path="Source/Auxilia.Core.Api/Auxilia.Core.Api.csproj" />
+  </Folder>
+  <Project Path="Auxilia.Core.Api.Tests/Auxilia.Core.Api.Tests.csproj" />
+  <Project Path="Auxilia.Core.Contracts/Auxilia.Core.Contracts.csproj" />
   <Project Path="Auxilia.SystemTestSuite\Auxilia.SystemTestSuite.csproj" />
 </Solution>
