@@ -8,7 +8,8 @@ public sealed class PolicyEngine(
     IDataAccess<PrincipalRecord> principals,
     IDataAccess<RoleAssignmentRecord> roleAssignments,
     WorkflowTypeAccessStore accessStore,
-    AuditLog auditLog) : IPolicyEngine
+    AuditLog auditLog,
+    GroupRoleResolver? groupRoleResolver = null) : IPolicyEngine
 {
     public async Task<PolicyDecision> EvaluateAsync(PolicyContext context, CancellationToken ct = default)
     {
@@ -37,6 +38,13 @@ public sealed class PolicyEngine(
             .Where(a => a.PrincipalId == context.PrincipalId)
             .Select(a => a.RoleName)
             .ToList();
+
+        // Union in roles the principal holds through first-class group memberships.
+        if (groupRoleResolver is not null)
+            roles = roles
+                .Concat(await groupRoleResolver.RolesForAsync(context.PrincipalId, ct))
+                .Distinct()
+                .ToList();
 
         // Workflow-type access lists take precedence: when entries exist for this
         // (workflow type, action), they are the exclusive grant source.

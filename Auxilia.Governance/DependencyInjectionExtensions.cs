@@ -24,6 +24,9 @@ public static class DependencyInjectionExtensions
         services.AddPlatformEntity<WorkflowTypeAccessRecord>(dataSettings);
         services.AddPlatformEntity<CredentialRecord>(dataSettings);
         services.AddPlatformEntity<IdentitySourceRecord>(dataSettings);
+        services.AddPlatformEntity<GroupRecord>(dataSettings);
+        services.AddPlatformEntity<GroupMembershipRecord>(dataSettings);
+        services.AddPlatformEntity<GroupRoleRecord>(dataSettings);
 
         services.AddSingleton<IIdentityImportConnector, LdapIdentityImportConnector>();
         services.AddSingleton<IIdentityImportConnector, CsvIdentityImportConnector>();
@@ -31,6 +34,8 @@ public static class DependencyInjectionExtensions
         services.AddSingleton<PrincipalDirectory>();
         services.AddSingleton<WorkflowTypeAccessStore>();
         services.AddSingleton<GroupMappingResolver>();
+        services.AddSingleton<GroupRoleResolver>();
+        services.AddSingleton<GroupDirectory>();
         services.AddSingleton<IIdentityProvider, LocalIdentityProvider>();
         services.AddSingleton<IPolicyEngine, PolicyEngine>();
         services.AddSingleton<GovernanceSeeder>();
