@@ -81,9 +81,11 @@
   </Folder>
   <Folder Name="/Source/">
     <Project Path="Source/Auxilia.Core.Api/Auxilia.Core.Api.csproj" />
+    <Project Path="Source/Auxilia.WorkflowStudio/Auxilia.WorkflowStudio.csproj" />
   </Folder>
   <Project Path="Auxilia.Core.Api.Tests/Auxilia.Core.Api.Tests.csproj" />
   <Project Path="Auxilia.Core.Client/Auxilia.Core.Client.csproj" />
   <Project Path="Auxilia.Core.Contracts/Auxilia.Core.Contracts.csproj" />
   <Project Path="Auxilia.SystemTestSuite\Auxilia.SystemTestSuite.csproj" />
+  <Project Path="Auxilia.WorkflowStudio.Tests/Auxilia.WorkflowStudio.Tests.csproj" />
 </Solution>
