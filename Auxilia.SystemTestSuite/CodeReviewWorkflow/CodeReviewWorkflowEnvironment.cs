@@ -58,7 +58,7 @@ public class CodeReviewWorkflowEnvironment
         var imageBuilds = Task.WhenAll(
             WorkflowDispatchEnvironment.BuildImageAsync(
                 WorkflowDispatchEnvironment.SteeringImageName,
-                "Source/Auxilia.SteeringInstance/Dockerfile"),
+                "Source/Auxilia.Core.Runner/Dockerfile"),
             WorkflowDispatchEnvironment.BuildImageAsync(
                 ProductionImageName,
                 "Source/Auxilia.CodeReview.Workflow/Dockerfile"));

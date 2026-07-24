@@ -25,7 +25,7 @@ namespace Auxilia.SystemTestSuite.WorkflowDispatch;
 public class WorkflowDispatchEnvironment
 {
     internal const string DummyWorkflowsImageName = "auxilia-dummy-workflows:system-test";
-    internal const string SteeringImageName        = "auxilia-steeringinstance:system-test";
+    internal const string SteeringImageName        = "auxilia-core-runner:system-test";
     private  const string RabbitMqAlias            = "rabbitmq";
     private  const string RabbitMqImage            = "rabbitmq:3.13-management";
 
@@ -50,7 +50,7 @@ public class WorkflowDispatchEnvironment
     {
         // Build the SteeringInstance and dummy-workflows images in parallel from source.
         await Task.WhenAll(
-            BuildImageAsync(SteeringImageName,     "Source/Auxilia.SteeringInstance/Dockerfile"),
+            BuildImageAsync(SteeringImageName,     "Source/Auxilia.Core.Runner/Dockerfile"),
             BuildImageAsync(DummyWorkflowsImageName, "Auxilia.Workflows.Testing/Dockerfile"));
 
         // Named network — name is passed to the SteeringInstance so it can attach

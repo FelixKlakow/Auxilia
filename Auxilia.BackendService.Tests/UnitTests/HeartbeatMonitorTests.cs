@@ -90,7 +90,7 @@ public class HeartbeatMonitorTests
         await _heartbeats.SaveAsync(new ServiceHeartbeatRecord
         {
             Id = serviceId,
-            ServiceName = "Auxilia.SteeringInstance",
+            ServiceName = "Auxilia.Core.Runner",
             LastBeatUtc = _time.Now - TimeSpan.FromSeconds(60) // stale
         });
 
@@ -147,7 +147,7 @@ public class HeartbeatMonitorTests
         await _heartbeats.SaveAsync(new ServiceHeartbeatRecord
         {
             Id = serviceId,
-            ServiceName = "Auxilia.SteeringInstance",
+            ServiceName = "Auxilia.Core.Runner",
             LastBeatUtc = _time.Now // fresh again
         });
 

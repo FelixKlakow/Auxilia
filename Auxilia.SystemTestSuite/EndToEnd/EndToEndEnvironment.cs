@@ -144,7 +144,7 @@ public class EndToEndEnvironment
         // Sequential on purpose: parallel docker builds have wedged Docker Desktop daemons
         // (see FailoverEnvironment); the .prebuilt-images marker skips them locally anyway.
         await WorkflowDispatchEnvironment.BuildImageAsync(
-            WorkflowDispatchEnvironment.SteeringImageName, "Source/Auxilia.SteeringInstance/Dockerfile");
+            WorkflowDispatchEnvironment.SteeringImageName, "Source/Auxilia.Core.Runner/Dockerfile");
         await WorkflowDispatchEnvironment.BuildImageAsync(
             BackendImageName, "Source/Auxilia.BackendService/Dockerfile");
         await WorkflowDispatchEnvironment.BuildImageAsync(

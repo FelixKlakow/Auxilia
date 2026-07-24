@@ -28,7 +28,7 @@ namespace Auxilia.SystemTestSuite.CoreApiDispatch;
 public class CoreApiDispatchEnvironment
 {
     internal const string DummyWorkflowsImageName = "auxilia-dummy-workflows:system-test";
-    internal const string SteeringImageName        = "auxilia-steeringinstance:system-test";
+    internal const string SteeringImageName        = "auxilia-core-runner:system-test";
     internal const string CoreApiImageName         = "auxilia-core-api:system-test";
     internal const string DummyPackageUri          = "docker://auxilia-dummy-workflows:system-test";
     internal const string DummyWorkflowType        = "simple-git-commit-workflow";
@@ -56,7 +56,7 @@ public class CoreApiDispatchEnvironment
     public async Task OneTimeSetUp()
     {
         await Task.WhenAll(
-            BuildImageAsync(SteeringImageName, "Source/Auxilia.SteeringInstance/Dockerfile"),
+            BuildImageAsync(SteeringImageName, "Source/Auxilia.Core.Runner/Dockerfile"),
             BuildImageAsync(DummyWorkflowsImageName, "Auxilia.Workflows.Testing/Dockerfile"),
             BuildImageAsync(CoreApiImageName, "Source/Auxilia.Core.Api/Dockerfile"));
 

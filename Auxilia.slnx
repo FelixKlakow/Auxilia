@@ -13,8 +13,8 @@
   </Folder>
   <Folder Name="/02_FrontendDomain/" />
   <Folder Name="/03_SteeringDomain/">
-    <Project Path="Auxilia.SteeringInstance.Tests\Auxilia.SteeringInstance.Tests.csproj" />
-    <Project Path="Source\Auxilia.SteeringInstance\Auxilia.SteeringInstance.csproj" />
+    <Project Path="Auxilia.Core.Runner.Tests\Auxilia.Core.Runner.Tests.csproj" />
+    <Project Path="Source\Auxilia.Core.Runner\Auxilia.Core.Runner.csproj" />
   </Folder>
   <Folder Name="/04_BackendDomain/">
     <Project Path="Auxilia.Adapters.Email.Tests\Auxilia.Adapters.Email.Tests.csproj" />

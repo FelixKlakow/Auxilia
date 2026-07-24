@@ -41,7 +41,7 @@ public class FailoverEnvironment
         // Sequential on purpose: three parallel docker builds have wedged the Docker Desktop
         // daemon on developer machines; layer caching makes the sequential cost negligible.
         await WorkflowDispatchEnvironment.BuildImageAsync(
-            WorkflowDispatchEnvironment.SteeringImageName, "Source/Auxilia.SteeringInstance/Dockerfile");
+            WorkflowDispatchEnvironment.SteeringImageName, "Source/Auxilia.Core.Runner/Dockerfile");
         await WorkflowDispatchEnvironment.BuildImageAsync(
             "auxilia-backendservice:system-test", "Source/Auxilia.BackendService/Dockerfile");
         await WorkflowDispatchEnvironment.BuildImageAsync(
