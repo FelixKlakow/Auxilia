@@ -1,6 +1,6 @@
 # Enterprise Login & Connected Accounts — Design
 
-> **Status:** L1 delivered · 2026-07-25 · Entra OIDC sign-in + JIT provisioning + browser session live in Core.Api (L2–L4 pending)
+> **Status:** L2 delivered · 2026-07-25 · Entra OIDC sign-in + JIT provisioning + directory-group→role mapping (with Graph overage fallback) live in Core.Api (L3–L4 pending)
 > **Owner:** Felix Klakow
 > **Scope:** Support the login scenarios Felix's company needs — **Microsoft/Entra ID (Azure AD) SSO**, and **"connected accounts"**: one Auxilia identity linked to the corporate directory (AD) that cascades authorized access to TFS / Azure DevOps / repositories.
 
@@ -20,7 +20,7 @@ Core.Api is the single auth authority. Governance already provides the *shape* f
 - **`GroupMappingResolver`** already turns IdP group claims into roles; **first-class groups** (`GroupDirectory` + `GroupRoleResolver`) union direct + group + IdP-mapped roles in the Policy Engine.
 - **Connectors** hold per-principal/company external-service credentials, scoped personal or company-wide, and are delivered to workflows **just-in-time, encrypted** (the credential-resolution path is built and proven).
 
-Delivered in **L1**: the interactive OIDC login flow (Entra), JIT principal provisioning from an external identity, and browser session issuance — see the implementation note below. Still missing: directory-group→role mapping at sign-in (**L2**) and the identity→resource-access (ADO/TFS/repo) linkage (**L3/L4**).
+Delivered in **L1**: the interactive OIDC login flow (Entra), JIT principal provisioning from an external identity, and browser session issuance. Delivered in **L2**: directory group claims are mapped to roles and reconciled onto the principal at every sign-in, with a Microsoft Graph fallback for group-claim overage, plus an administrator surface (REST + MCP) for the mappings — see the implementation notes below. Still missing: the identity→resource-access (ADO/TFS/repo) linkage (**L3/L4**).
 
 ## 3. Target model
 
@@ -55,6 +55,8 @@ graph TB
 
 > **Implementation note (L1).** The OIDC *protocol* is handled by ASP.NET Core's battle-tested `AddOpenIdConnect` handler (registered only when `Oidc:Enabled`), which signs the validated identity into a short-lived external cookie. The Auxilia-identity half — turning validated external claims into a provisioned principal + session — is `ExternalIdentityProvisioner` in `Auxilia.Governance` (find-or-create keyed deterministically by `provider|subject`, no credential record, disabled accounts refused, direct-role session, fully audited). Core.Api wires three schemes (`AuthSchemes`): API-key bearer (programmatic default), a session `Cookie`, and the Entra `Oidc` scheme; the default authorization policy accepts API-key **or** cookie, so both resolve to the same `auxilia:principal-id` and the Policy Engine authorizes them identically. Endpoints: `GET /auth/login` (challenge), `GET /auth/callback` (provision + issue cookie), `POST /auth/logout`, `GET /auth/me`. Automated tests drive a stubbed external scheme; real Entra needs an app registration (manual).
 - **Roles from the directory** — group claims from the Entra token flow through the existing `GroupMappingResolver`/group system: `(tenant, AD group) -> Auxilia role(s)`, evaluated at sign-in, unioned with any direct/first-class-group roles. No per-user role admin for directory users.
+
+> **Implementation note (L2).** Directory roles are reconciled into `RoleAssignmentRecord`s tagged `Source = "GroupMapping"` at every sign-in inside `ExternalIdentityProvisioner`: roles the token's groups map to are granted, ones the token no longer grants are revoked, and administered (`Direct`) / imported grants are never touched. Because the Policy Engine already reads **all** assignment sources by principal id, directory roles authorize with no Policy-Engine change — a cookie session and an API key for the same principal stay identical. **Group-claim overage** (Entra omits the `groups` claim past ~200 memberships, emitting `hasgroups`/`_claim_names`) is detected by `CoreClaims.HasGroupOverage` and resolved through `IDirectoryGroupResolver`: the `GraphDirectoryGroupResolver` calls Microsoft Graph `POST /me/getMemberGroups` with the user's saved token — this requires the Entra app to request a Graph scope granting `GroupMember.Read.All`; a missing scope or Graph error degrades to no directory roles (deny-by-default, logged) rather than blocking sign-in. Mappings are administered over REST (`/api/identity/group-mappings`) and MCP (`*_group_mapping`), gated by `identity-source.manage`. Automated tests drive a stubbed directory resolver; real Graph overage is manual.
 - **Sessions** — interactive sign-in issues a **cookie** (dashboard/Studio); AI/service principals keep the **API-key bearer**; both resolve to the same `PrincipalRecord` + roles through the one Policy Engine, so MCP and UI never diverge.
 
 ## 4. Connected accounts → resource access (the AD cascade)
@@ -86,7 +88,7 @@ Either way, **secrets/tokens still live only in the Core** and reach workflows o
 |---|---|---|
 | **L0** | Auth-model spec: session shapes (cookie vs bearer), the login endpoints on Core.Api, provider registration, config surface (tenant/client id, redirect URIs) | design only |
 | **L1** ✅ | Entra OIDC relying party + `ExternalIdentityProvisioner` (JIT) + browser session cookie; `/auth/*` endpoints; local + API-key coexist | ✅ unit (provisioning: create/idempotent/roles/disabled/audit), component (login via a stubbed OIDC provider, deny-by-default, API-key coexistence); manual (real Entra tenant) pending |
-| **L2** | Directory group -> role at sign-in through `GroupMappingResolver`; group-claim overage fallback (Entra caps group claims — fall back to Graph) | unit (claim mapping, overage), component (roles resolved from group claims) |
+| **L2** ✅ | Directory group -> role at sign-in through `GroupMappingResolver` (reconciled onto the principal, `Source="GroupMapping"`); group-claim overage → Microsoft Graph fallback; REST + MCP admin surface for the mappings | ✅ unit (claim mapping/reconcile/revoke/audit, overage detection), component (roles from group claims, overage fallback, mapping admin); manual (real Graph overage) pending |
 | **L3** | Connected accounts (mechanism A): identity-linked connectors + AD-group gating; connect flow for ADO/TFS/repos; workflows resolve them JIT | component (gated resolution), system (a run uses a connected ADO connector) |
 | **L4** | (Optional) OBO delegation (mechanism B) for live per-user ADO/TFS tokens | component + manual |
 
@@ -94,7 +96,7 @@ Either way, **secrets/tokens still live only in the Core** and reach workflows o
 
 - **Multi-tenant** — one Auxilia deployment serving several companies' Entra tenants, or one tenant per deployment? (`TenantId` already rides every resource.)
 - **OBO vs connect-flow** for ADO/TFS delegation (decision L4) — revisit once L3 is in use.
-- **Group-claim overage** — Entra omits group claims past ~200; needs a Microsoft Graph fallback to read memberships.
+- ~~**Group-claim overage** — Entra omits group claims past ~200; needs a Microsoft Graph fallback to read memberships.~~ Resolved in L2 (`GraphDirectoryGroupResolver`); requires a Graph `GroupMember.Read.All` scope on the app registration for over-quota users.
 - **Local-account coexistence** — keep local admin accounts for break-glass even when Entra is the primary IdP.
 - **Testing without a tenant** — L1/L2 use a stubbed OIDC provider for automated tests; a real Entra app registration is needed only for manual verification.
 

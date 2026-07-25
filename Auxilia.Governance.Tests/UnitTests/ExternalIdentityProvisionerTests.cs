@@ -15,6 +15,19 @@ public class ExternalIdentityProvisionerTests
     private static ExternalIdentity Entra(string subject, string name = "Ada Lovelace", params string[] groups)
         => new("entra", subject, name, $"{subject}@contoso.com", groups);
 
+    private Task SeedMappingAsync(string groupClaim, string roleName, string identityProvider = "entra")
+        => _ctx.GroupMappings.SaveAsync(new GroupMappingRecord
+        {
+            Id = GroupMappingRecord.IdFor(identityProvider, groupClaim, roleName),
+            IdentityProvider = identityProvider,
+            GroupClaim = groupClaim,
+            RoleName = roleName
+        });
+
+    private async Task<string?> SourceOfAsync(Guid principalId, string roleName)
+        => (await _ctx.RoleAssignments.ReadAsync())
+            .SingleOrDefault(a => a.PrincipalId == principalId && a.RoleName == roleName)?.Source;
+
     [Test]
     public async Task FirstSignIn_ProvisionsHumanPrincipal_WithExternalSubjectAndNoCredential()
     {
@@ -97,6 +110,76 @@ public class ExternalIdentityProvisionerTests
         {
             Assert.That(await _ctx.AuditCountAsync("principal.provisioned"), Is.EqualTo(1));
             Assert.That(await _ctx.AuditCountAsync("principal.signed-in"), Is.EqualTo(1));
+        });
+    }
+
+    [Test]
+    public async Task SignIn_MapsDirectoryGroupClaims_ToRoles()
+    {
+        await SeedMappingAsync("group-ops", BuiltInRoles.Operator);
+
+        var session = await _ctx.Provisioner.ProvisionAsync(Entra("sub-1", groups: "group-ops"));
+
+        Assert.That(session!.Roles, Does.Contain(BuiltInRoles.Operator));
+        // The derived assignment is tagged as directory-sourced, not administered.
+        Assert.That(await SourceOfAsync(session.PrincipalId, BuiltInRoles.Operator), Is.EqualTo("GroupMapping"));
+    }
+
+    [Test]
+    public async Task SignIn_Reconciles_RevokesDirectoryRole_WhenGroupNoLongerPresent()
+    {
+        await SeedMappingAsync("group-ops", BuiltInRoles.Operator);
+        var session = await _ctx.Provisioner.ProvisionAsync(Entra("sub-1", groups: "group-ops"));
+        Assert.That(session!.Roles, Does.Contain(BuiltInRoles.Operator));
+
+        // The user has left the group: the next sign-in carries no group claims.
+        var reSignIn = await _ctx.Provisioner.ProvisionAsync(Entra("sub-1"));
+
+        Assert.That(reSignIn!.Roles, Does.Not.Contain(BuiltInRoles.Operator));
+        Assert.That(await SourceOfAsync(session.PrincipalId, BuiltInRoles.Operator), Is.Null,
+            "A revoked directory role must leave no assignment behind.");
+    }
+
+    [Test]
+    public async Task Reconciliation_NeverStripsDirectlyAssignedRoles()
+    {
+        var session = await _ctx.Provisioner.ProvisionAsync(Entra("sub-1"));
+        await _ctx.Directory.AssignRoleAsync(session!.PrincipalId, BuiltInRoles.Auditor);
+
+        // Sign in with a group claim that maps to nothing — reconciliation must not touch the direct grant.
+        var reSignIn = await _ctx.Provisioner.ProvisionAsync(Entra("sub-1", groups: "unmapped-group"));
+
+        Assert.That(reSignIn!.Roles, Does.Contain(BuiltInRoles.Auditor));
+        Assert.That(await SourceOfAsync(session.PrincipalId, BuiltInRoles.Auditor), Is.EqualTo("Direct"));
+    }
+
+    [Test]
+    public async Task DirectRole_IsNotDowngraded_NorRevoked_WhenAlsoMappedFromDirectory()
+    {
+        var session = await _ctx.Provisioner.ProvisionAsync(Entra("sub-1"));
+        await _ctx.Directory.AssignRoleAsync(session!.PrincipalId, BuiltInRoles.Operator);
+        await SeedMappingAsync("group-ops", BuiltInRoles.Operator);
+
+        // Sign in while in the group: the pre-existing Direct grant stays Direct (not rewritten to GroupMapping).
+        await _ctx.Provisioner.ProvisionAsync(Entra("sub-1", groups: "group-ops"));
+        Assert.That(await SourceOfAsync(session.PrincipalId, BuiltInRoles.Operator), Is.EqualTo("Direct"));
+
+        // Leaving the group must not revoke the role, because the grant is administered, not directory-derived.
+        var afterLeaving = await _ctx.Provisioner.ProvisionAsync(Entra("sub-1"));
+        Assert.That(afterLeaving!.Roles, Does.Contain(BuiltInRoles.Operator));
+    }
+
+    [Test]
+    public async Task DirectoryRole_GrantAndRevoke_AreAudited()
+    {
+        await SeedMappingAsync("group-ops", BuiltInRoles.Operator);
+        await _ctx.Provisioner.ProvisionAsync(Entra("sub-1", groups: "group-ops")); // grants
+        await _ctx.Provisioner.ProvisionAsync(Entra("sub-1"));                       // revokes
+
+        Assert.Multiple(async () =>
+        {
+            Assert.That(await _ctx.AuditCountAsync("role.assigned"), Is.EqualTo(1));
+            Assert.That(await _ctx.AuditCountAsync("role.revoked"), Is.EqualTo(1));
         });
     }
 }

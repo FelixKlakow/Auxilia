@@ -40,6 +40,18 @@ public static class CoreAuthExtensions
             options.Events.OnRedirectToAccessDenied = ctx => { ctx.Response.StatusCode = StatusCodes.Status403Forbidden; return Task.CompletedTask; };
         });
 
+        // Group-claim overage fallback: read >~200-group memberships from Microsoft Graph at sign-in.
+        // Wired to Graph only when interactive sign-in is configured; otherwise a harmless no-op.
+        if (oidc.Enabled)
+        {
+            services.AddHttpClient();
+            services.AddSingleton<IDirectoryGroupResolver, GraphDirectoryGroupResolver>();
+        }
+        else
+        {
+            services.AddSingleton<IDirectoryGroupResolver, NullDirectoryGroupResolver>();
+        }
+
         if (oidc.Enabled)
         {
             // Short-lived cookie that carries the validated external identity from the OIDC

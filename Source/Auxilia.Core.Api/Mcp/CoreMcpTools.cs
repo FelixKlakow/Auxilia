@@ -23,7 +23,8 @@ public sealed class CoreMcpTools(
     RunConfigurationService configurations,
     RunReadService runView,
     ConnectorService connectors,
-    GroupDirectory groups)
+    GroupDirectory groups,
+    GroupMappingDirectory groupMappings)
 {
     private static readonly JsonSerializerOptions JsonOptions = JsonSerializerOptions.Web;
 
@@ -236,6 +237,62 @@ public sealed class CoreMcpTools(
         {
             return Error(ex.Message);
         }
+    }
+
+    [McpServerTool(Name = "list_group_mappings")]
+    [Description("Lists directory group→role mappings applied to federated (Entra) sign-ins.")]
+    public async Task<CallToolResult> ListGroupMappingsAsync(
+        RequestContext<CallToolRequestParams> context, CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (await DenyAsync(principalId, PermissionActions.IdentitySourceManage, null, cancellationToken) is { } denial)
+            return denial;
+        var mappings = (await groupMappings.ListAsync(cancellationToken))
+            .Select(m => new { id = m.Id, identityProvider = m.IdentityProvider, groupClaim = m.GroupClaim, roleName = m.RoleName });
+        return JsonResult(new { groupMappings = mappings });
+    }
+
+    [McpServerTool(Name = "create_group_mapping")]
+    [Description("Maps an identity-provider group claim to a built-in role granted at sign-in.")]
+    public async Task<CallToolResult> CreateGroupMappingAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Identity provider name (e.g. entra).")] string identityProvider,
+        [Description("Group claim value (the directory group's object id).")] string groupClaim,
+        [Description("Role name (Administrator, Operator, User, Auditor).")] string roleName,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (await DenyAsync(principalId, PermissionActions.IdentitySourceManage, null, cancellationToken) is { } denial)
+            return denial;
+        try
+        {
+            var mapping = await groupMappings.CreateAsync(identityProvider, groupClaim, roleName, cancellationToken);
+            return JsonResult(new { id = mapping.Id, identityProvider, groupClaim, roleName });
+        }
+        catch (ArgumentException ex)
+        {
+            return Error(ex.Message);
+        }
+    }
+
+    [McpServerTool(Name = "remove_group_mapping")]
+    [Description("Removes a directory group→role mapping by id.")]
+    public async Task<CallToolResult> RemoveGroupMappingAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Group-mapping id (GUID).")] string mappingId,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (await DenyAsync(principalId, PermissionActions.IdentitySourceManage, null, cancellationToken) is { } denial)
+            return denial;
+        if (!Guid.TryParse(mappingId, out var id))
+            return Error("mappingId must be a GUID.");
+        return await groupMappings.RemoveAsync(id, cancellationToken)
+            ? JsonResult(new { id, removed = true })
+            : Error("group mapping not found.");
     }
 
     private async Task<CallToolResult?> DenyAsync(

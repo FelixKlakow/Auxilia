@@ -34,6 +34,7 @@ public static class DependencyInjectionExtensions
         services.AddSingleton<PrincipalDirectory>();
         services.AddSingleton<WorkflowTypeAccessStore>();
         services.AddSingleton<GroupMappingResolver>();
+        services.AddSingleton<GroupMappingDirectory>();
         services.AddSingleton<GroupRoleResolver>();
         services.AddSingleton<GroupDirectory>();
         services.AddSingleton<IIdentityProvider, LocalIdentityProvider>();

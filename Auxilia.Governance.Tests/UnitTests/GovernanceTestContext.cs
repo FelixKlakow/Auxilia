@@ -25,6 +25,7 @@ internal sealed class GovernanceTestContext
     public LocalIdentityProvider IdentityProvider { get; }
     public ExternalIdentityProvisioner Provisioner { get; }
     public GroupMappingResolver GroupMappingResolver { get; }
+    public GroupMappingDirectory GroupMappingDirectory { get; }
 
     public GovernanceTestContext()
     {
@@ -33,8 +34,9 @@ internal sealed class GovernanceTestContext
         AccessStore = new WorkflowTypeAccessStore(AccessRecords);
         PolicyEngine = new PolicyEngine(Principals, RoleAssignments, AccessStore, AuditLog);
         IdentityProvider = new LocalIdentityProvider(Credentials, Principals, RoleAssignments);
-        Provisioner = new ExternalIdentityProvisioner(Principals, RoleAssignments, AuditLog);
         GroupMappingResolver = new GroupMappingResolver(GroupMappings);
+        GroupMappingDirectory = new GroupMappingDirectory(GroupMappings, AuditLog);
+        Provisioner = new ExternalIdentityProvisioner(Principals, RoleAssignments, GroupMappingResolver, AuditLog);
     }
 
     public async Task<Guid> NewPrincipalWithRoleAsync(string role)

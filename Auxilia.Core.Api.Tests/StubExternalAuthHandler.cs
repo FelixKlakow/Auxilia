@@ -30,6 +30,9 @@ public sealed class StubExternalAuthHandler(
         foreach (var group in Request.Headers["X-Test-Groups"].ToString()
                      .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             claims.Add(new Claim("groups", group));
+        // Emulate Entra's group-claim overage signal (too many groups to embed in the token).
+        if (Request.Headers["X-Test-Overage"].ToString() is "true")
+            claims.Add(new Claim("hasgroups", "true"));
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "StubExternal"));
         return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(principal, Scheme.Name)));

@@ -44,4 +44,13 @@ public static class CoreClaims
         var groups = principal.FindAll("groups").Select(c => c.Value).ToList();
         return new ExternalIdentity(provider, subject, displayName, email, groups);
     }
+
+    /// <summary>
+    /// True when the token signalled group-claim overage: Entra omits the <c>groups</c> claim once a
+    /// user is in more than ~200 groups, emitting <c>hasgroups=true</c> (or a <c>_claim_names</c>
+    /// pointer) instead — the full membership must then be read from Microsoft Graph.
+    /// </summary>
+    public static bool HasGroupOverage(ClaimsPrincipal principal)
+        => string.Equals(principal.FindFirstValue("hasgroups"), "true", StringComparison.OrdinalIgnoreCase)
+           || principal.FindFirst("_claim_names")?.Value.Contains("\"groups\"", StringComparison.Ordinal) == true;
 }

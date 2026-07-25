@@ -121,7 +121,8 @@ app.MapGet("/auth/login", (string? returnUrl, IOptions<OidcSettings> oidc) =>
 // handler) for a provisioned Core principal and issues the browser session cookie.
 app.MapGet("/auth/callback", async (
         string? returnUrl, HttpContext http, IAuthenticationSchemeProvider schemes,
-        ExternalIdentityProvisioner provisioner, IOptions<OidcSettings> oidc, CancellationToken ct) =>
+        ExternalIdentityProvisioner provisioner, IDirectoryGroupResolver directoryGroups,
+        IOptions<OidcSettings> oidc, CancellationToken ct) =>
 {
     if (await schemes.GetSchemeAsync(AuthSchemes.ExternalCookie) is null)
         return Results.NotFound(new { error = "interactive sign-in is not configured" });
@@ -131,6 +132,12 @@ app.MapGet("/auth/callback", async (
         return Results.Unauthorized();
 
     var identity = CoreClaims.ExternalIdentityFromPrincipal(external.Principal, oidc.Value.ProviderName);
+    if (CoreClaims.HasGroupOverage(external.Principal))
+    {
+        // Too many groups for the token to carry them — read the real set from the directory.
+        var accessToken = external.Properties?.GetTokenValue("access_token");
+        identity = identity with { Groups = await directoryGroups.GetGroupIdsAsync(identity.Subject, accessToken, ct) };
+    }
     var session = await provisioner.ProvisionAsync(identity, ct);
     if (session is null)
         return Results.Json(new { error = "the account is not permitted to sign in" },
@@ -324,6 +331,41 @@ app.MapPost("/api/groups/{id:guid}/roles", async (
     {
         return Results.BadRequest(new { error = ex.Message });
     }
+}).RequireAuthorization();
+
+// --- Identity: directory group → role mappings (consumed at federated sign-in) ---
+app.MapGet("/api/identity/group-mappings", async (
+        HttpContext http, IPolicyEngine policy, GroupMappingDirectory mappings, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.IdentitySourceManage, ct) is { } fail)
+        return fail;
+    return Results.Ok((await mappings.ListAsync(ct))
+        .Select(m => new GroupMappingDto(m.Id, m.IdentityProvider, m.GroupClaim, m.RoleName)));
+}).RequireAuthorization();
+
+app.MapPost("/api/identity/group-mappings", async (
+        CreateGroupMappingRequest request, HttpContext http, IPolicyEngine policy,
+        GroupMappingDirectory mappings, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.IdentitySourceManage, ct) is { } fail)
+        return fail;
+    try
+    {
+        var mapping = await mappings.CreateAsync(request.IdentityProvider, request.GroupClaim, request.RoleName, ct);
+        return Results.Ok(new GroupMappingDto(mapping.Id, mapping.IdentityProvider, mapping.GroupClaim, mapping.RoleName));
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+}).RequireAuthorization();
+
+app.MapDelete("/api/identity/group-mappings/{id:guid}", async (
+        Guid id, HttpContext http, IPolicyEngine policy, GroupMappingDirectory mappings, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.IdentitySourceManage, ct) is { } fail)
+        return fail;
+    return await mappings.RemoveAsync(id, ct) ? Results.NoContent() : Results.NotFound();
 }).RequireAuthorization();
 
 // --- MCP (authenticated) + health ---

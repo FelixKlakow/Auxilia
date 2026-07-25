@@ -1,10 +1,12 @@
 using System.Net;
 using System.Net.Http.Json;
 using Auxilia.Core.Api.Auth;
+using Auxilia.Governance;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Auxilia.Core.Api.Tests.ComponentTests;
 
@@ -20,16 +22,31 @@ public sealed class OidcLoginTests : CoreApiComponentTestBase
 {
     protected override void ConfigureHost(IWebHostBuilder builder)
         => builder.ConfigureTestServices(services =>
+        {
+            // The stub occupies the external scheme the real OIDC handler would.
             services.AddAuthentication()
-                .AddScheme<AuthenticationSchemeOptions, StubExternalAuthHandler>(AuthSchemes.ExternalCookie, null));
+                .AddScheme<AuthenticationSchemeOptions, StubExternalAuthHandler>(AuthSchemes.ExternalCookie, null);
+            // Stand in for the Graph overage lookup: an over-quota user is "in" group-ops.
+            services.RemoveAll<IDirectoryGroupResolver>();
+            services.AddSingleton<IDirectoryGroupResolver>(new StubDirectoryGroupResolver(["group-ops"]));
+        });
 
     private sealed record MeResponse(Guid PrincipalId, string? DisplayName, string[] Roles);
 
-    private static async Task<HttpResponseMessage> SignInAsync(HttpClient client, string subject, string name = "Ada Lovelace")
+    /// <summary>Seeds a directory group → role mapping the sign-in flow resolves against.</summary>
+    private Task SeedMappingAsync(string groupClaim, string roleName)
+        => Factory.Services.GetRequiredService<GroupMappingDirectory>().CreateAsync("entra", groupClaim, roleName);
+
+    private static async Task<HttpResponseMessage> SignInAsync(
+        HttpClient client, string subject, string name = "Ada Lovelace", string? groups = null, bool overage = false)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, "/auth/callback?returnUrl=/auth/me");
         request.Headers.Add("X-Test-Sub", subject);
         request.Headers.Add("X-Test-Name", name);
+        if (groups is not null)
+            request.Headers.Add("X-Test-Groups", groups);
+        if (overage)
+            request.Headers.Add("X-Test-Overage", "true");
         return await client.SendAsync(request); // auto-redirect + cookie container → lands on /auth/me
     }
 
@@ -90,5 +107,30 @@ public sealed class OidcLoginTests : CoreApiComponentTestBase
     {
         var response = await CreateClient().GetAsync("/api/runs");
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+    }
+
+    [Test]
+    public async Task SignIn_WithGroupClaims_GrantsMappedDirectoryRoles()
+    {
+        await SeedMappingAsync("group-ops", "Operator");
+
+        var me = await (await SignInAsync(Factory.CreateClient(), "sub-1", groups: "group-ops"))
+            .Content.ReadFromJsonAsync<MeResponse>();
+
+        Assert.That(me!.Roles, Does.Contain("Operator"),
+            "A directory group claim must grant its mapped role for the session.");
+    }
+
+    [Test]
+    public async Task SignIn_WithGroupOverage_ReadsGroupsFromDirectory_AndGrantsMappedRoles()
+    {
+        // No groups ride in the token (overage); the directory resolver reports membership in group-ops.
+        await SeedMappingAsync("group-ops", "Operator");
+
+        var me = await (await SignInAsync(Factory.CreateClient(), "sub-1", overage: true))
+            .Content.ReadFromJsonAsync<MeResponse>();
+
+        Assert.That(me!.Roles, Does.Contain("Operator"),
+            "Group-claim overage must fall back to the directory and still resolve mapped roles.");
     }
 }
