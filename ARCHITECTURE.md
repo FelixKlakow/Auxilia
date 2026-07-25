@@ -5,6 +5,15 @@
 
 ---
 
+> **This document describes the three-deployable architecture** delivered by the Core platform separation (branch `feature/core-platform-separation`; migration plan and delivery status in **`docs/core-platform-separation-plan.md`**). The platform is:
+> - **`Auxilia.Core.Api`** — the secure **control plane**: REST + OpenAPI, authenticated MCP, the identity / RBAC / groups / policy / audit authority, connector administration (secrets encrypted at rest), and the Run API.
+> - **`Auxilia.Core.Runner`** — the **execution plane** (formerly the *Steering Instance*): container launch, the authenticated JIT-credential handshake, workspace / network / resource mediation, and run lifecycle.
+> - **`Auxilia.WorkflowStudio`** — the workflow-domain **product**: types, schemas, the configuration editor, triggers, and view rendering — a pure `Auxilia.Core.Client` consumer.
+>
+> Each service owns its **own database**; secrets live only in the Core; audit is centralised in the Core. `Auxilia.BackendService` remains as a **transitional** Blazor host (dashboard + legacy config pages, platform scheduler, heartbeat monitor) being superseded by Workflow Studio and a Core admin console. Points still in flight are marked **Transition state** where they matter.
+
+---
+
 ## Table of Contents
 
 1. System Overview
@@ -34,6 +43,7 @@ Auxilia is a **workflow-driven distributed system** where:
 - **Workflows** are stateful, signed programs that run to completion and communicate exclusively via the platform message bus.
 - **AI agents** are first-class citizens - they can trigger, steer, observe, and complete workflows via the same interfaces as human users (MCP protocol).
 - **Security is pluggable** - runs standalone out of the box, or integrates with corporate identity providers (AAD, LDAP, OIDC).
+- **The platform is three deployables** - a secure **Core** (`Core.Api` control plane + `Core.Runner` execution plane) that owns identity, secrets, and container execution, and a **Workflow Studio** product that owns the workflow domain and is a pure client of the Core Web API. Each has its own database; they meet only over the Core API and the message bus.
 
 ---
 
@@ -43,8 +53,11 @@ Auxilia is a **workflow-driven distributed system** where:
 |---|---|
 | **Work Item** | A unit of work from an external task source (Jira issue, ADO ticket, Trello card, etc.) |
 | **Workflow** | A signed, stateful, isolated program that processes a work item through defined steps until completion or cancellation |
-| **Steering Instance** | The backend mediator between the message bus, the frontend, and AI agents |
-| **MCP Interface** | Model Context Protocol endpoint - gives AI agents full parity with the human UI |
+| **Core.Api** | The secure control plane — REST + OpenAPI, authenticated MCP, the identity / RBAC / groups / policy / audit authority, connector administration, and the Run API |
+| **Core.Runner** | The execution plane (formerly the *Steering Instance*) — launches and configures workload containers, performs the just-in-time credential handshake, and owns run lifecycle, ownership, and failover heartbeats |
+| **Workflow Studio** | The workflow-domain product — types, schemas, packages, the configuration editor, triggers/adapters, and view rendering; a pure client of the Core API on its own database |
+| **Connector** | A stored, named set of credentials/settings for an external system, administered in the Core and **encrypted at rest**. Workflow configurations reference connectors by ID and never carry secret material (this is the concrete mechanism behind the *Account Bundle* concept used below) |
+| **MCP Interface** | Model Context Protocol endpoint - gives AI agents full parity with the human UI; on the Core it is authenticated against the same policy authority as REST |
 | **Account Bundle** | A set of credentials grouped by purpose (e.g. user identity, AI service, source control) |
 | **Resource Proxy** | A platform-managed, audited access point through which workflows reach external APIs and databases |
 | **Trust Chain** | Signature chain ensuring a workflow is authorized to run in this environment |
@@ -63,94 +76,90 @@ Auxilia is a **workflow-driven distributed system** where:
 graph TB
     subgraph Sources["External Sources"]
         TASKS["Task Sources (Jira, ADO, TFS, Trello, GitHub)"]
-        SC["Source Control - multiple systems (Git, TFVC)"]
         IDP["Identity Providers (AAD, LDAP, OIDC, Local)"]
-        EXT["External Resources (APIs, Databases, CI systems)"]
-        PKG_REG["Package Registries (NuGet, npm, PyPI...)"]
+        EXT["External Resources (APIs, DBs, CI, package registries)"]
     end
     subgraph Clients["Clients"]
-        UI["Blazor Server Frontend"]
-        AI["AI Agents (Copilot, OpenAI, Custom)"]
+        ADMIN["Core Admin Console*"]
+        STUDIOUI["Workflow Studio UI"]
+        AI["AI Agents (MCP)"]
+        CLI["CLI / external automation"]
     end
-    subgraph Backend["Backend Platform (ASP.NET Core)"]
-        GW["API Gateway"]
-        MCP["MCP Server"]
-        SEC["Security and Policy Service"]
-        ACCT["Account Manager"]
-        SIGNING["Workflow Trust Service (ISigningProvider)"]
-        ADAPTERS["Integration Adapters"]
-        PROXY["Resource Proxy"]
-        WM["Workspace Manager"]
-        NET["Network Egress Layer"]
-        PKG_PROXY["Package Proxy (optional)"]
-        BUS["Message Bus (IMessageBus - RabbitMQ default)"]
-        SI["Steering Instance Pool"]
+    subgraph Product["WORKFLOW STUDIO (product · own DB)"]
+        PROD["Types · schemas · packages\nConfig editor (slot→connector refs)\nTriggers + integration adapters\nView rendering / dashboards"]
+        PRODMCP["Product MCP"]
     end
-    subgraph Execution["Workflow Execution (IWorkflowRunner)"]
-        WR["Workflow Runner"]
-        REG["Workflow Registry"]
-        WF["Workflow Containers / Processes"]
+    subgraph Core["CORE (security kernel)"]
+        API["Core.Api — control plane\nREST + OpenAPI · authenticated MCP\nIdentity / RBAC / groups / policy / audit\nConnectors (secrets, encrypted)\nRun API + filtered queries"]
+        RUNNER["Core.Runner — execution plane\nDocker launch · workspace / CoW\nnetwork policy · Resource Proxy\nJIT credential handshake · lifecycle\nownership · heartbeat · drain"]
     end
-    UI <-->|HTTPS / SignalR| GW
-    AI <-->|MCP Protocol| MCP
-    MCP --> SEC
-    GW --> SEC
-    MCP -->|Dispatch commands| BUS
-    GW -->|Dispatch commands| BUS
-    ADAPTERS -->|Work item events| BUS
-    BUS <--> SI
-    SI --> SEC
-    SI --> ACCT
-    SI --> SIGNING
-    SI --> WM
-    WM -->|CoW snapshot mounted| WF
-    WF -->|Resource requests via bus| PROXY
-    WF -->|Declared network calls| NET
-    NET --> PKG_PROXY
-    NET -->|Undeclared - blocked and logged| NET
-    PKG_PROXY --> PKG_REG
-    PROXY --> EXT
-    WM -->|Fetch and push via| PROXY
-    SIGNING --> WR
-    REG --> WR
-    WR --> WF
-    ADAPTERS <--> Sources
-    IDP --> SEC
+    WF["Workload Containers\n(own network + mount namespace)"]
+    BE["BackendService (transitional)*\ndashboard · scheduler · heartbeat monitor · mailbox adapter"]
+    BUS["Message Bus (IMessageBus — RabbitMQ default)"]
+    COREDB[("Core.Api DB")]
+    RUNDB[("Core.Runner DB")]
+    PRODDB[("Product DB")]
+
+    ADMIN -->|REST + auth MCP| API
+    CLI -->|REST| API
+    AI -->|authenticated MCP| API
+    STUDIOUI --> PROD
+    PROD -->|Core.Client REST: connectors, identity, runs| API
+    PROD -->|start run — Run API| API
+    PRODMCP -.->|authenticated via Core| API
+    TASKS -->|work-item events| PROD
+    IDP -->|authenticate| API
+
+    API -->|run request| BUS
+    BUS -->|competing consume| RUNNER
+    RUNNER -->|status events| BUS
+    BUS --> API
+    BUS -.->|status fan-out| BE
+
+    RUNNER -->|launch + JIT encrypted slot creds| WF
+    WF -->|resource requests via bus| RUNNER
+    RUNNER -->|scoped, audited, default-deny egress| EXT
+
+    API --> COREDB
+    RUNNER --> RUNDB
+    PROD --> PRODDB
 ```
+
+<sub>\* Transition state — the Core admin console and the retirement of `BackendService` are in flight; today `BackendService` still hosts the dashboard, legacy config pages, scheduler, and heartbeat monitor. Core.Api and Core.Runner currently keep **separate** databases; consolidating them into one shared Core DB tier (with the failover monitor moving into Core.Api) is planned — see §12 and the migration plan.</sub>
 
 ---
 
 ## 4. Key Components
 
-### Frontend - Blazor Server
-- Aggregated view of work items from all configured task sources
-- Real-time workflow monitoring via SignalR
-- Account bundle management and security policy configuration
-- Workflow artifact configuration (where produced artifacts are routed)
-- **Everything in the UI is also exposed via the MCP Server** - no hidden operations
+### Core.Api — Control Plane
+- The single **authentication + authorization authority**: hosts Governance (identity, principals, RBAC, **first-class groups**, the Policy Engine) and the audit authority. Every REST call and every MCP tool authenticates (API-key bearer) and is policy-checked per action — there is no unauthenticated or unauthorized path.
+- **Connector administration**: stores connectors (credentials/settings for external systems) **encrypted at rest**; reads return setting *keys*, never values; secrets are decrypted only just-in-time at dispatch. Secrets live here and nowhere else.
+- **Run API**: start a run inline ("on the fly"), from a stored configuration, or from a startup static seed; query runs with typed filters; cancel a run. It authorizes the caller, then dispatches a **self-contained `RunWorkflowCommand`** to Core.Runner over the bus (the runner has a different database and cannot resolve a Core principal, so it trusts Core-dispatched commands rather than re-authorizing).
+- **Authenticated MCP** twin of the REST surface (`/mcp`), subject to the same policy authority — AI/service parity without a hand-maintained mirror.
+- Stateless → scales horizontally behind a load balancer. Owns its own database.
+- **Transition state:** the Core **admin console** UI and relocating the **heartbeat/failover monitor** into Core.Api are planned; today the monitor still runs in `BackendService`.
 
-### API Gateway - ASP.NET Core
-- Single entry point for all external traffic (UI and MCP clients)
-- Token validation delegated to the Security Service
-- WebSocket / SignalR upgrade for real-time event streams
+### Core.Runner — Execution Plane
+- The renamed, dissolved *Steering Instance*. Consumes run requests from Core.Api (competing consumers), **launches and configures the workload container correctly** — credentials, network policy, mounts, capability clamps, resource limits — and owns the full run lifecycle (see section 6). This is the single audited "configure the container correctly" chokepoint.
+- Performs the **authenticated registration handshake**: injects a one-time instance token at launch, pre-creates the instance's exclusive response queue, and delivers each slot's configuration **just-in-time per slot activation**, encrypted for that instance — never an upfront bundle, never before the slot is used.
+- Hosts the execution-side platform capabilities: the **Workspace Manager** (warm cache + per-run CoW snapshots), the **Network Egress Layer**, the **Resource Proxy**, artifact persistence, live view-data fan-out, and the drain coordinator for long-living workflows.
+- Emits ownership **heartbeats** for failover detection and publishes **status events** back to Core.Api (and to the dashboard).
+- Scales via competing consumers on the run queue. Owns its own database.
+- **Transition state:** Core.Runner still resolves credentialed slots from its own slot-configuration stores (seeded via the `slot-configurations` exchange); moving that resolution onto **Core connectors** and folding the runner's lifecycle store into a shared Core DB tier are the remaining consolidation steps.
 
-### Backend Service - Platform Host
-- Hosts the API Gateway, the MCP Server, and the dashboard backend (SignalR fan-out via the Redis backplane)
-- Hosts the **platform scheduler** for time-based workflow triggers
-- Runs the **heartbeat monitor**: watches Steering Instance heartbeats in the ownership store, detects orphaned workflow instances, marks them Failed, and triggers cleanup and fresh re-dispatch per retry policy (see section 14.2)
-- There is **no separate Orchestration Service**: earlier drafts showed one, but its responsibilities (work-item intake, pre-flight, dispatch, lifecycle management) belong to the Steering Instance — a standalone orchestrator would only forward decisions and add a failure mode without an isolation benefit
+### Workflow Studio — the Product
+- Owns everything **workflow-domain**: workflow types, schemas, packages, dirty-configuration detection, the **configuration editor** (bindings are slot→**connector references**, never secrets), triggers, integration adapters, and view rendering / dashboards.
+- A **pure client of the Core API** (`Auxilia.Core.Client`): it fetches available connectors/providers and dispatches runs through the Core Run API — it holds no credentials, touches no Core database, and does not publish to the bus itself.
+- Exposes its own **authenticated Product MCP** for the workflow-authoring surface, which authenticates via the Core. Owns its own database.
+
+### BackendService — Dashboard Host (transitional)
+- The original Blazor Server monolith, being **superseded**. Today it still hosts the operator/observer **dashboard** and legacy configuration pages (moving to Workflow Studio + the Core admin console), the **platform scheduler** for time-based triggers, the **heartbeat monitor** (moving to Core.Api), the mailbox integration adapter, and SignalR fan-out via the Redis backplane.
+- There is **no separate Orchestration Service**: work-item intake and trigger decisions live in the Product; pre-flight, dispatch authority, and lifecycle live in the Core (Api + Runner). A standalone orchestrator would only forward decisions and add a failure mode without an isolation benefit.
 
 ### Message Bus - IMessageBus
 - **Default: RabbitMQ** (runs locally in Docker, zero-config)
 - **Cloud swap: Azure Service Bus** (drop-in alternative via the same interface)
-- All communication between Steering Instances and Workflow programs passes exclusively through here
-
-### Steering Instance
-- Bridges the message bus and the workflow runtime — and owns dispatch: consumes work-item events and dispatch commands (competing consumers), selects the appropriate workflow, runs the **pre-flight checks** (signature, required account bundles, resource availability, named artifact input resolution), and manages the full workflow instance lifecycle (see section 6)
-- Delivers scoped credentials and resource endpoints **just-in-time per slot activation** — a workflow receives a slot's configuration (encrypted for that instance) only when it first needs the slot, never as an upfront bundle at startup
-- Forwards AI assistance requests to the AI Integration Layer
-- Streams live status to the frontend
-- Notifies human / AI when a workflow is waiting for input due to resource unavailability
+- Carries run requests (Core.Api → Core.Runner), status/view events, Resource-Proxy traffic, and AI-assistance requests. Workload containers reach the platform **only** through here — never a direct call.
 
 ### Workspace Manager
 - Manages **warm cache** entries for each repository — cloned once, kept current via background fetches via the Resource Proxy
@@ -172,14 +181,14 @@ graph TB
 - Retention periods and consumption access (which workflows/identities may read which artifact types) are operator configuration, enforced at dispatch-time resolution
 
 ### Platform Data Layer - Auxilia.UniversalDataAccess
-- Durable storage for all platform state: workflow registry and schemas, slot configurations and account bundles (encrypted at rest), run lifecycle records, persisted view data, the artifact metadata index, and the audit log
-- The Steering Instance's current in-memory stores (schema store, slot-configuration store, provider registry, seeded via the slot-configurations exchange) are an **interim dev simplification** — production platform state must survive restarts and be shared consistently across Steering Instance replicas
-- Storage backend is pluggable behind the universal data access abstraction; Redis remains a separate concern (ephemeral ownership/heartbeat and SignalR backplane only, see section 14)
+- The same `IDataAccess` / `PlatformData` abstraction backs every service, but each points it at a **separate backend instance** (distinct Mongo database / JSON root): the **Core.Api DB** (principals, roles, groups, connectors + provider catalog with secrets encrypted at rest, the audit log), the **Core.Runner DB** (run lifecycle / ownership, schemas, slot configurations, provider registrations), and the **Product DB** (workflow types, configurations, signal handlers, view data, dashboards, triggers). No service reads another's store.
+- Storage backend is pluggable behind the abstraction (InMemory for tests, JSON for dev, MongoDB for replicated production); Redis remains a separate concern (ephemeral ownership/heartbeat and SignalR backplane only, see section 14).
+- **Transition state:** consolidating the Core.Api and Core.Runner stores into a single **shared Core DB tier** (the two Core tiers are one family) is planned; today they are separate, and Core.Api hands the runner a self-contained run spec so no shared store is required.
 
 ### Audit Log
 - Immutable, append-only record of every action: human and AI operations, policy decisions (allow **and** deny), credential deliveries per slot activation, Resource Proxy calls, network traffic (allowed and blocked), and workflow lifecycle transitions including retries and failovers
 - Written by platform components only — workflows can neither write nor read it directly
-- Stored via the Platform Data Layer; retention period and read access are operator configuration
+- **Centralised in the Core** as the single immutable security trail (a deliberate exception to per-service databases: audit must not fragment); stored via the Platform Data Layer. Retention period and read access are operator configuration
 - Verifies every workflow artifact before execution - no unsigned execution path exists
 - In dev mode signing can be disabled entirely; no dev CA ceremony required locally
 - Three production implementations depending on deployment mode (see section 12)
@@ -226,11 +235,12 @@ graph TB
 - Not required — workflows function without it as long as the registry endpoints are declared and reachable
 
 ### MCP Server
-- Exposes every user-facing operation as an MCP tool
-- AI agents authenticate with their own Account Bundle - subject to the same policy rules as humans
-- Key tools: trigger_workflow, get_workflow_status, send_input, approve_step, cancel_workflow, list_work_items
+- MCP is a **first-class, authenticated** surface, split to match the two products: the **Core MCP** (on Core.Api) exposes runtime / connector / identity / group tools; the **Product MCP** (on Workflow Studio) exposes workflow-authoring tools and authenticates via the Core.
+- Every tool authenticates (API-key bearer, principal-bound) and is policy-checked against the **same authority as REST** — AI and service principals get UI parity with no hidden operations and no separately maintained mirror.
+- Representative Core tools: `run_workflow`, `run_configuration`, `list_runs`, `get_run`, `cancel_run`, `list_connectors`, `create_connector`, `create_group`, `assign_group_role`.
 
 ### Integration Adapters
+- Integration adapters live in **Workflow Studio** — the product owns *which* workflow a work item should run — and they start it by calling the Core **Run API**, never by publishing to the bus directly. Two adapter contracts:
 - **ITaskSourceAdapter** — read work items (full detail including linked items, history, attachments), update status, create work items, create sub-tasks, attach artifact references (`AttachArtifact`)
 - **ISourceControlAdapter** — clone, diff, branch, commit, push, create PR; plus lightweight introspection: ListDirectory, GetFileContent, DetectFrameworks (no full clone required)
 
@@ -291,7 +301,7 @@ stateDiagram-v2
     PreFlight --> Queued : Signature valid, bundles available, resources reachable
     PreFlight --> PreFlightFailed : Required resource or bundle unavailable
     PreFlightFailed --> Queued : Condition resolved, requeued
-    Queued --> Running : Steering Instance launches container / process
+    Queued --> Running : Core.Runner launches container / process
     Running --> WaitingForInput : Step requires human or AI decision
     WaitingForInput --> Running : Input received (human via UI or AI via MCP)
     Running --> Completed : All steps finished
@@ -309,17 +319,17 @@ stateDiagram-v2
 - If pre-flight fails the work item is held and the user/AI is notified; it can be requeued automatically when the condition resolves (configurable)
 - **Schema pre-loading**: the `WorkflowAnnouncementHandler` reads `workflow-schema.json` from the extracted ZIP package and populates `WorkflowSchemaStore` before sending the `Run` directive — no `EmitSchema` round-trip is required
 - **Workflow artifacts** are declared by the workflow and configured by the user - where they are stored and how they are linked back to the work item is a per-workflow configuration
-- **Workflows are not resumable (v1)**: there is no checkpointing — a retry after `Failed`, and failover after an orphaned Steering Instance, always means *kill and restart from scratch*. Because a failed run may already have performed external writes, every external write a workflow performs must be **idempotent or guarded** (branch-exists check, find-or-create PR, deduplicated comments) — this is part of the workflow SDK contract
+- **Workflows are not resumable (v1)**: there is no checkpointing — a retry after `Failed`, and failover after an orphaned Core.Runner, always means *kill and restart from scratch*. Because a failed run may already have performed external writes, every external write a workflow performs must be **idempotent or guarded** (branch-exists check, find-or-create PR, deduplicated comments) — this is part of the workflow SDK contract
 - **Failures and restarts are never silent**: every failure, retry, and orphan reassignment is published as a status event and shown in the dashboard (and via MCP), so the user always sees that a run was restarted and why
 
 ### Trigger model
 
-A dispatch originates from one of four trigger sources; all of them converge on the same dispatch command queue consumed by the Steering Instance pool:
+A dispatch originates from one of four trigger sources; all of them converge on the Core **Run API**, which authorizes the request and dispatches it to the Core.Runner pool:
 
 | Trigger | Source |
 |---|---|
 | **Work item event** | Integration Adapters detect work item changes (created, moved to a configured state) and publish dispatch commands |
-| **Manual** | A human via the dashboard or an AI agent via the MCP `trigger_workflow` tool |
+| **Manual** | A human via the dashboard/Studio or an AI agent via the Core MCP `run_workflow` tool — both resolve to a Core Run API call |
 | **Schedule** | The platform scheduler (hosted in the Backend Service) for recurring runs, e.g. nightly security scans |
 | **Artifact completion** | A finished run's persisted artifact triggers a configured follow-up workflow (e.g. CodeReviewResult → Selective Fixing) — workflow chaining without coupling the workflows to each other |
 
@@ -336,8 +346,8 @@ Workflows declare their **lifetime** in the manifest:
 
 Long-living workflows keep every invariant of the platform, with these adaptations:
 
-- **Credentials still arrive just-in-time per slot activation, but carry an expiry** — the SDK transparently re-requests a slot's configuration from the Steering Instance when it expires; long-lived processes never hold indefinitely valid secrets
-- **Dirty-configuration handling**: when a stored configuration is changed or marked dirty, the Steering Instance signals the instance to **drain and shut down**; the replacement starts with the new configuration. Upgrade to a new workflow version works the same way (drain + replace)
+- **Credentials still arrive just-in-time per slot activation, but carry an expiry** — the SDK transparently re-requests a slot's configuration from Core.Runner when it expires; long-lived processes never hold indefinitely valid secrets
+- **Dirty-configuration handling**: when a stored configuration is changed or marked dirty, Core.Runner signals the instance to **drain and shut down**; the replacement starts with the new configuration. Upgrade to a new workflow version works the same way (drain + replace)
 - **Draining is a visible lifecycle state**: a draining instance finishes in-flight work but accepts no new triggers, and is shown as `Draining` in the dashboard until it exits
 - **Still not resumable**: a crash or failover is a fresh restart that re-subscribes to its triggers; the idempotency obligations of section 6 apply unchanged
 - **Operator opt-in**: because one-shot is the security default, deploying a long-living workflow requires explicit operator approval in the platform configuration
@@ -361,7 +371,7 @@ graph TD
         REQUEST["Any request - UI or MCP"] --> SEC["Security Service"]
         SEC --> IDP["Identity Provider (AAD / LDAP / OIDC / Local)"]
         IDP --> POLICY["Policy Engine"]
-        POLICY -->|Allowed| DISPATCH["Dispatch (Steering Instance)"]
+        POLICY -->|Allowed| DISPATCH["Dispatch (Core.Api → Core.Runner)"]
         POLICY -->|Denied| BLOCK["Blocked"]
     end
 ```
@@ -370,7 +380,7 @@ graph TD
 - Signing can be **fully disabled in dev mode** - there is no ceremony, no dev CA required locally
 - In all non-dev modes signing is mandatory with no bypass; the signed artifact records what the workflow *is* — permissions and network policy are resolved at runtime, not locked into the artifact
 - **The signature is the basis for credential delivery**: the signing authority is responsible for ensuring a workflow is correct and trustworthy. Only a signature-verified workflow may receive credentials, and it receives them just-in-time per slot activation — encrypted for the specific instance, scoped to the slot's declared capabilities, and never before the slot is actually needed
-- **The registration handshake is authenticated**: channel encryption alone does not authenticate the requester. The Steering Instance injects a **one-time instance token** into the container/process at launch and pre-creates an **exclusive response queue** per instance; announcements and registration requests must present the token (validated, single-use, time-limited), and directives/configurations are only ever delivered to that pre-created queue — the request's self-declared response topic is ignored. Token-less operation exists only behind the `RequireInstanceToken=false` setting for trusted-operator dev scenarios
+- **The registration handshake is authenticated**: channel encryption alone does not authenticate the requester. Core.Runner injects a **one-time instance token** into the container/process at launch and pre-creates an **exclusive response queue** per instance; announcements and registration requests must present the token (validated, single-use, time-limited), and directives/configurations are only ever delivered to that pre-created queue — the request's self-declared response topic is ignored. Token-less operation exists only behind the `RequireInstanceToken=false` setting for trusted-operator dev scenarios
 - Workflows have **no arbitrary outbound network access** — effective network policy is resolved at dispatch from three layers (manifest baseline, run configuration, platform policy ceiling) and enforced at the kernel level; see section 10
 - Structured API calls (task sources, source control, databases) go through the Resource Proxy; build toolchain calls (package restore, etc.) go through the Network Egress Layer
 - Every action (human or AI) is written to an immutable audit log
@@ -608,7 +618,7 @@ graph LR
 ```
 
 - Workflows declare *which bundle types* they need - never specific credentials
-- Bundles are encrypted at rest; the Steering Instance decrypts and re-encrypts the relevant scoped subset for a specific workflow instance only at slot activation time — never earlier, and never more than the activated slot requires
+- Bundles are encrypted at rest **in the Core** (as connectors); Core.Runner decrypts and re-encrypts the relevant scoped subset for a specific workflow instance only at slot activation time — never earlier, and never more than the activated slot requires
 - AI bundles carry usage quotas and purpose restrictions
 - Multiple bundles of the same type are supported (e.g. two ADO instances, a GitHub and a Jira account)
 
@@ -617,6 +627,17 @@ graph LR
 ## 12. Deployment Modes
 
 All modes share the same codebase. Runtime behaviour is driven entirely by configuration and pluggable interface implementations.
+
+**Deployment topology.** A deployment runs three services, each with its own database, plus the transitional dashboard host:
+
+| Service | Role | Database | Scaling |
+|---|---|---|---|
+| `Auxilia.Core.Api` | Control plane (auth authority, connectors, Run API, Core MCP) | Core.Api DB | Stateless behind a load balancer |
+| `Auxilia.Core.Runner` | Execution plane (launch, JIT creds, lifecycle) — needs the Docker socket / a container runtime | Core.Runner DB | Competing consumers on the run queue |
+| `Auxilia.WorkflowStudio` | Workflow product (types, config editor, triggers, views, Product MCP) | Product DB | Stateless client of the Core |
+| `Auxilia.BackendService` *(transitional)* | Dashboard, platform scheduler, heartbeat monitor | existing platform DB | Sticky sessions + Redis backplane |
+
+Platform services (RabbitMQ, MongoDB, Redis, the dashboard) are deployed by Compose / k8s as they are today — the Core runs **workload containers only**, it is not a platform supervisor.
 
 | Mode | Message Bus | Workflow Runtime | Signing | Identity |
 |---|---|---|---|---|
@@ -666,14 +687,14 @@ The execution isolation layer v1 realizes default-deny only as full internal-net
 | 13 | IMessageBus, IWorkflowRunner, ISigningProvider, IIdentityProvider, and IResourceProxy are all pluggable - no hard dependency on any specific technology |
 | 14 | **Workflows are trusted via signature, credentials are delivered just-in-time** — the signing authority vouches for the workflow's correctness; a verified workflow may hold scoped credentials directly, but receives each slot's credentials only at slot activation, encrypted per instance, never as an upfront bundle |
 | 15 | **Artifact persistence via pluggable `IArtifactStore`** — production is direct but manifest/config-limited; consumption is resolved at dispatch and mounted read-only into the container; the bus carries references (ID + hash), never payloads; backends (filesystem, blob, database) are a deployment choice |
-| 16 | **No separate Orchestration Service** — dispatch, pre-flight, and lifecycle management live in the Steering Instance; the Backend Service hosts the API Gateway, MCP Server, dashboard fan-out, platform scheduler, and the heartbeat monitor for Steering Instance failover |
-| 17 | **Unified principal model with deny-by-default RBAC** — humans, AI agents, and services are all principals through the same Policy Engine; four built-in roles (Administrator, Operator, User, Auditor); workflow-type access lists as the primary instrument; single-tenant v1 with `TenantId` on every resource (see section 16) |
+| 16 | **No separate Orchestration Service** — trigger decisions live in the Product; the dispatch authority lives in **Core.Api** (the Run API); container launch, pre-flight, and lifecycle live in **Core.Runner**. A standalone orchestrator would only forward decisions and add a failure mode without an isolation benefit |
+| 17 | **Unified principal model with deny-by-default RBAC** — humans, AI agents, and services are all principals through the same Policy Engine (hosted in Core.Api); four built-in roles (Administrator, Operator, User, Auditor) plus **first-class groups** (a principal's effective roles are the union of its direct assignments and its groups'); workflow-type access lists as the primary instrument; single-tenant v1 with `TenantId` on every resource (see section 16) |
 
 ---
 
 ## 14. Scaling
 
-The frontend and the steering layer have different scaling characteristics and are solved independently.
+The frontend/dashboard, the control plane (Core.Api), and the execution layer (Core.Runner) have different scaling characteristics and are solved independently.
 
 ---
 
@@ -715,14 +736,14 @@ graph LR
 
 ---
 
-### 14.2 Steering Instance Scaling
+### 14.2 Core.Runner Scaling
 
-Steering instances scale via **competing consumers** on the RabbitMQ command queue - adding instances increases dispatch throughput automatically.
+Core.Runner instances scale via **competing consumers** on the RabbitMQ run-request queue — adding instances increases dispatch throughput automatically.
 
-Once a steering instance picks up a workflow it becomes the **owner** for its lifetime (it holds the container/process handle). Two concerns follow:
+Once a Core.Runner picks up a run it becomes the **owner** for its lifetime (it holds the container/process handle). Two concerns follow:
 
-- **Ownership tracking** - each run's lifecycle record carries the owning instance's service ID; instances write liveness heartbeats. v1 keeps both in the **platform data layer** (shared MongoDB in replicated deployments); moving the hot heartbeat path to Redis is a later optimization, not a semantic change
-- **Failover** - each steering instance emits a heartbeat; if it stops, the **Backend Service heartbeat monitor** detects the orphaned workflow instances, terminates them gracefully via their per-run cancel queues (no Docker access required), and marks them Failed. Recovery is always a fresh restart from scratch (workflows are not resumable, see section 6) issued as a new dispatch command per retry policy — exactly once per orphaned run, so failovers never cascade; the failover event is surfaced in the dashboard so the user sees the run was restarted
+- **Ownership tracking** - each run's lifecycle record carries the owning instance's service ID; instances write liveness heartbeats. v1 keeps both in the runner's **platform data layer**; moving the hot heartbeat path to Redis is a later optimization, not a semantic change
+- **Failover** - each Core.Runner emits a heartbeat; if it stops, the **heartbeat monitor** (in `BackendService` today, moving to Core.Api) detects the orphaned workflow instances, terminates them gracefully via their per-run cancel queues (no Docker access required), and marks them Failed. Recovery is always a fresh restart from scratch (workflows are not resumable, see section 6) issued as a new dispatch per retry policy — exactly once per orphaned run, so failovers never cascade; the failover event is surfaced in the dashboard so the user sees the run was restarted
 
 ```mermaid
 graph TB
@@ -730,10 +751,10 @@ graph TB
         CMD[Command Queue competing consumers]
         EVT[Event Exchange fanout]
     end
-    subgraph SteeringPool[Steering Instance Pool]
-        SI1[Steering Instance 1 owns WF-101 WF-102]
-        SI2[Steering Instance 2 owns WF-103]
-        SI3[Steering Instance 3 idle]
+    subgraph SteeringPool[Core.Runner Pool]
+        SI1[Core.Runner 1 owns WF-101 WF-102]
+        SI2[Core.Runner 2 owns WF-103]
+        SI3[Core.Runner 3 idle]
     end
     subgraph Workflows[Workflow Containers / Processes]
         WF101[Workflow WF-101]
@@ -741,8 +762,8 @@ graph TB
         WF103[Workflow WF-103]
     end
     REDIS[Redis Ownership Store and Heartbeat]
-    TRIG[Trigger sources: Adapters, UI / MCP, Scheduler]
-    BE[Backend Service heartbeat monitor]
+    TRIG[Trigger sources: Product adapters, Core Run API / MCP, Scheduler]
+    BE[Heartbeat monitor - BackendService today, moving to Core.Api]
     TRIG -->|Dispatch command| CMD
     CMD -->|Competing consume| SI1
     CMD -->|Competing consume| SI2
@@ -770,14 +791,14 @@ End-to-end path of a workflow status update from container to browser when fully
 sequenceDiagram
     participant WF as Workflow Container
     participant BUS as RabbitMQ
-    participant SI as Steering Instance owner
+    participant SI as Core.Runner owner
     participant BE as Backend Service
     participant REDIS as Redis Backplane
     participant BS1 as Blazor Instance 1
     participant BS2 as Blazor Instance 2
     participant UA as Browser A subscribed
     WF->>BUS: StepCompleted message
-    BUS->>SI: Delivered to owning Steering Instance
+    BUS->>SI: Delivered to owning Core.Runner
     SI->>BUS: Publish WorkflowStatusUpdated event
     BUS->>BE: Event consumed
     BE->>REDIS: Publish to SignalR backplane
@@ -794,12 +815,12 @@ sequenceDiagram
 | Component | Local / Dev | On-premise | Cloud (Azure) |
 |---|---|---|---|
 | Blazor Server instances | 1 (no backplane needed) | N + sticky LB + Redis backplane | N + Azure Front Door + Azure Cache for Redis |
-| Steering instances | 1 | Pool via competing consumers | Pool via competing consumers with auto-scale |
+| Core.Runner instances | 1 | Pool via competing consumers | Pool via competing consumers with auto-scale |
 | Ownership and heartbeat store | Not needed | Platform data layer (MongoDB); Redis as later optimization | Platform data layer; Azure Cache for Redis as later optimization |
 | Message bus | RabbitMQ single in Docker | RabbitMQ cluster | Azure Service Bus |
 | Workflow runtime | OS Process | Docker / k3s | AKS node pool |
 
-Redis serves a dual purpose in non-dev modes: **SignalR backplane** and **steering ownership store**. A single Redis instance or cluster covers both.
+Redis serves a dual purpose in non-dev modes: **SignalR backplane** and **Core.Runner ownership store**. A single Redis instance or cluster covers both.
 
 ---
 
@@ -828,16 +849,16 @@ views:
 ```mermaid
 graph LR
     WF["Workflow"] -->|"ViewData message<br/>(instanceId, viewName, sequence, payload)"| BUS["Message Bus"]
-    BUS --> SI["Steering Instance"]
+    BUS --> SI["Core.Runner (republishes as platform event)"]
     SI -->|live fan-out| BACKPLANE["SignalR backplane (Redis)"]
-    BACKPLANE --> FE["Frontend: renders view from descriptor"]
-    SI -->|"lifecycle includes persisted"| STORE["View Store (platform DB / IArtifactStore)"]
-    STORE --> FE2["Frontend: re-opens views of finished runs"]
-    SI --> MCP["MCP Server — same view data exposed to AI agents"]
+    BACKPLANE --> FE["Workflow Studio: renders view from descriptor"]
+    SI -->|"lifecycle includes persisted"| STORE["View Store (Product DB / IArtifactStore)"]
+    STORE --> FE2["Workflow Studio: re-opens views of finished runs"]
+    SI --> MCP["MCP — same view data exposed to AI agents"]
 ```
 
 - Workflows publish `ViewData` messages: an envelope of `(instanceId, viewName, sequence, payload)` where the payload conforms to the declared view schema. The bus carries only view data items — large blobs belong in the Artifact Store, referenced from the payload
-- **Live**: the Steering Instance fans view data out to subscribed frontend circuits via the existing SignalR backplane (section 14) — a live agent view is simply a view with `rendering: stream`
+- **Live**: Core.Runner republishes view data as a platform event and Workflow Studio fans it out to subscribed dashboard circuits via the SignalR backplane (section 14) — a live agent view is simply a view with `rendering: stream`
 - **Persisted**: view data is stored so the dashboard can re-open the views of completed runs — viewing finished workflow results uses the identical rendering path as live data, replayed from the store
 - **Generic rendering**: the frontend renders views purely from the descriptor (schema + rendering hint); adding a new workflow with new views requires **no frontend changes**. A `custom` rendering hint allows future pluggable visual components
 - **AI parity**: the MCP server exposes the same views to AI agents — no hidden data channel
@@ -850,7 +871,7 @@ Dashboards are composed of views: per-run dashboards come from the run's workflo
 
 ## 16. Governance and RBAC
 
-Every operation in Auxilia — human, AI, or service — is performed by an authenticated **principal** and authorized by the **Policy Engine**. There are no anonymous operations and no unaudited decisions. See `docs/governance-rbac-design.md` for the implementation plan.
+Every operation in Auxilia — human, AI, or service — is performed by an authenticated **principal** and authorized by the **Policy Engine**, hosted in **Core.Api** as the platform's single authentication + authorization authority. There are no anonymous operations and no unaudited decisions. See `docs/governance-rbac-design.md` for the implementation plan.
 
 ### Principals
 
@@ -887,7 +908,7 @@ An authorization check is the triple **(principal, action, resource)** evaluated
 ```mermaid
 flowchart LR
     REQ["Request (UI / MCP / dispatch)"] --> AUTHN["Authenticate via IIdentityProvider"]
-    AUTHN --> RESOLVE["Resolve principal + roles<br/>(direct assignments + IdP group mappings)"]
+    AUTHN --> RESOLVE["Resolve principal + roles<br/>(direct + group membership + IdP mappings)"]
     RESOLVE --> RBAC["RBAC check: (principal, action, resource)<br/>deny by default"]
     RBAC -->|denied| AUDIT_D["Audit: deny"] --> BLOCK["Blocked"]
     RBAC -->|allowed| RESPOL["Resource policy checks:<br/>approval requirements, AI purpose restrictions,<br/>quotas, operator clamps"]
@@ -895,15 +916,15 @@ flowchart LR
     RESPOL -->|passed| AUDIT_A["Audit: allow"] --> EXEC["Operation proceeds"]
 ```
 
-Both outcomes are always audited. The Policy Engine is a library used at every enforcement point — API Gateway, MCP Server, dispatch pre-flight (trigger permission), view subscription, artifact consumption resolution, and administration operations — so UI and MCP cannot diverge.
+Both outcomes are always audited. The Policy Engine is a library used at every enforcement point in the Core — every REST endpoint, the Core MCP, dispatch (the Run API's trigger check), and administration operations — and the Product authorizes through the Core, so UI and MCP cannot diverge.
 
-### Identity provider group mapping
+### Groups and group mapping
 
-Role assignment is either **direct** (local accounts, administered in the dashboard) or **mapped**: an administrator maintains `(identity provider, group) → role(s)` mappings, so corporate directory groups (AAD/LDAP/OIDC claims) translate to Auxilia roles at sign-in without per-user administration. Mappings are evaluated at session start and cached for the session lifetime.
+Roles reach a principal three ways, unioned deny-by-default: **direct** assignment; membership in a **first-class group** (`GroupDirectory` + `GroupRoleResolver` — a group carries members and roles, and a member inherits the group's roles); and IdP **mapping**, where an administrator maintains `(identity provider, group) → role(s)` mappings so corporate directory groups (AAD/LDAP/OIDC claims) translate to Auxilia roles at sign-in without per-user administration. A principal's **effective roles are the union of all three**. First-class groups and their role assignments are administered in the Core (REST + authenticated MCP: `create_group`, `add_group_member`, `assign_group_role`); IdP mappings are evaluated at session start and cached for the session lifetime.
 
-### Administration in the dashboard
+### Administration
 
-The dashboard's admin area (Administrator role) covers: principal management, role assignments, group mappings, workflow-type access lists, platform policy ceilings, retention configuration, and the audit log viewer. Operator-level configuration (slot configs, clamps, triggers, shared dashboards) lives in the operator area. Everything is equally available via MCP, subject to the same permissions.
+Identity administration (principals, role assignments, **groups**, group mappings, platform policy ceilings, retention, the audit-log viewer) is a **Core.Api** responsibility — surfaced through the Core admin console and the Core MCP. Workflow-domain configuration (workflow-type access lists, slot→connector bindings, operator clamps, triggers, shared dashboards) lives in **Workflow Studio**. Both authenticate against the one Core policy authority, so UI and MCP cannot diverge. *(Transition state: the Core admin console is being built; some of these pages still live in `BackendService` today.)*
 
 ---
 

@@ -1,6 +1,8 @@
 # Goal: Auxilia v1 — Complete Platform Foundation, Proven by One Real End-to-End Path
 
 > Cross-reference: ARCHITECTURE.md, USE-CASES.md, docs/workflow-sdk-design.md
+>
+> **Historical (v1 / demo goal).** This records the pre-separation v1 goal, achieved for the demo. The platform has since been split into the three-deployable Core architecture — see ARCHITECTURE.md and `docs/core-platform-separation-plan.md`. Where this doc says *Steering Instance*, read `Auxilia.Core.Runner`.
 
 Build the complete Auxilia platform as specified in ARCHITECTURE.md, so that one real, governed, fully observable workflow runs end to end — from an external trigger to a persisted, re-viewable result — with every platform guarantee enforced and proven by the automated test pyramid.
 

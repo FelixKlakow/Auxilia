@@ -36,18 +36,18 @@ published to the **`workflow.view-data` exchange**. `Sequence` is a per-(instanc
 monotonic counter assigned by the SDK so consumers can order and de-duplicate. Payloads are
 view items only — large blobs belong in the Artifact Store, referenced from the payload.
 
-## 3. Steering Instance: persistence
+## 3. Persistence (Workflow Studio)
 
-`ViewDataHandler` consumes the exchange. For views whose lifecycle includes Persisted
-(descriptor known from the registration manifest, cached per instance), each item is stored
+The Product consumes the exchange (`ViewDataFanOutHandler`). For views whose lifecycle includes Persisted
+(descriptor known from the manifest, cached per instance), each item is stored
 as a `ViewDataRecord(InstanceId, ViewName, Sequence, PayloadJson, TimestampUtc)` in the
-platform data layer — so finished runs replay through the identical rendering path.
-Live-only views are not stored.
+**Product database** — so finished runs replay through the identical rendering path.
+Live-only views are not stored. *(Core.Runner forwards workflow view-data onto the platform; persistence and rendering are the Product's concern — see ARCHITECTURE.md §15.)*
 
-## 4. Backend Service: live fan-out
+## 4. Live fan-out (Workflow Studio dashboards)
 
-The dashboard backend consumes the same exchange and forwards items to subscribed SignalR
-circuits (group per `instanceId:viewName`). Subscription requires a `view.subscribe` policy
+The Product's dashboard backend consumes the same exchange and forwards items to subscribed SignalR
+circuits (group per `instanceId:viewName`) — hosted in `BackendService` today, moving to Workflow Studio. Subscription requires a `view.subscribe` policy
 check; access to a view follows the workflow type it belongs to (workflow-type access lists).
 Replay of a finished run = read `ViewDataRecord`s ordered by Sequence and push them through
 the same client-side renderer.
@@ -72,5 +72,5 @@ multiple workflows into shared dashboards (`DashboardRecord` with view reference
 
 ## 7. MCP parity
 
-The MCP server exposes `get_view_data(instanceId, viewName, fromSequence)` and a streaming
+The Product MCP exposes `get_view_data(instanceId, viewName, fromSequence)` and a streaming
 subscription backed by the same store/exchange — no hidden data channel.

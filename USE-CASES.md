@@ -35,7 +35,7 @@ All use cases below assume the following architectural capabilities are in place
 | Isolation between concurrent workflow runs accessing the same repos | Workspace Manager (mount namespaces + UID isolation) |
 | Controlled outbound network access for build tools and package managers | Network Egress Layer (default-deny; layered policy resolution) |
 | AI assistance during workflow execution | AI Integration Layer |
-| Human input mid-workflow | RequestInput message + Steering Instance + UI/MCP |
+| Human input mid-workflow | RequestInput message + Core.Runner + UI/MCP |
 | Workflow produces and stores artifacts | Artifact contract in workflow manifest |
 | Update work item status and attach results | Task Source Adapters (write-back) |
 | Audit log of all actions including AI decisions and network traffic | Audit Log (immutable) |
@@ -240,7 +240,7 @@ flowchart TD
 | ImplementationSummary artifact | Changes applied, test results, PR reference |
 
 **Key architectural points:**
-- The `REVISE --> INPUT` loop is bounded by a configurable per-workflow **max-revision-attempts** policy. When the limit is reached the finding is escalated: a RequestInput asks the human or AI whether to abandon the change, skip it, or override and apply the last revision as-is. This policy is enforced by the Steering Instance and is declared in the workflow manifest.
+- The `REVISE --> INPUT` loop is bounded by a configurable per-workflow **max-revision-attempts** policy. When the limit is reached the finding is escalated: a RequestInput asks the human or AI whether to abandon the change, skip it, or override and apply the last revision as-is. This policy is enforced by the Core.Runner and is declared in the workflow manifest.
 
 **Gap identified:** Resource Proxy needs async long-running call support - trigger CI build and poll for result. See section 9.
 
@@ -340,7 +340,7 @@ flowchart TD
 
 **Key architectural points:**
 - Approval for security fixes should default to mandatory human or AI sign-off regardless of auto-apply policy, unless explicitly overridden. This is a security-specific policy flag.
-- The `RETRY --> AIGEN` loop is bounded by a configurable **max-remediation-attempts** policy (same mechanism as UC6). When the limit is reached the finding is escalated via RequestInput: human or AI chooses to abandon, skip, or manually supply a fix. Enforced by the Steering Instance, declared in the workflow manifest.
+- The `RETRY --> AIGEN` loop is bounded by a configurable **max-remediation-attempts** policy (same mechanism as UC6). When the limit is reached the finding is escalated via RequestInput: human or AI chooses to abandon, skip, or manually supply a fix. Enforced by the Core.Runner, declared in the workflow manifest.
 - Targeted re-scanning after each fix requires async Resource Proxy support (same gap as UC6 and UC7).
 - Closing or updating the source security work item requires write-back via the Task Source Adapter.
 - This workflow is a natural consumer of UC7 artifacts, reinforcing the need for cross-workflow artifact references.
@@ -453,7 +453,7 @@ The following gaps were identified across the use cases above. Each requires a c
 
 **Identified in:** UC6, UC8
 
-**Summary:** AI revision and remediation retry loops must be bounded to prevent runaway runs. A configurable `max-revision-attempts` / `max-remediation-attempts` policy is declared in the workflow manifest and enforced by the Steering Instance. When the limit is reached the run escalates via RequestInput rather than looping indefinitely.
+**Summary:** AI revision and remediation retry loops must be bounded to prevent runaway runs. A configurable `max-revision-attempts` / `max-remediation-attempts` policy is declared in the workflow manifest and enforced by the Core.Runner. When the limit is reached the run escalates via RequestInput rather than looping indefinitely.
 
 ---
 
@@ -473,7 +473,7 @@ The following must be reflected in ARCHITECTURE.md:
 | 8 | Workspace Manager — warm cache, CoW snapshots, mount namespace isolation, multi-source, no-cache; capability-limited mid-run write-back | ✅ Resolved — ARCHITECTURE.md §8 |
 | 9 | Network Egress Layer — layered policy (manifest + run config + platform ceiling), default-deny, allow-all opt-in | ✅ Resolved — ARCHITECTURE.md §9 |
 | 10 | Package Proxy — optional registry mirror, caching, scanning, air-gap support | ✅ Resolved — ARCHITECTURE.md §4 & §9 |
-| 11 | Bounded revision/retry loops — max-attempts policy in manifest, enforced by Steering Instance, escalates via RequestInput | ✅ Resolved — UC6 & UC8 key points |
+| 11 | Bounded revision/retry loops — max-attempts policy in manifest, enforced by Core.Runner, escalates via RequestInput | ✅ Resolved — UC6 & UC8 key points |
 
 ---
 
