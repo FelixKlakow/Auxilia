@@ -50,6 +50,10 @@ public class CoreApiDispatchEnvironment
     private const string RabbitMqAlias = "rabbitmq";
     private const string RabbitMqImage = "rabbitmq:3.13-management";
     private const string CoreApiAlias = "core-api";
+    // Shared run-output + workspace roots: the runner writes to its container view; the Docker
+    // daemon (and thus workflow containers) bind-mount the same physical directory by its host path.
+    private const string ContainerRunOutput  = "/run-output";
+    private const string ContainerWorkspaces = "/workspaces";
 
     private static readonly string NetworkName =
         $"auxilia-coreapi-{Guid.NewGuid():N}".Substring(0, 30);
@@ -60,6 +64,8 @@ public class CoreApiDispatchEnvironment
     private IContainer _steeringInstance = null!;
     private IContainer _coreApi = null!;
     private IContainer _gitServer = null!;
+    private string _runOutputDir = null!;
+    private string _workspaceDir = null!;
     private INetwork _network = null!;
     private RabbitMqContainer _rabbitMq = null!;
 
@@ -91,10 +97,19 @@ public class CoreApiDispatchEnvironment
             .Build();
         await _rabbitMq.StartAsync();
 
+        _runOutputDir = Path.Combine(Path.GetTempPath(), $"auxilia-coreapi-output-{Guid.NewGuid():N}");
+        _workspaceDir = Path.Combine(Path.GetTempPath(), $"auxilia-coreapi-workspaces-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_runOutputDir);
+        Directory.CreateDirectory(_workspaceDir);
+
         const string dockerSocket = "/var/run/docker.sock";
         _steeringInstance = new ContainerBuilder(SteeringImageName)
             .WithNetwork(_network)
             .WithBindMount(dockerSocket, dockerSocket)
+            // Shared run-output + workspace roots so per-run repository clones are visible to the
+            // workflow container the daemon launches (ARCHITECTURE §9 — Docker-in-Docker bind split).
+            .WithBindMount(_runOutputDir, ContainerRunOutput)
+            .WithBindMount(_workspaceDir, ContainerWorkspaces)
             .WithEnvironment("RabbitMq__Host", RabbitMqAlias)
             .WithEnvironment("RabbitMq__Port", "5672")
             .WithEnvironment("RabbitMq__UserName", "guest")
@@ -115,6 +130,11 @@ public class CoreApiDispatchEnvironment
                 "/app/slots/Auxilia.Slots.CredentialProbe.slothandler.dll")
             .WithEnvironment(
                 "WorkflowLauncher__ExtraEnvironmentVariables__AUXILIA_DEVELOPER_MODE", "1")
+            // The daemon's view of the shared roots (host paths) that it bind-mounts into workflows.
+            .WithEnvironment("WorkflowDispatcher__RunOutputDirectory",         ContainerRunOutput)
+            .WithEnvironment("WorkflowDispatcher__RunOutputHostDirectory",     _runOutputDir)
+            .WithEnvironment("WorkflowDispatcher__WorkspaceRootDirectory",     ContainerWorkspaces)
+            .WithEnvironment("WorkflowDispatcher__WorkspaceRootHostDirectory", _workspaceDir)
             .WithWaitStrategy(
                 Wait.ForUnixContainer().UntilMessageIsLogged("WorkflowDispatcher started"))
             .Build();
@@ -162,6 +182,9 @@ public class CoreApiDispatchEnvironment
         if (_steeringInstance is not null) await _steeringInstance.DisposeAsync();
         if (_rabbitMq is not null) await _rabbitMq.DisposeAsync();
         if (_network is not null) await _network.DisposeAsync();
+        foreach (var dir in new[] { _runOutputDir, _workspaceDir })
+            try { if (dir is not null && Directory.Exists(dir)) Directory.Delete(dir, recursive: true); }
+            catch (IOException) { /* leave for manual cleanup */ }
     }
 
     internal static async Task BuildImageAsync(string tag, string dockerfilePath)

@@ -52,7 +52,11 @@ public sealed class RepositoryWorkspaceSystemTests
             },
             Repositories:
             [
-                new RepositorySpec("main", CoreApiDispatchEnvironment.RepositoryCloneUrl, AuthConnectorId: connector!.Id)
+                // NoCache: clone straight into the run workspace. (The warm-cache copy trips over
+                // git's read-only pack .idx on Docker Desktop's bind mount — a host-FS quirk, not a
+                // product issue: WorkspaceManagerTests proves the copy path on a normal filesystem.)
+                new RepositorySpec("main", CoreApiDispatchEnvironment.RepositoryCloneUrl,
+                    AuthConnectorId: connector!.Id, NoCache: true)
             ]);
         var runResp = await Client.PostAsJsonAsync("/api/runs", run, cancellationToken);
         runResp.EnsureSuccessStatusCode();
