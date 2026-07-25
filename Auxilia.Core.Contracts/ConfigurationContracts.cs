@@ -1,15 +1,17 @@
 namespace Auxilia.Core.Contracts;
 
 /// <summary>
-/// A workflow slot bound either to a stored connector (by id — secrets stay in the Core) or
-/// to a raw provider type with inline settings. Connector-backed bindings carry no settings
-/// of their own.
+/// A workflow slot bound to a stored connector (by id — secrets stay in the Core), to a raw
+/// provider type with inline settings, or — when <see cref="DelegatedResource"/> is set — to a
+/// token obtained on-behalf-of the triggering user at resolution time (OBO delegation).
+/// Connector-backed and delegated bindings carry no settings of their own.
 /// </summary>
 public sealed record SlotBinding(
     string SlotName,
     string? ProviderType = null,
     Guid? ConnectorId = null,
-    IReadOnlyDictionary<string, string>? Settings = null);
+    IReadOnlyDictionary<string, string>? Settings = null,
+    string? DelegatedResource = null);
 
 /// <summary>Create a run configuration in the Core store.</summary>
 public sealed record CreateRunConfiguration(

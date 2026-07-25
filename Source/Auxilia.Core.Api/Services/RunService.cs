@@ -67,7 +67,7 @@ public sealed class RunService(
         // presents the token to resolve credentialed slots JIT. No secrets travel in the command —
         // only the provider types, so the runner can load the matching slot-handler plugins.
         var resolutionToken = Guid.NewGuid().ToString("N");
-        await credentialResolver.StashAsync(commandId, resolutionToken, slotBindings, ct);
+        await credentialResolver.StashAsync(commandId, resolutionToken, slotBindings, triggeredBy, ct);
         var providerTypes = slotBindings
             .Where(b => !string.IsNullOrEmpty(b.ProviderType))
             .Select(b => b.ProviderType!)

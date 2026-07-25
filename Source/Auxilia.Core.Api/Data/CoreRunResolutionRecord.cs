@@ -18,5 +18,11 @@ public sealed record CoreRunResolutionRecord : IEntity
     /// <summary>The run's slot bindings (connector references / inline provider settings), serialized as JSON.</summary>
     public string SlotBindingsJson { get; init; } = "[]";
 
+    /// <summary>
+    /// The principal that triggered the run, if any. Used to resolve on-behalf-of (OBO) delegated
+    /// slots as that user at resolution time; still no secret is stored here.
+    /// </summary>
+    public Guid? TriggeredByPrincipalId { get; init; }
+
     public DateTimeOffset CreatedUtc { get; init; }
 }

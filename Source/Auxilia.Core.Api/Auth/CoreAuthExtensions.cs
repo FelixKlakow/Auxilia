@@ -1,3 +1,4 @@
+using Auxilia.Core.Api.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
@@ -51,6 +52,13 @@ public static class CoreAuthExtensions
         {
             services.AddSingleton<IDirectoryGroupResolver, NullDirectoryGroupResolver>();
         }
+
+        // OBO delegation: real Entra on-behalf-of exchange when delegation is enabled, else a no-op
+        // so a delegated slot simply fails closed.
+        if (oidc.Enabled && oidc.EnableDelegation)
+            services.AddSingleton<IDelegatedTokenExchange, EntraOboTokenExchange>();
+        else
+            services.AddSingleton<IDelegatedTokenExchange, NullDelegatedTokenExchange>();
 
         if (oidc.Enabled)
         {

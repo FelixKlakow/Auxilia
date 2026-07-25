@@ -24,4 +24,11 @@ public sealed class OidcSettings
 
     /// <summary>Extra scopes beyond openid/profile/email (e.g. a group scope) requested at sign-in.</summary>
     public IList<string> Scopes { get; set; } = new List<string>();
+
+    /// <summary>
+    /// When true, the user's access token is retained (encrypted, session-lifetime) at sign-in so
+    /// workflows can act on-behalf-of the user via OBO delegation. Off by default — retaining a user
+    /// token is opt-in. No refresh token is ever stored.
+    /// </summary>
+    public bool EnableDelegation { get; set; }
 }

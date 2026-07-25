@@ -18,17 +18,22 @@ namespace Auxilia.Core.Api.Services;
 public sealed class SlotCredentialResolver(
     IDataAccess<CoreRunResolutionRecord> store,
     ConnectorService connectors,
+    DelegatedTokenStore delegatedTokens,
+    IDelegatedTokenExchange delegatedExchange,
     AuditLog audit,
     TimeProvider clock,
     IOptions<CoreApiSettings> settings)
 {
     /// <summary>Records the run's resolution context at dispatch time (references only, never secrets).</summary>
-    public Task StashAsync(Guid runId, string resolutionToken, IReadOnlyList<SlotBinding> bindings, CancellationToken ct)
+    public Task StashAsync(
+        Guid runId, string resolutionToken, IReadOnlyList<SlotBinding> bindings,
+        Guid? triggeredBy, CancellationToken ct)
         => store.SaveAsync(new CoreRunResolutionRecord
         {
             Id = runId,
             ResolutionToken = resolutionToken,
             SlotBindingsJson = JsonSerializer.Serialize(bindings),
+            TriggeredByPrincipalId = triggeredBy,
             CreatedUtc = clock.GetUtcNow()
         }, ct);
 
@@ -55,7 +60,23 @@ public sealed class SlotCredentialResolver(
 
         string providerType;
         IReadOnlyDictionary<string, string> resolvedSettings;
-        if (binding.ConnectorId is { } connectorId)
+        if (binding.DelegatedResource is { } resource)
+        {
+            // On-behalf-of (OBO): mint a downstream token as the triggering user, just-in-time. The
+            // user's retained token is the only stored secret; the exchanged token is never persisted.
+            if (record.TriggeredByPrincipalId is not { } principalId)
+                return await RejectAsync(runId, "delegation-no-principal",
+                    "a delegated slot requires a triggering principal", ct);
+            if (await delegatedTokens.GetAsync(principalId, ct) is not { } userToken)
+                return await RejectAsync(runId, "delegation-no-token",
+                    "delegated access requires a recent interactive sign-in", ct);
+            if (await delegatedExchange.ExchangeAsync(userToken, resource, ct) is not { } downstreamToken)
+                return await RejectAsync(runId, "delegation-exchange-failed",
+                    "on-behalf-of token exchange failed", ct);
+            providerType = binding.ProviderType ?? string.Empty;
+            resolvedSettings = new Dictionary<string, string> { ["accessToken"] = downstreamToken };
+        }
+        else if (binding.ConnectorId is { } connectorId)
         {
             if (await connectors.ResolveSettingsAsync(connectorId, ct) is not { } settingsMap)
                 return await RejectAsync(runId, "connector-not-found", $"connector '{connectorId}' not found", ct);

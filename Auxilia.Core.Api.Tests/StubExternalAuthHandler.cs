@@ -34,8 +34,13 @@ public sealed class StubExternalAuthHandler(
         if (Request.Headers["X-Test-Overage"].ToString() is "true")
             claims.Add(new Claim("hasgroups", "true"));
 
+        // Carry a saved access token so the callback's OBO-token retention path can run.
+        var properties = new AuthenticationProperties();
+        if (Request.Headers["X-Test-AccessToken"].ToString() is { Length: > 0 } accessToken)
+            properties.StoreTokens([new AuthenticationToken { Name = "access_token", Value = accessToken }]);
+
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "StubExternal"));
-        return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(principal, Scheme.Name)));
+        return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(principal, properties, Scheme.Name)));
     }
 
     // The callback signs the external identity out after provisioning; the stub is stateless.

@@ -35,6 +35,7 @@ builder.Services.AddPlatformEntity<CoreRunConfigurationRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreConnectorRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreRunRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreRunResolutionRecord>(platformData);
+builder.Services.AddPlatformEntity<DelegatedUserTokenRecord>(platformData);
 builder.Services.AddPlatformEntity<AuditRecord>(platformData);
 builder.Services.AddSingleton<AuditLog>();
 
@@ -76,6 +77,7 @@ builder.Services.AddRateLimiter(options =>
 // --- Core services ---
 builder.Services.AddSingleton<ConnectorService>();
 builder.Services.AddSingleton<ConnectorAccessPolicy>();
+builder.Services.AddSingleton<DelegatedTokenStore>();
 builder.Services.AddSingleton<RunConfigurationService>();
 builder.Services.AddSingleton<RunService>();
 builder.Services.AddSingleton<RunReadService>();
@@ -123,6 +125,7 @@ app.MapGet("/auth/login", (string? returnUrl, IOptions<OidcSettings> oidc) =>
 app.MapGet("/auth/callback", async (
         string? returnUrl, HttpContext http, IAuthenticationSchemeProvider schemes,
         ExternalIdentityProvisioner provisioner, IDirectoryGroupResolver directoryGroups,
+        DelegatedTokenStore delegatedTokens, TimeProvider clock,
         IOptions<OidcSettings> oidc, CancellationToken ct) =>
 {
     if (await schemes.GetSchemeAsync(AuthSchemes.ExternalCookie) is null)
@@ -145,6 +148,18 @@ app.MapGet("/auth/callback", async (
             statusCode: StatusCodes.Status403Forbidden);
 
     await http.SignInAsync(AuthSchemes.Cookie, CoreClaims.ToClaimsPrincipal(session, AuthSchemes.Cookie));
+
+    // Session-lifetime OBO: retain the user's access token (encrypted) so a workflow can act
+    // on-behalf-of them until it expires. Opt-in; no refresh token is ever kept.
+    if (oidc.Value.EnableDelegation
+        && external.Properties?.GetTokenValue("access_token") is { Length: > 0 } userAccessToken)
+    {
+        var expiresUtc = DateTimeOffset.TryParse(external.Properties.GetTokenValue("expires_at"), out var exp)
+            ? exp
+            : clock.GetUtcNow().AddHours(1);
+        await delegatedTokens.RetainAsync(session.PrincipalId, userAccessToken, expiresUtc, ct);
+    }
+
     await http.SignOutAsync(AuthSchemes.ExternalCookie);
 
     var target = returnUrl is { Length: > 0 } && returnUrl.StartsWith('/') && !returnUrl.StartsWith("//")

@@ -16,16 +16,26 @@ namespace Auxilia.Core.Api.Tests.UnitTests;
 [Category("Unit")]
 public sealed class SlotCredentialResolverTests
 {
-    private static (SlotCredentialResolver Resolver, ConnectorService Connectors) New()
+    private sealed class StubExchange(string? downstream) : IDelegatedTokenExchange
     {
+        public Task<string?> ExchangeAsync(string userAccessToken, string resource, CancellationToken ct = default)
+            => Task.FromResult(downstream);
+    }
+
+    private static (SlotCredentialResolver Resolver, ConnectorService Connectors, DelegatedTokenStore Tokens) New(
+        IDelegatedTokenExchange? exchange = null)
+    {
+        var protector = new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32));
         var connectors = new ConnectorService(
-            new InMemoryDataAccess<CoreConnectorRecord>(),
-            new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32)), TimeProvider.System);
+            new InMemoryDataAccess<CoreConnectorRecord>(), protector, TimeProvider.System);
+        var tokens = new DelegatedTokenStore(
+            new InMemoryDataAccess<DelegatedUserTokenRecord>(), protector, TimeProvider.System);
         var resolver = new SlotCredentialResolver(
-            new InMemoryDataAccess<CoreRunResolutionRecord>(), connectors,
+            new InMemoryDataAccess<CoreRunResolutionRecord>(), connectors, tokens,
+            exchange ?? new NullDelegatedTokenExchange(),
             new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System),
             TimeProvider.System, Options.Create(new CoreApiSettings()));
-        return (resolver, connectors);
+        return (resolver, connectors, tokens);
     }
 
     private static (string PublicKey, RSA Rsa) NewKeyPair()
@@ -43,7 +53,7 @@ public sealed class SlotCredentialResolverTests
     [Test]
     public async Task Resolve_ConnectorBackedSlot_ReturnsCiphertextDecryptingToConnectorSettings()
     {
-        var (resolver, connectors) = New();
+        var (resolver, connectors, _) = New();
         var connector = await connectors.CreateAsync(
             new CreateConnector("gh", "github", new Dictionary<string, string> { ["token"] = "secret-xyz" }),
             ownerPrincipalId: null, CancellationToken.None);
@@ -51,7 +61,7 @@ public sealed class SlotCredentialResolverTests
         var runId = Guid.NewGuid();
         var token = Guid.NewGuid().ToString("N");
         await resolver.StashAsync(runId, token,
-            new List<SlotBinding> { new("sc", "github", connector.Id) }, CancellationToken.None);
+            new List<SlotBinding> { new("sc", "github", connector.Id) }, triggeredBy: null, CancellationToken.None);
 
         var (publicKey, rsa) = NewKeyPair();
         using (rsa)
@@ -68,11 +78,11 @@ public sealed class SlotCredentialResolverTests
     [Test]
     public async Task Resolve_WrongToken_Fails()
     {
-        var (resolver, _) = New();
+        var (resolver, _, _) = New();
         var runId = Guid.NewGuid();
         await resolver.StashAsync(runId, "the-real-token",
             new List<SlotBinding> { new("sc", "local", Settings: new Dictionary<string, string>()) },
-            CancellationToken.None);
+            triggeredBy: null, CancellationToken.None);
 
         var (publicKey, rsa) = NewKeyPair();
         using (rsa)
@@ -88,12 +98,12 @@ public sealed class SlotCredentialResolverTests
     [Test]
     public async Task Resolve_UnknownSlot_Fails()
     {
-        var (resolver, _) = New();
+        var (resolver, _, _) = New();
         var runId = Guid.NewGuid();
         var token = Guid.NewGuid().ToString("N");
         await resolver.StashAsync(runId, token,
             new List<SlotBinding> { new("sc", "local", Settings: new Dictionary<string, string>()) },
-            CancellationToken.None);
+            triggeredBy: null, CancellationToken.None);
 
         var (publicKey, rsa) = NewKeyPair();
         using (rsa)
@@ -107,7 +117,7 @@ public sealed class SlotCredentialResolverTests
     [Test]
     public async Task Resolve_UnknownRun_Fails()
     {
-        var (resolver, _) = New();
+        var (resolver, _, _) = New();
         var (publicKey, rsa) = NewKeyPair();
         using (rsa)
         {
@@ -122,11 +132,13 @@ public sealed class SlotCredentialResolverTests
     public async Task Resolve_Rejection_IsAudited()
     {
         var auditStore = new InMemoryDataAccess<AuditRecord>();
+        var protector = new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32));
         var connectors = new ConnectorService(
-            new InMemoryDataAccess<CoreConnectorRecord>(),
-            new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32)), TimeProvider.System);
+            new InMemoryDataAccess<CoreConnectorRecord>(), protector, TimeProvider.System);
+        var tokens = new DelegatedTokenStore(
+            new InMemoryDataAccess<DelegatedUserTokenRecord>(), protector, TimeProvider.System);
         var resolver = new SlotCredentialResolver(
-            new InMemoryDataAccess<CoreRunResolutionRecord>(), connectors,
+            new InMemoryDataAccess<CoreRunResolutionRecord>(), connectors, tokens, new NullDelegatedTokenExchange(),
             new AuditLog(auditStore, TimeProvider.System), TimeProvider.System,
             Options.Create(new CoreApiSettings()));
 
@@ -146,12 +158,12 @@ public sealed class SlotCredentialResolverTests
     [Test]
     public async Task Resolve_InlineBinding_UsesInlineSettings()
     {
-        var (resolver, _) = New();
+        var (resolver, _, _) = New();
         var runId = Guid.NewGuid();
         var token = Guid.NewGuid().ToString("N");
         await resolver.StashAsync(runId, token,
             new List<SlotBinding> { new("sc", "local", Settings: new Dictionary<string, string> { ["path"] = "/repos/x" }) },
-            CancellationToken.None);
+            triggeredBy: null, CancellationToken.None);
 
         var (publicKey, rsa) = NewKeyPair();
         using (rsa)
@@ -162,6 +174,53 @@ public sealed class SlotCredentialResolverTests
             Assert.That(success, Is.True, error);
             Assert.That(credential!.ProviderType, Is.EqualTo("local"));
             Assert.That(Decrypt(rsa, credential.EncryptedSettings)["path"], Is.EqualTo("/repos/x"));
+        }
+    }
+
+    [Test]
+    public async Task Resolve_DelegatedSlot_ExchangesTheUsersTokenOnBehalfOf()
+    {
+        var principalId = Guid.NewGuid();
+        var (resolver, _, tokens) = New(new StubExchange("downstream-ado-token"));
+        await tokens.RetainAsync(principalId, "user-token", DateTimeOffset.MaxValue, CancellationToken.None);
+
+        var runId = Guid.NewGuid();
+        var token = Guid.NewGuid().ToString("N");
+        await resolver.StashAsync(runId, token,
+            new List<SlotBinding> { new("sc", "ado", DelegatedResource: "499b/.default") },
+            triggeredBy: principalId, CancellationToken.None);
+
+        var (publicKey, rsa) = NewKeyPair();
+        using (rsa)
+        {
+            var (success, error, credential) = await resolver.ResolveAsync(
+                runId, token, "sc", publicKey, CancellationToken.None);
+
+            Assert.That(success, Is.True, error);
+            Assert.That(credential!.ProviderType, Is.EqualTo("ado"));
+            Assert.That(Decrypt(rsa, credential.EncryptedSettings)["accessToken"], Is.EqualTo("downstream-ado-token"),
+                "The delegated slot delivers the OBO-exchanged token, minted just-in-time.");
+        }
+    }
+
+    [Test]
+    public async Task Resolve_DelegatedSlot_WithoutARetainedToken_Fails()
+    {
+        var (resolver, _, _) = New(new StubExchange("x"));
+        var runId = Guid.NewGuid();
+        var token = Guid.NewGuid().ToString("N");
+        await resolver.StashAsync(runId, token,
+            new List<SlotBinding> { new("sc", "ado", DelegatedResource: "r") },
+            triggeredBy: Guid.NewGuid(), CancellationToken.None);
+
+        var (publicKey, rsa) = NewKeyPair();
+        using (rsa)
+        {
+            var (success, error, _) = await resolver.ResolveAsync(
+                runId, token, "sc", publicKey, CancellationToken.None);
+
+            Assert.That(success, Is.False);
+            Assert.That(error, Is.EqualTo("delegated access requires a recent interactive sign-in"));
         }
     }
 }

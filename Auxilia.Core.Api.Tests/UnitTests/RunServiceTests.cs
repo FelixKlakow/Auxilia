@@ -23,11 +23,14 @@ public sealed class RunServiceTests
         var bus = new FakeMessageBusClient();
         var configs = new RunConfigurationService(
             new InMemoryDataAccess<CoreRunConfigurationRecord>(), TimeProvider.System);
+        var protector = new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32));
         var connectorStore = new InMemoryDataAccess<CoreConnectorRecord>();
-        var connectors = new ConnectorService(
-            connectorStore, new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32)), TimeProvider.System);
+        var connectors = new ConnectorService(connectorStore, protector, TimeProvider.System);
+        var delegatedTokens = new DelegatedTokenStore(
+            new InMemoryDataAccess<DelegatedUserTokenRecord>(), protector, TimeProvider.System);
         var resolver = new SlotCredentialResolver(
-            new InMemoryDataAccess<CoreRunResolutionRecord>(), connectors,
+            new InMemoryDataAccess<CoreRunResolutionRecord>(), connectors, delegatedTokens,
+            new NullDelegatedTokenExchange(),
             new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System),
             TimeProvider.System, Options.Create(new CoreApiSettings()));
         var accessPolicy = new ConnectorAccessPolicy(connectorStore, new InMemoryDataAccess<PrincipalRecord>());
