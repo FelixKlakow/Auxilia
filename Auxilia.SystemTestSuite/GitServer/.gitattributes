@@ -1,0 +1,3 @@
+# Consumed inside a Linux container — keep LF regardless of checkout platform.
+Dockerfile text eol=lf
+httpd.conf text eol=lf

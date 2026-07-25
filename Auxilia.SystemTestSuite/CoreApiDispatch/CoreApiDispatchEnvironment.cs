@@ -38,6 +38,14 @@ public class CoreApiDispatchEnvironment
     // the Core, and the provider type its slot handler is registered under.
     internal const string CredentialWorkflowType   = "credential-resolution-workflow";
     internal const string CredentialProviderType   = "credential-probe";
+    // Per-run repository test: an authenticated git server, and the no-slot workflow that verifies
+    // the runner cloned + mounted the repo (using the JIT-resolved connector credential).
+    internal const string GitServerImageName       = "auxilia-git-server:system-test";
+    internal const string GitServerAlias           = "gitserver";
+    internal const string RepositoryWorkflowType   = "workspace-repository-workflow";
+    internal const string RepositoryCloneUrl       = "http://gitserver/git/test.git";
+    internal const string GitUsername              = "builduser";
+    internal const string GitPassword              = "the-pat";
 
     private const string RabbitMqAlias = "rabbitmq";
     private const string RabbitMqImage = "rabbitmq:3.13-management";
@@ -51,6 +59,7 @@ public class CoreApiDispatchEnvironment
 
     private IContainer _steeringInstance = null!;
     private IContainer _coreApi = null!;
+    private IContainer _gitServer = null!;
     private INetwork _network = null!;
     private RabbitMqContainer _rabbitMq = null!;
 
@@ -63,10 +72,18 @@ public class CoreApiDispatchEnvironment
         await Task.WhenAll(
             BuildImageAsync(SteeringImageName, "Source/Auxilia.Core.Runner/Dockerfile"),
             BuildImageAsync(DummyWorkflowsImageName, "Auxilia.Workflows.Testing/Dockerfile"),
-            BuildImageAsync(CoreApiImageName, "Source/Auxilia.Core.Api/Dockerfile"));
+            BuildImageAsync(CoreApiImageName, "Source/Auxilia.Core.Api/Dockerfile"),
+            BuildImageAsync(GitServerImageName, "Auxilia.SystemTestSuite/GitServer/Dockerfile"));
 
         _network = new NetworkBuilder().WithName(NetworkName).Build();
         await _network.CreateAsync();
+
+        // Authenticated git server the runner clones per-run repositories from.
+        _gitServer = new ContainerBuilder(GitServerImageName)
+            .WithNetwork(_network).WithNetworkAliases(GitServerAlias)
+            .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("resuming normal operations"))
+            .Build();
+        await _gitServer.StartAsync();
 
         _rabbitMq = new RabbitMqBuilder(RabbitMqImage)
             .WithUsername("guest").WithPassword("guest")
@@ -141,6 +158,7 @@ public class CoreApiDispatchEnvironment
         CoreApiClient?.Dispose();
         if (MessageBusClient is IAsyncDisposable disposable) await disposable.DisposeAsync();
         if (_coreApi is not null) await _coreApi.DisposeAsync();
+        if (_gitServer is not null) await _gitServer.DisposeAsync();
         if (_steeringInstance is not null) await _steeringInstance.DisposeAsync();
         if (_rabbitMq is not null) await _rabbitMq.DisposeAsync();
         if (_network is not null) await _network.DisposeAsync();
