@@ -14,6 +14,9 @@ public sealed class CoreApiSettings
     /// a configuration whose name already exists is left untouched.
     /// </summary>
     public List<StaticRunConfiguration> StaticConfigurations { get; set; } = new();
+
+    /// <summary>Validity of a Core-resolved slot credential; the workflow re-requests after expiry.</summary>
+    public TimeSpan SlotCredentialLifetime { get; set; } = TimeSpan.FromMinutes(30);
 }
 
 /// <summary>A run configuration provided through host settings (appsettings / environment).</summary>

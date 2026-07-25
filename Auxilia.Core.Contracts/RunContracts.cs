@@ -9,7 +9,8 @@ public sealed record RunRequest(
     string WorkflowType,
     string PackageUri,
     IReadOnlyDictionary<string, string>? Context = null,
-    Guid? RequestedBy = null);
+    Guid? RequestedBy = null,
+    IReadOnlyList<SlotBinding>? SlotBindings = null);
 
 /// <summary>Acknowledgement that a run was accepted and dispatched to the runner.</summary>
 public sealed record RunAccepted(Guid RunId, Guid CommandId);

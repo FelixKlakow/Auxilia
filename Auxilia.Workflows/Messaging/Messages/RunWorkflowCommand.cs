@@ -34,4 +34,9 @@ public sealed record RunWorkflowCommand(
     /// pre-flight fails the run when it is missing, disabled, or references unregistered
     /// slot providers.
     /// </summary>
-    Guid? WorkflowConfigurationId = null);
+    Guid? WorkflowConfigurationId = null,
+    /// <summary>
+    /// Run-scoped token the runner presents to Core.Api to resolve this run's slot credentials
+    /// just-in-time. Minted at dispatch; carries no secret and is valid only for this run.
+    /// </summary>
+    string? ResolutionToken = null);

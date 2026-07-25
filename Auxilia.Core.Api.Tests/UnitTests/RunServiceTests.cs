@@ -1,8 +1,12 @@
+using System.Security.Cryptography;
 using Auxilia.Core.Api;
 using Auxilia.Core.Api.Data;
 using Auxilia.Core.Api.Services;
 using Auxilia.Core.Api.Tests;
 using Auxilia.Core.Contracts;
+using Auxilia.PlatformData;
+using Auxilia.PlatformData.Entities;
+using Auxilia.PlatformData.Protection;
 using Auxilia.UniversalDataAccess.Implementations;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -19,8 +23,15 @@ public sealed class RunServiceTests
         var bus = new FakeMessageBusClient();
         var configs = new RunConfigurationService(
             new InMemoryDataAccess<CoreRunConfigurationRecord>(), TimeProvider.System);
+        var connectors = new ConnectorService(
+            new InMemoryDataAccess<CoreConnectorRecord>(),
+            new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32)), TimeProvider.System);
+        var resolver = new SlotCredentialResolver(
+            new InMemoryDataAccess<CoreRunResolutionRecord>(), connectors,
+            new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System),
+            TimeProvider.System, Options.Create(new CoreApiSettings()));
         var service = new RunService(
-            bus, configs, Options.Create(new CoreApiSettings()), NullLogger<RunService>.Instance);
+            bus, configs, resolver, Options.Create(new CoreApiSettings()), NullLogger<RunService>.Instance);
         return (service, bus, configs);
     }
 
@@ -39,6 +50,8 @@ public sealed class RunServiceTests
         Assert.That(command.WorkflowPackageUri, Is.EqualTo("docker://img"));
         Assert.That(command.RequestedBy, Is.Null,
             "The Core is the auth authority and dispatches with RequestedBy=null.");
+        Assert.That(command.ResolutionToken, Is.Not.Null.And.Not.Empty,
+            "Every dispatch mints a run-scoped resolution token for JIT credential resolution.");
     }
 
     [Test]

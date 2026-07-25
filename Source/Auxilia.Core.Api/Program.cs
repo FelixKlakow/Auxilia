@@ -30,6 +30,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddPlatformEntity<CoreRunConfigurationRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreConnectorRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreRunRecord>(platformData);
+builder.Services.AddPlatformEntity<CoreRunResolutionRecord>(platformData);
 builder.Services.AddPlatformEntity<AuditRecord>(platformData);
 builder.Services.AddSingleton<AuditLog>();
 
@@ -54,6 +55,7 @@ builder.Services.AddSingleton<ConnectorService>();
 builder.Services.AddSingleton<RunConfigurationService>();
 builder.Services.AddSingleton<RunService>();
 builder.Services.AddSingleton<RunReadService>();
+builder.Services.AddSingleton<SlotCredentialResolver>();
 builder.Services.AddHostedService<RunTrackingService>();
 
 // --- MCP: first-class, authenticated AI/service parity ---
@@ -119,6 +121,24 @@ app.MapPost("/api/runs/{id:guid}/cancel", async (
     await runs.CancelAsync(id, ct);
     return Results.Accepted($"/api/runs/{id}");
 }).RequireAuthorization();
+
+// --- Internal: runner <-> Core just-in-time slot-credential resolution ---
+// Authorized by the run-scoped resolution token (header), NOT a principal API key — the runner
+// can resolve only slots of runs the Core dispatched to it. Secrets are resolved and encrypted
+// here; only ciphertext is returned.
+app.MapPost("/internal/runs/{runId:guid}/resolve-slot", async (
+        Guid runId, ResolveSlotRequest request, HttpContext http,
+        SlotCredentialResolver resolver, CancellationToken ct) =>
+{
+    var token = http.Request.Headers["X-Resolution-Token"].ToString();
+    if (string.IsNullOrEmpty(token))
+        return Results.Json(new { error = "missing resolution token" }, statusCode: StatusCodes.Status401Unauthorized);
+    var (success, error, credential) = await resolver.ResolveAsync(runId, token, request.SlotName, request.PublicKey, ct);
+    return success
+        ? Results.Ok(credential)
+        : Results.Json(new { error }, statusCode:
+            error == "invalid resolution token" ? StatusCodes.Status403Forbidden : StatusCodes.Status404NotFound);
+});
 
 // --- Configurations ---
 app.MapPost("/api/configurations", async (

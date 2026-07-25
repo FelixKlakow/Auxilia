@@ -8,18 +8,21 @@ namespace Auxilia.Core.Api.Services;
 /// <summary>
 /// Dispatches runs to the runner pool. Both the "on the fly" and "from a stored configuration"
 /// paths resolve here into a self-contained <see cref="RunWorkflowCommand"/> the runner can
-/// execute without reading any Core store.
+/// execute without reading any Core store. The command carries a run-scoped resolution token —
+/// never secrets — that the runner presents to resolve credentialed slots just-in-time.
 /// </summary>
 public sealed class RunService(
     IMessageBusClient bus,
     RunConfigurationService configurations,
+    SlotCredentialResolver credentialResolver,
     IOptions<CoreApiSettings> settings,
     ILogger<RunService> logger)
 {
     public Task<RunAccepted> RunInlineAsync(RunRequest request, CancellationToken ct)
         => DispatchAsync(
             request.WorkflowType, request.PackageUri,
-            new Dictionary<string, string>(request.Context ?? new Dictionary<string, string>()), ct);
+            new Dictionary<string, string>(request.Context ?? new Dictionary<string, string>()),
+            request.SlotBindings ?? [], ct);
 
     public async Task<RunAccepted> RunConfigurationAsync(Guid configurationId, Guid? requestedBy, CancellationToken ct)
     {
@@ -30,7 +33,7 @@ public sealed class RunService(
 
         return await DispatchAsync(
             config.WorkflowType, config.PackageUri,
-            new Dictionary<string, string>(config.Context), ct);
+            new Dictionary<string, string>(config.Context), config.SlotBindings, ct);
     }
 
     /// <summary>Requests cancellation of a run; the runner consumes the command and stops the container.</summary>
@@ -41,13 +44,22 @@ public sealed class RunService(
     }
 
     private async Task<RunAccepted> DispatchAsync(
-        string workflowType, string packageUri, Dictionary<string, string> context, CancellationToken ct)
+        string workflowType, string packageUri, Dictionary<string, string> context,
+        IReadOnlyList<SlotBinding> slotBindings, CancellationToken ct)
     {
-        // The Core is the single authorization authority: the caller was already authorized
-        // here, so the command is dispatched WITHOUT a RequestedBy principal. The runner trusts
+        // The Core is the single authorization authority: the caller was already authorized here,
+        // so the command is dispatched WITHOUT a RequestedBy principal. The runner trusts
         // Core-dispatched commands and cannot resolve a Core-database principal against its own.
         var commandId = Guid.NewGuid();
-        var command = new RunWorkflowCommand(commandId, workflowType, packageUri, context, RequestedBy: null);
+
+        // Stash the run's slot→connector references under a run-scoped resolution token; the runner
+        // presents the token to resolve credentialed slots JIT. No secrets travel in the command.
+        var resolutionToken = Guid.NewGuid().ToString("N");
+        await credentialResolver.StashAsync(commandId, resolutionToken, slotBindings, ct);
+
+        var command = new RunWorkflowCommand(
+            commandId, workflowType, packageUri, context,
+            RequestedBy: null, WorkflowConfigurationId: null, ResolutionToken: resolutionToken);
         await bus.PublishAsync(settings.Value.RunCommandQueue, command, ct);
         logger.LogInformation(
             "Dispatched run. CommandId={CommandId} WorkflowType={WorkflowType}", commandId, workflowType);
