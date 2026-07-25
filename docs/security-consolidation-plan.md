@@ -3,6 +3,8 @@
 > **Status:** Approved · 2026-07-25 · continues `docs/core-platform-separation-plan.md` (Phase 2's remaining intent)
 > **Owner:** Felix Klakow
 > **Goal:** Make "secrets live only in the Core" literally true. Today the Core owns connectors but they are *not* in the credential path — credentialed slots still resolve from the **runner's own** stores, seeded via the `slot-configurations` fanout. Move all credential resolution into the Core, keeping Core.Api and Core.Runner on **separate databases**.
+>
+> **Delivery status (2026-07-25):** **S1 ✅** (Core.Api resolves + encrypts, run-scoped token, `6f31c2b`) and **S2 ✅** (runner resolves via Core and relays ciphertext, `3f486f4`) are delivered on `feature/core-platform-separation` — solution-wide unit + component suite green. The new path is opt-in via `WorkflowDispatcher:CoreApiBaseAddress` and **coexists** with the legacy local path. **Remaining: S3** (make the Core path the default; retire the `slot-configurations` seed + the runner's credential stores; migrate secrets into Core connectors; prove end-to-end on real Docker) and **S4** (rate-limit + audit resolution).
 
 ---
 
