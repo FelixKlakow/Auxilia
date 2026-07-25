@@ -69,6 +69,7 @@
     <Project Path="Auxilia.Slots.ClaudeCode.Tests\Auxilia.Slots.ClaudeCode.Tests.csproj" />
     <Project Path="Auxilia.Slots.ClaudeCode\Auxilia.Slots.ClaudeCode.csproj" />
     <Project Path="Auxilia.Slots.CodingSession\Auxilia.Slots.CodingSession.csproj" />
+    <Project Path="Auxilia.Slots.CredentialProbe\Auxilia.Slots.CredentialProbe.csproj" />
     <Project Path="Auxilia.Slots.Email.Tests\Auxilia.Slots.Email.Tests.csproj" />
     <Project Path="Auxilia.Slots.Email\Auxilia.Slots.Email.csproj" />
     <Project Path="Auxilia.Slots.GitHub.Tests\Auxilia.Slots.GitHub.Tests.csproj" />

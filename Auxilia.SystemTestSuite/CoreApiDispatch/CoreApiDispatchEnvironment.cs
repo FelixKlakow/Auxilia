@@ -34,6 +34,10 @@ public class CoreApiDispatchEnvironment
     internal const string DummyWorkflowType        = "simple-git-commit-workflow";
     internal const string StaticConfigurationName  = "static-dummy";
     internal const string BootstrapApiKey          = "aux-system-test-key-abcdef0123456789";
+    // Credentialed-slot test: the dummy workflow that resolves a connector-backed slot through
+    // the Core, and the provider type its slot handler is registered under.
+    internal const string CredentialWorkflowType   = "credential-resolution-workflow";
+    internal const string CredentialProviderType   = "credential-probe";
 
     private const string RabbitMqAlias = "rabbitmq";
     private const string RabbitMqImage = "rabbitmq:3.13-management";
@@ -86,6 +90,14 @@ public class CoreApiDispatchEnvironment
             .WithEnvironment("WorkflowLauncher__RabbitMqPort", "5672")
             .WithEnvironment("WorkflowLauncher__RabbitMqUserName", "guest")
             .WithEnvironment("WorkflowLauncher__RabbitMqPassword", "guest")
+            // The credential-probe slot handler is baked onto the runner image at /app/slots.
+            // Its DLL is copied into the workflow container at launch; the test-fake plugin is
+            // unsigned, so it loads only when the workflow container runs in developer mode.
+            .WithEnvironment(
+                $"WorkflowLauncher__SlotPackages__{CredentialProviderType}",
+                "/app/slots/Auxilia.Slots.CredentialProbe.slothandler.dll")
+            .WithEnvironment(
+                "WorkflowLauncher__ExtraEnvironmentVariables__AUXILIA_DEVELOPER_MODE", "1")
             .WithWaitStrategy(
                 Wait.ForUnixContainer().UntilMessageIsLogged("WorkflowDispatcher started"))
             .Build();

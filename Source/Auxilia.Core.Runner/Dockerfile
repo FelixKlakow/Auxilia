@@ -3,6 +3,11 @@ WORKDIR /repo
 COPY . .
 RUN dotnet publish Source/Auxilia.Core.Runner/Auxilia.Core.Runner.csproj \
     -c Release -o /app/publish --no-self-contained
+# Bake the credential-probe slot handler onto the runner filesystem. The runner copies the
+# *.slothandler.dll into the workflow container at launch (the workflow image already carries
+# Auxilia.Workflows.Testing, so the plugin's ICredentialProbe reference resolves there).
+RUN dotnet publish Auxilia.Slots.CredentialProbe/Auxilia.Slots.CredentialProbe.csproj \
+    -c Release -o /app/slots --no-self-contained
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 # git: the Workspace Manager clones per-run repository workspaces (ARCHITECTURE §9).
@@ -11,4 +16,5 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /app/publish .
+COPY --from=build /app/slots /app/slots
 ENTRYPOINT ["dotnet", "Auxilia.Core.Runner.dll"]
