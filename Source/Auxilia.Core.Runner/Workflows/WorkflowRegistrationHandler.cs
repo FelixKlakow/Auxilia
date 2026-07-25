@@ -12,10 +12,10 @@ namespace Auxilia.Core.Runner.Workflows;
 public sealed class WorkflowRegistrationHandler(
     IMessageBusClient messageBus,
     EnvironmentValidator environmentValidator,
-    ConfigurationResolver configResolver,
+    SignalHandlerStore signalHandlerStore,
+    WorkflowSchemaStore schemaStore,
     WorkflowInstanceRegistry instanceRegistry,
     WorkflowInstanceTokenRegistry tokenRegistry,
-    DirtyConfigurationDetector dirtyDetector,
     AuditLog auditLog,
     WorkflowStatusPublisher statusPublisher,
     IOptions<WorkflowDispatcherSettings> dispatcherSettings,
@@ -104,9 +104,8 @@ public sealed class WorkflowRegistrationHandler(
         }
 
         // The manifest is the authoritative schema of this package version: persist it so the
-        // registry knows the slots of docker-baked workflows too, and mark slot configurations
-        // dirty when a new version adds required capability fields.
-        await dirtyDetector.DetectAsync(request.Manifest.WorkflowName, SchemaOf(request.Manifest), cancellationToken);
+        // dispatcher knows the workflow's slots, network endpoints, repositories, and terminal port.
+        await schemaStore.SetSchemaAsync(request.Manifest.WorkflowName, SchemaOf(request.Manifest), cancellationToken);
 
         // Workflows that declare no slots need no configuration resolution.
         if (request.Manifest.Slots.Count == 0)
@@ -114,7 +113,7 @@ public sealed class WorkflowRegistrationHandler(
             logger.LogInformation(
                 "Workflow {WorkflowInstanceId} declares no slots — responding with empty configuration.",
                 request.WorkflowInstanceId);
-            var signalHandlers = await configResolver.ResolveSignalHandlersAsync(
+            var signalHandlers = await ResolveSignalHandlersAsync(
                 request.Manifest.WorkflowName, cancellationToken);
             await messageBus.PublishAsync(responseTopic, new WorkflowConfigurationResponse(
                 request.WorkflowInstanceId, true, null,
@@ -135,36 +134,14 @@ public sealed class WorkflowRegistrationHandler(
             return;
         }
 
-        // Pre-flight only: verify the slot configuration source is valid. No credentials are
-        // delivered at registration — slots activate just-in-time (ARCHITECTURE §4/§7).
-        // Instances dispatched from a named configuration (#18) validate that configuration's
-        // bindings; all others keep the global (workflow type, slot) table.
-        var instanceRecord = await instanceRegistry.GetAsync(request.WorkflowInstanceId, cancellationToken);
-        var (configsValid, invalidReason) = instanceRecord?.WorkflowConfigurationId is { } configurationId
-            ? await configResolver.ValidateConfigurationAsync(configurationId, cancellationToken)
-            : await configResolver.ValidateConfiguredAsync(
-                request.Manifest.WorkflowName, cancellationToken);
-        if (!configsValid)
-        {
-            logger.LogInformation(
-                "Workflow registration rejected for instance {WorkflowInstanceId}: configuration validation failed — {Reason}.",
-                request.WorkflowInstanceId,
-                invalidReason);
-
-            await messageBus.PublishAsync(responseTopic, new WorkflowConfigurationResponse(
-                request.WorkflowInstanceId,
-                false,
-                invalidReason,
-                new Dictionary<string, EncryptedSlotConfiguration>()),
-                cancellationToken);
-            return;
-        }
-
+        // No credentials are delivered at registration — every slot activates just-in-time,
+        // resolved and encrypted by the Core (ARCHITECTURE §4/§7). The runner stores no slot
+        // configurations to validate here.
         logger.LogInformation(
             "Workflow registration succeeded for instance {WorkflowInstanceId}.",
             request.WorkflowInstanceId);
 
-        var slottedSignalHandlers = await configResolver.ResolveSignalHandlersAsync(
+        var slottedSignalHandlers = await ResolveSignalHandlersAsync(
             request.Manifest.WorkflowName, cancellationToken);
         await messageBus.PublishAsync(responseTopic, new WorkflowConfigurationResponse(
             request.WorkflowInstanceId,
@@ -185,6 +162,16 @@ public sealed class WorkflowRegistrationHandler(
         await auditLog.AppendAsync(
             "steering-instance", "workflow.registration.accepted",
             request.WorkflowInstanceId.ToString(), "success", ct: cancellationToken);
+    }
+
+    private async Task<IReadOnlyDictionary<string, ISignalHandlerDescriptor>> ResolveSignalHandlersAsync(
+        string workflowTypeName, CancellationToken ct)
+    {
+        var signalHandlers = await signalHandlerStore.GetHandlersAsync(workflowTypeName, ct);
+        var handlerMap = new Dictionary<string, ISignalHandlerDescriptor>(signalHandlers.Count);
+        foreach (var handler in signalHandlers)
+            handlerMap[handler.SignalName] = handler.HandlerDescriptor;
+        return handlerMap;
     }
 
     private static Auxilia.Workflows.WorkflowSchema SchemaOf(Auxilia.Workflows.WorkflowManifest manifest)

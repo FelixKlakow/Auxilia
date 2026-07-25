@@ -63,10 +63,7 @@ public class AuthenticatedHandshakeComponentTests
                 var platformData = new PlatformDataSettings { Backend = PlatformDataBackend.InMemory };
                 services.AddPlatformEntity<WorkflowSchemaRecord>(platformData);
                 services.AddPlatformEntity<WorkflowPackageRecord>(platformData);
-                services.AddPlatformEntity<SlotConfigurationRecord>(platformData);
                 services.AddPlatformEntity<SlotProviderRecord>(platformData);
-                services.AddPlatformEntity<WorkflowConfigurationRecord>(platformData);
-                services.AddPlatformEntity<SlotInstanceRecord>(platformData);
                 services.AddPlatformEntity<SignalHandlerRecord>(platformData);
                 services.AddPlatformEntity<WorkflowInstanceRecord>(platformData);
                 services.AddPlatformEntity<AuditRecord>(platformData);
@@ -78,9 +75,6 @@ public class AuthenticatedHandshakeComponentTests
                 services.AddSingleton<WorkflowStatusPublisher>();
                 services.AddSingleton(new SteeringInstanceInfo(Guid.NewGuid(), DateTime.UtcNow));
                 services.AddSingleton<WorkflowInstanceTokenRegistry>();
-                services.AddSingleton<SlotConfigurationStore>();
-                services.AddSingleton<WorkflowConfigurationStore>();
-                services.AddSingleton<SlotInstanceStore>();
                 services.AddSingleton<SlotProviderRegistry>();
                 services.AddSingleton<SignalHandlerStore>();
                 services.AddSingleton<WorkflowSchemaStore>();
@@ -88,8 +82,6 @@ public class AuthenticatedHandshakeComponentTests
                 services.AddSingleton<PendingWorkflowPackageStore>();
                 services.AddSingleton<WorkflowInstanceRegistry>();
                 services.AddSingleton<EnvironmentValidator>();
-                services.AddSingleton<DirtyConfigurationDetector>();
-                services.AddSingleton<ConfigurationResolver>();
                 services.AddSingleton<WorkflowRegistrationHandler>();
                 services.AddSingleton<WorkflowAnnouncementHandler>();
                 services.AddSingleton<NetworkPolicyResolver>();

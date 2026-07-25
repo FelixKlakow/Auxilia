@@ -3,7 +3,6 @@ using Auxilia.Governance.Policy;
 using Auxilia.PlatformData;
 using Auxilia.PlatformData.Artifacts;
 using Auxilia.PlatformData.Entities;
-using Auxilia.PlatformData.Protection;
 using Auxilia.Core.Runner.Workflows;
 using Auxilia.Core.Runner.Workflows.Storage;
 using Auxilia.UniversalDataAccess.Implementations;
@@ -22,27 +21,6 @@ internal static class TestStores
             new WorkflowTypeAccessStore(new InMemoryDataAccess<WorkflowTypeAccessRecord>()),
             NewAuditLog());
 
-    public static SlotConfigurationStore NewSlotConfigurationStore()
-        => new(new InMemoryDataAccess<SlotConfigurationRecord>(), new NullSettingsProtector());
-
-    public static SlotInstanceStore NewSlotInstanceStore()
-        => new(new InMemoryDataAccess<SlotInstanceRecord>(), new NullSettingsProtector(),
-            NewAuditLog(), TimeProvider.System);
-
-    public static WorkflowConfigurationStore NewWorkflowConfigurationStore(
-        SlotInstanceStore? slotInstances = null)
-        => new(new InMemoryDataAccess<WorkflowConfigurationRecord>(), slotInstances ?? NewSlotInstanceStore(),
-            new NullSettingsProtector(), NewAuditLog(), TimeProvider.System);
-
-    public static ConfigurationResolver NewConfigurationResolver(
-        SlotConfigurationStore? slotStore = null,
-        SignalHandlerStore? signalHandlerStore = null,
-        WorkflowConfigurationStore? configurationStore = null)
-        => new(slotStore ?? NewSlotConfigurationStore(),
-            signalHandlerStore ?? NewSignalHandlerStore(),
-            configurationStore ?? NewWorkflowConfigurationStore(),
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<ConfigurationResolver>.Instance);
-
     public static WorkflowSchemaStore NewWorkflowSchemaStore()
         => new(new InMemoryDataAccess<WorkflowSchemaRecord>());
 
@@ -57,9 +35,6 @@ internal static class TestStores
             {
                 JsonDirectory = Path.Combine(Path.GetTempPath(), $"auxilia-artifacts-{Guid.NewGuid():N}")
             });
-
-    public static DirtyConfigurationDetector NewDirtyDetector()
-        => new(NewWorkflowSchemaStore(), NewSlotConfigurationStore());
 
     public static SlotProviderRegistry NewSlotProviderRegistry()
         => new(new InMemoryDataAccess<SlotProviderRecord>());

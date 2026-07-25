@@ -35,7 +35,6 @@ public class WorkflowDispatchPipelineComponentTests
     private IHost _host = null!;
     private FakeMessageBusClient _bus = null!;
     private FakeWorkflowLauncher _launcher = null!;
-    private SlotConfigurationStore _slotStore = null!;
     private SlotProviderRegistry _providerRegistry = null!;
 
     private static byte[] CreateMinimalPackageZip(string workflowType = "my-workflow")
@@ -115,10 +114,7 @@ public class WorkflowDispatchPipelineComponentTests
                 var platformData = new PlatformDataSettings { Backend = PlatformDataBackend.InMemory };
                 services.AddPlatformEntity<WorkflowSchemaRecord>(platformData);
                 services.AddPlatformEntity<WorkflowPackageRecord>(platformData);
-                services.AddPlatformEntity<SlotConfigurationRecord>(platformData);
                 services.AddPlatformEntity<SlotProviderRecord>(platformData);
-                services.AddPlatformEntity<WorkflowConfigurationRecord>(platformData);
-                services.AddPlatformEntity<SlotInstanceRecord>(platformData);
                 services.AddPlatformEntity<SignalHandlerRecord>(platformData);
                 services.AddPlatformEntity<WorkflowInstanceRecord>(platformData);
                 services.AddPlatformEntity<AuditRecord>(platformData);
@@ -130,18 +126,13 @@ public class WorkflowDispatchPipelineComponentTests
                 services.AddSingleton<WorkflowStatusPublisher>();
                 services.AddSingleton(new SteeringInstanceInfo(Guid.NewGuid(), DateTime.UtcNow));
                 services.AddSingleton<WorkflowInstanceTokenRegistry>();
-                services.AddSingleton<SlotConfigurationStore>();
-                services.AddSingleton<WorkflowConfigurationStore>();
-                services.AddSingleton<SlotInstanceStore>();
                 services.AddSingleton<SlotProviderRegistry>();
                 services.AddSingleton<SignalHandlerStore>();
                 services.AddSingleton<WorkflowSchemaStore>();
                 services.AddSingleton<WorkflowPackageStore>();
                 services.AddSingleton<PendingWorkflowPackageStore>();
                 services.AddSingleton<WorkflowInstanceRegistry>();
-                services.AddSingleton<DirtyConfigurationDetector>();
                 services.AddSingleton<EnvironmentValidator>();
-                services.AddSingleton<ConfigurationResolver>();
                 services.AddSingleton<WorkflowRegistrationHandler>();
                 services.AddSingleton<WorkflowAnnouncementHandler>();
                 services.AddSingleton<NetworkPolicyResolver>();
@@ -151,7 +142,6 @@ public class WorkflowDispatchPipelineComponentTests
             })
             .Build();
 
-        _slotStore = _host.Services.GetRequiredService<SlotConfigurationStore>();
         _providerRegistry = _host.Services.GetRequiredService<SlotProviderRegistry>();
 
         // Start all handlers (mirrors what Program.cs does)
@@ -274,18 +264,13 @@ public class WorkflowDispatchPipelineComponentTests
         Assert.That(response.Slots, Is.Empty);
     }
 
-    // ------------------------------------------------------------------ Slot config seeding tests
+    // ------------------------------------------------------------------ Slotted registration
 
     [Test]
-    public async Task WhenSlotConfigSeeded_RegistrationSucceedsWithEmptySlots()
+    public async Task WhenSlottedWorkflowRegisters_SucceedsWithEmptySlots()
     {
-        // Seed the store directly (mirrors what Program.cs does from appsettings)
-        await _slotStore.UpsertConfigurationAsync("seeded-workflow",
-            new StoredSlotConfiguration(
-                "source-control", "LocalGit",
-                new Dictionary<string, string> { ["RepositoryPath"] = "/repos/test" },
-                ConfigurationStatus.Valid));
-
+        // Registration no longer validates or ships slot configuration: a slotted workflow
+        // registers successfully with empty slots, and each slot activates just-in-time via the Core.
         var instanceId = Guid.NewGuid();
         var responseTopic = $"resp-{instanceId:N}";
 
@@ -294,8 +279,8 @@ public class WorkflowDispatchPipelineComponentTests
 
         var request = new WorkflowRegistrationRequest(
             instanceId,
-            new WorkflowManifest("seeded-workflow", instanceId.ToString(),
-                [new SlotDefinition("source-control", null) { ServiceType = typeof(object) }], // declares the slot
+            new WorkflowManifest("slotted-workflow", instanceId.ToString(),
+                [new SlotDefinition("source-control", null) { ServiceType = typeof(object) }], // declares a slot
                 [], string.Empty, [], []),
             publicKey,
             responseTopic);
@@ -311,36 +296,7 @@ public class WorkflowDispatchPipelineComponentTests
         var response = msg as WorkflowConfigurationResponse;
         Assert.That(response, Is.Not.Null);
         Assert.That(response!.Success, Is.True);
-        // Credentials no longer ship at registration — the slot activates just-in-time.
         Assert.That(response.Slots, Is.Empty);
-    }
-
-    [Test]
-    public async Task WhenWorkflowHasSlotsButNoConfigSeeded_ConfigurationResponseIsFailure()
-    {
-        var instanceId = Guid.NewGuid();
-        var responseTopic = $"resp-{instanceId:N}";
-
-        var request = new WorkflowRegistrationRequest(
-            instanceId,
-            new WorkflowManifest("unconfigured-workflow", instanceId.ToString(),
-                [new SlotDefinition("source-control", null) { ServiceType = typeof(object) }], // declares a slot
-                [], string.Empty, [], []),
-            AnyPublicKey(),
-            responseTopic);
-
-        await _bus.SimulateReceivedAsync("workflow-registration", request);
-
-        var responded = await _bus.WaitForConditionAsync(
-            () => _bus.PublishedMessages.Any(m => m.Topic == responseTopic),
-            Timeout);
-
-        Assert.That(responded, Is.True);
-        var (_, msg) = _bus.PublishedMessages.First(m => m.Topic == responseTopic);
-        var response = msg as WorkflowConfigurationResponse;
-        Assert.That(response, Is.Not.Null);
-        Assert.That(response!.Success, Is.False);
-        Assert.That(response.ErrorMessage, Does.Contain("No slot configurations"));
     }
 
     // ------------------------------------------------------------------ helpers

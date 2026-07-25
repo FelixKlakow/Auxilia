@@ -65,10 +65,7 @@ try
     builder.Services.AddSettingsProtection(platformDataSettings);
     builder.Services.AddPlatformEntity<WorkflowSchemaRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<WorkflowPackageRecord>(platformDataSettings);
-    builder.Services.AddPlatformEntity<SlotConfigurationRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<SlotProviderRecord>(platformDataSettings);
-    builder.Services.AddPlatformEntity<WorkflowConfigurationRecord>(platformDataSettings);
-    builder.Services.AddPlatformEntity<SlotInstanceRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<SignalHandlerRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<WorkflowInstanceRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<AuditRecord>(platformDataSettings);
@@ -92,16 +89,11 @@ try
     builder.Services.AddSingleton<WorkflowSchemaStore>();
     builder.Services.AddSingleton<WorkflowPackageStore>();
     builder.Services.AddSingleton<PendingWorkflowPackageStore>();
-    builder.Services.AddSingleton<SlotConfigurationStore>();
-    builder.Services.AddSingleton<SlotInstanceStore>();
-    builder.Services.AddSingleton<WorkflowConfigurationStore>();
     builder.Services.AddSingleton<SignalHandlerStore>();
     builder.Services.AddSingleton<WorkflowInstanceRegistry>();
     builder.Services.AddSingleton(TimeProvider.System);
     builder.Services.AddSingleton<WorkflowInstanceTokenRegistry>();
-    builder.Services.AddSingleton<DirtyConfigurationDetector>();
     builder.Services.AddSingleton<EnvironmentValidator>();
-    builder.Services.AddSingleton<ConfigurationResolver>();
     builder.Services.AddSingleton<WorkflowRegistrationHandler>();
     builder.Services.AddSingleton<SlotActivationHandler>();
     builder.Services.AddSingleton<ICoreCredentialClient, CoreCredentialClient>();
@@ -133,9 +125,6 @@ try
 
     // --- Slot configuration seeding ---
     builder.Services.AddSingleton<SlotProviderRegistry>();
-    builder.Services.AddSingleton<SlotConfigurationSeedHandler>();
-    builder.Services.Configure<SlotConfigurationsSettings>(
-        builder.Configuration.GetSection("SlotConfigurations"));
 
     // --- OpenTelemetry(tracing + metrics) ---
     var otlpEndpoint = builder.Configuration["Otlp:Endpoint"];
@@ -179,10 +168,7 @@ try
 
     await app.Services.GetRequiredService<GovernanceSeeder>().SeedAsync(app.Lifetime.ApplicationStopping);
 
-    var configSeedHandler = app.Services.GetRequiredService<SlotConfigurationSeedHandler>();
-    await configSeedHandler.StartAsync(app.Lifetime.ApplicationStopping);
-
-    // Seed slot providers and configurations from startup config (env vars / appsettings).
+    // Seed slot-handler providers (plugin DLLs) from startup config (env vars / appsettings).
     var launcherSettings = app.Services.GetRequiredService<IOptions<DockerWorkflowLauncherSettings>>().Value;
     var providerRegistry = app.Services.GetRequiredService<SlotProviderRegistry>();
     foreach (var (providerType, dllPath) in launcherSettings.SlotPackages)
@@ -207,13 +193,6 @@ try
             providerType, dllPath, sidecar?.Settings, sidecar?.Contracts, sidecar?.Category,
             sidecar?.Description);
     }
-
-    var slotConfigSettings = app.Services.GetRequiredService<IOptions<SlotConfigurationsSettings>>().Value;
-    var slotStore = app.Services.GetRequiredService<SlotConfigurationStore>();
-    foreach (var (workflowType, entries) in slotConfigSettings.Workflows)
-        foreach (var entry in entries)
-            await slotStore.UpsertConfigurationAsync(workflowType,
-                new StoredSlotConfiguration(entry.SlotName, entry.ProviderType, entry.Settings, ConfigurationStatus.Valid));
 
     var handler = app.Services.GetRequiredService<WorkflowRegistrationHandler>();
     await handler.StartAsync(app.Lifetime.ApplicationStopping);

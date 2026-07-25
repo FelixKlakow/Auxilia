@@ -17,12 +17,12 @@ public class WorkflowRegistrationHandlerTests
     private static WorkflowRegistrationHandler MakeHandler(
         CapturingFakeMessageBusClient messageBus,
         EnvironmentValidator? envValidator = null,
-        ConfigurationResolver? configResolver = null,
         WorkflowInstanceRegistry? instanceRegistry = null,
         WorkflowInstanceTokenRegistry? tokenRegistry = null,
         bool requireInstanceToken = false,
         List<string>? approvedLongLivingWorkflowTypes = null,
-        DirtyConfigurationDetector? dirtyDetector = null)
+        WorkflowSchemaStore? schemaStore = null,
+        SignalHandlerStore? signalStore = null)
     {
         var profile = new RunnerProfile
         {
@@ -33,14 +33,6 @@ public class WorkflowRegistrationHandlerTests
             Options.Create(profile),
             NullLogger<EnvironmentValidator>.Instance);
 
-        var store = TestStores.NewSlotConfigurationStore();
-        var signalStore = TestStores.NewSignalHandlerStore();
-        var resolver = configResolver ?? new ConfigurationResolver(
-            store,
-            signalStore,
-            TestStores.NewWorkflowConfigurationStore(),
-            NullLogger<ConfigurationResolver>.Instance);
-
         var settings = Options.Create(new WorkflowDispatcherSettings
         {
             RequireInstanceToken = requireInstanceToken,
@@ -50,10 +42,10 @@ public class WorkflowRegistrationHandlerTests
         return new WorkflowRegistrationHandler(
             messageBus,
             validator,
-            resolver,
+            signalStore ?? TestStores.NewSignalHandlerStore(),
+            schemaStore ?? TestStores.NewWorkflowSchemaStore(),
             instanceRegistry ?? TestStores.NewWorkflowInstanceRegistry(),
             tokenRegistry ?? new WorkflowInstanceTokenRegistry(settings, TimeProvider.System),
-            dirtyDetector ?? TestStores.NewDirtyDetector(),
             TestStores.NewAuditLog(),
             TestStores.NewStatusPublisher(messageBus),
             settings,
@@ -94,7 +86,6 @@ public class WorkflowRegistrationHandlerTests
     public async Task HandleAsync_AcceptedRegistration_PersistsTheManifestSchema()
     {
         var schemaStore = TestStores.NewWorkflowSchemaStore();
-        var detector = new DirtyConfigurationDetector(schemaStore, TestStores.NewSlotConfigurationStore());
         var manifest = new WorkflowManifest(
             "TestWorkflow", Guid.NewGuid().ToString(), [], [], "3.1", ["tag-a"], [])
         {
@@ -107,7 +98,7 @@ public class WorkflowRegistrationHandlerTests
             Guid.NewGuid(), manifest, ValidPublicKey(), "reply-topic");
 
         var bus = new CapturingFakeMessageBusClient();
-        var handler = MakeHandler(bus, dirtyDetector: detector);
+        var handler = MakeHandler(bus, schemaStore: schemaStore);
         await handler.StartAsync(CancellationToken.None);
         await bus.InvokeAsync(request, CancellationToken.None);
 
@@ -130,7 +121,6 @@ public class WorkflowRegistrationHandlerTests
     public async Task HandleAsync_RejectedEnvironment_DoesNotPersistASchema()
     {
         var schemaStore = TestStores.NewWorkflowSchemaStore();
-        var detector = new DirtyConfigurationDetector(schemaStore, TestStores.NewSlotConfigurationStore());
         var manifest = new WorkflowManifest(
             "TestWorkflow", Guid.NewGuid().ToString(), [],
             [new ToolRequirement("git")], string.Empty, [], []);
@@ -138,62 +128,11 @@ public class WorkflowRegistrationHandlerTests
             Guid.NewGuid(), manifest, ValidPublicKey(), "reply-topic");
 
         var bus = new CapturingFakeMessageBusClient();
-        var handler = MakeHandler(bus, dirtyDetector: detector);
+        var handler = MakeHandler(bus, schemaStore: schemaStore);
         await handler.StartAsync(CancellationToken.None);
         await bus.InvokeAsync(request, CancellationToken.None);
 
         Assert.That(await schemaStore.GetSchemaAsync("TestWorkflow"), Is.Null);
-    }
-
-    [Test]
-    public async Task HandleAsync_ConfigNotFound_PublishesFailureResponse()
-    {
-        // Manifest declares a slot so the config resolver is reached — but the store is empty.
-        var manifest = new WorkflowManifest(
-            "TestWorkflow", Guid.NewGuid().ToString(),
-            [new SlotDefinition("slotA", null) { ServiceType = typeof(object) }], // non-empty slots → resolver is consulted
-            [], string.Empty, [], []);
-        var request = new WorkflowRegistrationRequest(
-            Guid.NewGuid(), manifest, ValidPublicKey(), "reply-topic");
-
-        var bus = new CapturingFakeMessageBusClient();
-        var handler = MakeHandler(bus); // empty store → no config found
-        await handler.StartAsync(CancellationToken.None);
-        await bus.InvokeAsync(request, CancellationToken.None);
-
-        Assert.That(bus.Published, Has.Count.EqualTo(1));
-        var response = (WorkflowConfigurationResponse)bus.Published[0].Message;
-        Assert.That(response.Success, Is.False);
-        Assert.That(response.ErrorMessage, Does.Contain("No slot configurations"));
-    }
-
-    [Test]
-    public async Task HandleAsync_DirtyConfig_PublishesFailureResponse()
-    {
-        var store = TestStores.NewSlotConfigurationStore();
-        await store.UpsertConfigurationAsync("TestWorkflow",
-            new StoredSlotConfiguration("slotA", "ProviderX",
-                new Dictionary<string, string> { ["key"] = "val" },
-                ConfigurationStatus.Dirty));
-        var resolver = new ConfigurationResolver(store, TestStores.NewSignalHandlerStore(), TestStores.NewWorkflowConfigurationStore(), NullLogger<ConfigurationResolver>.Instance);
-
-        // Manifest must declare the slot so the resolver is reached.
-        var manifest = new WorkflowManifest(
-            "TestWorkflow", Guid.NewGuid().ToString(),
-            [new SlotDefinition("slotA", null) { ServiceType = typeof(object) }],
-            [], string.Empty, [], []);
-        var request = new WorkflowRegistrationRequest(
-            Guid.NewGuid(), manifest, ValidPublicKey(), "reply-topic");
-
-        var bus = new CapturingFakeMessageBusClient();
-        var handler = MakeHandler(bus, configResolver: resolver);
-        await handler.StartAsync(CancellationToken.None);
-        await bus.InvokeAsync(request, CancellationToken.None);
-
-        Assert.That(bus.Published, Has.Count.EqualTo(1));
-        var response = (WorkflowConfigurationResponse)bus.Published[0].Message;
-        Assert.That(response.Success, Is.False);
-        Assert.That(response.ErrorMessage, Does.Contain("dirty"));
     }
 
     [Test]
@@ -202,14 +141,8 @@ public class WorkflowRegistrationHandlerTests
         using var rsa = RSA.Create(2048);
         var publicKey = Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
 
-        var store = TestStores.NewSlotConfigurationStore();
-        await store.UpsertConfigurationAsync("TestWorkflow",
-            new StoredSlotConfiguration("slotA", "ProviderX",
-                new Dictionary<string, string> { ["key"] = "val" },
-                ConfigurationStatus.Valid));
-        var resolver = new ConfigurationResolver(store, TestStores.NewSignalHandlerStore(), TestStores.NewWorkflowConfigurationStore(), NullLogger<ConfigurationResolver>.Instance);
-
-        // Manifest must declare the slot so the configuration pre-flight runs.
+        // A slotted workflow no longer needs stored slot configuration at registration —
+        // credentials are resolved just-in-time by the Core when each slot activates.
         var manifest = new WorkflowManifest(
             "TestWorkflow", Guid.NewGuid().ToString(),
             [new SlotDefinition("slotA", null) { ServiceType = typeof(object) }],
@@ -218,7 +151,7 @@ public class WorkflowRegistrationHandlerTests
             Guid.NewGuid(), manifest, publicKey, "my-response-topic");
 
         var bus = new CapturingFakeMessageBusClient();
-        var handler = MakeHandler(bus, configResolver: resolver);
+        var handler = MakeHandler(bus);
         await handler.StartAsync(CancellationToken.None);
         await bus.InvokeAsync(request, CancellationToken.None);
 
@@ -236,9 +169,37 @@ public class WorkflowRegistrationHandlerTests
     }
 
     [Test]
+    public async Task HandleAsync_ResolvesSignalHandlersFromStore_IntoResponse()
+    {
+        // The registration response carries the workflow type's configured signal handlers so the
+        // running instance knows how to react to each signal it emits.
+        var signalStore = TestStores.NewSignalHandlerStore();
+        await signalStore.UpsertHandlerAsync("SignalWorkflow",
+            new StoredSignalHandlerConfiguration("build-complete",
+                new NotifySignalHandler("slack", new Dictionary<string, string> { ["channel"] = "#builds" })));
+
+        var instanceId = Guid.NewGuid();
+        var request = new WorkflowRegistrationRequest(
+            instanceId,
+            new WorkflowManifest("SignalWorkflow", instanceId.ToString(), [], [], string.Empty, [], []),
+            ValidPublicKey(), "reply-topic");
+
+        var bus = new CapturingFakeMessageBusClient();
+        var handler = MakeHandler(bus, signalStore: signalStore);
+        await handler.StartAsync(CancellationToken.None);
+        await bus.InvokeAsync(request, CancellationToken.None);
+
+        var response = (WorkflowConfigurationResponse)bus.Published
+            .First(p => p.Message is WorkflowConfigurationResponse).Message;
+        Assert.That(response.Success, Is.True);
+        Assert.That(response.SignalHandlers.ContainsKey("build-complete"), Is.True);
+        Assert.That(response.SignalHandlers["build-complete"], Is.TypeOf<NotifySignalHandler>());
+    }
+
+    [Test]
     public async Task HandleAsync_NoSlots_PublishesSuccessWithEmptySlots()
     {
-        // A workflow with no declared slots must succeed immediately without consulting the store.
+        // A workflow with no declared slots succeeds immediately.
         var request = new WorkflowRegistrationRequest(
             Guid.NewGuid(),
             new WorkflowManifest("SlotlessWorkflow", Guid.NewGuid().ToString(),
@@ -248,7 +209,7 @@ public class WorkflowRegistrationHandlerTests
             "reply-topic");
 
         var bus = new CapturingFakeMessageBusClient();
-        var handler = MakeHandler(bus); // empty store — must NOT be consulted
+        var handler = MakeHandler(bus);
         await handler.StartAsync(CancellationToken.None);
         await bus.InvokeAsync(request, CancellationToken.None);
 
@@ -279,29 +240,22 @@ public class WorkflowRegistrationHandlerTests
     }
 
     [Test]
-    public async Task HandleAsync_HappyPath_TracksInstanceId()
+    public async Task HandleAsync_SlottedHappyPath_TracksInstanceId()
     {
         using var rsa = RSA.Create(2048);
         var publicKey = Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
-
-        var store = TestStores.NewSlotConfigurationStore();
-        await store.UpsertConfigurationAsync("TestWorkflow",
-            new StoredSlotConfiguration("slotA", "ProviderX",
-                new Dictionary<string, string> { ["key"] = "val" },
-                ConfigurationStatus.Valid));
-        var resolver = new ConfigurationResolver(store, TestStores.NewSignalHandlerStore(), TestStores.NewWorkflowConfigurationStore(), NullLogger<ConfigurationResolver>.Instance);
 
         var instanceId = Guid.NewGuid();
         var request = new WorkflowRegistrationRequest(
             instanceId,
             new WorkflowManifest("TestWorkflow", instanceId.ToString(),
-                [new SlotDefinition("slotA", null) { ServiceType = typeof(object) }], // must have a slot so resolver is reached
+                [new SlotDefinition("slotA", null) { ServiceType = typeof(object) }],
                 [], string.Empty, [], []),
             publicKey,
             "reply");
 
         var bus = new CapturingFakeMessageBusClient();
-        var handler = MakeHandler(bus, configResolver: resolver);
+        var handler = MakeHandler(bus);
         await handler.StartAsync(CancellationToken.None);
         await bus.InvokeAsync(request, CancellationToken.None);
 
@@ -370,13 +324,6 @@ public class WorkflowRegistrationHandlerTests
     [Test]
     public async Task HandleAsync_Slotted_ManifestWithViews_RecordsViewsJsonOnInstanceRecord()
     {
-        var store = TestStores.NewSlotConfigurationStore();
-        await store.UpsertConfigurationAsync("TestWorkflow",
-            new StoredSlotConfiguration("slotA", "ProviderX",
-                new Dictionary<string, string> { ["key"] = "val" },
-                ConfigurationStatus.Valid));
-        var resolver = new ConfigurationResolver(store, TestStores.NewSignalHandlerStore(), TestStores.NewWorkflowConfigurationStore(), NullLogger<ConfigurationResolver>.Instance);
-
         var instanceId = Guid.NewGuid();
         var request = new WorkflowRegistrationRequest(
             instanceId,
@@ -393,7 +340,7 @@ public class WorkflowRegistrationHandlerTests
 
         var bus = new CapturingFakeMessageBusClient();
         var registry = TestStores.NewWorkflowInstanceRegistry();
-        var handler = MakeHandler(bus, configResolver: resolver, instanceRegistry: registry);
+        var handler = MakeHandler(bus, instanceRegistry: registry);
         await handler.StartAsync(CancellationToken.None);
         await bus.InvokeAsync(request, CancellationToken.None);
 

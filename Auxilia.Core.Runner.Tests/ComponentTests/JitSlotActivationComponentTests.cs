@@ -64,10 +64,7 @@ public class JitSlotActivationComponentTests
                 var platformData = new PlatformDataSettings { Backend = PlatformDataBackend.InMemory };
                 services.AddPlatformEntity<WorkflowSchemaRecord>(platformData);
                 services.AddPlatformEntity<WorkflowPackageRecord>(platformData);
-                services.AddPlatformEntity<SlotConfigurationRecord>(platformData);
                 services.AddPlatformEntity<SlotProviderRecord>(platformData);
-                services.AddPlatformEntity<WorkflowConfigurationRecord>(platformData);
-                services.AddPlatformEntity<SlotInstanceRecord>(platformData);
                 services.AddPlatformEntity<SignalHandlerRecord>(platformData);
                 services.AddPlatformEntity<WorkflowInstanceRecord>(platformData);
                 services.AddPlatformEntity<AuditRecord>(platformData);
@@ -79,9 +76,6 @@ public class JitSlotActivationComponentTests
                 services.AddSingleton<WorkflowStatusPublisher>();
                 services.AddSingleton(new SteeringInstanceInfo(Guid.NewGuid(), DateTime.UtcNow));
                 services.AddSingleton<WorkflowInstanceTokenRegistry>();
-                services.AddSingleton<SlotConfigurationStore>();
-                services.AddSingleton<WorkflowConfigurationStore>();
-                services.AddSingleton<SlotInstanceStore>();
                 services.AddSingleton<SlotProviderRegistry>();
                 services.AddSingleton<SignalHandlerStore>();
                 services.AddSingleton<WorkflowSchemaStore>();
@@ -89,12 +83,11 @@ public class JitSlotActivationComponentTests
                 services.AddSingleton<PendingWorkflowPackageStore>();
                 services.AddSingleton<WorkflowInstanceRegistry>();
                 services.AddSingleton<EnvironmentValidator>();
-                services.AddSingleton<DirtyConfigurationDetector>();
-                services.AddSingleton<ConfigurationResolver>();
                 services.AddSingleton<WorkflowRegistrationHandler>();
                 services.AddSingleton<WorkflowAnnouncementHandler>();
                 services.AddSingleton<SlotActivationHandler>();
-                services.AddSingleton<ICoreCredentialClient, FakeCoreCredentialClient>();
+                services.AddSingleton<FakeCoreCredentialClient>();
+                services.AddSingleton<ICoreCredentialClient>(sp => sp.GetRequiredService<FakeCoreCredentialClient>());
                 services.AddSingleton<NetworkPolicyResolver>();
                 services.AddSingleton<WorkspaceManager>();
                 services.AddSingleton(TestStores.NewArtifactStore());
@@ -121,7 +114,8 @@ public class JitSlotActivationComponentTests
     private async Task<(Guid InstanceId, string Token)> DispatchAsync(string workflowType = "jit-wf")
     {
         var command = new RunWorkflowCommand(
-            Guid.NewGuid(), workflowType, "docker://jit-wf:test", new Dictionary<string, string>());
+            Guid.NewGuid(), workflowType, "docker://jit-wf:test", new Dictionary<string, string>(),
+            ResolutionToken: "jit-run-token");
 
         await _bus.SimulateReceivedAsync("workflow.run-commands", command);
         await _bus.WaitForConditionAsync(() => _launcher.Calls.Count > 0, Timeout);
@@ -134,11 +128,12 @@ public class JitSlotActivationComponentTests
     /// <summary>Runs the full authenticated handshake for a manifest with one slot ("repo").</summary>
     private async Task<(Guid InstanceId, string Token)> HandshakeWithSlotAsync()
     {
-        await _host.Services.GetRequiredService<SlotConfigurationStore>()
-            .UpsertConfigurationAsync("jit-wf", new StoredSlotConfiguration(
-                "repo", "git",
-                new Dictionary<string, string> { ["RepositoryUrl"] = "https://example.com/repo.git" },
-                ConfigurationStatus.Valid));
+        // The Core resolves and encrypts this run's slot credentials just-in-time; the fake Core
+        // client stands in for that, returning the repo settings encrypted for the instance's key.
+        _host.Services.GetRequiredService<FakeCoreCredentialClient>().RespondWith(
+            "git",
+            new Dictionary<string, string> { ["RepositoryUrl"] = "https://example.com/repo.git" },
+            DateTimeOffset.UtcNow.AddMinutes(30));
 
         var (instanceId, token) = await DispatchAsync();
         var canonicalQueue = WorkflowQueues.ResponseQueueFor(instanceId);

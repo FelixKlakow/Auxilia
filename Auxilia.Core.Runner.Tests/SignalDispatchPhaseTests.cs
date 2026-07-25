@@ -42,37 +42,12 @@ public class SignalDispatchPhaseTests
         Assert.That(handlers[0].HandlerDescriptor, Is.InstanceOf<InvokeWorkflowSignalHandler>());
     }
 
-    #endregion
-
-    #region ConfigurationResolver tests
-
     [Test]
-    public async Task ConfigurationResolver_ResolveSignalHandlers_IncludesSignalHandlers_WhenPresent()
+    public async Task SignalHandlerStore_GetHandlers_ReturnsEmpty_WhenNoneConfigured()
     {
-        var signalStore = TestStores.NewSignalHandlerStore();
-        await signalStore.UpsertHandlerAsync("TestWorkflow",
-            new StoredSignalHandlerConfiguration("signal-a", new InvokeWorkflowSignalHandler("target-wf")));
+        var store = TestStores.NewSignalHandlerStore(); // empty — no handlers
 
-        var resolver = new ConfigurationResolver(
-            TestStores.NewSlotConfigurationStore(), signalStore,
-            TestStores.NewWorkflowConfigurationStore(), NullLogger<ConfigurationResolver>.Instance);
-
-        var handlers = await resolver.ResolveSignalHandlersAsync("TestWorkflow");
-
-        Assert.That(handlers, Contains.Key("signal-a"));
-        Assert.That(handlers["signal-a"], Is.InstanceOf<InvokeWorkflowSignalHandler>());
-    }
-
-    [Test]
-    public async Task ConfigurationResolver_ResolveSignalHandlers_ReturnsEmpty_WhenNoneConfigured()
-    {
-        var signalStore = TestStores.NewSignalHandlerStore(); // empty — no handlers
-
-        var resolver = new ConfigurationResolver(
-            TestStores.NewSlotConfigurationStore(), signalStore,
-            TestStores.NewWorkflowConfigurationStore(), NullLogger<ConfigurationResolver>.Instance);
-
-        var handlers = await resolver.ResolveSignalHandlersAsync("TestWorkflow");
+        var handlers = await store.GetHandlersAsync("TestWorkflow");
 
         Assert.That(handlers, Is.Empty);
     }
@@ -87,25 +62,19 @@ public class SignalDispatchPhaseTests
         using var rsa = RSA.Create(2048);
         var publicKey = Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
 
-        var slotStore = TestStores.NewSlotConfigurationStore();
-        await slotStore.UpsertConfigurationAsync("TestWorkflow",
-            new StoredSlotConfiguration("slotA", "ProviderX",
-                new Dictionary<string, string> { ["key"] = "val" },
-                ConfigurationStatus.Valid));
-
         var signalStore = TestStores.NewSignalHandlerStore();
         await signalStore.UpsertHandlerAsync("TestWorkflow",
             new StoredSignalHandlerConfiguration("on-done", new NotifySignalHandler("email", new Dictionary<string, string>())));
 
-        var resolver = new ConfigurationResolver(slotStore, signalStore, TestStores.NewWorkflowConfigurationStore(), NullLogger<ConfigurationResolver>.Instance);
         var registry = TestStores.NewWorkflowInstanceRegistry();
 
         var bus = new CapturingBus();
         var profile = new RunnerProfile { AvailableTools = new HashSet<string>(), OpenPorts = new HashSet<int>() };
         var validator = new EnvironmentValidator(Options.Create(profile), NullLogger<EnvironmentValidator>.Instance);
         var settings = Options.Create(new WorkflowDispatcherSettings { RequireInstanceToken = false });
-        var handler = new WorkflowRegistrationHandler(bus, validator, resolver, registry,
-            new WorkflowInstanceTokenRegistry(settings, TimeProvider.System), TestStores.NewDirtyDetector(), TestStores.NewAuditLog(),
+        var handler = new WorkflowRegistrationHandler(bus, validator, signalStore,
+            TestStores.NewWorkflowSchemaStore(), registry,
+            new WorkflowInstanceTokenRegistry(settings, TimeProvider.System), TestStores.NewAuditLog(),
             TestStores.NewStatusPublisher(bus), settings,
             NullLogger<WorkflowRegistrationHandler>.Instance);
 

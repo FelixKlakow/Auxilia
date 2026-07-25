@@ -17,12 +17,10 @@ namespace Auxilia.Core.Runner.Workflows;
 /// </summary>
 public sealed class SlotActivationHandler(
     IMessageBusClient messageBus,
-    ConfigurationResolver configResolver,
     ICoreCredentialClient coreCredentialClient,
     WorkflowInstanceRegistry instanceRegistry,
     WorkflowInstanceTokenRegistry tokenRegistry,
     AuditLog auditLog,
-    TimeProvider timeProvider,
     IOptions<WorkflowDispatcherSettings> dispatcherSettings,
     ILogger<SlotActivationHandler> logger)
 {
@@ -65,62 +63,44 @@ public sealed class SlotActivationHandler(
             return;
         }
 
-        // Credential source. A Core-dispatched run carries a run-scoped resolution token: the
-        // Core resolves the connector and encrypts it for this instance, so plaintext never enters
-        // the runner — we only relay the ciphertext. Runs without a token (legacy / dev) keep
-        // resolving from the runner's own stores (#18: configuration bindings, else the global
-        // (workflow type, slot) table).
-        EncryptedSlotConfiguration? slot;
-        DateTimeOffset expiresUtc;
-
+        // A run always carries a run-scoped resolution token: the Core resolves the connector and
+        // encrypts it for this instance, so plaintext never enters the runner — we only relay the
+        // ciphertext. There is no local credential store.
         var command = TryParseCommand(instance.DispatchCommandJson);
-        if (!string.IsNullOrWhiteSpace(dispatcherSettings.Value.CoreApiBaseAddress)
-            && command is { ResolutionToken: { Length: > 0 } resolutionToken })
+        if (command?.ResolutionToken is not { Length: > 0 } resolutionToken)
         {
-            var resolved = await coreCredentialClient.ResolveAsync(
-                command.CommandId, resolutionToken, request.SlotName, request.PublicKey, ct);
-            if (resolved is null)
-            {
-                await auditLog.AppendAsync(
-                    "steering-instance", "workflow.slot-activation.rejected",
-                    request.WorkflowInstanceId.ToString(), "core-resolution-failed", ct: ct);
-                await messageBus.PublishAsync(responseTopic, new SlotActivationResponse(
-                    request.WorkflowInstanceId, request.SlotName, false,
-                    "credential resolution failed in the Core", null), ct);
-                return;
-            }
-            slot = new EncryptedSlotConfiguration(resolved.ProviderType, resolved.EncryptedSettings);
-            expiresUtc = resolved.ExpiresUtc;
-        }
-        else
-        {
-            var (success, error, localSlot) = instance.WorkflowConfigurationId is { } configurationId
-                ? await configResolver.ResolveConfigurationSlotAsync(
-                    configurationId, request.SlotName, request.PublicKey, ct)
-                : await configResolver.ResolveSlotAsync(
-                    instance.WorkflowType, request.SlotName, request.PublicKey, ct);
-            if (!success)
-            {
-                await auditLog.AppendAsync(
-                    "steering-instance", "workflow.slot-activation.rejected",
-                    request.WorkflowInstanceId.ToString(), error ?? "resolution-failed", ct: ct);
-                await messageBus.PublishAsync(responseTopic, new SlotActivationResponse(
-                    request.WorkflowInstanceId, request.SlotName, false, error, null), ct);
-                return;
-            }
-            slot = localSlot;
-            expiresUtc = timeProvider.GetUtcNow() + dispatcherSettings.Value.SlotCredentialLifetime;
+            await auditLog.AppendAsync(
+                "steering-instance", "workflow.slot-activation.rejected",
+                request.WorkflowInstanceId.ToString(), "no-resolution-token", ct: ct);
+            await messageBus.PublishAsync(responseTopic, new SlotActivationResponse(
+                request.WorkflowInstanceId, request.SlotName, false,
+                "run has no credential resolution context", null), ct);
+            return;
         }
 
+        var resolved = await coreCredentialClient.ResolveAsync(
+            command.CommandId, resolutionToken, request.SlotName, request.PublicKey, ct);
+        if (resolved is null)
+        {
+            await auditLog.AppendAsync(
+                "steering-instance", "workflow.slot-activation.rejected",
+                request.WorkflowInstanceId.ToString(), "core-resolution-failed", ct: ct);
+            await messageBus.PublishAsync(responseTopic, new SlotActivationResponse(
+                request.WorkflowInstanceId, request.SlotName, false,
+                "credential resolution failed in the Core", null), ct);
+            return;
+        }
+
+        var slot = new EncryptedSlotConfiguration(resolved.ProviderType, resolved.EncryptedSettings);
         await auditLog.AppendAsync(
             "steering-instance", "workflow.slot-activated",
             request.WorkflowInstanceId.ToString(), request.SlotName, ct: ct);
         await messageBus.PublishAsync(responseTopic, new SlotActivationResponse(
-            request.WorkflowInstanceId, request.SlotName, true, null, slot, expiresUtc), ct);
+            request.WorkflowInstanceId, request.SlotName, true, null, slot, resolved.ExpiresUtc), ct);
 
         logger.LogInformation(
             "Slot activated. InstanceId={InstanceId} Slot={SlotName} ExpiresUtc={ExpiresUtc:O}",
-            request.WorkflowInstanceId, request.SlotName, expiresUtc);
+            request.WorkflowInstanceId, request.SlotName, resolved.ExpiresUtc);
     }
 
     private static RunWorkflowCommand? TryParseCommand(string? dispatchCommandJson)
