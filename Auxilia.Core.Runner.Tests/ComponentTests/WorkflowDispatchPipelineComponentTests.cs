@@ -138,6 +138,7 @@ public class WorkflowDispatchPipelineComponentTests
                 services.AddSingleton<NetworkPolicyResolver>();
                 services.AddSingleton<WorkspaceManager>();
                 services.AddSingleton(TestStores.NewArtifactStore());
+                services.AddSingleton(Mock.Of<IRepositoryAuthResolver>());
                 services.AddSingleton<WorkflowDispatcher>();
             })
             .Build();

@@ -97,6 +97,7 @@ try
     builder.Services.AddSingleton<WorkflowRegistrationHandler>();
     builder.Services.AddSingleton<SlotActivationHandler>();
     builder.Services.AddSingleton<ICoreCredentialClient, CoreCredentialClient>();
+    builder.Services.AddSingleton<IRepositoryAuthResolver, RepositoryAuthResolver>();
     builder.Services.AddSingleton<ResourceProxyHandler>();
     builder.Services.AddSingleton<NetworkPolicyResolver>();
     builder.Services.AddSingleton<WorkspaceManager>();

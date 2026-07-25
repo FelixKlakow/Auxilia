@@ -10,7 +10,22 @@ public sealed record RunRequest(
     string PackageUri,
     IReadOnlyDictionary<string, string>? Context = null,
     Guid? RequestedBy = null,
-    IReadOnlyList<SlotBinding>? SlotBindings = null);
+    IReadOnlyList<SlotBinding>? SlotBindings = null,
+    IReadOnlyList<RepositorySpec>? Repositories = null);
+
+/// <summary>
+/// A repository to prepare into a run's workspace before launch (cloned by the Workspace Manager and
+/// bind-mounted). The URL is non-secret and supplied per run; when the repo needs authentication,
+/// <see cref="AuthConnectorId"/> references a Core connector that holds <em>only the credential</em>
+/// (e.g. a TFS/Azure DevOps PAT). The credential is resolved just-in-time at dispatch and never rides
+/// the bus or enters the workflow container — one auth connector can serve many repositories.
+/// </summary>
+public sealed record RepositorySpec(
+    string Id,
+    string CloneUrl,
+    string? Branch = null,
+    Guid? AuthConnectorId = null,
+    bool NoCache = false);
 
 /// <summary>Acknowledgement that a run was accepted and dispatched to the runner.</summary>
 public sealed record RunAccepted(Guid RunId, Guid CommandId);

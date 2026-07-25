@@ -149,6 +149,7 @@ public class WorkflowDispatcherTests
             TestStores.NewArtifactStore(),
             new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
             TestStores.NewWorkspaceManager(),
+            Mock.Of<IRepositoryAuthResolver>(),
             new AuditLog(_auditRecords, TimeProvider.System),
             TestStores.NewInstanceInfo(),
             NullLogger<WorkflowDispatcher>.Instance);
@@ -367,6 +368,7 @@ public class WorkflowDispatcherTests
             TestStores.NewArtifactStore(),
             new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
             TestStores.NewWorkspaceManager(),
+            Mock.Of<IRepositoryAuthResolver>(),
             new AuditLog(_auditRecords, TimeProvider.System),
             TestStores.NewInstanceInfo(),
             NullLogger<WorkflowDispatcher>.Instance);
@@ -454,6 +456,7 @@ public class WorkflowDispatcherTests
             TestStores.NewArtifactStore(),
             new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
             TestStores.NewWorkspaceManager(),
+            Mock.Of<IRepositoryAuthResolver>(),
             new AuditLog(_auditRecords, TimeProvider.System),
             TestStores.NewInstanceInfo(),
             NullLogger<WorkflowDispatcher>.Instance);

@@ -44,6 +44,7 @@ public sealed class WorkflowDispatcher(
     Auxilia.PlatformData.Artifacts.IArtifactStore artifactStore,
     NetworkPolicyResolver networkPolicyResolver,
     WorkspaceManager workspaceManager,
+    IRepositoryAuthResolver repositoryAuthResolver,
     AuditLog auditLog,
     SteeringInstanceInfo instanceInfo,
     ILogger<WorkflowDispatcher> logger)
@@ -207,11 +208,36 @@ public sealed class WorkflowDispatcher(
                 note = networkPolicy.Note
             }), ct);
 
-        // Per-run repository workspace (ARCHITECTURE §9): declared repos from the stored
-        // schema plus configuration-bound ones (any slot binding whose settings carry a
-        // RepositoryUrl) are prepared by the Workspace Manager and bind-mounted at /workspace.
+        // Per-run repository workspace (ARCHITECTURE §9): repos declared in the stored schema plus
+        // per-run ones supplied on the command are prepared by the Workspace Manager and bind-mounted
+        // at /workspace. A per-run repo's auth (when present) is resolved from the Core just-in-time
+        // here — the credential is injected into the clone URL, used to clone, and never enters the
+        // container (the Workspace Manager strips it from the mounted copy).
         string? workspaceRoot = null;
         var repositories = (schema?.Repositories ?? []).ToList();
+        foreach (var repo in command.Repositories ?? [])
+        {
+            var cloneUrl = repo.CloneUrl;
+            if (repo.AuthSlotName is { } authSlotName)
+            {
+                if (string.IsNullOrEmpty(command.ResolutionToken))
+                {
+                    await FailPreFlightAsync(instanceId, workflowType,
+                        $"repository '{repo.Id}' requires authentication but the run carries no resolution token", ct);
+                    return;
+                }
+                var auth = await repositoryAuthResolver.ResolveAsync(
+                    command.CommandId, command.ResolutionToken, authSlotName, ct);
+                if (auth is null)
+                {
+                    await FailPreFlightAsync(instanceId, workflowType,
+                        $"could not resolve the credential for repository '{repo.Id}'", ct);
+                    return;
+                }
+                cloneUrl = RepositoryCloneUrl.WithCredentials(repo.CloneUrl, auth.Username, auth.Token);
+            }
+            repositories.Add(new RepositoryDeclaration(repo.Id, cloneUrl, repo.Branch, repo.NoCache));
+        }
         if (repositories.Count > 0)
         {
             try

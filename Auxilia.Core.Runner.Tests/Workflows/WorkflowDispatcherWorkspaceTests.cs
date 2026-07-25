@@ -36,10 +36,16 @@ public class WorkflowDispatcherWorkspaceTests
     private string _tempRoot = null!;
     private string _originRepo = null!;
     private WorkflowDispatcherSettings _dispatcherSettings = null!;
+    private Mock<IRepositoryAuthResolver> _mockRepoAuth = null!;
 
     [SetUp]
     public async Task SetUp()
     {
+        _mockRepoAuth = new Mock<IRepositoryAuthResolver>();
+        _mockRepoAuth
+            .Setup(r => r.ResolveAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RepositoryAuth("user", "the-pat"));
         _tempRoot = Path.Combine(Path.GetTempPath(), $"auxilia-dispatcher-workspace-{Guid.NewGuid():N}");
         _originRepo = Path.Combine(_tempRoot, "origin");
         CreateOriginRepo(_originRepo);
@@ -111,6 +117,7 @@ public class WorkflowDispatcherWorkspaceTests
             TestStores.NewArtifactStore(),
             new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
             TestStores.NewWorkspaceManager(_dispatcherSettings),
+            _mockRepoAuth.Object,
             new AuditLog(_auditRecords, TimeProvider.System),
             TestStores.NewInstanceInfo(),
             NullLogger<WorkflowDispatcher>.Instance);
@@ -210,6 +217,54 @@ public class WorkflowDispatcherWorkspaceTests
         var failedEvent = _statusEvents.SingleOrDefault(e => e.State == "PreFlightFailed");
         Assert.That(failedEvent, Is.Not.Null, "A PreFlightFailed status event must be published.");
         Assert.That(failedEvent!.ErrorMessage, Does.Contain("workspace preparation failed"));
+    }
+
+    [Test]
+    public async Task WhenCommandCarriesAuthenticatedRepository_ResolvesCredentialJit_AndPreparesWorkspace()
+    {
+        WorkflowLaunchRequest? captured = null;
+        _mockLauncher
+            .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
+            .ReturnsAsync(new WorkflowLaunchResult());
+
+        // No schema repo — the repository is supplied per run on the command, its auth in a slot.
+        var command = new RunWorkflowCommand(
+            Guid.NewGuid(), WorkflowType, "docker://workspace-workflow:test",
+            new Dictionary<string, string>(),
+            ResolutionToken: "run-token",
+            Repositories: [new RepositoryDispatch("main", _originRepo, AuthSlotName: "repo-auth:main")]);
+
+        await _capturedHandler!(command, CancellationToken.None);
+
+        _mockRepoAuth.Verify(r => r.ResolveAsync(
+            command.CommandId, "run-token", "repo-auth:main", It.IsAny<CancellationToken>()), Times.Once,
+            "The repo credential must be resolved JIT via the run's resolution token.");
+        Assert.That(captured, Is.Not.Null);
+        Assert.That(File.Exists(Path.Combine(captured!.WorkspaceDirectoryBind!, "repos", "main", "test.txt")),
+            Is.True, "The per-run repository must be cloned into the prepared workspace.");
+    }
+
+    [Test]
+    public async Task WhenCommandRepositoryAuthCannotBeResolved_RunGoesPreFlightFailed_AndDoesNotLaunch()
+    {
+        _mockRepoAuth
+            .Setup(r => r.ResolveAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RepositoryAuth?)null);
+
+        var command = new RunWorkflowCommand(
+            Guid.NewGuid(), WorkflowType, "docker://workspace-workflow:test",
+            new Dictionary<string, string>(),
+            ResolutionToken: "run-token",
+            Repositories: [new RepositoryDispatch("main", _originRepo, AuthSlotName: "repo-auth:main")]);
+
+        await _capturedHandler!(command, CancellationToken.None);
+
+        _mockLauncher.Verify(
+            l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.That(_statusEvents.Any(e => e.State == "PreFlightFailed"), Is.True,
+            "An unresolvable repo credential must fail the run pre-flight, not launch.");
     }
 
     // ------------------------------------------------------------------ helpers

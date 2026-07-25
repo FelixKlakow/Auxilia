@@ -91,6 +91,7 @@ public class JitSlotActivationComponentTests
                 services.AddSingleton<NetworkPolicyResolver>();
                 services.AddSingleton<WorkspaceManager>();
                 services.AddSingleton(TestStores.NewArtifactStore());
+                services.AddSingleton<IRepositoryAuthResolver, RepositoryAuthResolver>();
                 services.AddSingleton<WorkflowDispatcher>();
             })
             .Build();

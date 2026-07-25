@@ -82,6 +82,7 @@ public class WorkflowDispatcherDockerImageUriTests
             TestStores.NewArtifactStore(),
             new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
             TestStores.NewWorkspaceManager(),
+            Mock.Of<IRepositoryAuthResolver>(),
             TestStores.NewAuditLog(),
             TestStores.NewInstanceInfo(),
             NullLogger<WorkflowDispatcher>.Instance);

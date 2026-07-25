@@ -1,3 +1,5 @@
+using Auxilia.Workflows.Workspace;
+
 namespace Auxilia.Workflows.Messaging.Messages;
 
 /// <summary>
@@ -44,4 +46,10 @@ public sealed record RunWorkflowCommand(
     /// Distinct provider types of this run's slots — the runner loads the matching slot-handler
     /// plugins before launch. Non-secret; the settings themselves are resolved JIT from the Core.
     /// </summary>
-    IReadOnlyList<string>? SlotProviderTypes = null);
+    IReadOnlyList<string>? SlotProviderTypes = null,
+    /// <summary>
+    /// Per-run repositories to clone into the workspace before launch. Non-secret: each carries the
+    /// clone URL and, when auth is needed, the name of a synthetic slot the runner resolves at
+    /// dispatch to obtain the credential — the credential itself never rides the command.
+    /// </summary>
+    IReadOnlyList<RepositoryDispatch>? Repositories = null);
