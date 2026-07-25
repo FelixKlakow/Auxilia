@@ -4,10 +4,12 @@ using Auxilia.Core.Api.Data;
 using Auxilia.Core.Api.Services;
 using Auxilia.Core.Contracts;
 using Auxilia.Governance;
+using Auxilia.Governance.Identity;
 using Auxilia.Governance.Policy;
 using Auxilia.Messaging;
 using Auxilia.PlatformData;
 using Auxilia.PlatformData.Entities;
+using System.Security.Claims;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.RateLimiting;
@@ -43,11 +45,8 @@ builder.Services.AddGovernance(platformData, governanceSettings);
 builder.Services.AddSingleton<CoreSecurityBootstrap>();
 builder.Services.Configure<CoreSecuritySettings>(builder.Configuration.GetSection("CoreSecurity"));
 
-// --- Authentication / authorization (API-key bearer for REST and MCP alike) ---
-builder.Services.AddAuthentication(CoreApiKeyAuthenticationHandler.SchemeName)
-    .AddScheme<AuthenticationSchemeOptions, CoreApiKeyAuthenticationHandler>(
-        CoreApiKeyAuthenticationHandler.SchemeName, null);
-builder.Services.AddAuthorization();
+// --- Authentication / authorization: API-key bearer (REST + MCP) + interactive OIDC/cookie ---
+builder.Services.AddCoreAuthentication(builder.Configuration);
 
 // --- Settings ---
 builder.Services.Configure<CoreApiSettings>(builder.Configuration.GetSection("CoreApi"));
@@ -105,6 +104,61 @@ await app.Services.GetRequiredService<GovernanceSeeder>().SeedAsync(app.Lifetime
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
+
+// --- Interactive sign-in (Entra OIDC) + browser session; local password + API-key auth coexist ---
+app.MapGet("/auth/login", (string? returnUrl, IOptions<OidcSettings> oidc) =>
+    oidc.Value.Enabled
+        ? Results.Challenge(
+            new AuthenticationProperties
+            {
+                RedirectUri = "/auth/callback" +
+                    (string.IsNullOrEmpty(returnUrl) ? "" : $"?returnUrl={Uri.EscapeDataString(returnUrl)}")
+            },
+            [AuthSchemes.Oidc])
+        : Results.NotFound(new { error = "interactive sign-in is not configured" }));
+
+// Exchanges the validated external identity (signed into the temporary external cookie by the OIDC
+// handler) for a provisioned Core principal and issues the browser session cookie.
+app.MapGet("/auth/callback", async (
+        string? returnUrl, HttpContext http, IAuthenticationSchemeProvider schemes,
+        ExternalIdentityProvisioner provisioner, IOptions<OidcSettings> oidc, CancellationToken ct) =>
+{
+    if (await schemes.GetSchemeAsync(AuthSchemes.ExternalCookie) is null)
+        return Results.NotFound(new { error = "interactive sign-in is not configured" });
+
+    var external = await http.AuthenticateAsync(AuthSchemes.ExternalCookie);
+    if (!external.Succeeded || external.Principal is null)
+        return Results.Unauthorized();
+
+    var identity = CoreClaims.ExternalIdentityFromPrincipal(external.Principal, oidc.Value.ProviderName);
+    var session = await provisioner.ProvisionAsync(identity, ct);
+    if (session is null)
+        return Results.Json(new { error = "the account is not permitted to sign in" },
+            statusCode: StatusCodes.Status403Forbidden);
+
+    await http.SignInAsync(AuthSchemes.Cookie, CoreClaims.ToClaimsPrincipal(session, AuthSchemes.Cookie));
+    await http.SignOutAsync(AuthSchemes.ExternalCookie);
+
+    var target = returnUrl is { Length: > 0 } && returnUrl.StartsWith('/') && !returnUrl.StartsWith("//")
+        ? returnUrl : "/";
+    return Results.LocalRedirect(target);
+});
+
+app.MapPost("/auth/logout", async (HttpContext http) =>
+{
+    await http.SignOutAsync(AuthSchemes.Cookie);
+    return Results.Ok();
+}).RequireAuthorization();
+
+app.MapGet("/auth/me", (HttpContext http) =>
+    CoreClaims.PrincipalIdOf(http.User) is { } principalId
+        ? Results.Ok(new
+        {
+            principalId,
+            displayName = http.User.Identity?.Name,
+            roles = http.User.FindAll(ClaimTypes.Role).Select(c => c.Value).ToArray()
+        })
+        : Results.Unauthorized()).RequireAuthorization();
 
 // --- Runs ---
 app.MapPost("/api/runs", async (

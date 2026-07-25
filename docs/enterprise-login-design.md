@@ -1,6 +1,6 @@
 # Enterprise Login & Connected Accounts — Design
 
-> **Status:** Design · 2026-07-25 · not yet implemented
+> **Status:** L1 delivered · 2026-07-25 · Entra OIDC sign-in + JIT provisioning + browser session live in Core.Api (L2–L4 pending)
 > **Owner:** Felix Klakow
 > **Scope:** Support the login scenarios Felix's company needs — **Microsoft/Entra ID (Azure AD) SSO**, and **"connected accounts"**: one Auxilia identity linked to the corporate directory (AD) that cascades authorized access to TFS / Azure DevOps / repositories.
 
@@ -20,7 +20,7 @@ Core.Api is the single auth authority. Governance already provides the *shape* f
 - **`GroupMappingResolver`** already turns IdP group claims into roles; **first-class groups** (`GroupDirectory` + `GroupRoleResolver`) union direct + group + IdP-mapped roles in the Policy Engine.
 - **Connectors** hold per-principal/company external-service credentials, scoped personal or company-wide, and are delivered to workflows **just-in-time, encrypted** (the credential-resolution path is built and proven).
 
-Missing: the interactive OIDC login flow, JIT principal provisioning from an external identity, browser session issuance, and the identity→resource-access (ADO/TFS/repo) linkage.
+Delivered in **L1**: the interactive OIDC login flow (Entra), JIT principal provisioning from an external identity, and browser session issuance — see the implementation note below. Still missing: directory-group→role mapping at sign-in (**L2**) and the identity→resource-access (ADO/TFS/repo) linkage (**L3/L4**).
 
 ## 3. Target model
 
@@ -51,7 +51,9 @@ graph TB
     MAP -.->|authorizes which connectors/resources| CONN
 ```
 
-- **`OidcIdentityProvider` (Entra)** — Core.Api runs the OIDC authorization-code + PKCE flow against the company tenant, validates the ID token, and resolves/creates the `PrincipalRecord` for the token subject (**JIT provisioning**: `ExternalSubject` on the principal, no secret stored locally). Multiple identity providers coexist behind `IIdentityProvider`; the login screen offers each configured method.
+- **Entra OIDC relying party** — Core.Api runs the OIDC authorization-code + PKCE flow against the company tenant, validates the ID token, and resolves/creates the `PrincipalRecord` for the token subject (**JIT provisioning**: `ExternalSubject` on the principal, no secret stored locally). Multiple sign-in methods coexist (local password, API key, Entra); the login screen offers each configured method.
+
+> **Implementation note (L1).** The OIDC *protocol* is handled by ASP.NET Core's battle-tested `AddOpenIdConnect` handler (registered only when `Oidc:Enabled`), which signs the validated identity into a short-lived external cookie. The Auxilia-identity half — turning validated external claims into a provisioned principal + session — is `ExternalIdentityProvisioner` in `Auxilia.Governance` (find-or-create keyed deterministically by `provider|subject`, no credential record, disabled accounts refused, direct-role session, fully audited). Core.Api wires three schemes (`AuthSchemes`): API-key bearer (programmatic default), a session `Cookie`, and the Entra `Oidc` scheme; the default authorization policy accepts API-key **or** cookie, so both resolve to the same `auxilia:principal-id` and the Policy Engine authorizes them identically. Endpoints: `GET /auth/login` (challenge), `GET /auth/callback` (provision + issue cookie), `POST /auth/logout`, `GET /auth/me`. Automated tests drive a stubbed external scheme; real Entra needs an app registration (manual).
 - **Roles from the directory** — group claims from the Entra token flow through the existing `GroupMappingResolver`/group system: `(tenant, AD group) -> Auxilia role(s)`, evaluated at sign-in, unioned with any direct/first-class-group roles. No per-user role admin for directory users.
 - **Sessions** — interactive sign-in issues a **cookie** (dashboard/Studio); AI/service principals keep the **API-key bearer**; both resolve to the same `PrincipalRecord` + roles through the one Policy Engine, so MCP and UI never diverge.
 
@@ -83,7 +85,7 @@ Either way, **secrets/tokens still live only in the Core** and reach workflows o
 | Phase | Work | Tests |
 |---|---|---|
 | **L0** | Auth-model spec: session shapes (cookie vs bearer), the login endpoints on Core.Api, provider registration, config surface (tenant/client id, redirect URIs) | design only |
-| **L1** | `OidcIdentityProvider` (Entra) + JIT principal provisioning + browser session issuance; login endpoints; local + API-key coexist | unit (token validation, provisioning), component (Core.Api login via a stubbed OIDC provider), manual (real Entra tenant) |
+| **L1** ✅ | Entra OIDC relying party + `ExternalIdentityProvisioner` (JIT) + browser session cookie; `/auth/*` endpoints; local + API-key coexist | ✅ unit (provisioning: create/idempotent/roles/disabled/audit), component (login via a stubbed OIDC provider, deny-by-default, API-key coexistence); manual (real Entra tenant) pending |
 | **L2** | Directory group -> role at sign-in through `GroupMappingResolver`; group-claim overage fallback (Entra caps group claims — fall back to Graph) | unit (claim mapping, overage), component (roles resolved from group claims) |
 | **L3** | Connected accounts (mechanism A): identity-linked connectors + AD-group gating; connect flow for ADO/TFS/repos; workflows resolve them JIT | component (gated resolution), system (a run uses a connected ADO connector) |
 | **L4** | (Optional) OBO delegation (mechanism B) for live per-user ADO/TFS tokens | component + manual |

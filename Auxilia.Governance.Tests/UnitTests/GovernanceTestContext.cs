@@ -23,6 +23,7 @@ internal sealed class GovernanceTestContext
     public WorkflowTypeAccessStore AccessStore { get; }
     public PolicyEngine PolicyEngine { get; }
     public LocalIdentityProvider IdentityProvider { get; }
+    public ExternalIdentityProvisioner Provisioner { get; }
     public GroupMappingResolver GroupMappingResolver { get; }
 
     public GovernanceTestContext()
@@ -32,6 +33,7 @@ internal sealed class GovernanceTestContext
         AccessStore = new WorkflowTypeAccessStore(AccessRecords);
         PolicyEngine = new PolicyEngine(Principals, RoleAssignments, AccessStore, AuditLog);
         IdentityProvider = new LocalIdentityProvider(Credentials, Principals, RoleAssignments);
+        Provisioner = new ExternalIdentityProvisioner(Principals, RoleAssignments, AuditLog);
         GroupMappingResolver = new GroupMappingResolver(GroupMappings);
     }
 

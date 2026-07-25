@@ -6,7 +6,8 @@ Standalone deployable. Drives `Auxilia.Core.Runner` over the message bus; owns i
 
 ## Load-bearing invariants (do not violate without asking)
 - **Own isolated database (Principle 4).** `Program.cs` binds its own `PlatformData` section and registers only Core entities (`CoreRunConfigurationRecord`, `CoreConnectorRecord`, `CoreRunRecord`, `AuditRecord`). Never read or write another service's store; cross-service traffic is REST or the bus only.
-- **Single authentication + audit authority.** The Core hosts governance (`AddGovernance`) and is the *only* place principals authenticate. Every REST endpoint and every MCP tool authenticates via API-key bearer (`CoreApiKeyAuthenticationHandler`), then runs a per-action `IPolicyEngine` check (`PermissionActions.*`) before doing anything — `MapMcp("/mcp").RequireAuthorization()` included. There is no unauthenticated or unauthorized path.
+- **Single authentication + audit authority.** The Core hosts governance (`AddGovernance`) and is the *only* place principals authenticate. Every REST endpoint and every MCP tool authenticates via **API-key bearer** (`CoreApiKeyAuthenticationHandler`) *or* an interactive **session cookie** (issued after Entra OIDC sign-in) — `AddCoreAuthentication` wires both schemes plus the optional `Oidc` scheme, and the default authorization policy accepts API-key **or** cookie. Both resolve to the same `auxilia:principal-id` claim, so the per-action `IPolicyEngine` check (`PermissionActions.*`) authorizes cookie and API-key callers identically — `MapMcp("/mcp").RequireAuthorization()` included. No credentials → a 401, never a browser redirect. There is no unauthenticated or unauthorized path (except `GET /health` and the token-authorized `resolve-slot`).
+- **Interactive sign-in is JIT and secretless.** `GET /auth/login` challenges Entra (only when `Oidc:Enabled`); `GET /auth/callback` exchanges the validated external identity for a principal via `ExternalIdentityProvisioner` (keyed by `provider|subject`, **no credential record**, disabled accounts refused) and issues the session cookie. A freshly provisioned external user holds **no roles** — deny-by-default until granted. Directory-group→role mapping is a later phase (see `docs/enterprise-login-design.md`).
 - **Secrets live here and only here — encrypted at rest, never returned.** `ConnectorService` protects settings with `ISettingsProtector` on write; reads (`ToDto`) return setting *keys*, never values; `ResolveSettingsAsync` decrypts only at dispatch time (JIT). Never log or audit secret values.
 - **The Core is the authorization authority; the runner trusts it.** Run endpoints authorize the *Core-database* principal, then dispatch a self-contained inline `RunWorkflowCommand` with `RequestedBy = null`. The runner has a *separate* database and cannot resolve a Core principal, so it trusts Core-dispatched commands instead of re-authorizing. This is what lets the two services keep separate databases.
 - **Runs are tracked by correlation, not shared state.** `RunTrackingService` (hosted) subscribes to `WorkflowStatusEvent` on the bus and updates `CoreRunRecord` (keyed by the runner's instance id) — the Core never reaches into the runner's store.
@@ -18,6 +19,7 @@ Standalone deployable. Drives `Auxilia.Core.Runner` over the message bus; owns i
 - `POST /api/configurations`, `GET /api/configurations`, `GET /api/configurations/{id}`, `POST /api/configurations/{id}/run`
 - `POST /api/connectors`, `GET /api/connectors`, `GET /api/connectors/{id}`
 - `POST /api/groups`, `GET /api/groups`, `POST /api/groups/{id}/members`, `POST /api/groups/{id}/roles` (all `principal.administer`)
+- `GET /auth/login`, `GET /auth/callback` (anonymous — the OIDC sign-in flow), `POST /auth/logout`, `GET /auth/me` (authenticated)
 - `/mcp` (authenticated MCP twin of the above), `GET /health`
 
 ## File / Folder Map
@@ -38,7 +40,10 @@ Source/Auxilia.Core.Api/
 │   └── RunTrackingService.cs          # Hosted; WorkflowStatusEvent -> CoreRunRecord
 ├── Auth/
 │   ├── CoreApiKeyAuthenticationHandler.cs # Bearer API key -> IdentityProvider principal
-│   ├── CoreClaims.cs                  # "auxilia:principal-id" claim; PrincipalIdOf(user)
+│   ├── CoreAuthExtensions.cs          # AddCoreAuthentication: API-key + Cookie + optional Entra OIDC; multi-scheme default policy
+│   ├── AuthSchemes.cs                 # Scheme name constants (ApiKey / Cookie / Oidc / ExternalCookie)
+│   ├── OidcSettings.cs                # Entra relying-party config (bound from Oidc:*); Enabled gates the OIDC scheme
+│   ├── CoreClaims.cs                  # "auxilia:principal-id" claim; PrincipalIdOf(user); ExternalIdentityFromPrincipal
 │   ├── CoreSecuritySettings.cs        # BootstrapApiKey
 │   ├── CoreSecurityBootstrap.cs       # Idempotently ensures the Administrator API-key principal
 │   └── CoreAuthorization.cs           # Shared REST/MCP authorize helper (returns a 401/403 result, or null on allow)
