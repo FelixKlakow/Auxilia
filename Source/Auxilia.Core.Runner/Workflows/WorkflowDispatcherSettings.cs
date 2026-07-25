@@ -33,6 +33,14 @@ public sealed class WorkflowDispatcherSettings
     public TimeSpan SlotCredentialLifetime { get; set; } = TimeSpan.FromMinutes(30);
 
     /// <summary>
+    /// Base address of Core.Api's internal slot-resolution endpoint. When set, a Core-dispatched
+    /// run (one carrying a resolution token) has its credentialed slots resolved and encrypted by
+    /// the Core — plaintext never enters this process. When empty, the runner resolves slots from
+    /// its own stores (legacy / dev).
+    /// </summary>
+    public string? CoreApiBaseAddress { get; set; }
+
+    /// <summary>
     /// Platform ceiling for the network policy (ARCHITECTURE §10): when false (default),
     /// run configurations requesting <c>allow-all</c> are clamped to default-deny.
     /// </summary>

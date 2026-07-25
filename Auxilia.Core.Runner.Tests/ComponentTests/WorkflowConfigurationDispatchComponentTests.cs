@@ -100,6 +100,7 @@ public class WorkflowConfigurationDispatchComponentTests
                 services.AddSingleton<WorkflowRegistrationHandler>();
                 services.AddSingleton<WorkflowAnnouncementHandler>();
                 services.AddSingleton<SlotActivationHandler>();
+                services.AddSingleton<ICoreCredentialClient, FakeCoreCredentialClient>();
                 services.AddSingleton<SlotConfigurationSeedHandler>();
                 services.AddSingleton<LongLivingDrainCoordinator>();
                 services.AddSingleton<NetworkPolicyResolver>();

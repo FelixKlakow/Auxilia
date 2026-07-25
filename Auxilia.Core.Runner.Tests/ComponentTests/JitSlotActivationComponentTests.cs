@@ -94,6 +94,7 @@ public class JitSlotActivationComponentTests
                 services.AddSingleton<WorkflowRegistrationHandler>();
                 services.AddSingleton<WorkflowAnnouncementHandler>();
                 services.AddSingleton<SlotActivationHandler>();
+                services.AddSingleton<ICoreCredentialClient, FakeCoreCredentialClient>();
                 services.AddSingleton<NetworkPolicyResolver>();
                 services.AddSingleton<WorkspaceManager>();
                 services.AddSingleton(TestStores.NewArtifactStore());

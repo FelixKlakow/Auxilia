@@ -26,6 +26,7 @@
         <ProjectReference Include="..\..\Auxilia.Governance\Auxilia.Governance.csproj" />
         <ProjectReference Include="..\..\Auxilia.PlatformData\Auxilia.PlatformData.csproj" />
         <ProjectReference Include="..\..\Auxilia.Workflows\Auxilia.Workflows.csproj" />
+        <ProjectReference Include="..\..\Auxilia.Core.Contracts\Auxilia.Core.Contracts.csproj" />
     </ItemGroup>
 
     <ItemGroup>

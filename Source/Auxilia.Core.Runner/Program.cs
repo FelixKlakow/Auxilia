@@ -104,6 +104,7 @@ try
     builder.Services.AddSingleton<ConfigurationResolver>();
     builder.Services.AddSingleton<WorkflowRegistrationHandler>();
     builder.Services.AddSingleton<SlotActivationHandler>();
+    builder.Services.AddSingleton<ICoreCredentialClient, CoreCredentialClient>();
     builder.Services.AddSingleton<ResourceProxyHandler>();
     builder.Services.AddSingleton<NetworkPolicyResolver>();
     builder.Services.AddSingleton<WorkspaceManager>();
@@ -120,6 +121,7 @@ try
     builder.Services.AddSingleton<IDeveloperModeProvider, EnvironmentDeveloperModeProvider>();
     builder.Services.AddSingleton<IWorkflowPackageVerifier, WorkflowPackageVerifier>();
     builder.Services.AddHttpClient("workflow-packages");
+    builder.Services.AddHttpClient("core-api");
 
     // --- Workflow launcher settings ---
     builder.Services.Configure<DockerWorkflowLauncherSettings>(
