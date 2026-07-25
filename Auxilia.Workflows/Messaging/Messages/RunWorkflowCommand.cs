@@ -39,4 +39,9 @@ public sealed record RunWorkflowCommand(
     /// Run-scoped token the runner presents to Core.Api to resolve this run's slot credentials
     /// just-in-time. Minted at dispatch; carries no secret and is valid only for this run.
     /// </summary>
-    string? ResolutionToken = null);
+    string? ResolutionToken = null,
+    /// <summary>
+    /// Distinct provider types of this run's slots — the runner loads the matching slot-handler
+    /// plugins before launch. Non-secret; the settings themselves are resolved JIT from the Core.
+    /// </summary>
+    IReadOnlyList<string>? SlotProviderTypes = null);

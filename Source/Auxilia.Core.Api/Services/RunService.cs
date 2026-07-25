@@ -53,13 +53,20 @@ public sealed class RunService(
         var commandId = Guid.NewGuid();
 
         // Stash the run's slot→connector references under a run-scoped resolution token; the runner
-        // presents the token to resolve credentialed slots JIT. No secrets travel in the command.
+        // presents the token to resolve credentialed slots JIT. No secrets travel in the command —
+        // only the provider types, so the runner can load the matching slot-handler plugins.
         var resolutionToken = Guid.NewGuid().ToString("N");
         await credentialResolver.StashAsync(commandId, resolutionToken, slotBindings, ct);
+        var providerTypes = slotBindings
+            .Where(b => !string.IsNullOrEmpty(b.ProviderType))
+            .Select(b => b.ProviderType!)
+            .Distinct()
+            .ToList();
 
         var command = new RunWorkflowCommand(
             commandId, workflowType, packageUri, context,
-            RequestedBy: null, WorkflowConfigurationId: null, ResolutionToken: resolutionToken);
+            RequestedBy: null, WorkflowConfigurationId: null, ResolutionToken: resolutionToken,
+            SlotProviderTypes: providerTypes);
         await bus.PublishAsync(settings.Value.RunCommandQueue, command, ct);
         logger.LogInformation(
             "Dispatched run. CommandId={CommandId} WorkflowType={WorkflowType}", commandId, workflowType);

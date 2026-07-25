@@ -396,16 +396,16 @@ public class WorkflowDispatchPipelineComponentTests
     }
 
     [Test]
-    public async Task WhenRunCommandPublished_AndSlotPackagesSeeded_LauncherReceivesSlotPluginFiles()
+    public async Task WhenRunCommandCarriesSlotProviderTypes_LauncherReceivesSlotPluginFiles()
     {
-        await _slotStore.UpsertConfigurationAsync("my-workflow",
-            new StoredSlotConfiguration("slot1", "MyProvider",
-                new Dictionary<string, string>(), ConfigurationStatus.Valid));
+        // Plugins are resolved from the command's provider types against the provider registry;
+        // an unregistered type would fail pre-flight instead.
         await _providerRegistry.UpsertAsync("MyProvider", "/fake/path.slothandler.dll");
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "my-workflow", "https://example.com/my-workflow.zip",
-            new Dictionary<string, string>());
+            new Dictionary<string, string>(),
+            SlotProviderTypes: new[] { "MyProvider" });
 
         await _bus.SimulateReceivedAsync("workflow.run-commands", command);
 

@@ -32,7 +32,6 @@ public class WorkflowDispatcherWorkspaceTests
     private WorkflowDispatcher _sut = null!;
     private WorkflowSchemaStore _schemaStore = null!;
     private SlotProviderRegistry _providerRegistry = null!;
-    private WorkflowConfigurationStore _configurationStore = null!;
     private InMemoryDataAccess<AuditRecord> _auditRecords = null!;
     private string _tempRoot = null!;
     private string _originRepo = null!;
@@ -54,7 +53,6 @@ public class WorkflowDispatcherWorkspaceTests
 
         _schemaStore = TestStores.NewWorkflowSchemaStore();
         _providerRegistry = TestStores.NewSlotProviderRegistry();
-        _configurationStore = TestStores.NewWorkflowConfigurationStore();
         _auditRecords = new InMemoryDataAccess<AuditRecord>();
         _statusEvents = [];
 
@@ -102,9 +100,7 @@ public class WorkflowDispatcherWorkspaceTests
             new Mock<IHttpClientFactory>().Object,
             new Mock<IWorkflowPackageVerifier>().Object,
             new Mock<PendingWorkflowPackageStore>().Object,
-            TestStores.NewSlotConfigurationStore(),
             _providerRegistry,
-            _configurationStore,
             new WorkflowInstanceTokenRegistry(
                 Options.Create(new WorkflowDispatcherSettings()), TimeProvider.System),
             TestStores.NewPolicyEngine(),
@@ -199,40 +195,6 @@ public class WorkflowDispatcherWorkspaceTests
             Assert.That(captured.EnvironmentVariables.ContainsKey(
                 WorkflowEnvironmentVariables.WorkspaceDirectory), Is.False);
         });
-    }
-
-    [Test]
-    public async Task WhenConfigurationBindingCarriesRepositoryUrl_TheRepoIsClonedIntoTheWorkspace()
-    {
-        await _providerRegistry.UpsertAsync("github-repository", "/plugins/github.slothandler.dll");
-        var configuration = await _configurationStore.UpsertAsync(new StoredWorkflowConfiguration(
-            "repo-config", "Repo config", WorkflowType, "docker://workspace-workflow:test", true,
-            [
-                new StoredSlotBinding("repository", "github-repository",
-                    new Dictionary<string, string>
-                    {
-                        ["RepositoryUrl"] = _originRepo,
-                        ["MountIntoWorkspace"] = "true"
-                    })
-            ]));
-
-        WorkflowLaunchRequest? captured = null;
-        _mockLauncher
-            .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
-            .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
-            .ReturnsAsync(new WorkflowLaunchResult());
-
-        await _capturedHandler!(
-            new RunWorkflowCommand(Guid.NewGuid(), null, null,
-                new Dictionary<string, string>(), WorkflowConfigurationId: configuration.Id),
-            CancellationToken.None);
-
-        Assert.That(captured, Is.Not.Null, "the run must launch");
-        Assert.That(captured!.WorkspaceDirectoryBind, Is.Not.Null,
-            "a RepositoryUrl-bearing binding must produce a workspace");
-        Assert.That(
-            File.Exists(Path.Combine(captured.WorkspaceDirectoryBind!, "repos", "repository", "test.txt")),
-            Is.True, "the configured repository must be cloned to /workspace/repos/<slotName>");
     }
 
     [Test]

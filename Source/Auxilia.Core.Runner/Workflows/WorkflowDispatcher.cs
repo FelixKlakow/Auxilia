@@ -34,9 +34,7 @@ public sealed class WorkflowDispatcher(
     IHttpClientFactory httpClientFactory,
     IWorkflowPackageVerifier packageVerifier,
     PendingWorkflowPackageStore pendingPackages,
-    SlotConfigurationStore slotStore,
     SlotProviderRegistry providerRegistry,
-    WorkflowConfigurationStore configurationStore,
     WorkflowInstanceTokenRegistry tokenRegistry,
     IPolicyEngine policyEngine,
     WorkflowInstanceRegistry instanceRegistry,
@@ -64,22 +62,10 @@ public sealed class WorkflowDispatcher(
 
     private async Task HandleAsync(RunWorkflowCommand command, CancellationToken ct)
     {
-        // Named-configuration dispatch (#18): the configuration supplies workflow type and
-        // package URI when the command omits them. A missing or disabled configuration still
-        // creates the instance record first so the pre-flight failure is visible everywhere.
-        StoredWorkflowConfiguration? configuration = null;
-        string? configurationError = null;
-        if (command.WorkflowConfigurationId is { } configurationId)
-        {
-            configuration = await configurationStore.GetAsync(configurationId, ct);
-            if (configuration is null)
-                configurationError = $"workflow configuration '{configurationId}' not found";
-            else if (!configuration.Enabled)
-                configurationError = $"workflow configuration '{configuration.Name}' is disabled";
-        }
-
-        var workflowType = configuration?.WorkflowType ?? command.WorkflowType ?? string.Empty;
-        var packageUri = configuration?.PackageUri ?? command.WorkflowPackageUri ?? string.Empty;
+        // The Core resolves configurations and hands us a self-contained run spec: workflow type,
+        // package URI, context, the slot provider types to load, and a resolution token.
+        var workflowType = command.WorkflowType ?? string.Empty;
+        var packageUri = command.WorkflowPackageUri ?? string.Empty;
 
         logger.LogInformation(
             "Received RunWorkflowCommand. CommandId={CommandId} WorkflowType={WorkflowType} PackageUri={PackageUri}",
@@ -91,21 +77,8 @@ public sealed class WorkflowDispatcher(
         var instanceId = issued.WorkflowInstanceId;
         await instanceRegistry.CreateAsync(
             instanceId, workflowType, "Received",
-            instanceInfo.ServiceId, JsonSerializer.Serialize(command),
-            configuration?.Id, configuration?.Name, ct);
+            instanceInfo.ServiceId, JsonSerializer.Serialize(command), ct: ct);
         await statusPublisher.PublishAsync(instanceId, workflowType, "Received", ct: ct);
-
-        if (configurationError is not null)
-        {
-            logger.LogWarning(
-                "Dispatch rejected: {Reason}. CommandId={CommandId}",
-                configurationError, command.CommandId);
-            await auditLog.AppendAsync(
-                "steering-instance", "workflow.dispatch.rejected",
-                instanceId.ToString(), configurationError, ct: ct);
-            await FailPreFlightAsync(instanceId, workflowType, configurationError, ct);
-            return;
-        }
 
         // Pre-flight authorization: the trigger permission of the requesting principal.
         if (command.RequestedBy is { } principalId)
@@ -192,53 +165,26 @@ public sealed class WorkflowDispatcher(
             foreach (var (key, value) in settings.ExtraEnvironmentVariables)
                 env[key] = value;
 
-        // 5b. Resolve slot plugin files. A named configuration fully defines the run's slot
-        // bindings; an unregistered provider type fails pre-flight there. The configuration-less
-        // path stays byte-for-byte: providers come from the global (type, slot) table and
-        // missing registrations are merely skipped.
+        // Resolve slot-handler plugins for the run's provider types (sent by the Core). An
+        // unregistered provider type fails pre-flight.
         var pluginFiles = new List<SlotPluginFile>();
-        if (configuration is not null)
+        foreach (var providerType in (command.SlotProviderTypes ?? []).Distinct())
         {
-            foreach (var providerType in configuration.SlotBindings.Select(b => b.ProviderType).Distinct())
+            var dllPath = await providerRegistry.GetDllPathAsync(providerType, ct);
+            if (dllPath is null)
             {
-                var dllPath = await providerRegistry.GetDllPathAsync(providerType, ct);
-                if (dllPath is null)
-                {
-                    var reason =
-                        $"workflow configuration '{configuration.Name}' references unregistered slot provider '{providerType}'";
-                    logger.LogWarning(
-                        "Dispatch rejected: {Reason}. CommandId={CommandId}", reason, command.CommandId);
-                    await auditLog.AppendAsync(
-                        "steering-instance", "workflow.dispatch.rejected",
-                        instanceId.ToString(), reason, ct: ct);
-                    await FailPreFlightAsync(instanceId, workflowType, reason, ct);
-                    return;
-                }
-
-                var manifestPath = Path.ChangeExtension(dllPath, null) + ".manifest.json";
-                pluginFiles.Add(new SlotPluginFile(dllPath, manifestPath));
+                var reason = $"run references unregistered slot provider '{providerType}'";
+                logger.LogWarning(
+                    "Dispatch rejected: {Reason}. CommandId={CommandId}", reason, command.CommandId);
+                await auditLog.AppendAsync(
+                    "steering-instance", "workflow.dispatch.rejected",
+                    instanceId.ToString(), reason, ct: ct);
+                await FailPreFlightAsync(instanceId, workflowType, reason, ct);
+                return;
             }
-        }
-        else
-        {
-            var providerTypes = (await slotStore.GetConfigurationsAsync(workflowType, ct))
-                .Select(c => c.ProviderType)
-                .Distinct();
 
-            foreach (var providerType in providerTypes)
-            {
-                var dllPath = await providerRegistry.GetDllPathAsync(providerType, ct);
-                if (dllPath is null)
-                {
-                    logger.LogWarning(
-                        "No SlotPackages entry for ProviderType={ProviderType} (WorkflowType={WorkflowType}). Skipping.",
-                        providerType, workflowType);
-                    continue;
-                }
-
-                var manifestPath = Path.ChangeExtension(dllPath, null) + ".manifest.json";
-                pluginFiles.Add(new SlotPluginFile(dllPath, manifestPath));
-            }
+            var manifestPath = Path.ChangeExtension(dllPath, null) + ".manifest.json";
+            pluginFiles.Add(new SlotPluginFile(dllPath, manifestPath));
         }
 
         if (pluginFiles.Count > 0)
@@ -265,9 +211,7 @@ public sealed class WorkflowDispatcher(
         // schema plus configuration-bound ones (any slot binding whose settings carry a
         // RepositoryUrl) are prepared by the Workspace Manager and bind-mounted at /workspace.
         string? workspaceRoot = null;
-        var repositories = (schema?.Repositories ?? [])
-            .Concat(ConfigurationRepositories(configuration))
-            .ToList();
+        var repositories = (schema?.Repositories ?? []).ToList();
         if (repositories.Count > 0)
         {
             try
@@ -406,49 +350,6 @@ public sealed class WorkflowDispatcher(
         var separator = root.Contains('\\') ? '\\' : '/';
         return $"{root}{separator}{instanceId:N}";
     }
-
-    /// <summary>
-    /// Repositories the run configuration asks to have in the workspace: any slot binding
-    /// whose resolved settings carry a <c>RepositoryUrl</c> and opt in via
-    /// <c>MountIntoWorkspace=true</c> is cloned to <c>/workspace/repos/&lt;slotName&gt;</c>
-    /// (API-only bindings simply omit the flag). A <c>Token</c> setting rides along as HTTPS
-    /// userinfo for the clone only — such clones never enter the warm cache, and the
-    /// Workspace Manager scrubs the credential from the clone's origin before launch.
-    /// </summary>
-    internal static IReadOnlyList<RepositoryDeclaration> ConfigurationRepositories(
-        StoredWorkflowConfiguration? configuration)
-    {
-        if (configuration is null)
-            return [];
-
-        var declarations = new List<RepositoryDeclaration>();
-        foreach (var binding in configuration.SlotBindings)
-        {
-            if (!string.Equals(binding.Settings.GetValueOrDefault("MountIntoWorkspace"), "true",
-                    StringComparison.OrdinalIgnoreCase))
-                continue;
-            if (binding.Settings.GetValueOrDefault("RepositoryUrl") is not { Length: > 0 } repositoryUrl)
-                continue;
-            var token = binding.Settings.GetValueOrDefault("Token");
-            var branch = binding.Settings.GetValueOrDefault("Branch");
-            declarations.Add(new RepositoryDeclaration(
-                binding.SlotName,
-                CloneUrlWithToken(repositoryUrl.Trim(), token),
-                string.IsNullOrWhiteSpace(branch) ? null : branch.Trim(),
-                NoCache: !string.IsNullOrEmpty(token)));
-        }
-
-        return declarations;
-    }
-
-    /// <summary>The token becomes HTTPS userinfo; non-HTTP URLs and URLs already carrying userinfo stay untouched.</summary>
-    private static string CloneUrlWithToken(string repositoryUrl, string? token)
-        => string.IsNullOrEmpty(token)
-           || !Uri.TryCreate(repositoryUrl, UriKind.Absolute, out var uri)
-           || uri.Scheme is not ("http" or "https")
-           || !string.IsNullOrEmpty(uri.UserInfo)
-            ? repositoryUrl
-            : new UriBuilder(uri) { UserName = "x-access-token", Password = token }.Uri.ToString();
 
     private async Task FailPreFlightAsync(Guid instanceId, string workflowType, string reason, CancellationToken ct)
     {

@@ -35,7 +35,6 @@ public class WorkflowDispatcherDockerImageUriTests
 
     private WorkflowDispatcher BuildDispatcher(
         DockerWorkflowLauncherSettings? launcherSettings = null,
-        SlotConfigurationStore? slotStore = null,
         SlotProviderRegistry? providerRegistry = null,
         IHttpClientFactory? httpFactory = null)
     {
@@ -72,9 +71,7 @@ public class WorkflowDispatcherDockerImageUriTests
             httpFactory ?? _mockHttpFactory.Object,
             _mockVerifier.Object,
             _mockPendingPackages.Object,
-            slotStore ?? TestStores.NewSlotConfigurationStore(),
             providerRegistry ?? TestStores.NewSlotProviderRegistry(),
-            TestStores.NewWorkflowConfigurationStore(),
             new WorkflowInstanceTokenRegistry(
                 Options.Create(new WorkflowDispatcherSettings()), TimeProvider.System),
             TestStores.NewPolicyEngine(),
@@ -140,16 +137,11 @@ public class WorkflowDispatcherDockerImageUriTests
     [Test]
     public async Task HandleAsync_DockerUri_SlotPluginFilesStillPopulated()
     {
-        var slotStore = TestStores.NewSlotConfigurationStore();
-        await slotStore.UpsertConfigurationAsync("my-workflow",
-            new StoredSlotConfiguration("slot1", "MyProvider",
-                new Dictionary<string, string>(), ConfigurationStatus.Valid));
-
         var providerRegistry = TestStores.NewSlotProviderRegistry();
         await providerRegistry.UpsertAsync("MyProvider", "/plugins/my-provider.slothandler.dll");
 
         await _sut.StopAsync();
-        _sut = BuildDispatcher(slotStore: slotStore, providerRegistry: providerRegistry);
+        _sut = BuildDispatcher(providerRegistry: providerRegistry);
         await _sut.StartAsync(CancellationToken.None);
 
         WorkflowLaunchRequest? captured = null;
@@ -160,7 +152,8 @@ public class WorkflowDispatcherDockerImageUriTests
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "my-workflow", "docker://my-image:1.0",
-            new Dictionary<string, string>());
+            new Dictionary<string, string>(),
+            SlotProviderTypes: new[] { "MyProvider" });
 
         await _capturedHandler!(command, CancellationToken.None);
 

@@ -139,9 +139,7 @@ public class WorkflowDispatcherTests
             CreateHttpClientFactory(_validPackageZip),
             _mockVerifier.Object,
             _mockPendingPackages.Object,
-            TestStores.NewSlotConfigurationStore(),
             TestStores.NewSlotProviderRegistry(),
-            TestStores.NewWorkflowConfigurationStore(),
             _tokenRegistry,
             TestStores.NewPolicyEngine(),
             TestStores.NewWorkflowInstanceRegistry(),
@@ -341,11 +339,6 @@ public class WorkflowDispatcherTests
     [Test]
     public async Task Enrichment_MatchFound_SlotPluginFilesHasOneEntry()
     {
-        var slotStore = TestStores.NewSlotConfigurationStore();
-        await slotStore.UpsertConfigurationAsync("my-workflow",
-            new StoredSlotConfiguration("slot1", "MyProvider",
-                new Dictionary<string, string>(), ConfigurationStatus.Valid));
-
         var providerRegistry = TestStores.NewSlotProviderRegistry();
         await providerRegistry.UpsertAsync("MyProvider", "/plugins/my-provider.slothandler.dll");
 
@@ -364,9 +357,7 @@ public class WorkflowDispatcherTests
             CreateHttpClientFactory(_validPackageZip),
             _mockVerifier.Object,
             _mockPendingPackages.Object,
-            slotStore,
             providerRegistry,
-            TestStores.NewWorkflowConfigurationStore(),
             _tokenRegistry,
             TestStores.NewPolicyEngine(),
             TestStores.NewWorkflowInstanceRegistry(),
@@ -383,7 +374,8 @@ public class WorkflowDispatcherTests
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
-            new Dictionary<string, string>());
+            new Dictionary<string, string>(),
+            SlotProviderTypes: new[] { "MyProvider" });
         await _capturedHandler!(command, CancellationToken.None);
 
         Assert.That(captured, Is.Not.Null);
@@ -392,7 +384,7 @@ public class WorkflowDispatcherTests
     }
 
     [Test]
-    public async Task Enrichment_NoSlotConfig_SlotPluginFilesIsEmpty()
+    public async Task Enrichment_NoSlotProviderTypes_SlotPluginFilesIsEmpty()
     {
         WorkflowLaunchRequest? captured = null;
         _mockLauncher
@@ -410,12 +402,32 @@ public class WorkflowDispatcherTests
     }
 
     [Test]
-    public async Task Enrichment_ProviderTypeAbsentFromSlotPackages_SlotPluginFilesIsEmpty()
+    public async Task Enrichment_ProviderTypeUnregistered_FailsPreFlightAndDoesNotLaunch()
     {
-        var slotStore = TestStores.NewSlotConfigurationStore();
-        await slotStore.UpsertConfigurationAsync("my-workflow",
-            new StoredSlotConfiguration("slot1", "UnknownProvider",
-                new Dictionary<string, string>(), ConfigurationStatus.Valid));
+        // The default dispatcher's provider registry is empty, so an unregistered provider
+        // type on the command fails pre-flight — no container is launched.
+        var command = new RunWorkflowCommand(
+            Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
+            new Dictionary<string, string>(),
+            SlotProviderTypes: new[] { "UnknownProvider" });
+        await _capturedHandler!(command, CancellationToken.None);
+
+        _mockLauncher.Verify(
+            l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _mockBus.Verify(
+            b => b.PublishToExchangeAsync(
+                "workflow.status-events",
+                It.Is<WorkflowStatusEvent>(e => e.State == "PreFlightFailed"),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Test]
+    public async Task Enrichment_DuplicateProviderType_DeduplicatesToOneEntry()
+    {
+        var providerRegistry = TestStores.NewSlotProviderRegistry();
+        await providerRegistry.UpsertAsync("MyProvider", "/plugins/my-provider.slothandler.dll");
 
         WorkflowLaunchRequest? captured = null;
         _mockLauncher
@@ -432,65 +444,7 @@ public class WorkflowDispatcherTests
             CreateHttpClientFactory(_validPackageZip),
             _mockVerifier.Object,
             _mockPendingPackages.Object,
-            slotStore,
-            TestStores.NewSlotProviderRegistry(),
-            TestStores.NewWorkflowConfigurationStore(),
-            _tokenRegistry,
-            TestStores.NewPolicyEngine(),
-            TestStores.NewWorkflowInstanceRegistry(),
-            TestStores.NewStatusPublisher(_mockBus.Object),
-            _schemaStore,
-            TestStores.NewWorkflowPackageStore(),
-            TestStores.NewArtifactStore(),
-            new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
-            TestStores.NewWorkspaceManager(),
-            new AuditLog(_auditRecords, TimeProvider.System),
-            TestStores.NewInstanceInfo(),
-            NullLogger<WorkflowDispatcher>.Instance);
-        await _sut.StartAsync(CancellationToken.None);
-
-        var command = new RunWorkflowCommand(
-            Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
-            new Dictionary<string, string>());
-        await _capturedHandler!(command, CancellationToken.None);
-
-        Assert.That(captured, Is.Not.Null);
-        Assert.That(captured!.SlotPluginFiles, Is.Empty);
-    }
-
-    [Test]
-    public async Task Enrichment_DuplicateProviderType_DeduplicatesToOneEntry()
-    {
-        var slotStore = TestStores.NewSlotConfigurationStore();
-        await slotStore.UpsertConfigurationAsync("my-workflow",
-            new StoredSlotConfiguration("slot1", "MyProvider",
-                new Dictionary<string, string>(), ConfigurationStatus.Valid));
-        await slotStore.UpsertConfigurationAsync("my-workflow",
-            new StoredSlotConfiguration("slot2", "MyProvider",
-                new Dictionary<string, string>(), ConfigurationStatus.Valid));
-
-        var settings = DefaultSettings();
-        var providerRegistry = TestStores.NewSlotProviderRegistry();
-        await providerRegistry.UpsertAsync("MyProvider", "/plugins/my-provider.slothandler.dll");
-
-        WorkflowLaunchRequest? captured = null;
-        _mockLauncher
-            .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
-            .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
-            .ReturnsAsync(new WorkflowLaunchResult());
-
-        await _sut.StopAsync();
-        _sut = new WorkflowDispatcher(
-            _mockBus.Object,
-            _mockLauncher.Object,
-            Options.Create(settings),
-            Options.Create(new WorkflowDispatcherSettings()),
-            CreateHttpClientFactory(_validPackageZip),
-            _mockVerifier.Object,
-            _mockPendingPackages.Object,
-            slotStore,
             providerRegistry,
-            TestStores.NewWorkflowConfigurationStore(),
             _tokenRegistry,
             TestStores.NewPolicyEngine(),
             TestStores.NewWorkflowInstanceRegistry(),
@@ -507,7 +461,8 @@ public class WorkflowDispatcherTests
 
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
-            new Dictionary<string, string>());
+            new Dictionary<string, string>(),
+            SlotProviderTypes: new[] { "MyProvider", "MyProvider" });
         await _capturedHandler!(command, CancellationToken.None);
 
         Assert.That(captured, Is.Not.Null);
