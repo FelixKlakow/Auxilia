@@ -42,27 +42,23 @@ public sealed class SlotCredentialResolver(
     {
         var record = await store.ReadAsync(runId, ct);
         if (record is null)
-            return (false, "unknown run", null);
+            return await RejectAsync(runId, "unknown-run", "unknown run", ct);
 
         if (!CryptographicOperations.FixedTimeEquals(
                 Encoding.UTF8.GetBytes(record.ResolutionToken), Encoding.UTF8.GetBytes(resolutionToken)))
-        {
-            await audit.AppendAsync(
-                "core-api", "workflow.slot-credential.rejected", runId.ToString(), "invalid-resolution-token", ct: ct);
-            return (false, "invalid resolution token", null);
-        }
+            return await RejectAsync(runId, "invalid-resolution-token", "invalid resolution token", ct);
 
         var bindings = JsonSerializer.Deserialize<List<SlotBinding>>(record.SlotBindingsJson) ?? [];
         var binding = bindings.FirstOrDefault(b => b.SlotName == slotName);
         if (binding is null)
-            return (false, $"no binding for slot '{slotName}'", null);
+            return await RejectAsync(runId, "no-binding", $"no binding for slot '{slotName}'", ct);
 
         string providerType;
         IReadOnlyDictionary<string, string> resolvedSettings;
         if (binding.ConnectorId is { } connectorId)
         {
             if (await connectors.ResolveSettingsAsync(connectorId, ct) is not { } settingsMap)
-                return (false, $"connector '{connectorId}' not found", null);
+                return await RejectAsync(runId, "connector-not-found", $"connector '{connectorId}' not found", ct);
             resolvedSettings = settingsMap;
             providerType = binding.ProviderType
                            ?? (await connectors.GetAsync(connectorId, ct))?.ProviderType
@@ -75,16 +71,23 @@ public sealed class SlotCredentialResolver(
         }
 
         if (string.IsNullOrEmpty(providerType))
-            return (false, $"slot '{slotName}' has no provider type", null);
+            return await RejectAsync(runId, "no-provider-type", $"slot '{slotName}' has no provider type", ct);
 
         var (ok, error, encrypted) = EncryptForPublicKey(resolvedSettings, publicKeyBase64);
         if (!ok)
-            return (false, error, null);
+            return await RejectAsync(runId, "encrypt-failed", error!, ct);
 
         await audit.AppendAsync(
             "core-api", "workflow.slot-credential.resolved", runId.ToString(), slotName, ct: ct);
         var expiresUtc = clock.GetUtcNow() + settings.Value.SlotCredentialLifetime;
         return (true, null, new ResolvedSlotCredential(providerType, encrypted!, expiresUtc));
+    }
+
+    private async Task<(bool Success, string? Error, ResolvedSlotCredential? Credential)> RejectAsync(
+        Guid runId, string reason, string error, CancellationToken ct)
+    {
+        await audit.AppendAsync("core-api", "workflow.slot-credential.rejected", runId.ToString(), reason, ct: ct);
+        return (false, error, null);
     }
 
     private static (bool Success, string? Error, string? Encrypted) EncryptForPublicKey(

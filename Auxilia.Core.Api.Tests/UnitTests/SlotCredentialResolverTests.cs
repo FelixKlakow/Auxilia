@@ -119,6 +119,31 @@ public sealed class SlotCredentialResolverTests
     }
 
     [Test]
+    public async Task Resolve_Rejection_IsAudited()
+    {
+        var auditStore = new InMemoryDataAccess<AuditRecord>();
+        var connectors = new ConnectorService(
+            new InMemoryDataAccess<CoreConnectorRecord>(),
+            new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32)), TimeProvider.System);
+        var resolver = new SlotCredentialResolver(
+            new InMemoryDataAccess<CoreRunResolutionRecord>(), connectors,
+            new AuditLog(auditStore, TimeProvider.System), TimeProvider.System,
+            Options.Create(new CoreApiSettings()));
+
+        var (publicKey, rsa) = NewKeyPair();
+        using (rsa)
+        {
+            // Unknown run — a rejection that must still be audited.
+            await resolver.ResolveAsync(Guid.NewGuid(), "tok", "sc", publicKey, CancellationToken.None);
+        }
+
+        var records = await auditStore.ReadAsync();
+        Assert.That(records.Any(r =>
+                r.Action == "workflow.slot-credential.rejected" && r.Outcome == "unknown-run"),
+            Is.True, "Every resolution rejection must be audited.");
+    }
+
+    [Test]
     public async Task Resolve_InlineBinding_UsesInlineSettings()
     {
         var (resolver, _) = New();

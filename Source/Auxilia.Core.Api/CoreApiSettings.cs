@@ -17,6 +17,9 @@ public sealed class CoreApiSettings
 
     /// <summary>Validity of a Core-resolved slot credential; the workflow re-requests after expiry.</summary>
     public TimeSpan SlotCredentialLifetime { get; set; } = TimeSpan.FromMinutes(30);
+
+    /// <summary>Max slot-credential resolution requests accepted per run (keyed by resolution token) per minute.</summary>
+    public int ResolutionRateLimitPermitsPerMinute { get; set; } = 60;
 }
 
 /// <summary>A run configuration provided through host settings (appsettings / environment).</summary>

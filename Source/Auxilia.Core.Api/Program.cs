@@ -8,7 +8,9 @@ using Auxilia.Governance.Policy;
 using Auxilia.Messaging;
 using Auxilia.PlatformData;
 using Auxilia.PlatformData.Entities;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -50,6 +52,28 @@ builder.Services.AddAuthorization();
 // --- Settings ---
 builder.Services.Configure<CoreApiSettings>(builder.Configuration.GetSection("CoreApi"));
 
+// --- Rate limiting: bound slot-credential resolution per run (defence against a compromised runner) ---
+var coreApiRateSettings = builder.Configuration.GetSection("CoreApi").Get<CoreApiSettings>() ?? new CoreApiSettings();
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddPolicy("resolve-slot", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Request.Headers["X-Resolution-Token"].ToString() is { Length: > 0 } token
+                ? token : "anonymous",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = coreApiRateSettings.ResolutionRateLimitPermitsPerMinute,
+                Window = TimeSpan.FromMinutes(1)
+            }));
+    options.OnRejected = async (context, ct) =>
+    {
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        var runId = context.HttpContext.Request.RouteValues.TryGetValue("runId", out var r) ? r?.ToString() : null;
+        await context.HttpContext.RequestServices.GetRequiredService<AuditLog>().AppendAsync(
+            "core-api", "workflow.slot-credential.rate-limited", runId ?? "unknown", "rate-limit-exceeded", ct: ct);
+    };
+});
+
 // --- Core services ---
 builder.Services.AddSingleton<ConnectorService>();
 builder.Services.AddSingleton<RunConfigurationService>();
@@ -80,6 +104,7 @@ await app.Services.GetRequiredService<GovernanceSeeder>().SeedAsync(app.Lifetime
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 // --- Runs ---
 app.MapPost("/api/runs", async (
@@ -138,7 +163,7 @@ app.MapPost("/internal/runs/{runId:guid}/resolve-slot", async (
         ? Results.Ok(credential)
         : Results.Json(new { error }, statusCode:
             error == "invalid resolution token" ? StatusCodes.Status403Forbidden : StatusCodes.Status404NotFound);
-});
+}).RequireRateLimiting("resolve-slot");
 
 // --- Configurations ---
 app.MapPost("/api/configurations", async (
