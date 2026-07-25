@@ -37,6 +37,7 @@ public class CoreApiDispatchEnvironment
 
     private const string RabbitMqAlias = "rabbitmq";
     private const string RabbitMqImage = "rabbitmq:3.13-management";
+    private const string CoreApiAlias = "core-api";
 
     private static readonly string NetworkName =
         $"auxilia-coreapi-{Guid.NewGuid():N}".Substring(0, 30);
@@ -77,6 +78,9 @@ public class CoreApiDispatchEnvironment
             .WithEnvironment("RabbitMq__Port", "5672")
             .WithEnvironment("RabbitMq__UserName", "guest")
             .WithEnvironment("RabbitMq__Password", "guest")
+            // Credentialed slots resolve just-in-time from the Core over HTTP — the runner holds
+            // no secrets. Reaches Core.Api by its network alias (see the Core.Api container below).
+            .WithEnvironment("WorkflowDispatcher__CoreApiBaseAddress", $"http://{CoreApiAlias}:8080")
             .WithEnvironment("WorkflowLauncher__NetworkName", NetworkName)
             .WithEnvironment("WorkflowLauncher__RabbitMqHost", RabbitMqAlias)
             .WithEnvironment("WorkflowLauncher__RabbitMqPort", "5672")
@@ -89,6 +93,7 @@ public class CoreApiDispatchEnvironment
 
         _coreApi = new ContainerBuilder(CoreApiImageName)
             .WithNetwork(_network)
+            .WithNetworkAliases(CoreApiAlias)
             .WithEnvironment("ASPNETCORE_URLS", "http://+:8080")
             .WithEnvironment("RabbitMq__Host", RabbitMqAlias)
             .WithEnvironment("RabbitMq__Port", "5672")
