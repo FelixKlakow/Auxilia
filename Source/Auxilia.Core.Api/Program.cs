@@ -75,6 +75,7 @@ builder.Services.AddRateLimiter(options =>
 
 // --- Core services ---
 builder.Services.AddSingleton<ConnectorService>();
+builder.Services.AddSingleton<ConnectorAccessPolicy>();
 builder.Services.AddSingleton<RunConfigurationService>();
 builder.Services.AddSingleton<RunService>();
 builder.Services.AddSingleton<RunReadService>();
@@ -178,7 +179,14 @@ app.MapPost("/api/runs", async (
         { WorkflowType = request.WorkflowType }, ct);
     if (!decision.Allowed)
         return Results.Json(new { error = decision.Reason }, statusCode: StatusCodes.Status403Forbidden);
-    return Results.Ok(await runs.RunInlineAsync(request, ct));
+    try
+    {
+        return Results.Ok(await runs.RunInlineAsync(request, principalId, ct));
+    }
+    catch (ConnectorAccessDeniedException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status403Forbidden);
+    }
 }).RequireAuthorization();
 
 app.MapGet("/api/runs", async (
@@ -260,7 +268,11 @@ app.MapPost("/api/configurations/{id:guid}/run", async (
         return Results.Json(new { error = decision.Reason }, statusCode: StatusCodes.Status403Forbidden);
     try
     {
-        return Results.Ok(await runs.RunConfigurationAsync(id, null, ct));
+        return Results.Ok(await runs.RunConfigurationAsync(id, principalId, ct));
+    }
+    catch (ConnectorAccessDeniedException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status403Forbidden);
     }
     catch (InvalidOperationException ex)
     {
@@ -270,9 +282,17 @@ app.MapPost("/api/configurations/{id:guid}/run", async (
 
 // --- Connectors ---
 app.MapPost("/api/connectors", async (
-        CreateConnector request, ConnectorService svc, CancellationToken ct) =>
-    Results.Ok(await svc.CreateAsync(request, ct)))
-    .RequireAuthorization();
+        CreateConnector request, HttpContext http, IPolicyEngine policy, ConnectorService svc, CancellationToken ct) =>
+{
+    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+        return Results.Unauthorized();
+    // Any authenticated principal may connect their own personal (identity-linked) account; a shared
+    // company connector requires the connector-management permission.
+    if (request.Scope != ConnectorScope.Personal
+        && await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.SlotConfigWrite, ct) is { } fail)
+        return fail;
+    return Results.Ok(await svc.CreateAsync(request, principalId, ct));
+}).RequireAuthorization();
 
 app.MapGet("/api/connectors", async (
         string? providerType, ConnectorService svc, CancellationToken ct, int skip = 0, int take = 50) =>
@@ -282,6 +302,23 @@ app.MapGet("/api/connectors", async (
 app.MapGet("/api/connectors/{id:guid}", async (Guid id, ConnectorService svc, CancellationToken ct) =>
         await svc.GetAsync(id, ct) is { } connector ? Results.Ok(connector) : Results.NotFound())
     .RequireAuthorization();
+
+// Grant a personal connector to principals / directory groups (owner, or a connector manager).
+app.MapPost("/api/connectors/{id:guid}/grants", async (
+        Guid id, SetConnectorGrants request, HttpContext http, IPolicyEngine policy,
+        ConnectorService svc, CancellationToken ct) =>
+{
+    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+        return Results.Unauthorized();
+    if (await svc.GetAsync(id, ct) is not { } connector)
+        return Results.NotFound();
+    if (connector.OwnerPrincipalId != principalId
+        && await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.SlotConfigWrite, ct) is { } fail)
+        return fail;
+    return await svc.SetGrantsAsync(id, request.Grants, ct)
+        ? Results.Accepted($"/api/connectors/{id}")
+        : Results.NotFound();
+}).RequireAuthorization();
 
 // --- Groups (identity administration) ---
 app.MapPost("/api/groups", async (

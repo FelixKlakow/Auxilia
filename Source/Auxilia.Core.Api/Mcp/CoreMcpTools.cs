@@ -43,7 +43,7 @@ public sealed class CoreMcpTools(
             return denial;
 
         var accepted = await runs.RunInlineAsync(
-            new RunRequest(workflowType, packageUri, ParseObject(contextJson)), cancellationToken);
+            new RunRequest(workflowType, packageUri, ParseObject(contextJson)), principalId, cancellationToken);
         return JsonResult(new { runId = accepted.RunId, commandId = accepted.CommandId });
     }
 
@@ -67,8 +67,12 @@ public sealed class CoreMcpTools(
 
         try
         {
-            var accepted = await runs.RunConfigurationAsync(id, null, cancellationToken);
+            var accepted = await runs.RunConfigurationAsync(id, principalId, cancellationToken);
             return JsonResult(new { runId = accepted.RunId, commandId = accepted.CommandId });
+        }
+        catch (ConnectorAccessDeniedException ex)
+        {
+            return Error(ex.Message);
         }
         catch (InvalidOperationException ex)
         {
@@ -142,21 +146,59 @@ public sealed class CoreMcpTools(
     }
 
     [McpServerTool(Name = "create_connector")]
-    [Description("Creates a connector. Settings are a JSON object; values are stored encrypted.")]
+    [Description("Creates a connector. Settings are a JSON object; values are stored encrypted. " +
+                 "Scope Personal makes it an identity-linked connector owned by you.")]
     public async Task<CallToolResult> CreateConnectorAsync(
         RequestContext<CallToolRequestParams> context,
         [Description("Connector name.")] string name,
         [Description("Provider type.")] string providerType,
         [Description("JSON object of settings.")] string settingsJson,
+        [Description("Scope: Company (shared) or Personal (identity-linked, owned by you).")]
+        string scope = ConnectorScope.Company,
         CancellationToken cancellationToken = default)
     {
         if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
             return NoPrincipal();
-        if (await DenyAsync(principalId, PermissionActions.SlotConfigWrite, null, cancellationToken) is { } denial)
+        // Company connectors require the connector-management permission; personal ones are self-owned.
+        if (scope != ConnectorScope.Personal
+            && await DenyAsync(principalId, PermissionActions.SlotConfigWrite, null, cancellationToken) is { } denial)
             return denial;
         var connector = await connectors.CreateAsync(
-            new CreateConnector(name, providerType, ParseObject(settingsJson)), cancellationToken);
+            new CreateConnector(name, providerType, ParseObject(settingsJson), scope), principalId, cancellationToken);
         return JsonResult(connector);
+    }
+
+    [McpServerTool(Name = "set_connector_grants")]
+    [Description("Replaces a personal connector's access grants (owner or a connector manager only). " +
+                 "Grants is a JSON array of {kind,id}, kind = Principal or DirectoryGroup.")]
+    public async Task<CallToolResult> SetConnectorGrantsAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Connector id (GUID).")] string connectorId,
+        [Description("JSON array, e.g. [{\"kind\":\"DirectoryGroup\",\"id\":\"<group-object-id>\"}].")] string grantsJson,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (!Guid.TryParse(connectorId, out var id))
+            return Error("connectorId must be a GUID.");
+        if (await connectors.GetAsync(id, cancellationToken) is not { } connector)
+            return Error("connector not found.");
+        if (connector.OwnerPrincipalId != principalId
+            && await DenyAsync(principalId, PermissionActions.SlotConfigWrite, null, cancellationToken) is { } denial)
+            return denial;
+
+        List<ConnectorGrant>? grants;
+        try
+        {
+            grants = JsonSerializer.Deserialize<List<ConnectorGrant>>(grantsJson);
+        }
+        catch (JsonException)
+        {
+            return Error("grants must be a JSON array of {kind,id} objects.");
+        }
+        return await connectors.SetGrantsAsync(id, grants ?? [], cancellationToken)
+            ? JsonResult(new { connectorId = id, grants = grants ?? [] })
+            : Error("connector not found.");
     }
 
     [McpServerTool(Name = "create_group")]

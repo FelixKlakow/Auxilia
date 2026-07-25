@@ -15,16 +15,17 @@ public sealed class RunService(
     IMessageBusClient bus,
     RunConfigurationService configurations,
     SlotCredentialResolver credentialResolver,
+    ConnectorAccessPolicy connectorAccess,
     IOptions<CoreApiSettings> settings,
     ILogger<RunService> logger)
 {
-    public Task<RunAccepted> RunInlineAsync(RunRequest request, CancellationToken ct)
+    public Task<RunAccepted> RunInlineAsync(RunRequest request, Guid? triggeredBy, CancellationToken ct)
         => DispatchAsync(
             request.WorkflowType, request.PackageUri,
             new Dictionary<string, string>(request.Context ?? new Dictionary<string, string>()),
-            request.SlotBindings ?? [], ct);
+            request.SlotBindings ?? [], triggeredBy, ct);
 
-    public async Task<RunAccepted> RunConfigurationAsync(Guid configurationId, Guid? requestedBy, CancellationToken ct)
+    public async Task<RunAccepted> RunConfigurationAsync(Guid configurationId, Guid? triggeredBy, CancellationToken ct)
     {
         var config = await configurations.GetAsync(configurationId, ct)
                      ?? throw new KeyNotFoundException($"configuration '{configurationId}' not found");
@@ -33,7 +34,7 @@ public sealed class RunService(
 
         return await DispatchAsync(
             config.WorkflowType, config.PackageUri,
-            new Dictionary<string, string>(config.Context), config.SlotBindings, ct);
+            new Dictionary<string, string>(config.Context), config.SlotBindings, triggeredBy, ct);
     }
 
     /// <summary>Requests cancellation of a run; the runner consumes the command and stops the container.</summary>
@@ -45,8 +46,18 @@ public sealed class RunService(
 
     private async Task<RunAccepted> DispatchAsync(
         string workflowType, string packageUri, Dictionary<string, string> context,
-        IReadOnlyList<SlotBinding> slotBindings, CancellationToken ct)
+        IReadOnlyList<SlotBinding> slotBindings, Guid? triggeredBy, CancellationToken ct)
     {
+        // Gate identity-linked connectors: the triggering principal must be allowed to use every
+        // connector a slot binds before any credential context is staged for the run. Company
+        // connectors pass freely; a personal connector admits only its owner and granted subjects.
+        foreach (var connectorId in slotBindings
+                     .Where(b => b.ConnectorId is not null)
+                     .Select(b => b.ConnectorId!.Value)
+                     .Distinct())
+            if (!await connectorAccess.CanUseAsync(connectorId, triggeredBy, ct))
+                throw new ConnectorAccessDeniedException(connectorId);
+
         // The Core is the single authorization authority: the caller was already authorized here,
         // so the command is dispatched WITHOUT a RequestedBy principal. The runner trusts
         // Core-dispatched commands and cannot resolve a Core-database principal against its own.

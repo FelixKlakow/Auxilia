@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Auxilia.PlatformData;
 using Auxilia.PlatformData.Entities;
 using Auxilia.UniversalDataAccess;
@@ -30,6 +31,7 @@ public sealed class ExternalIdentityProvisioner(
     {
         var subjectKey = SubjectKey(identity.Provider, identity.Subject);
         var principalId = DeterministicGuid.For("principal-external", subjectKey);
+        var groupsJson = JsonSerializer.Serialize(identity.Groups);
 
         var principal = await principals.ReadAsync(principalId, ct);
         if (principal is null)
@@ -41,7 +43,8 @@ public sealed class ExternalIdentityProvisioner(
                 Kind = "Human",
                 DisplayName = identity.DisplayName,
                 ExternalSubject = subjectKey,
-                Status = "Active"
+                Status = "Active",
+                DirectoryGroupsJson = groupsJson
             };
             await principals.SaveAsync(principal, ct);
             await auditLog.AppendAsync("external-identity", "principal.provisioned",
@@ -53,10 +56,11 @@ public sealed class ExternalIdentityProvisioner(
                 principal.Id.ToString(), "disabled", ct: ct);
             return null;
         }
-        else if (principal.DisplayName != identity.DisplayName)
+        else if (principal.DisplayName != identity.DisplayName || principal.DirectoryGroupsJson != groupsJson)
         {
-            // Keep the display name current with the directory (the source of truth).
-            principal = principal with { DisplayName = identity.DisplayName };
+            // Keep the display name and directory group memberships current with the directory
+            // (the source of truth) — the latter gates AD-group-scoped connector access.
+            principal = principal with { DisplayName = identity.DisplayName, DirectoryGroupsJson = groupsJson };
             await principals.SaveAsync(principal, ct);
         }
 

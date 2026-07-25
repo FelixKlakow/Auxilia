@@ -23,15 +23,17 @@ public sealed class RunServiceTests
         var bus = new FakeMessageBusClient();
         var configs = new RunConfigurationService(
             new InMemoryDataAccess<CoreRunConfigurationRecord>(), TimeProvider.System);
+        var connectorStore = new InMemoryDataAccess<CoreConnectorRecord>();
         var connectors = new ConnectorService(
-            new InMemoryDataAccess<CoreConnectorRecord>(),
-            new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32)), TimeProvider.System);
+            connectorStore, new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32)), TimeProvider.System);
         var resolver = new SlotCredentialResolver(
             new InMemoryDataAccess<CoreRunResolutionRecord>(), connectors,
             new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System),
             TimeProvider.System, Options.Create(new CoreApiSettings()));
+        var accessPolicy = new ConnectorAccessPolicy(connectorStore, new InMemoryDataAccess<PrincipalRecord>());
         var service = new RunService(
-            bus, configs, resolver, Options.Create(new CoreApiSettings()), NullLogger<RunService>.Instance);
+            bus, configs, resolver, accessPolicy, Options.Create(new CoreApiSettings()),
+            NullLogger<RunService>.Instance);
         return (service, bus, configs);
     }
 
@@ -43,7 +45,7 @@ public sealed class RunServiceTests
         await service.RunInlineAsync(
             new RunRequest("wt", "docker://img",
                 new Dictionary<string, string> { ["K"] = "V" }, RequestedBy: Guid.NewGuid()),
-            CancellationToken.None);
+            triggeredBy: Guid.NewGuid(), CancellationToken.None);
 
         var command = bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>().Single();
         Assert.That(command.WorkflowType, Is.EqualTo("wt"));

@@ -14,4 +14,9 @@ public sealed record PrincipalRecord : IEntity
     public string? ExternalSubject { get; init; }
     /// <summary>"Active" or "Disabled".</summary>
     public required string Status { get; init; }
+    /// <summary>
+    /// JSON array of the principal's directory (AD/Entra) group object ids, refreshed from the token
+    /// at each federated sign-in. Drives AD-group-gated connector access; empty for local principals.
+    /// </summary>
+    public string DirectoryGroupsJson { get; init; } = "[]";
 }

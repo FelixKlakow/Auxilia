@@ -46,7 +46,7 @@ public sealed class SlotCredentialResolverTests
         var (resolver, connectors) = New();
         var connector = await connectors.CreateAsync(
             new CreateConnector("gh", "github", new Dictionary<string, string> { ["token"] = "secret-xyz" }),
-            CancellationToken.None);
+            ownerPrincipalId: null, CancellationToken.None);
 
         var runId = Guid.NewGuid();
         var token = Guid.NewGuid().ToString("N");

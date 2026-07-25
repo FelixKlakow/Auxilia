@@ -26,7 +26,7 @@ public sealed class ConnectorServiceTests
         var dto = await service.CreateAsync(
             new CreateConnector("gh", "github",
                 new Dictionary<string, string> { ["token"] = "secret-xyz" }),
-            CancellationToken.None);
+            ownerPrincipalId: null, CancellationToken.None);
 
         Assert.That(dto.SettingKeys, Does.Contain("token"));
         var record = await store.ReadAsync(dto.Id, CancellationToken.None);
@@ -42,7 +42,7 @@ public sealed class ConnectorServiceTests
         var dto = await service.CreateAsync(
             new CreateConnector("gh", "github",
                 new Dictionary<string, string> { ["token"] = "secret-xyz" }),
-            CancellationToken.None);
+            ownerPrincipalId: null, CancellationToken.None);
 
         var resolved = await service.ResolveSettingsAsync(dto.Id, CancellationToken.None);
         Assert.That(resolved, Is.Not.Null);

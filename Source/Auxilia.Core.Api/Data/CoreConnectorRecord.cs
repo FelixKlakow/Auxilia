@@ -16,5 +16,14 @@ public sealed record CoreConnectorRecord : IEntity
     /// <summary>JSON dictionary of setting key → protected value.</summary>
     public string ProtectedSettingsJson { get; init; } = "{}";
 
+    /// <summary>"Company" (shared) or "Personal" (identity-linked, owner + granted subjects only).</summary>
+    public string Scope { get; init; } = Core.Contracts.ConnectorScope.Company;
+
+    /// <summary>The principal who owns a personal connector; null for company connectors.</summary>
+    public Guid? OwnerPrincipalId { get; init; }
+
+    /// <summary>JSON array of <c>ConnectorGrant</c> admitting subjects to a personal connector.</summary>
+    public string GrantsJson { get; init; } = "[]";
+
     public DateTimeOffset UpdatedUtc { get; init; }
 }

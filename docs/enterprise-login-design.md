@@ -1,6 +1,6 @@
 # Enterprise Login & Connected Accounts — Design
 
-> **Status:** L2 delivered · 2026-07-25 · Entra OIDC sign-in + JIT provisioning + directory-group→role mapping (with Graph overage fallback) live in Core.Api (L3–L4 pending)
+> **Status:** L3 delivered · 2026-07-25 · Entra OIDC sign-in + JIT provisioning + directory-group→role mapping + identity-linked, AD-group-gated connectors live in Core.Api (L4 / OBO pending)
 > **Owner:** Felix Klakow
 > **Scope:** Support the login scenarios Felix's company needs — **Microsoft/Entra ID (Azure AD) SSO**, and **"connected accounts"**: one Auxilia identity linked to the corporate directory (AD) that cascades authorized access to TFS / Azure DevOps / repositories.
 
@@ -20,7 +20,7 @@ Core.Api is the single auth authority. Governance already provides the *shape* f
 - **`GroupMappingResolver`** already turns IdP group claims into roles; **first-class groups** (`GroupDirectory` + `GroupRoleResolver`) union direct + group + IdP-mapped roles in the Policy Engine.
 - **Connectors** hold per-principal/company external-service credentials, scoped personal or company-wide, and are delivered to workflows **just-in-time, encrypted** (the credential-resolution path is built and proven).
 
-Delivered in **L1**: the interactive OIDC login flow (Entra), JIT principal provisioning from an external identity, and browser session issuance. Delivered in **L2**: directory group claims are mapped to roles and reconciled onto the principal at every sign-in, with a Microsoft Graph fallback for group-claim overage, plus an administrator surface (REST + MCP) for the mappings — see the implementation notes below. Still missing: the identity→resource-access (ADO/TFS/repo) linkage (**L3/L4**).
+Delivered in **L1**: the interactive OIDC login flow (Entra), JIT principal provisioning from an external identity, and browser session issuance. Delivered in **L2**: directory group claims are mapped to roles and reconciled onto the principal at every sign-in, with a Microsoft Graph fallback for group-claim overage, plus an administrator surface (REST + MCP) for the mappings. Delivered in **L3**: connectors are identity-linked (owned by a principal) and AD-group-gated, and the JIT dispatch path enforces that the triggering principal may use every connector a run binds — the AD cascade. See the implementation notes below. Still missing: live per-request OBO delegation (**L4**) and an interactive OAuth authorization-code connect UI.
 
 ## 3. Target model
 
@@ -70,6 +70,8 @@ graph TB
 
 **Recommendation:** start with **A** — it lands the scenario on top of what's already built (connectors + JIT delivery + groups), with AD group membership as the authorization gate. Add **B** (OBO delegation) as a follow-up for live per-user delegation where a stored connector is not acceptable.
 
+> **Implementation note (L3).** A Core connector now carries a `Scope` (`Company` = shared, `Personal` = identity-linked) and an `OwnerPrincipalId`; a personal connector also carries **grants** admitting other subjects — a specific principal or an AD **directory group**. Eligibility is decided by `ConnectorAccessPolicy.CanUseAsync`: company → anyone; personal → owner ∪ granted principals ∪ members of a granted directory group. The **AD cascade** works because the provisioner persists each principal's directory group ids (`PrincipalRecord.DirectoryGroupsJson`) at every sign-in, so group membership is known at dispatch even without a live session. Enforcement is at **dispatch**: `RunService` gates every connector a run's slot bindings reference against the *triggering* principal before any credential context is staged — an ineligible trigger is refused with 403 and nothing is dispatched (the runner's later token-authorized resolution trusts the pre-authorized stash, consistent with the separate-database trust model). Admin surface: `POST /api/connectors` creates a personal connector owned by the caller (company connectors need `slot-config.write`); `POST /api/connectors/{id}/grants` sets its grants (owner or a connector manager); MCP twins `create_connector` (with scope) and `set_connector_grants`. The connector's credential is whatever the owner supplies (e.g. an ADO PAT); a full interactive OAuth authorization-code connect UI and live OBO exchange are **L4**.
+
 Either way, **secrets/tokens still live only in the Core** and reach workflows only through the JIT, per-instance-encrypted resolution path — the connected account changes *whose* credential and *how it's provisioned/authorized*, not the delivery mechanism.
 
 ## 5. Decisions
@@ -89,7 +91,7 @@ Either way, **secrets/tokens still live only in the Core** and reach workflows o
 | **L0** | Auth-model spec: session shapes (cookie vs bearer), the login endpoints on Core.Api, provider registration, config surface (tenant/client id, redirect URIs) | design only |
 | **L1** ✅ | Entra OIDC relying party + `ExternalIdentityProvisioner` (JIT) + browser session cookie; `/auth/*` endpoints; local + API-key coexist | ✅ unit (provisioning: create/idempotent/roles/disabled/audit), component (login via a stubbed OIDC provider, deny-by-default, API-key coexistence); manual (real Entra tenant) pending |
 | **L2** ✅ | Directory group -> role at sign-in through `GroupMappingResolver` (reconciled onto the principal, `Source="GroupMapping"`); group-claim overage → Microsoft Graph fallback; REST + MCP admin surface for the mappings | ✅ unit (claim mapping/reconcile/revoke/audit, overage detection), component (roles from group claims, overage fallback, mapping admin); manual (real Graph overage) pending |
-| **L3** | Connected accounts (mechanism A): identity-linked connectors + AD-group gating; connect flow for ADO/TFS/repos; workflows resolve them JIT | component (gated resolution), system (a run uses a connected ADO connector) |
+| **L3** ✅ | Connected accounts (mechanism A): identity-linked connectors (owner + `Scope`) + AD-group/principal gating; dispatch-time enforcement against the triggering principal; REST + MCP admin for connectors and grants | ✅ unit (`ConnectorAccessPolicy`: company/owner/principal-grant/directory-group-grant/deny; sign-in persists directory groups), component (gated dispatch 403 vs. allowed, create-as-personal, grants admin); system (a run uses a connected ADO connector) + interactive OAuth connect UI pending |
 | **L4** | (Optional) OBO delegation (mechanism B) for live per-user ADO/TFS tokens | component + manual |
 
 ## 7. Open questions

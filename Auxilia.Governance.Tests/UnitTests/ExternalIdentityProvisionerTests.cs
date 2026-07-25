@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Auxilia.Governance.Identity;
 using Auxilia.PlatformData.Entities;
 
@@ -181,5 +182,27 @@ public class ExternalIdentityProvisionerTests
             Assert.That(await _ctx.AuditCountAsync("role.assigned"), Is.EqualTo(1));
             Assert.That(await _ctx.AuditCountAsync("role.revoked"), Is.EqualTo(1));
         });
+    }
+
+    [Test]
+    public async Task SignIn_PersistsDirectoryGroupMemberships_OnThePrincipal()
+    {
+        var session = await _ctx.Provisioner.ProvisionAsync(Entra("sub-1", "Ada Lovelace", "group-a", "group-b"));
+
+        var principal = await _ctx.Principals.ReadAsync(session!.PrincipalId);
+        Assert.That(JsonSerializer.Deserialize<List<string>>(principal!.DirectoryGroupsJson),
+            Is.EquivalentTo(new[] { "group-a", "group-b" }),
+            "Directory group memberships are persisted so AD-group connector gating can be evaluated at dispatch.");
+    }
+
+    [Test]
+    public async Task SignIn_RefreshesDirectoryGroups_WhenMembershipChanges()
+    {
+        await _ctx.Provisioner.ProvisionAsync(Entra("sub-1", "Ada Lovelace", "group-a"));
+        var session = await _ctx.Provisioner.ProvisionAsync(Entra("sub-1", "Ada Lovelace", "group-b"));
+
+        var principal = await _ctx.Principals.ReadAsync(session!.PrincipalId);
+        Assert.That(JsonSerializer.Deserialize<List<string>>(principal!.DirectoryGroupsJson),
+            Is.EquivalentTo(new[] { "group-b" }), "The directory is the source of truth; stale groups are dropped.");
     }
 }
