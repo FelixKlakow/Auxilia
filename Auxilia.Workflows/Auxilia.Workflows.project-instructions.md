@@ -1,19 +1,19 @@
 # Auxilia.Workflows
 
-Workflow SDK consumed by every workflow binary. Declares slots and environment requirements, negotiates configuration with SteeringInstance over the message bus, and bootstraps the resolved slot providers into the DI container.
+Workflow SDK consumed by every workflow binary. Declares slots and environment requirements, negotiates configuration with the Core.Runner over the message bus, and bootstraps the resolved slot providers into the DI container.
 
 ## Architecture
 
-A workflow binary calls `WorkflowBuilder` at startup. When run normally it sends a `WorkflowRegistrationRequest` to SteeringInstance and waits for a `WorkflowConfigurationResponse` containing RSA-encrypted slot configs. `WorkflowBootstrapper` decrypts each config and calls the matching `ISlotHandler` to register the provider into `IServiceCollection`. When run with no args (schema-export mode) it serialises the `WorkflowSchema` to stdout and exits — used by tooling only.
+A workflow binary calls `WorkflowBuilder` at startup. When run normally it sends a `WorkflowRegistrationRequest` to the Core.Runner and waits for a `WorkflowConfigurationResponse` containing RSA-encrypted slot configs. `WorkflowBootstrapper` decrypts each config and calls the matching `ISlotHandler` to register the provider into `IServiceCollection`. When run with no args (schema-export mode) it serialises the `WorkflowSchema` to stdout and exits — used by tooling only.
 
-Platform-launched instances read their identity from env vars (`WorkflowEnvironmentVariables`): `Workflow__InstanceId` + one-time `Workflow__InstanceToken` (carried in announcement and registration messages for authentication) and `Workflow__AnnouncementQueue`/`Workflow__RegistrationQueue` (the launching Steering Instance's queues). Without them the SDK self-generates an identity — accepted only by an SI running with `RequireInstanceToken=false` (dev mode). The response queue name is always `WorkflowQueues.ResponseQueueFor(instanceId)` — pre-created by the platform in authenticated mode.
+Platform-launched instances read their identity from env vars (`WorkflowEnvironmentVariables`): `Workflow__InstanceId` + one-time `Workflow__InstanceToken` (carried in announcement and registration messages for authentication) and `Workflow__AnnouncementQueue`/`Workflow__RegistrationQueue` (the launching Core.Runner's queues). Without them the SDK self-generates an identity — accepted only by a runner running with `RequireInstanceToken=false` (dev mode). The response queue name is always `WorkflowQueues.ResponseQueueFor(instanceId)` — pre-created by the platform in authenticated mode.
 
 `SlotHandlerRegistry` is a static map from provider-type string → `ISlotHandler`. Slot-package libraries register their handler into it; the core SDK does not know about any concrete provider.
 
 ```mermaid
 sequenceDiagram
     participant W as WorkflowBuilder
-    participant SI as SteeringInstance
+    participant SI as Core.Runner
     W->>SI: WorkflowRegistrationRequest (manifest + RSA public key)
     SI-->>W: WorkflowConfigurationResponse (encrypted slot configs)
     W->>W: WorkflowBootstrapper decrypts → ISlotHandler.Register per slot

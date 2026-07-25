@@ -47,5 +47,5 @@ four-level pyramid (see `TestStrategy.md`):
 - **Runtime-extensible vocabularies**: providers, trigger kinds, connect flows, and
   account types are registered at runtime — adding one is a registration, not a rebuild.
 - **One-click demo stand**: `Start-Presentation.bat` boots the full platform
-  (MongoDB, RabbitMQ, mail server, Steering Instance, dashboard) in Docker with
+  (MongoDB, RabbitMQ, mail server, Core.Runner, dashboard) in Docker with
   persistent data across restarts.

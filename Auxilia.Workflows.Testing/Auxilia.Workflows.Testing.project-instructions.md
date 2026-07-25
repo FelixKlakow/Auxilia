@@ -1,6 +1,6 @@
 # Auxilia.Workflows.Testing
 
-In-process test harness for workflow binaries. Allows component tests to run a `WorkflowBuilder`-based entry point without a real message bus or SteeringInstance, asserting on the resulting `HarnessResult`.
+In-process test harness for workflow binaries. Allows component tests to run a `WorkflowBuilder`-based entry point without a real message bus or Core.Runner, asserting on the resulting `HarnessResult`.
 
 ## Architecture
 
@@ -43,4 +43,4 @@ Auxilia.Workflows.Testing/
 ## Special Rules
 - `WorkflowBuilder.TestContext` is set before the entry point fires and cleared in the `finally` block; never leave it set between tests.
 - RSA encryption uses the workflow's own ephemeral public key so the normal decryption path is exercised — do not bypass it.
-- Missing slots cause an immediate `WorkflowState.Failed` response rather than an exception, mirroring real SteeringInstance behaviour.
+- Missing slots cause an immediate `WorkflowState.Failed` response rather than an exception, mirroring real Core.Runner behaviour.

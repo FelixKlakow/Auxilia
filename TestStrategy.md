@@ -19,7 +19,7 @@ Auxilia uses a four-tier test pyramid. Each tier has a distinct scope, dependenc
 
 ## Level 1 – Unit Tests
 
-**Projects:** `Auxilia.BackendService.Tests/UnitTests/`, `Auxilia.SteeringInstance.Tests/`
+**Projects:** `Auxilia.BackendService.Tests/UnitTests/`, `Auxilia.Core.Runner.Tests/`, `Auxilia.Core.Api.Tests/UnitTests/`, `Auxilia.WorkflowStudio.Tests/UnitTests/`
 
 **Scope:** A single class or function in isolation. All external dependencies are replaced with Moq mocks.
 

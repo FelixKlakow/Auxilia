@@ -8,10 +8,10 @@
 ## 1. Goals
 
 - Workflows declare their **capability requirements** upfront in code (builder pattern).
-- On startup the workflow node sends its requirements to the **Steering Instance** via RabbitMQ.
-- The Steering Instance resolves which concrete providers satisfy each requirement, pushes back an encrypted **configuration envelope**, and the workflow boots with fully-resolved dependencies.
-- New workflow types can be added without touching the Steering Instance core – it only needs to know about capability contracts, not concrete workflow logic.
-- Workflows are **one-shot by default**: they run exactly once and always shut down afterwards to prevent data leaks and maximise security. A manifest-declared **long-living** lifetime exists for service-style workflows (standing agents, monitors) — declared via `.WithLifetime(WorkflowLifetime.LongLiving)`, which requires operator approval on the Steering Instance (`WorkflowDispatcher:ApprovedLongLivingWorkflowTypes`). Long-living instances receive a `WorkflowDrainSignal` via DI; when its token fires (stored configuration changed or a new version registered) the application must finish in-flight work and return — the Steering Instance marks the run `Draining` and starts a replacement with the fresh configuration once it exits. See ARCHITECTURE.md §6 for the full lifetime model (credential expiry + re-request arrives with per-slot JIT delivery).
+- On startup the workflow node sends its requirements to the **Core.Runner** via RabbitMQ.
+- The Core.Runner resolves which concrete providers satisfy each requirement, pushes back an encrypted **configuration envelope**, and the workflow boots with fully-resolved dependencies.
+- New workflow types can be added without touching the Core.Runner core – it only needs to know about capability contracts, not concrete workflow logic.
+- Workflows are **one-shot by default**: they run exactly once and always shut down afterwards to prevent data leaks and maximise security. A manifest-declared **long-living** lifetime exists for service-style workflows (standing agents, monitors) — declared via `.WithLifetime(WorkflowLifetime.LongLiving)`, which requires operator approval on the Core.Runner (`WorkflowDispatcher:ApprovedLongLivingWorkflowTypes`). Long-living instances receive a `WorkflowDrainSignal` via DI; when its token fires (stored configuration changed or a new version registered) the application must finish in-flight work and return — the Core.Runner marks the run `Draining` and starts a replacement with the fresh configuration once it exits. See ARCHITECTURE.md §6 for the full lifetime model (credential expiry + re-request arrives with per-slot JIT delivery).
 - Workflows operate in two modes driven by **command-line arguments**: `run` (execute business logic) and `schema` (emit a JSON schema — invoked by the Packer at packaging time so the signed package always carries a current schema and the frontend can render a typed configuration UI).
 - **Environment requirements** are first-class – a workflow can declare what must be present in its execution environment (tools, ports, OS). Multi-container orchestration is deferred to a future iteration.
 
@@ -24,9 +24,9 @@
 | **Capability** | A typed descriptor expressing _what_ a slot requires, not _which_ provider satisfies it. Capabilities have **required** and **optional** fields. |
 | **Slot** | An explicitly named dependency a workflow declares it needs. Every slot carries a name and an optional human-readable description. Multiple slots of the same interface type are supported. |
 | **EnvironmentRequirement** | A typed descriptor of what the execution environment must provide (installed tools, exposed ports, OS constraints). |
-| **WorkflowManifest** | The serialisable output of the builder – sent to the Steering Instance in `run` mode. |
-| **WorkflowSchema** | The JSON schema emitted in `schema` mode – describes all slots, their capabilities, and environment requirements so the Steering Instance and frontend stay in sync. |
-| **WorkflowConfiguration** | The resolved, encrypted answer from the Steering Instance – contains connection details and secrets per slot. |
+| **WorkflowManifest** | The serialisable output of the builder – sent to the Core.Runner in `run` mode. |
+| **WorkflowSchema** | The JSON schema emitted in `schema` mode – describes all slots, their capabilities, and environment requirements so the Core.Runner and frontend stay in sync. |
+| **WorkflowConfiguration** | The resolved, encrypted answer from the Core.Runner – contains connection details and secrets per slot. |
 | **WorkflowBootstrapper** | Receives the `WorkflowConfiguration`, decrypts it, and wires up real DI services. |
 
 ---
@@ -106,7 +106,7 @@ All five shipped slot packages follow the same pattern:
 
 ## 4. Capability Records
 
-Capabilities express requirements only – never preferences for a specific provider. Each field is either **required** (non-nullable / value type) or **optional** (nullable). The Steering Instance uses these fields to determine whether a stored configuration satisfies the manifest. If a new required field is added to a capability, existing stored configurations are automatically marked **dirty** and must be reconfigured via the frontend.
+Capabilities express requirements only – never preferences for a specific provider. Each field is either **required** (non-nullable / value type) or **optional** (nullable). The Core.Runner uses these fields to determine whether a stored configuration satisfies the manifest. If a new required field is added to a capability, existing stored configurations are automatically marked **dirty** and must be reconfigured via the frontend.
 
 ```csharp
 public interface ICapability { }
@@ -143,13 +143,13 @@ public record TaskSourceCapabilities : ICapability
 public record NoCapabilities : ICapability;
 ```
 
-All capability records carry `[JsonExtensionData]` to tolerate unknown fields from newer workflow versions arriving at an older Steering Instance.
+All capability records carry `[JsonExtensionData]` to tolerate unknown fields from newer workflow versions arriving at an older Core.Runner.
 
 ---
 
 ## 5. Environment Requirements
 
-Environment requirements are declared via a fluent sub-builder on `.RequiresEnvironment(...)` and are included in both the `WorkflowManifest` and the emitted `WorkflowSchema`. The Steering Instance uses them to validate that the target runner satisfies the workflow's prerequisites before dispatching.
+Environment requirements are declared via a fluent sub-builder on `.RequiresEnvironment(...)` and are included in both the `WorkflowManifest` and the emitted `WorkflowSchema`. The Core.Runner uses them to validate that the target runner satisfies the workflow's prerequisites before dispatching.
 
 The fluent style avoids tying the API to a specific field shape (e.g. `MinimumDotNetVersion`) – each requirement is a discrete, versioned assertion:
 
@@ -193,7 +193,7 @@ await WorkflowBuilder.Create("code-review-workflow")
     .Run(args);
 ```
 
-Schema mode is invoked at **packaging time** by `Auxilia.Workflows.Packer`: the emitted `workflow-schema.json` is embedded in the signed `*.workflow.zip`. At registration the Steering Instance (`WorkflowAnnouncementHandler`) reads the schema directly from the extracted package — there is **no runtime schema round-trip** against a running container. When a new version is registered, the Steering Instance diffs the embedded schema against the stored one to detect dirty configurations.
+Schema mode is invoked at **packaging time** by `Auxilia.Workflows.Packer`: the emitted `workflow-schema.json` is embedded in the signed `*.workflow.zip`. At registration the Core.Runner (`WorkflowAnnouncementHandler`) reads the schema directly from the extracted package — there is **no runtime schema round-trip** against a running container. When a new version is registered, the Core.Runner diffs the embedded schema against the stored one to detect dirty configurations.
 
 ---
 
@@ -202,7 +202,7 @@ Schema mode is invoked at **packaging time** by `Auxilia.Workflows.Packer`: the 
 ```mermaid
 sequenceDiagram
     participant W as Workflow node
-    participant S as Steering Instance
+    participant S as Core.Runner
 
     W->>S: WorkflowRegistrationRequest\n{ manifest, publicKey, responseTopic }
     Note over S: Validate environment requirements against runner\nResolve providers for each slot\nEncrypt SlotConfigurations with W's public key
@@ -212,7 +212,7 @@ sequenceDiagram
 
 - The workflow generates an **ephemeral asymmetric key pair** on each startup.
 - The public key is included in `WorkflowRegistrationRequest`.
-- The Steering Instance validates `EnvironmentRequirements` against the registered runner profile, then encrypts each `SlotConfiguration` payload with the public key.
+- The Core.Runner validates `EnvironmentRequirements` against the registered runner profile, then encrypts each `SlotConfiguration` payload with the public key.
 - The workflow decrypts with its private key inside the SDK.
 - Once the workflow exits the private key is discarded.
 
@@ -221,7 +221,7 @@ sequenceDiagram
 - The workflow is **trusted by signature** — the signing authority is responsible for verifying that the workflow is correct and trustworthy before signing. A signature-verified workflow is therefore permitted to hold the scoped credentials its slots resolve to; the SDK keeping decrypted settings out of application code is defence in depth, not the trust boundary.
 - The invariant is **just-in-time delivery**: a workflow holds *no* credentials prior to configuration. Registration only *validates* that every slot is configured; the response carries no secrets. Each slot's configuration is delivered on a `SlotActivationRequest` when the workflow first resolves the slot (keyed DI factories route through the SDK's `SlotActivator`), encrypted for the instance's ephemeral key and answered only on the pre-created response queue. Delivered credentials carry an `ExpiresUtc`; the activator transparently re-requests after expiry, so long-living instances never hold indefinitely valid secrets. The instance token authenticates activations and dies with the run. (The test harness may still deliver all slots eagerly in the registration response — the SDK supports both.)
 - Operator-configured operation limits (e.g. allowed branch patterns, PR-only, no force-push for source control) are enforced in **two layers**: the credential delivered in the `SlotConfiguration` is scoped to the limits wherever the provider supports it, and the slot handler enforces the same limits uniformly before executing any operation. The credential scope is the hard backstop; the handler check provides provider-independent behaviour and clear errors.
-- The handshake is **authenticated**, not just encrypted — an ephemeral public key proves nothing about who is asking. The dispatcher issues an **instance token** per launch (env vars `Workflow__InstanceId` / `Workflow__InstanceToken`) and pre-creates the instance's **exclusive response queue** (`workflow-response-{instanceId}`); announcements, the registration (single-use — duplicates are rejected), and every slot activation carry the token (constant-time comparison; the issuance lifetime bounds only the launch→registration window, and the token dies when the run reaches a terminal state). All responses go only to the pre-created queue, ignoring the self-declared `ResponseTopic`. When the env vars are absent the SDK self-generates an identity — accepted only by a Steering Instance configured with `RequireInstanceToken=false` (trusted-operator dev mode).
+- The handshake is **authenticated**, not just encrypted — an ephemeral public key proves nothing about who is asking. The dispatcher issues an **instance token** per launch (env vars `Workflow__InstanceId` / `Workflow__InstanceToken`) and pre-creates the instance's **exclusive response queue** (`workflow-response-{instanceId}`); announcements, the registration (single-use — duplicates are rejected), and every slot activation carry the token (constant-time comparison; the issuance lifetime bounds only the launch→registration window, and the token dies when the run reaches a terminal state). All responses go only to the pre-created queue, ignoring the self-declared `ResponseTopic`. When the env vars are absent the SDK self-generates an identity — accepted only by a Core.Runner configured with `RequireInstanceToken=false` (trusted-operator dev mode).
 
 ### Schema flow (packaging time)
 
@@ -229,7 +229,7 @@ sequenceDiagram
 sequenceDiagram
     participant P as Packer
     participant W as Workflow binary
-    participant SI as Steering Instance
+    participant SI as Core.Runner
 
     P->>W: invoke with "schema"
     W->>P: WorkflowSchema (workflow-schema.json)
@@ -240,7 +240,7 @@ sequenceDiagram
 ### Message shapes
 
 ```csharp
-// Workflow → Steering (run mode)
+// Workflow → Core.Runner (run mode)
 public record WorkflowRegistrationRequest(
     Guid WorkflowInstanceId,   // platform-assigned at launch (env), self-generated only in dev
     WorkflowManifest Manifest,
@@ -248,7 +248,7 @@ public record WorkflowRegistrationRequest(
     string ResponseTopic,      // ignored in authenticated mode — the pre-created queue is used
     string? InstanceToken = null); // one-time launch token; required unless RequireInstanceToken=false
 
-// Steering → Workflow (run mode)
+// Core.Runner → Workflow (run mode)
 public record WorkflowConfigurationResponse(
     Guid WorkflowInstanceId,
     bool Success,
@@ -274,7 +274,7 @@ sequenceDiagram
     participant App as Workflow Program.cs
     participant Builder as WorkflowBuilder
     participant Bus as RabbitMQ
-    participant SI as Steering Instance
+    participant SI as Core.Runner
     participant Boot as WorkflowBootstrapper
     participant PL as PluginLoader
     participant Handler as ISlotHandler (plugin)
@@ -311,8 +311,8 @@ sequenceDiagram
 **Stage-by-stage description:**
 
 1. **Builder call-site** – The workflow's `Program.cs` calls typed extension methods (e.g. `RequiresAiAgent`), each of which calls `builder.Requires<TService>(name, capabilities, description)`. The builder accumulates a `SlotDefinition` list.
-2. **Announcement / directive** – On `Run(args)`, the builder publishes a `WorkflowAnnouncementMessage`; the Steering Instance responds with a `WorkflowDirective` confirming it should proceed.
-3. **Registration request** – The builder sends a `WorkflowRegistrationRequest` carrying the manifest and an ephemeral public key. The Steering Instance validates environment requirements, resolves the appropriate provider for each slot, and returns a `WorkflowConfigurationResponse` with each slot's settings encrypted under the workflow's public key.
+2. **Announcement / directive** – On `Run(args)`, the builder publishes a `WorkflowAnnouncementMessage`; the Core.Runner responds with a `WorkflowDirective` confirming it should proceed.
+3. **Registration request** – The builder sends a `WorkflowRegistrationRequest` carrying the manifest and an ephemeral public key. The Core.Runner validates environment requirements, resolves the appropriate provider for each slot, and returns a `WorkflowConfigurationResponse` with each slot's settings encrypted under the workflow's public key.
 4. **Plugin loading** – `PluginLoader` discovers `*.slothandler.dll` files under `AppContext.BaseDirectory` via `FileSystemPluginDiscovery`, verifies each manifest signature, loads the assembly, locates the single `ISlotHandler` implementation by reflection, and registers it in `ISlotHandlerResolver` keyed by `providerType` string.
 5. **Bootstrapping** – `WorkflowBootstrapper.Apply` iterates over the response slots, decrypts each `EncryptedSlotConfiguration` with the private key, resolves the matching `ISlotHandler`, and calls `Register(services, slotName, serviceType, configuration)`. Each handler registers keyed DI services using `slotName` as the key so multiple slots of the same interface type can coexist.
 6. **Execution** – The `IServiceProvider` is built and the workflow body runs. On exit the private key is discarded.
@@ -355,15 +355,15 @@ Each `ISlotHandler` implementation already knows its target service interface an
 ## 9. Timeout / Failure
 
 - The workflow waits for `WorkflowConfigurationResponse` with a configurable timeout (default 30 s).
-- If the timeout expires or `Success == false`, the workflow logs the error and exits with a failure status. The Steering Instance — which launched the instance and owns its lifecycle — marks the run `Failed` (or `PreFlightFailed`) and surfaces it in the dashboard. Re-dispatch is an explicit dispatcher decision per retry policy, **not** an external container restart loop: uncontrolled restarts would produce duplicate announcements and untracked instances.
+- If the timeout expires or `Success == false`, the workflow logs the error and exits with a failure status. The Core.Runner — which launched the instance and owns its lifecycle — marks the run `Failed` (or `PreFlightFailed`) and surfaces it in the dashboard. Re-dispatch is an explicit dispatcher decision per retry policy, **not** an external container restart loop: uncontrolled restarts would produce duplicate announcements and untracked instances.
 - No complex retry logic needed in v1 beyond this; failures are visible, restarts are deliberate.
 - Because each workflow is one-shot, there is no concept of dynamic reconfiguration after boot.
 - **No resumability (v1):** a restart is always from scratch — there is no checkpointing. Workflows must therefore make every external write **idempotent or guarded** (branch-exists check, find-or-create PR, deduplicated comments); a restarted run must converge to the same outcome, not duplicate side effects.
-- Every failure and restart is published as a status event so the Steering Instance can surface it in the dashboard — restarts are never silent.
+- Every failure and restart is published as a status event so the Core.Runner can surface it in the dashboard — restarts are never silent.
 
 ---
 
-## 10. Steering Instance responsibilities
+## 10. Core.Runner responsibilities
 
 1. On new workflow type registration: read the embedded `workflow-schema.json` from the verified package, store the `WorkflowSchema`.
 2. On each new deployment: diff the newly embedded schema against the stored one, mark affected configurations dirty.
@@ -374,16 +374,16 @@ Each `ISlotHandler` implementation already knows its target service interface an
    - Publish `WorkflowConfigurationResponse` to `request.ResponseTopic`.
 4. Track `WorkflowInstanceId` → manifest for monitoring dashboards.
 
-Frontend reads `WorkflowSchema` to render a typed configuration UI. The Steering Instance reads stored provider mappings on demand.
+Frontend reads `WorkflowSchema` to render a typed configuration UI. The Core.Runner reads stored provider mappings on demand.
 
 ---
 
 ## 11. Capability Versioning
 
-The Steering Instance operates purely on the communication contract – it never knows provider implementation details. Versioning concerns are limited to the schema:
+The Core.Runner operates purely on the communication contract – it never knows provider implementation details. Versioning concerns are limited to the schema:
 
 - New **optional** capability field → existing stored configurations remain valid.
-- New **required** capability field → Steering Instance marks affected configurations **dirty**; frontend must reconfigure before the next workflow run succeeds.
+- New **required** capability field → Core.Runner marks affected configurations **dirty**; frontend must reconfigure before the next workflow run succeeds.
 - Unknown fields in a capability are preserved via `[JsonExtensionData]` and passed through unchanged, ensuring forward compatibility.
 
 ---
@@ -432,7 +432,7 @@ Source/
     SourceControlWorkflowBuilderExtensions.cs
 
 Source/
-  Auxilia.SteeringInstance/
+  Auxilia.Core.Runner/
     Workflows/
       WorkflowRegistrationHandler.cs      ← mirrors IdentificationRequestHandler
       WorkflowSchemaStore.cs
@@ -448,7 +448,7 @@ Source/
 Some workflows may require sidecar services in their execution environment (e.g. a local database, a mock API). Single-container environment requirements (tools, ports, OS) are fully supported from v1 via `EnvironmentRequirements`. To extend this to multi-container scenarios the following changes would be needed:
 
 - **`EnvironmentRequirements` extension** – add a `SidecarServices` collection describing additional containers (image, ports, health-check).
-- **Steering Instance scheduler** – must orchestrate a pod/compose group rather than a single container, and wait for all sidecars to be healthy before dispatching the workflow.
+- **Core.Runner scheduler** – must orchestrate a pod/compose group rather than a single container, and wait for all sidecars to be healthy before dispatching the workflow.
 - **Runner abstraction** – the current implicit single-container runner model would need to be replaced with a pluggable `IRunnerOrchestrator` (Docker Compose, Kubernetes Job, etc.).
 
 This is a significant scope increase and is explicitly deferred beyond v1.

@@ -13,21 +13,21 @@ Cross-reference: `TestStrategy.md` for tier definitions.
 
 | Component | Location | Responsibility |
 |---|---|---|
-| `RunWorkflowCommand` | `Auxilia.Workflows/Messaging/Messages/` | New message: external trigger → SteeringInstance |
-| `WorkflowDispatcher` | `Auxilia.SteeringInstance/Workflows/` | Consumes `workflow.run-commands`; calls `IWorkflowLauncher` |
-| `IWorkflowLauncher` | `Auxilia.SteeringInstance/Workflows/` | Abstraction over "start a workflow process" |
-| `WorkflowLaunchRequest` | `Auxilia.SteeringInstance/Workflows/` | Launcher parameter: image + env vars |
-| `DockerWorkflowLauncher` | `Auxilia.SteeringInstance/Workflows/` | Production impl: `docker run -d` + injects RabbitMQ env vars |
-| `DockerWorkflowLauncherSettings` | `Auxilia.SteeringInstance/Workflows/` | Config POCO (`WorkflowLauncher` section) |
-| `WorkflowAnnouncementHandler` | `Auxilia.SteeringInstance/Workflows/` | Consumes `workflow.announcements`; responds `WorkflowDirective(Run)` |
+| `RunWorkflowCommand` | `Auxilia.Workflows/Messaging/Messages/` | New message: external trigger → Core.Runner |
+| `WorkflowDispatcher` | `Auxilia.Core.Runner/Workflows/` | Consumes `workflow.run-commands`; calls `IWorkflowLauncher` |
+| `IWorkflowLauncher` | `Auxilia.Core.Runner/Workflows/` | Abstraction over "start a workflow process" |
+| `WorkflowLaunchRequest` | `Auxilia.Core.Runner/Workflows/` | Launcher parameter: image + env vars |
+| `DockerWorkflowLauncher` | `Auxilia.Core.Runner/Workflows/` | Production impl: `docker run -d` + injects RabbitMQ env vars |
+| `DockerWorkflowLauncherSettings` | `Auxilia.Core.Runner/Workflows/` | Config POCO (`WorkflowLauncher` section) |
+| `WorkflowAnnouncementHandler` | `Auxilia.Core.Runner/Workflows/` | Consumes `workflow.announcements`; responds `WorkflowDirective(Run)` |
 | `IWorkflowBuilder.WithRunBody` | `Auxilia.Workflows/` | Registers business-logic delegate; executed inside resolved DI scope |
-| `SlotConfigurationsSettings` | `Auxilia.SteeringInstance/Workflows/Storage/` | Config-file slot config seeding |
+| `SlotConfigurationsSettings` | `Auxilia.Core.Runner/Workflows/Storage/` | Config-file slot config seeding |
 
 ---
 
 ## Level 1 – Unit Tests
 
-**Project:** `Auxilia.SteeringInstance.Tests/` (new unit test files)
+**Project:** `Auxilia.Core.Runner.Tests/` (new unit test files)
 
 ### `WorkflowAnnouncementHandlerTests`
 
@@ -67,13 +67,13 @@ These tests verify the argument-building logic of `DockerWorkflowLauncher` is co
 
 ## Level 2 – Component Tests
 
-**Project:** `Auxilia.SteeringInstance.Tests/ComponentTests/` (new folder)
+**Project:** `Auxilia.Core.Runner.Tests/ComponentTests/` (new folder)
 
 Use `FakeMessageBusClient` (from `Auxilia.Messaging`) and a `FakeWorkflowLauncher` (to be created — records calls, does not invoke Docker).
 
 ### `WorkflowDispatchPipelineComponentTests`
 
-End-to-end through the in-process DI container of the SteeringInstance; no real network calls.
+End-to-end through the in-process DI container of the Core.Runner; no real network calls.
 
 | Test | Steps | Assert |
 |---|---|---|
@@ -99,16 +99,16 @@ End-to-end through the in-process DI container of the SteeringInstance; no real 
 | Container | Image | Notes |
 |---|---|---|
 | RabbitMQ | `rabbitmq:3.13-management` | Internal alias `rabbitmq` |
-| MongoDB | `mongo:7` | Required by SteeringInstance in future; included now for parity |
-| SteeringInstance | `auxilia-steeringinstance:system-test` | Built from source; `WorkflowLauncher:NetworkName` set to the Testcontainers network name; `SlotConfigurations` seeded with a `"local-git"` entry |
-| SimpleGitWorkflow | `auxilia-simple-git-workflow:system-test` | **Not pre-started** — launched on demand by SteeringInstance's `DockerWorkflowLauncher` |
+| MongoDB | `mongo:7` | Required by Core.Runner in future; included now for parity |
+| Core.Runner | `auxilia-core-runner:system-test` | Built from source; `WorkflowLauncher:NetworkName` set to the Testcontainers network name; `SlotConfigurations` seeded with a `"local-git"` entry |
+| SimpleGitWorkflow | `auxilia-simple-git-workflow:system-test` | **Not pre-started** — launched on demand by Core.Runner's `DockerWorkflowLauncher` |
 | Git server | `alpine/git` (init bare) or a bind-mounted temp dir | Acts as the target repository for the workflow |
 
 **Key setup considerations:**
-- The Testcontainers network name must be passed to the SteeringInstance via `WorkflowLauncher:NetworkName` so that any workflow containers it spawns are on the same network.
+- The Testcontainers network name must be passed to the Core.Runner via `WorkflowLauncher:NetworkName` so that any workflow containers it spawns are on the same network.
 - The bare git repo can be a bind-mounted host directory (created in `[OneTimeSetUp]` via `git init`); the path is shared into all containers that need it.
-- The SteeringInstance must be configured with a slot config for `"simple-git-workflow"` pointing at the repo path inside the container.
-- SteeringInstance's startup log message `"WorkflowDispatcher started"` should be used as the `UntilMessageIsLogged` wait strategy.
+- The Core.Runner must be configured with a slot config for `"simple-git-workflow"` pointing at the repo path inside the container.
+- Core.Runner's startup log message `"WorkflowDispatcher started"` should be used as the `UntilMessageIsLogged` wait strategy.
 
 ### Test class: `WorkflowDispatchSystemTests`
 
@@ -149,7 +149,7 @@ await WorkflowBuilder.Create("simple-git-workflow")
     .Run(args);
 ```
 
-**Slot config** the SteeringInstance needs for this workflow:
+**Slot config** the Core.Runner needs for this workflow:
 ```json
 "SlotConfigurations": {
   "Workflows": {
@@ -177,5 +177,5 @@ The `"LocalGit"` slot handler does not yet exist — it is the next piece to bui
 | 3 | Implement `WithRunBody` logic in `SimpleGitWorkflow` (LibGit2Sharp or `git` CLI) |
 | 4 | Implement `WorkflowDispatchEnvironment` (SetUpFixture) following the strategy above |
 | 5 | Implement `WorkflowDispatchSystemTests` |
-| 6 | Add `FakeWorkflowLauncher` to the SteeringInstance test project for Level 2 use |
+| 6 | Add `FakeWorkflowLauncher` to the Core.Runner test project for Level 2 use |
 
