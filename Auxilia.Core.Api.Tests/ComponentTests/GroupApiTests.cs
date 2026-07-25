@@ -1,6 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
-using Auxilia.Core.Api;
+using Auxilia.Core.Contracts;
 
 namespace Auxilia.Core.Api.Tests.ComponentTests;
 

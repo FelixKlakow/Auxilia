@@ -175,12 +175,10 @@ app.MapPost("/auth/logout", async (HttpContext http) =>
 
 app.MapGet("/auth/me", (HttpContext http) =>
     CoreClaims.PrincipalIdOf(http.User) is { } principalId
-        ? Results.Ok(new
-        {
+        ? Results.Ok(new CurrentPrincipal(
             principalId,
-            displayName = http.User.Identity?.Name,
-            roles = http.User.FindAll(ClaimTypes.Role).Select(c => c.Value).ToArray()
-        })
+            http.User.Identity?.Name,
+            http.User.FindAll(ClaimTypes.Role).Select(c => c.Value).ToArray()))
         : Results.Unauthorized()).RequireAuthorization();
 
 // --- Runs ---

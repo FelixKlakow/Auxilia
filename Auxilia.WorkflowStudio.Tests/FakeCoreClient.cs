@@ -56,4 +56,25 @@ public sealed class FakeCoreClient : ICoreClient
     public Task<PagedResult<RunStatus>> QueryRunsAsync(RunQuery query, CancellationToken ct = default)
         => Task.FromResult(new PagedResult<RunStatus>(new List<RunStatus>(), 0, query.Skip, query.Take));
     public Task CancelRunAsync(Guid id, CancellationToken ct = default) => Task.CompletedTask;
+    public Task<Connector?> GetConnectorAsync(Guid id, CancellationToken ct = default)
+        => Task.FromResult(Connectors.FirstOrDefault(c => c.Id == id));
+    public Task SetConnectorGrantsAsync(Guid id, SetConnectorGrants request, CancellationToken ct = default)
+        => Task.CompletedTask;
+    public Task<GroupDto> CreateGroupAsync(CreateGroupRequest request, CancellationToken ct = default)
+        => Task.FromResult(new GroupDto(Guid.NewGuid(), request.Name, request.Description, [], []));
+    public Task<IReadOnlyList<GroupDto>> ListGroupsAsync(CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<GroupDto>>([]);
+    public Task AddGroupMemberAsync(Guid groupId, AddGroupMemberRequest request, CancellationToken ct = default)
+        => Task.CompletedTask;
+    public Task AssignGroupRoleAsync(Guid groupId, AssignGroupRoleRequest request, CancellationToken ct = default)
+        => Task.CompletedTask;
+    public Task<IReadOnlyList<GroupMappingDto>> ListGroupMappingsAsync(CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<GroupMappingDto>>([]);
+    public Task<GroupMappingDto> CreateGroupMappingAsync(CreateGroupMappingRequest request, CancellationToken ct = default)
+        => Task.FromResult(new GroupMappingDto(
+            Guid.NewGuid(), request.IdentityProvider, request.GroupClaim, request.RoleName));
+    public Task RemoveGroupMappingAsync(Guid id, CancellationToken ct = default) => Task.CompletedTask;
+    public Task<CurrentPrincipal> GetCurrentPrincipalAsync(CancellationToken ct = default)
+        => Task.FromResult(new CurrentPrincipal(Guid.NewGuid(), "fake", []));
+    public Task<bool> CheckHealthAsync(CancellationToken ct = default) => Task.FromResult(true);
 }

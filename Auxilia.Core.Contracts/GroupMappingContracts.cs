@@ -1,4 +1,4 @@
-namespace Auxilia.Core.Api;
+namespace Auxilia.Core.Contracts;
 
 /// <summary>Request to map an identity-provider group claim to a built-in role at sign-in.</summary>
 public sealed record CreateGroupMappingRequest(string IdentityProvider, string GroupClaim, string RoleName);

@@ -30,8 +30,7 @@ Standalone deployable. Drives `Auxilia.Core.Runner` over the message bus; owns i
 Source/Auxilia.Core.Api/
 ├── Program.cs                 # Host wiring; own DB; governance; API-key auth; REST + MCP; startup static-config seeding
 ├── CoreApiSettings.cs         # RunCommandQueue, CancelCommandQueue, StaticConfigurations (seed-on-boot)
-├── GroupContracts.cs          # CreateGroupRequest / AddGroupMemberRequest / AssignGroupRoleRequest / GroupDto
-├── GroupMappingContracts.cs   # CreateGroupMappingRequest / GroupMappingDto (directory group→role admin)
+# (group / group-mapping / auth request+response DTOs live in Auxilia.Core.Contracts, shared with the client)
 ├── Data/
 │   ├── CoreRunConfigurationRecord.cs  # Stored runnable configuration (workflow type + slot bindings)
 │   ├── CoreConnectorRecord.cs         # Connector; ProtectedSettingsJson (encrypted); Scope/Owner/Grants (L3)

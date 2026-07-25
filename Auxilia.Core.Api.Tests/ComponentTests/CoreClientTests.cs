@@ -1,3 +1,4 @@
+using System.Net;
 using Auxilia.Core.Client;
 using Auxilia.Core.Contracts;
 using Auxilia.Workflows.Messaging.Messages;
@@ -56,5 +57,90 @@ public sealed class CoreClientTests : CoreApiComponentTestBase
         ICoreClient core = new CoreClient(CreateClient());
         var run = await core.GetRunAsync(Guid.NewGuid());
         Assert.That(run, Is.Null);
+    }
+
+    [Test]
+    public async Task Client_Connector_GetAndSetGrants_RoundTrips()
+    {
+        ICoreClient core = new CoreClient(CreateClient());
+        var connector = await core.CreateConnectorAsync(new CreateConnector(
+            "conn-" + Guid.NewGuid().ToString("N"), "github",
+            new Dictionary<string, string> { ["token"] = "x" }, ConnectorScope.Personal));
+
+        var fetched = await core.GetConnectorAsync(connector.Id);
+        Assert.That(fetched!.Scope, Is.EqualTo(ConnectorScope.Personal));
+
+        await core.SetConnectorGrantsAsync(connector.Id,
+            new SetConnectorGrants([new ConnectorGrant(ConnectorGrantKind.DirectoryGroup, "group-devs")]));
+
+        var afterGrant = await core.GetConnectorAsync(connector.Id);
+        Assert.That(afterGrant!.Grants, Has.One.Matches<ConnectorGrant>(g => g.Id == "group-devs"));
+    }
+
+    [Test]
+    public async Task Client_Groups_CreateListMemberRole_RoundTrips()
+    {
+        ICoreClient core = new CoreClient(CreateClient());
+        var me = await core.GetCurrentPrincipalAsync();
+
+        var group = await core.CreateGroupAsync(new CreateGroupRequest($"g-{Guid.NewGuid():N}"));
+        await core.AddGroupMemberAsync(group.Id, new AddGroupMemberRequest(me.PrincipalId));
+        await core.AssignGroupRoleAsync(group.Id, new AssignGroupRoleRequest("Operator"));
+
+        var stored = (await core.ListGroupsAsync()).Single(g => g.Id == group.Id);
+        Assert.Multiple(() =>
+        {
+            Assert.That(stored.Members, Does.Contain(me.PrincipalId));
+            Assert.That(stored.Roles, Does.Contain("Operator"));
+        });
+    }
+
+    [Test]
+    public async Task Client_GroupMappings_CreateListRemove_RoundTrips()
+    {
+        ICoreClient core = new CoreClient(CreateClient());
+        var mapping = await core.CreateGroupMappingAsync(
+            new CreateGroupMappingRequest("entra", $"grp-{Guid.NewGuid():N}", "Operator"));
+
+        Assert.That((await core.ListGroupMappingsAsync()).Any(m => m.Id == mapping.Id), Is.True);
+
+        await core.RemoveGroupMappingAsync(mapping.Id);
+        Assert.That((await core.ListGroupMappingsAsync()).Any(m => m.Id == mapping.Id), Is.False);
+    }
+
+    [Test]
+    public async Task Client_CurrentPrincipal_IsTheAuthenticatedAdministrator()
+    {
+        var me = await new CoreClient(CreateClient()).GetCurrentPrincipalAsync();
+        Assert.Multiple(() =>
+        {
+            Assert.That(me.PrincipalId, Is.Not.EqualTo(Guid.Empty));
+            Assert.That(me.Roles, Does.Contain("Administrator"));
+        });
+    }
+
+    [Test]
+    public async Task Client_CheckHealth_ReturnsTrue()
+        => Assert.That(await new CoreClient(CreateClient()).CheckHealthAsync(), Is.True);
+
+    [Test]
+    public void Client_NonSuccess_ThrowsCoreApiException_WithStatusAndDetail()
+    {
+        ICoreClient core = new CoreClient(CreateClient());
+        var ex = Assert.CatchAsync<CoreApiException>(() =>
+            core.CreateGroupMappingAsync(new CreateGroupMappingRequest("entra", "g", "Wizard")));
+        Assert.Multiple(() =>
+        {
+            Assert.That(ex!.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+            Assert.That(ex.ErrorDetail, Does.Contain("Wizard"), "The server's error detail is surfaced.");
+        });
+    }
+
+    [Test]
+    public void Client_Unauthenticated_ThrowsCoreApiException_Unauthorized()
+    {
+        ICoreClient core = new CoreClient(CreateAnonymousClient());
+        var ex = Assert.CatchAsync<CoreApiException>(() => core.GetCurrentPrincipalAsync());
+        Assert.That(ex!.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
     }
 }
