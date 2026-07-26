@@ -1,20 +1,19 @@
 using System.Text.Json;
-using Auxilia.Core.Api.Data;
 using Auxilia.Messaging;
-using Auxilia.UniversalDataAccess;
 using Auxilia.Workflows.Messaging.Messages;
 
 namespace Auxilia.Core.Api.Services;
 
 /// <summary>
-/// Builds the Core's catalog of registered workflow types from the runner's schema registrations.
+/// Keeps registered workflow types' schemas fresh from the runner's schema announcements.
 /// Subscribes to the <see cref="WorkflowSchemaPublished.ExchangeName"/> fanout (its own exclusive
-/// queue) and upserts a <see cref="CoreWorkflowSchemaRecord"/> per type. Mirrors
-/// <see cref="RunTrackingService"/> — the Core never reads the runner's database.
+/// queue) and updates the registry record of the announced type — <em>registered types only</em>:
+/// a runtime announcement never creates a catalog entry, because registration (the deploy-time
+/// trust act) is the sole way into the registry.
 /// </summary>
 public sealed class WorkflowSchemaTrackingService(
     IMessageBusClient bus,
-    IDataAccess<CoreWorkflowSchemaRecord> schemas,
+    WorkflowTypeRegistryService registry,
     ILogger<WorkflowSchemaTrackingService> logger) : IHostedService
 {
     private IAsyncDisposable? _subscription;
@@ -30,13 +29,12 @@ public sealed class WorkflowSchemaTrackingService(
 
     private async Task HandleAsync(WorkflowSchemaPublished message, CancellationToken ct)
     {
-        await schemas.SaveAsync(new CoreWorkflowSchemaRecord
-        {
-            Id = CoreWorkflowSchemaRecord.IdFor(message.WorkflowType),
-            WorkflowType = message.WorkflowType,
-            SchemaJson = JsonSerializer.Serialize(message.Schema),
-            UpdatedUtc = message.TimestampUtc
-        }, ct);
+        var updated = await registry.UpdateSchemaAsync(
+            message.WorkflowType, JsonSerializer.Serialize(message.Schema), ct);
+        if (!updated)
+            logger.LogDebug(
+                "Ignored schema announcement for unregistered workflow type {WorkflowType}.",
+                message.WorkflowType);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)

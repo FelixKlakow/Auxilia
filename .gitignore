@@ -435,3 +435,6 @@ FodyWeavers.xsd
 
 # codegraph MCP runtime (local index/daemon)
 .codegraph/
+
+# Core.Api local runtime state (JSON store, package store)
+Source/Auxilia.Core.Api/core-data/

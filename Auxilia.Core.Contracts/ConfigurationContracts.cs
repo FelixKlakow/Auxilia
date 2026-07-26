@@ -13,25 +13,28 @@ public sealed record SlotBinding(
     IReadOnlyDictionary<string, string>? Settings = null,
     string? DelegatedResource = null);
 
-/// <summary>Create a run configuration in the Core store.</summary>
+/// <summary>
+/// Create a run configuration in the Core store. The configuration references a registered
+/// workflow type; the package coordinate is resolved from the workflow-type registry at dispatch.
+/// </summary>
 public sealed record CreateRunConfiguration(
     string Name,
     string WorkflowType,
-    string PackageUri,
     IReadOnlyDictionary<string, string>? Context = null,
     IReadOnlyList<SlotBinding>? SlotBindings = null,
-    bool Enabled = true);
+    bool Enabled = true,
+    IReadOnlyList<string>? Tags = null);
 
 /// <summary>A stored run configuration the Core resolves into a run spec on dispatch.</summary>
 public sealed record RunConfiguration(
     Guid Id,
     string Name,
     string WorkflowType,
-    string PackageUri,
     IReadOnlyDictionary<string, string> Context,
     IReadOnlyList<SlotBinding> SlotBindings,
     bool Enabled,
-    DateTimeOffset UpdatedUtc);
+    DateTimeOffset UpdatedUtc,
+    IReadOnlyList<string>? Tags = null);
 
 /// <summary>Filter for querying configurations.</summary>
 public sealed record ConfigurationQuery(

@@ -7,7 +7,6 @@ public sealed record ScheduledTriggerRecord : IEntity
 {
     public Guid Id { get; init; }
     public required string WorkflowType { get; init; }
-    public required string WorkflowPackageUri { get; init; }
     public int IntervalSeconds { get; init; }
     public bool Enabled { get; init; } = true;
     public string? ContextJson { get; init; }

@@ -29,7 +29,7 @@ public sealed class WorkflowsPageTests
     }
 
     private static RunConfiguration Config(Guid id, string name, string type, bool enabled)
-        => new(id, name, type, "pkg://x", new Dictionary<string, string>(), [], enabled, DateTimeOffset.UtcNow);
+        => new(id, name, type, new Dictionary<string, string>(), [], enabled, DateTimeOffset.UtcNow);
 
     [Test]
     public void Workflows_ListsConfigurations()
@@ -122,7 +122,6 @@ public sealed class WorkflowsPageTests
 
         cut.Find("input[placeholder='e.g. Nightly code review']").Change("My review");
         cut.FindAll("select")[0].Change("code-review");        // workflow type → fetches schema
-        cut.Find("input[placeholder='e.g. pkg://code-review/1.0.0']").Change("pkg://code-review/1.0.0");
         // the slot's connector picker is the second <select> (first is the workflow-type picker)
         cut.FindAll("select")[1].Change(connectorId.ToString());
         cut.FindAll("button").First(b => b.TextContent.Trim() == "Create configuration").Click();
@@ -132,7 +131,6 @@ public sealed class WorkflowsPageTests
             Assert.That(core.LastCreatedConfiguration, Is.Not.Null, "save calls CreateConfigurationAsync");
             Assert.That(core.LastCreatedConfiguration!.Name, Is.EqualTo("My review"));
             Assert.That(core.LastCreatedConfiguration.WorkflowType, Is.EqualTo("code-review"));
-            Assert.That(core.LastCreatedConfiguration.PackageUri, Is.EqualTo("pkg://code-review/1.0.0"));
             Assert.That(core.LastCreatedConfiguration.SlotBindings, Is.Not.Null.And.Count.EqualTo(1),
                 "the slot binding is present");
             Assert.That(core.LastCreatedConfiguration.SlotBindings![0].SlotName, Is.EqualTo("source"));

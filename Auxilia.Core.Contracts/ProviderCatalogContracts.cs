@@ -13,7 +13,8 @@ public sealed record ProviderSettingDescriptor(
     string? HelpText,
     string? DefaultValue,
     IReadOnlyList<string>? Choices,
-    bool Disabled);
+    bool Disabled,
+    string? ConnectFlow = null);
 
 /// <summary>
 /// One entry of the Core-owned slot-provider catalog: a registered slot-handler provider joined
@@ -27,6 +28,29 @@ public sealed record ProviderCatalogEntry(
     IReadOnlyList<ProviderSettingDescriptor> Descriptors,
     IReadOnlyList<string> Contracts,
     string? Description);
+
+/// <summary>
+/// Registers (or updates) a slot provider's descriptor in the Core catalog — normally mirrored
+/// from a plugin manifest by deployment tooling; also the API a runner or operator uses to make
+/// a provider configurable. Registration does NOT make it available (deny-by-default curation).
+/// </summary>
+public sealed record RegisterSlotProvider(
+    string ProviderType,
+    string Category,
+    string? Description,
+    IReadOnlyList<string> Contracts,
+    IReadOnlyList<RegisterProviderSetting> Settings);
+
+/// <summary>One manifest setting of a provider being registered.</summary>
+public sealed record RegisterProviderSetting(
+    string Key,
+    string Label,
+    string Kind,
+    bool Required = false,
+    string? HelpText = null,
+    string? DefaultValue = null,
+    IReadOnlyList<string>? Choices = null,
+    string? ConnectFlow = null);
 
 /// <summary>Set (or clear) a provider's deny-by-default availability.</summary>
 public sealed record SetProviderAvailability(bool Available);

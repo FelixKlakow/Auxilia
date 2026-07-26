@@ -31,6 +31,7 @@ public class WorkflowDispatcherTests
     private byte[] _validPackageZip = null!;
     private WorkflowInstanceTokenRegistry _tokenRegistry = null!;
     private WorkflowSchemaStore _schemaStore = null!;
+    private WorkflowInstanceRegistry _instanceRegistry = null!;
     private InMemoryDataAccess<AuditRecord> _auditRecords = null!;
 
     private static DockerWorkflowLauncherSettings DefaultSettings() => new()
@@ -86,6 +87,7 @@ public class WorkflowDispatcherTests
         _tokenRegistry = new WorkflowInstanceTokenRegistry(
             Options.Create(new WorkflowDispatcherSettings()), TimeProvider.System);
         _schemaStore = TestStores.NewWorkflowSchemaStore();
+        _instanceRegistry = TestStores.NewWorkflowInstanceRegistry();
         _auditRecords = new InMemoryDataAccess<AuditRecord>();
 
         _mockBus = new Mock<IMessageBusClient>(MockBehavior.Strict);
@@ -135,14 +137,14 @@ public class WorkflowDispatcherTests
             _mockBus.Object,
             _mockLauncher.Object,
             Options.Create(DefaultSettings()),
-            Options.Create(new WorkflowDispatcherSettings()),
+            Options.Create(new WorkflowDispatcherSettings { ContainerExitGraceSeconds = 0 }),
             CreateHttpClientFactory(_validPackageZip),
             _mockVerifier.Object,
             _mockPendingPackages.Object,
             TestStores.NewSlotProviderRegistry(),
             _tokenRegistry,
             TestStores.NewPolicyEngine(),
-            TestStores.NewWorkflowInstanceRegistry(),
+            _instanceRegistry,
             TestStores.NewStatusPublisher(_mockBus.Object),
             _schemaStore,
             TestStores.NewWorkflowPackageStore(),
@@ -354,14 +356,14 @@ public class WorkflowDispatcherTests
             _mockBus.Object,
             _mockLauncher.Object,
             Options.Create(DefaultSettings()),
-            Options.Create(new WorkflowDispatcherSettings()),
+            Options.Create(new WorkflowDispatcherSettings { ContainerExitGraceSeconds = 0 }),
             CreateHttpClientFactory(_validPackageZip),
             _mockVerifier.Object,
             _mockPendingPackages.Object,
             providerRegistry,
             _tokenRegistry,
             TestStores.NewPolicyEngine(),
-            TestStores.NewWorkflowInstanceRegistry(),
+            _instanceRegistry,
             TestStores.NewStatusPublisher(_mockBus.Object),
             _schemaStore,
             TestStores.NewWorkflowPackageStore(),
@@ -442,14 +444,14 @@ public class WorkflowDispatcherTests
             _mockBus.Object,
             _mockLauncher.Object,
             Options.Create(DefaultSettings()),
-            Options.Create(new WorkflowDispatcherSettings()),
+            Options.Create(new WorkflowDispatcherSettings { ContainerExitGraceSeconds = 0 }),
             CreateHttpClientFactory(_validPackageZip),
             _mockVerifier.Object,
             _mockPendingPackages.Object,
             providerRegistry,
             _tokenRegistry,
             TestStores.NewPolicyEngine(),
-            TestStores.NewWorkflowInstanceRegistry(),
+            _instanceRegistry,
             TestStores.NewStatusPublisher(_mockBus.Object),
             _schemaStore,
             TestStores.NewWorkflowPackageStore(),
@@ -616,5 +618,35 @@ public class WorkflowDispatcherTests
 
         Assert.That(captured!.EnvironmentVariables[WorkflowEnvironmentVariables.ResourceProxyQueue],
             Is.EqualTo("workflow-resource-proxy"));
+    }
+
+    [Test]
+    public async Task ContainerExit_WithoutTerminalState_FailsTheRun()
+    {
+        var instanceId = Guid.NewGuid();
+        await _instanceRegistry.CreateAsync(instanceId, "my-workflow", "Queued");
+
+        await _sut.HandleContainerExitAsync(instanceId, "my-workflow", new ContainerExit(139, "segfault at 0x0"));
+
+        var record = await _instanceRegistry.GetAsync(instanceId);
+        Assert.That(record!.State, Is.EqualTo("Failed"),
+            "a crashed container must fail its run — never leave it stuck in Queued/Running");
+        Assert.That(record.ErrorMessage, Does.Contain("exited (code 139)").And.Contain("segfault"));
+        _mockBus.Verify(b => b.PublishToExchangeAsync(
+            "workflow.status-events",
+            It.Is<WorkflowStatusEvent>(e => e.WorkflowInstanceId == instanceId && e.State == "Failed"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
+    public async Task ContainerExit_AfterTerminalState_ChangesNothing()
+    {
+        var instanceId = Guid.NewGuid();
+        await _instanceRegistry.CreateAsync(instanceId, "my-workflow", "Success");
+
+        await _sut.HandleContainerExitAsync(instanceId, "my-workflow", new ContainerExit(0, null));
+
+        var record = await _instanceRegistry.GetAsync(instanceId);
+        Assert.That(record!.State, Is.EqualTo("Success"), "a normal exit after completion is not a failure");
     }
 }

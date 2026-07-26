@@ -43,7 +43,17 @@ public sealed record WorkflowLaunchRequest(
 
     /// <summary>Deterministic container name/alias the terminal is reachable at on the shared network.</summary>
     public string? TerminalContainerName { get; init; }
+
+    /// <summary>
+    /// Invoked (from a background watcher) when the workflow container exits, with its exit code
+    /// and captured log tail. The dispatcher uses this to fail runs whose container died without
+    /// reporting a terminal state — a crash must never leave a run stuck in Queued/Running.
+    /// </summary>
+    public Func<ContainerExit, Task>? OnExited { get; init; }
 }
+
+/// <summary>How a workflow container ended: the exit code and the last lines it wrote.</summary>
+public sealed record ContainerExit(long ExitCode, string? LogTail);
 
 /// <summary>What a launch produced: the container-network "name:port" of the web terminal, when any.</summary>
 public sealed record WorkflowLaunchResult(string? TerminalEndpoint = null);

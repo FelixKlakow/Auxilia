@@ -10,7 +10,9 @@ namespace Auxilia.Core.Runner.Workflows;
 /// <summary>
 /// Launches workflow containers via the Docker API over the local (or configured) Docker socket.
 /// No Docker CLI is required inside the Core.Runner container — only socket access.
-/// The container is started with <c>AutoRemove = true</c> so it is cleaned up on exit.
+/// A background watcher waits for each container's exit, captures its exit code and log tail
+/// (so a crash is never silent), removes the container, and reports the exit to the dispatcher
+/// via <see cref="WorkflowLaunchRequest.OnExited"/>.
 /// The extracted workflow package is bind-mounted read-only into the container at <c>/workflow</c>.
 /// </summary>
 public sealed class DockerWorkflowLauncher(
@@ -79,6 +81,11 @@ public sealed class DockerWorkflowLauncher(
             "Workflow container started. RuntimeImage={RuntimeImage} ContainerId={ContainerId}",
             settings.RuntimeImage, created.ID[..Math.Min(12, created.ID.Length)]);
 
+        // Watch the container to its end on a background task: capture the exit code + log tail,
+        // remove the container (we own cleanup — no AutoRemove, or the evidence would vanish),
+        // and hand the exit to the dispatcher so a crashed workflow fails its run.
+        _ = Task.Run(() => WatchContainerAsync(settings, created.ID, request.OnExited));
+
         // Terminal reachability is container-to-container on the shared network: the backend
         // proxies to "<name>:<port>". No host port is published — the browser only ever talks
         // to the backend, never to the workflow container directly.
@@ -90,6 +97,60 @@ public sealed class DockerWorkflowLauncher(
         }
 
         return new WorkflowLaunchResult();
+    }
+
+    /// <summary>
+    /// Waits for the container to exit, captures its exit code and log tail, removes the
+    /// container, and reports the exit. Long-running by design (as long as the workflow itself);
+    /// every failure here is logged, never thrown — the watcher must not take the runner down.
+    /// </summary>
+    private async Task WatchContainerAsync(
+        DockerWorkflowLauncherSettings settings, string containerId, Func<ContainerExit, Task>? onExited)
+    {
+        try
+        {
+            using var client = clientFactory.CreateClient(settings.DockerSocketPath);
+            var wait = await client.Containers.WaitContainerAsync(containerId, CancellationToken.None);
+
+            string? logTail = null;
+            try
+            {
+                using var logs = await client.Containers.GetContainerLogsAsync(
+                    containerId, tty: false,
+                    new ContainerLogsParameters { ShowStdout = true, ShowStderr = true, Tail = "40" },
+                    CancellationToken.None);
+                using var stdout = new MemoryStream();
+                using var stderr = new MemoryStream();
+                await logs.CopyOutputToAsync(Stream.Null, stdout, stderr, CancellationToken.None);
+                logTail = (System.Text.Encoding.UTF8.GetString(stdout.ToArray()) + "\n"
+                           + System.Text.Encoding.UTF8.GetString(stderr.ToArray())).Trim();
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Could not read logs of exited container {ContainerId}.", containerId);
+            }
+
+            try
+            {
+                await client.Containers.RemoveContainerAsync(
+                    containerId, new ContainerRemoveParameters { Force = true }, CancellationToken.None);
+            }
+            catch (DockerContainerNotFoundException)
+            {
+                // Already gone — fine.
+            }
+
+            logger.LogInformation(
+                "Workflow container exited. ContainerId={ContainerId} ExitCode={ExitCode}",
+                containerId[..Math.Min(12, containerId.Length)], wait.StatusCode);
+
+            if (onExited is not null)
+                await onExited(new ContainerExit(wait.StatusCode, logTail));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Container exit watcher failed for {ContainerId}.", containerId);
+        }
     }
 
     /// <summary>
@@ -138,7 +199,8 @@ public sealed class DockerWorkflowLauncher(
             Env = env,
             HostConfig = new HostConfig
             {
-                AutoRemove = true,
+                // No AutoRemove: the exit watcher collects the exit code + log tail first,
+                // then removes the container — a crash must leave evidence, not vanish.
                 Binds = binds
             }
         };
@@ -186,7 +248,8 @@ public sealed class DockerWorkflowLauncher(
             Env   = env,
             HostConfig = new HostConfig
             {
-                AutoRemove = true,
+                // No AutoRemove: the exit watcher collects the exit code + log tail first,
+                // then removes the container — a crash must leave evidence, not vanish.
                 Binds      = binds
             }
         };

@@ -39,6 +39,24 @@ public sealed record CreateConnector(
 public sealed record SetConnectorGrants(IReadOnlyList<ConnectorGrant> Grants);
 
 /// <summary>
+/// Ask the Core to browse live data reachable with a connector's credential (the secret never
+/// leaves the Core): <c>repositories</c> lists the repositories the account can access,
+/// <c>branches</c> lists the branches of <see cref="Repository"/>. Callers must be eligible to
+/// use the connector (the same gate as dispatch).
+/// </summary>
+public sealed record BrowseConnector(string Kind, string? Repository = null)
+{
+    public const string Repositories = "repositories";
+    public const string Branches = "branches";
+}
+
+/// <summary>One browsable item (id = machine value, label = display).</summary>
+public sealed record ConnectorBrowseItem(string Id, string Label);
+
+/// <summary>The result of browsing with a connector's credential.</summary>
+public sealed record ConnectorBrowseResult(IReadOnlyList<ConnectorBrowseItem> Items);
+
+/// <summary>
 /// A stored connector. Secret values are never included — only the setting keys that are
 /// present, so a UI can show what is configured without exposing the material.
 /// </summary>

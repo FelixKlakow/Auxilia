@@ -15,6 +15,7 @@ public static class PermissionActions
     public const string ProviderCatalogManage = "provider-catalog.manage";
     public const string WorkflowConfigurationManage = "workflow-configuration.manage";
     public const string WorkflowTypeManage = "workflow-type.manage";
+    public const string WorkflowTypeSign = "workflow-type.sign";
     public const string TriggerConfigure = "trigger.configure";
     public const string DashboardManage = "dashboard.manage";
     public const string PrincipalAdminister = "principal.administer";

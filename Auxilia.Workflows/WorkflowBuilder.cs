@@ -275,6 +275,12 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 var cancelSub = await context.MessageBus.SubscribeAsync<CancelWorkflowCommand>(
                     cancelQueueName, (_, _) => { cts.Cancel(); return Task.CompletedTask; });
 
+                // Steer-back inputs: the Core's deliver-input endpoint publishes opaque payloads to
+                // this instance's response queue; the application awaits them via IWorkflowInputs.
+                var workflowInputs = new ChannelWorkflowInputs();
+                var inputSub = await context.MessageBus.SubscribeAsync<Messaging.Messages.WorkflowInputMessage>(
+                    responseTopic, (msg, _) => { workflowInputs.Push(msg.PayloadJson); return Task.CompletedTask; });
+
                 using var drainSignal = new WorkflowDrainSignal();
                 IAsyncDisposable? drainSub = null;
                 if (_lifetime == WorkflowLifetime.LongLiving)
@@ -312,6 +318,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
 
                     var services = new ServiceCollection();
                     services.AddSingleton(context.MessageBus);
+                    services.AddSingleton<IWorkflowInputs>(workflowInputs);
                     services.AddSingleton(drainSignal);
                     services.AddSingleton(resourceProxyClient);
                     services.AddSingleton(new Views.DeclaredViews(_views.AsReadOnly()));
@@ -382,6 +389,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 finally
                 {
                     await cancelSub.DisposeAsync();
+                    await inputSub.DisposeAsync();
                     if (drainSub is not null)
                         await drainSub.DisposeAsync();
                     if (slotActivator is not null)

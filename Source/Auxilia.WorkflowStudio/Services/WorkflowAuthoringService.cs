@@ -37,7 +37,7 @@ public sealed class WorkflowAuthoringService(WorkflowTypeCatalog catalog, ICoreC
             .ToList();
 
         var coreConfig = await core.CreateConfigurationAsync(new CreateRunConfiguration(
-            request.Name, type.Name, type.PackageUri, request.Context, coreBindings), ct);
+            request.Name, type.Name, request.Context, coreBindings), ct);
 
         return new ConfiguredWorkflowDto(coreConfig.Id, coreConfig.Name, type.Name);
     }

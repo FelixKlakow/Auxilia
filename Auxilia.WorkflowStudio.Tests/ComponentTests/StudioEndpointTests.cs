@@ -59,7 +59,6 @@ public sealed class StudioEndpointTests
         Assert.That(configure.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         var configured = await configure.Content.ReadFromJsonAsync<ConfiguredWorkflowDto>();
         Assert.That(configured!.WorkflowTypeName, Is.EqualTo("codereview"));
-        Assert.That(_core.CreatedConfigurations.Single().PackageUri, Is.EqualTo("docker://cr"));
 
         var run = await client.PostAsync($"/api/configured/{configured.CoreConfigurationId}/run", null);
         run.EnsureSuccessStatusCode();

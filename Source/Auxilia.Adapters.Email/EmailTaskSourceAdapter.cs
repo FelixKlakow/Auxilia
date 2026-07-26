@@ -152,10 +152,10 @@ public sealed class EmailTaskSourceAdapter(
                 ["MailUid"] = mail.Uid.ToString()
             };
 
-            // The dispatch seam decides how the run reaches the platform (bus command or Core Run
-            // API); mail dispatches carry no type/URI — the trigger's workflow configuration supplies them.
+            // The dispatch seam decides how the run reaches the platform; mail dispatches carry
+            // no type — the trigger's workflow configuration supplies it.
             var dispatchId = await dispatcher.DispatchAsync(
-                trigger.WorkflowConfigurationId, workflowType: null, packageUri: null,
+                trigger.WorkflowConfigurationId, workflowType: null,
                 context, trigger.RunAsPrincipalId, ct);
 
             // Marked seen only after the dispatch was accepted: a crash in between causes a

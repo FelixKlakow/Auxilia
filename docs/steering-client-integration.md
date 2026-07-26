@@ -184,9 +184,9 @@ Matches what's shipped and needs no new proxy connectors. **Cost:** the LLM-driv
 **Core (generic, semantics-blind):**
 | # | Addition | Where |
 |---|---|---|
-| 1 | Deliver-input: `POST /api/runs/{id}/inputs` — authorize `run.provide-input` (+ optional SoD), audit, publish `WorkflowSignalMessage`. `ICoreClient.ProvideInputAsync`. Contract in `RunContracts`. | Core.Api + Client + Contracts |
+| 1 | ✅ **Delivered 2026-07-26.** Deliver-input: `POST /api/runs/{id}/inputs` — authorizes `run.provide-input`, audits, publishes `WorkflowInputMessage` to the instance's response queue. `ICoreClient.ProvideInputAsync`; contract `ProvideRunInput` in `RunContracts`. (SoD still open.) | Core.Api + Client + Contracts |
 | 2 | Output-stream: `GET /api/runs/{id}/stream` (SSE) relaying view/status events. `ICoreClient.StreamRunAsync` → `IAsyncEnumerable`. | Core.Api + Client |
-| 3 | P2 receive in the SDK — a workflow-author API to *await an input signal* into the running instance (nothing consumes routed signals into a live run today). | `Auxilia.Workflows` + Core.Runner |
+| 3 | ✅ **Delivered 2026-07-26.** `IWorkflowInputs.ReceiveAsync` — channel-fed from the instance's response-queue subscription, DI-registered by the WorkflowBuilder. Demo: `echo-decision-workflow` (propose → hold → decide → echo) speaking the raw wire protocol. | `Auxilia.Workflows` |
 | 4 | *(Model A only)* one real `IResourceConnector` for git push. | Core.Runner + a connector |
 
 **No** decision store/endpoint/mandate in the Core.

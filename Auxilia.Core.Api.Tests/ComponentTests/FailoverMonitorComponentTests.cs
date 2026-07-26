@@ -29,6 +29,10 @@ public sealed class FailoverMonitorComponentTests : CoreApiComponentTestBase
     private const string DummyType = "simple-git-commit-workflow";
     private const string DummyImage = "docker://auxilia-dummy-workflows:system-test";
 
+    [SetUp]
+    public Task RegisterDummyTypeAsync() => RegisterActiveTypeAsync(CreateClient(), DummyType, DummyImage);
+
+
     private readonly ManualTimeProvider _time = new();
 
     protected override void ConfigureHost(IWebHostBuilder builder)
@@ -47,7 +51,7 @@ public sealed class FailoverMonitorComponentTests : CoreApiComponentTestBase
     /// <summary>Dispatches a run and returns (dispatch CommandId, the request context used).</summary>
     private async Task<Guid> DispatchRunAsync(HttpClient client, IDictionary<string, string>? context = null)
     {
-        var request = new RunRequest(DummyType, DummyImage,
+        var request = new RunRequest(DummyType,
             new Dictionary<string, string>(context ?? new Dictionary<string, string> { ["WORKFLOW_NAME"] = DummyType }));
         var response = await client.PostAsJsonAsync("/api/runs", request);
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));

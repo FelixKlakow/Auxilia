@@ -65,6 +65,10 @@ public sealed class ConnectorService(
     /// Decrypts a connector's settings for just-in-time injection. Never call this from a read
     /// endpoint — the plaintext must not leave the Core except into a launching container.
     /// </summary>
+    /// <summary>Deletes a connector permanently — configurations binding it will fail to dispatch.</summary>
+    public async Task<bool> DeleteAsync(Guid id, CancellationToken ct)
+        => await store.RemoveAsync(id, ct);
+
     public async Task<IReadOnlyDictionary<string, string>?> ResolveSettingsAsync(Guid id, CancellationToken ct)
     {
         if (await store.ReadAsync(id, ct) is not { } r)

@@ -34,7 +34,6 @@ public sealed class FailoverSystemTests
         //    API, so the Core stashes the dispatch command and can re-dispatch it on failover.
         var request = new RunRequest(
             "sleeping-workflow",
-            $"docker://{WorkflowDispatch.WorkflowDispatchEnvironment.DummyWorkflowsImageName}",
             new Dictionary<string, string>
             {
                 ["WORKFLOW_NAME"] = "sleeping-workflow",

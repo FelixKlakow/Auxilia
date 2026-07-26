@@ -17,17 +17,21 @@ public sealed class RunConfigurationService(
             Id = Guid.NewGuid(),
             Name = request.Name,
             WorkflowType = request.WorkflowType,
-            PackageUri = request.PackageUri,
             ContextJson = JsonSerializer.Serialize(
                 request.Context ?? new Dictionary<string, string>()),
             SlotBindingsJson = JsonSerializer.Serialize(
                 request.SlotBindings ?? new List<SlotBinding>()),
             Enabled = request.Enabled,
+            TagsJson = JsonSerializer.Serialize(request.Tags ?? []),
             UpdatedUtc = clock.GetUtcNow()
         };
         await store.SaveAsync(record, ct);
         return ToDto(record);
     }
+
+    /// <summary>Deletes a stored configuration permanently.</summary>
+    public Task<bool> DeleteAsync(Guid id, CancellationToken ct)
+        => store.RemoveAsync(id, ct);
 
     public async Task<RunConfiguration?> GetAsync(Guid id, CancellationToken ct)
         => await store.ReadAsync(id, ct) is { } r ? ToDto(r) : null;
@@ -51,15 +55,16 @@ public sealed class RunConfigurationService(
         if (all.Any(c => string.Equals(c.Name, seed.Name, StringComparison.OrdinalIgnoreCase)))
             return;
         await CreateAsync(
-            new CreateRunConfiguration(seed.Name, seed.WorkflowType, seed.PackageUri, seed.Context),
+            new CreateRunConfiguration(seed.Name, seed.WorkflowType, seed.Context),
             ct);
     }
 
     internal static RunConfiguration ToDto(CoreRunConfigurationRecord r) => new(
-        r.Id, r.Name, r.WorkflowType, r.PackageUri,
+        r.Id, r.Name, r.WorkflowType,
         JsonSerializer.Deserialize<Dictionary<string, string>>(r.ContextJson)
             ?? new Dictionary<string, string>(),
         JsonSerializer.Deserialize<List<SlotBinding>>(r.SlotBindingsJson)
             ?? new List<SlotBinding>(),
-        r.Enabled, r.UpdatedUtc);
+        r.Enabled, r.UpdatedUtc,
+        JsonSerializer.Deserialize<List<string>>(r.TagsJson ?? "[]") ?? []);
 }

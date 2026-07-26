@@ -34,10 +34,12 @@ public sealed class ConnectorAccessComponentTests : CoreApiComponentTestBase
         return id;
     }
 
+    [SetUp]
+    public Task RegisterTypeAsync() => RegisterActiveTypeAsync(CreateClient(), "wt", "docker://img");
+
     private static object RunBinding(Guid connectorId) => new
     {
         workflowType = "wt",
-        packageUri = "docker://img",
         slotBindings = new[] { new { slotName = "sc", connectorId } }
     };
 

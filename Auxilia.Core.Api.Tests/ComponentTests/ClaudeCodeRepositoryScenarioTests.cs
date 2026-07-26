@@ -23,6 +23,10 @@ public sealed class ClaudeCodeRepositoryScenarioTests : CoreApiComponentTestBase
     private const string ClaudeCode = "claude-code";
     private const string Package = "docker://auxilia-claude-code:latest";
 
+    [SetUp]
+    public Task RegisterClaudeCodeTypeAsync() => RegisterActiveTypeAsync(CreateClient(), ClaudeCode, Package);
+
+
     [Test]
     public async Task Client_ConfiguresTfsAuth_ThenStartsClaudeCodeSessionAgainstMultipleRepos()
     {
@@ -38,7 +42,7 @@ public sealed class ClaudeCodeRepositoryScenarioTests : CoreApiComponentTestBase
         //    the app's configuration.
         const string prompt = "Add a CHANGELOG entry for the latest release.";
         await core.RunAsync(new RunRequest(
-            ClaudeCode, Package,
+            ClaudeCode,
             Context: new Dictionary<string, string> { ["Title"] = prompt },
             Repositories:
             [
@@ -85,7 +89,7 @@ public sealed class ClaudeCodeRepositoryScenarioTests : CoreApiComponentTestBase
         ICoreClient core = new CoreClient(CreateClient());
 
         var ex = Assert.CatchAsync<CoreApiException>(() => core.RunAsync(new RunRequest(
-            ClaudeCode, Package,
+            ClaudeCode,
             Repositories: [new RepositorySpec("app", "https://dev.azure.com/contoso/app/_git/app", AuthConnectorId: connectorId)])));
 
         Assert.That(ex!.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden),

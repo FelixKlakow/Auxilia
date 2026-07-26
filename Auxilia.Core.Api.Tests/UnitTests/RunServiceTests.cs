@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Cryptography;
 using Auxilia.Core.Api;
 using Auxilia.Core.Api.Data;
@@ -18,7 +19,8 @@ namespace Auxilia.Core.Api.Tests.UnitTests;
 [Category("Unit")]
 public sealed class RunServiceTests
 {
-    private static (RunService Service, FakeMessageBusClient Bus, RunConfigurationService Configs) New()
+    private static (RunService Service, FakeMessageBusClient Bus, RunConfigurationService Configs,
+        WorkflowTypeRegistryService Registry, RunnerLivenessTracker Liveness) New(bool allowDispatchWithoutRunner = true)
     {
         var bus = new FakeMessageBusClient();
         var configs = new RunConfigurationService(
@@ -34,25 +36,39 @@ public sealed class RunServiceTests
             new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System),
             TimeProvider.System, Options.Create(new CoreApiSettings()));
         var accessPolicy = new ConnectorAccessPolicy(connectorStore, new InMemoryDataAccess<PrincipalRecord>());
+        var liveness = new RunnerLivenessTracker();
+        var registry = new WorkflowTypeRegistryService(
+            new InMemoryDataAccess<CoreWorkflowTypeRecord>(),
+            new StubHttpClientFactory(new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound))),
+            Options.Create(new CoreApiSettings()),
+            new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System),
+            TimeProvider.System, NullLogger<WorkflowTypeRegistryService>.Instance);
         var service = new RunService(
-            bus, configs, resolver, accessPolicy, Options.Create(new CoreApiSettings()),
+            bus, configs, registry, resolver, accessPolicy, connectors, liveness, TimeProvider.System,
+            Options.Create(new CoreApiSettings { AllowDispatchWithoutRunner = allowDispatchWithoutRunner }),
             NullLogger<RunService>.Instance);
-        return (service, bus, configs);
+        return (service, bus, configs, registry, liveness);
     }
 
+    private static Task SeedActiveTypeAsync(WorkflowTypeRegistryService registry, string type, string packageUri)
+        => registry.EnsureSeededAsync(
+            new StaticWorkflowType { WorkflowType = type, PackageUri = packageUri }, CancellationToken.None);
+
     [Test]
-    public async Task RunInline_PublishesCommand_WithoutRequestedBy()
+    public async Task RunInline_PublishesCommand_WithRegistryPackage_WithoutRequestedBy()
     {
-        var (service, bus, _) = New();
+        var (service, bus, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img");
 
         await service.RunInlineAsync(
-            new RunRequest("wt", "docker://img",
+            new RunRequest("wt",
                 new Dictionary<string, string> { ["K"] = "V" }, RequestedBy: Guid.NewGuid()),
             triggeredBy: Guid.NewGuid(), CancellationToken.None);
 
         var command = bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>().Single();
         Assert.That(command.WorkflowType, Is.EqualTo("wt"));
-        Assert.That(command.WorkflowPackageUri, Is.EqualTo("docker://img"));
+        Assert.That(command.WorkflowPackageUri, Is.EqualTo("docker://img"),
+            "The registry — not the caller — supplies the package coordinate.");
         Assert.That(command.RequestedBy, Is.Null,
             "The Core is the auth authority and dispatches with RequestedBy=null.");
         Assert.That(command.ResolutionToken, Is.Not.Null.And.Not.Empty,
@@ -60,11 +76,33 @@ public sealed class RunServiceTests
     }
 
     [Test]
+    public void RunInline_UnregisteredType_Throws()
+    {
+        var (service, _, _, _, _) = New();
+        Assert.ThrowsAsync<KeyNotFoundException>(() => service.RunInlineAsync(
+            new RunRequest("ghost"), triggeredBy: null, CancellationToken.None));
+    }
+
+    [Test]
+    public async Task RunInline_PendingType_Throws()
+    {
+        var (service, _, _, registry, _) = New();
+        // A docker registration has no verifiable signature — it enters Pending, not Active.
+        var outcome = await registry.RegisterAsync(
+            new RegisterWorkflowTypeRequest("wt", "docker://img"), null, CancellationToken.None);
+        Assert.That(outcome.Registration!.Status, Is.EqualTo(WorkflowTypeStatus.Pending));
+
+        Assert.ThrowsAsync<InvalidOperationException>(() => service.RunInlineAsync(
+            new RunRequest("wt"), triggeredBy: null, CancellationToken.None));
+    }
+
+    [Test]
     public async Task RunConfiguration_ResolvesTypePackageAndContext()
     {
-        var (service, bus, configs) = New();
+        var (service, bus, configs, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img");
         var config = await configs.CreateAsync(
-            new CreateRunConfiguration("c", "wt", "docker://img",
+            new CreateRunConfiguration("c", "wt",
                 new Dictionary<string, string> { ["WORKFLOW_NAME"] = "x" }),
             CancellationToken.None);
 
@@ -79,8 +117,31 @@ public sealed class RunServiceTests
     [Test]
     public void RunConfiguration_Missing_Throws()
     {
-        var (service, _, _) = New();
+        var (service, _, _, _, _) = New();
         Assert.ThrowsAsync<KeyNotFoundException>(
             () => service.RunConfigurationAsync(Guid.NewGuid(), null, null, CancellationToken.None));
+    }
+
+    [Test]
+    public async Task Dispatch_WithoutALiveRunner_FailsFast()
+    {
+        var (service, _, _, registry, _) = New(allowDispatchWithoutRunner: false);
+        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+
+        var ex = Assert.ThrowsAsync<InvalidOperationException>(() => service.RunInlineAsync(
+            new RunRequest("wt"), triggeredBy: null, CancellationToken.None));
+        Assert.That(ex!.Message, Does.Contain("no live Core.Runner"));
+    }
+
+    [Test]
+    public async Task Dispatch_WithAFreshRunnerHeartbeat_Succeeds()
+    {
+        var (service, bus, _, registry, liveness) = New(allowDispatchWithoutRunner: false);
+        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        liveness.Record(Guid.NewGuid(), TimeProvider.System.GetUtcNow());
+
+        await service.RunInlineAsync(new RunRequest("wt"), triggeredBy: null, CancellationToken.None);
+
+        Assert.That(bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>().Count(), Is.EqualTo(1));
     }
 }

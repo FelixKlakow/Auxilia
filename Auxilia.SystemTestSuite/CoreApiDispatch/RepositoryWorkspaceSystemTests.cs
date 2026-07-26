@@ -43,7 +43,6 @@ public sealed class RepositoryWorkspaceSystemTests
         // 2. Start a run against exactly that repo, referencing the auth connector for its credential.
         var run = new RunRequest(
             WorkflowType: CoreApiDispatchEnvironment.RepositoryWorkflowType,
-            PackageUri: CoreApiDispatchEnvironment.DummyPackageUri,
             Context: new Dictionary<string, string>
             {
                 ["WORKFLOW_NAME"] = CoreApiDispatchEnvironment.RepositoryWorkflowType,

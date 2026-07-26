@@ -206,7 +206,7 @@ public sealed class EndToEndSystemTests
             new AuthenticationHeaderValue("Bearer", nobody.ApiKey);
 
         var runResp = await nobodyClient.PostAsJsonAsync("/api/runs",
-            new RunRequest(EndToEndEnvironment.WorkflowType, EndToEndEnvironment.WorkflowPackageUri,
+            new RunRequest(EndToEndEnvironment.WorkflowType,
                 new Dictionary<string, string>()), cancellationToken);
 
         Assert.That(runResp.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden),

@@ -33,7 +33,7 @@ public sealed class WorkflowSchemaReadServiceTests
             InteractiveTerminalPort = 7681
         };
 
-        var dto = WorkflowSchemaReadService.ToSchemaDto(schema, "wf");
+        var dto = WorkflowSchemaReadService.ToSchemaDto(schema, "wf", "docker://wf", Auxilia.Core.Contracts.WorkflowTypeStatus.Active);
 
         Assert.Multiple(() =>
         {
@@ -58,6 +58,8 @@ public sealed class WorkflowSchemaReadServiceTests
             Assert.That(dto.Triggers.Single().Kind, Is.EqualTo(TriggerDeclaration.Schedule));
             Assert.That(dto.ConsumedArtifacts, Is.EquivalentTo(new[] { "patch" }));
             Assert.That(dto.InteractiveTerminalPort, Is.EqualTo(7681));
+            Assert.That(dto.PackageUri, Is.EqualTo("docker://wf"));
+            Assert.That(dto.Status, Is.EqualTo(Auxilia.Core.Contracts.WorkflowTypeStatus.Active));
         });
     }
 }

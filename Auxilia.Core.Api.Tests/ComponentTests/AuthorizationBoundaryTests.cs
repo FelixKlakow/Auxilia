@@ -17,6 +17,9 @@ namespace Auxilia.Core.Api.Tests.ComponentTests;
 [Category("Component")]
 public sealed class AuthorizationBoundaryTests : CoreApiComponentTestBase
 {
+    [SetUp]
+    public Task RegisterRunTypeAsync() => RegisterActiveTypeAsync(CreateClient(), "wt", "docker://img");
+
     private async Task<HttpClient> ClientForRolesAsync(params string[] roles)
     {
         var directory = Factory.Services.GetRequiredService<PrincipalDirectory>();

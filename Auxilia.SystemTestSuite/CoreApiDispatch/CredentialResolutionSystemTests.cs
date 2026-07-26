@@ -47,7 +47,6 @@ public class CredentialResolutionSystemTests
         var createConfig = new CreateRunConfiguration(
             Name: "cred-" + Guid.NewGuid().ToString("N"),
             WorkflowType: CoreApiDispatchEnvironment.CredentialWorkflowType,
-            PackageUri: CoreApiDispatchEnvironment.DummyPackageUri,
             Context: new Dictionary<string, string>
             {
                 ["WORKFLOW_NAME"] = CoreApiDispatchEnvironment.CredentialWorkflowType,

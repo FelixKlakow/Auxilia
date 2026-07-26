@@ -25,6 +25,9 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
             ("skip", query.Skip.ToString()),
             ("take", query.Take.ToString())), ct);
 
+    public Task DeleteConfigurationAsync(Guid id, CancellationToken ct = default)
+        => DeleteAsync($"/api/configurations/{id}", ct);
+
     public Task<RunAccepted> RunConfigurationAsync(
         Guid id, Guid? onBehalfOf = null, IReadOnlyDictionary<string, string>? context = null,
         CancellationToken ct = default)
@@ -71,6 +74,25 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
         }
     }
 
+    public Task<PagedResult<RunViewItem>> GetRunViewsAsync(
+        Guid runId, string? view = null, int skip = 0, int take = 200, CancellationToken ct = default)
+        => GetAsync<PagedResult<RunViewItem>>($"/api/runs/{runId}/views?" + Query(
+            ("view", view),
+            ("skip", skip.ToString()),
+            ("take", take.ToString())), ct);
+
+    public Task ProvideInputAsync(Guid runId, string payloadJson, CancellationToken ct = default)
+        => PostAsync($"/api/runs/{runId}/inputs", new ProvideRunInput(payloadJson), ct);
+
+    public async Task<int> ClearFinishedRunsAsync(CancellationToken ct = default)
+    {
+        using var response = await http.DeleteAsync("/api/runs", ct);
+        await EnsureSuccessAsync(response, ct);
+        return (await response.Content.ReadFromJsonAsync<ClearedRuns>(ct))?.Deleted ?? 0;
+    }
+
+    private sealed record ClearedRuns(int Deleted);
+
     // --- Audit ---
 
     public Task<PagedResult<AuditEntry>> QueryAuditAsync(AuditQuery query, CancellationToken ct = default)
@@ -100,6 +122,12 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
     public Task SetConnectorGrantsAsync(Guid id, SetConnectorGrants request, CancellationToken ct = default)
         => PostAsync($"/api/connectors/{id}/grants", request, ct);
 
+    public Task DeleteConnectorAsync(Guid id, CancellationToken ct = default)
+        => DeleteAsync($"/api/connectors/{id}", ct);
+
+    public Task<ConnectorBrowseResult> BrowseConnectorAsync(Guid id, BrowseConnector request, CancellationToken ct = default)
+        => PostAsync<BrowseConnector, ConnectorBrowseResult>($"/api/connectors/{id}/browse", request, ct);
+
     // --- Provider catalog ---
 
     public Task<PagedResult<ProviderCatalogEntry>> QueryProviderCatalogAsync(ProviderCatalogQuery query, CancellationToken ct = default)
@@ -107,6 +135,12 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
             ("available", query.Available?.ToString()),
             ("skip", query.Skip.ToString()),
             ("take", query.Take.ToString())), ct);
+
+    public Task<ProviderCatalogEntry> RegisterProviderAsync(RegisterSlotProvider request, CancellationToken ct = default)
+        => PostAsync<RegisterSlotProvider, ProviderCatalogEntry>("/api/provider-catalog", request, ct);
+
+    public Task DeleteProviderAsync(string providerType, CancellationToken ct = default)
+        => DeleteAsync($"/api/provider-catalog/{Uri.EscapeDataString(providerType)}", ct);
 
     public Task<ProviderCatalogEntry> SetProviderAvailabilityAsync(string providerType, bool available, CancellationToken ct = default)
         => PostAsync<SetProviderAvailability, ProviderCatalogEntry>(
@@ -123,12 +157,35 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
 
     public Task<PagedResult<WorkflowTypeDto>> ListWorkflowTypesAsync(WorkflowTypeQuery query, CancellationToken ct = default)
         => GetAsync<PagedResult<WorkflowTypeDto>>("/api/workflow-types?" + Query(
+            ("status", query.Status),
             ("skip", query.Skip.ToString()),
             ("take", query.Take.ToString())), ct);
 
     public Task<WorkflowSchemaDto?> GetWorkflowSchemaAsync(string workflowType, CancellationToken ct = default)
         => GetOrNullAsync<WorkflowSchemaDto>(
             $"/api/workflow-types/{Uri.EscapeDataString(workflowType)}/schema", ct);
+
+    public Task<WorkflowTypeRegistrationDto> RegisterWorkflowTypeAsync(
+        RegisterWorkflowTypeRequest request, CancellationToken ct = default)
+        => PostAsync<RegisterWorkflowTypeRequest, WorkflowTypeRegistrationDto>("/api/workflow-types", request, ct);
+
+    public Task<WorkflowTypeRegistrationDto?> GetWorkflowTypeRegistrationAsync(
+        string workflowType, CancellationToken ct = default)
+        => GetOrNullAsync<WorkflowTypeRegistrationDto>(
+            $"/api/workflow-types/{Uri.EscapeDataString(workflowType)}/registration", ct);
+
+    public Task UnregisterWorkflowTypeAsync(string workflowType, CancellationToken ct = default)
+        => DeleteAsync($"/api/workflow-types/{Uri.EscapeDataString(workflowType)}", ct);
+
+    public Task<WorkflowTypeRegistrationDto> ApproveWorkflowTypeAsync(string workflowType, CancellationToken ct = default)
+        => PostAsync<WorkflowTypeRegistrationDto>(
+            $"/api/workflow-types/{Uri.EscapeDataString(workflowType)}/approve", ct);
+
+    public Task<WorkflowTypeRegistrationDto> DenyWorkflowTypeAsync(
+        string workflowType, string reason, CancellationToken ct = default)
+        => PostAsync<DenyWorkflowTypeRequest, WorkflowTypeRegistrationDto>(
+            $"/api/workflow-types/{Uri.EscapeDataString(workflowType)}/deny",
+            new DenyWorkflowTypeRequest(reason), ct);
 
     // --- Groups ---
 

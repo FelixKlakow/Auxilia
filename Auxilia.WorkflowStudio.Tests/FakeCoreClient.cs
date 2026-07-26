@@ -21,7 +21,7 @@ public sealed class FakeCoreClient : ICoreClient
     {
         CreatedConfigurations.Add(request);
         return Task.FromResult(new RunConfiguration(
-            Guid.NewGuid(), request.Name, request.WorkflowType, request.PackageUri,
+            Guid.NewGuid(), request.Name, request.WorkflowType,
             request.Context ?? new Dictionary<string, string>(),
             request.SlotBindings ?? new List<SlotBinding>(), request.Enabled, DateTimeOffset.UtcNow));
     }
@@ -136,4 +136,38 @@ public sealed class FakeCoreClient : ICoreClient
         => Task.FromResult(new PagedResult<Auxilia.Core.Contracts.WorkflowTypeDto>([], 0, query.Skip, query.Take));
     public Task<Auxilia.Core.Contracts.WorkflowSchemaDto?> GetWorkflowSchemaAsync(string workflowType, CancellationToken ct = default)
         => Task.FromResult<Auxilia.Core.Contracts.WorkflowSchemaDto?>(null);
+    public Task<PagedResult<RunViewItem>> GetRunViewsAsync(
+        Guid runId, string? view = null, int skip = 0, int take = 200, CancellationToken ct = default)
+        => Task.FromResult(new PagedResult<RunViewItem>([], 0, skip, take));
+
+    public Task<ProviderCatalogEntry> RegisterProviderAsync(RegisterSlotProvider request, CancellationToken ct = default)
+        => Task.FromResult(new ProviderCatalogEntry(request.ProviderType, false, request.Category, [], request.Contracts, request.Description));
+
+    public Task DeleteConfigurationAsync(Guid id, CancellationToken ct = default) => Task.CompletedTask;
+    public Task DeleteProviderAsync(string providerType, CancellationToken ct = default) => Task.CompletedTask;
+    public Task DeleteConnectorAsync(Guid id, CancellationToken ct = default) => Task.CompletedTask;
+    public Task<ConnectorBrowseResult> BrowseConnectorAsync(Guid id, BrowseConnector request, CancellationToken ct = default)
+        => Task.FromResult(new ConnectorBrowseResult([]));
+
+    public Task ProvideInputAsync(Guid runId, string payloadJson, CancellationToken ct = default)
+        => Task.CompletedTask;
+    public Task<int> ClearFinishedRunsAsync(CancellationToken ct = default)
+        => Task.FromResult(0);
+
+    public Task<WorkflowTypeRegistrationDto> RegisterWorkflowTypeAsync(RegisterWorkflowTypeRequest request, CancellationToken ct = default)
+        => Task.FromResult(new WorkflowTypeRegistrationDto(
+            request.WorkflowType, request.PackageUri, WorkflowTypeStatus.Active, null, null, false,
+            null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+    public Task<WorkflowTypeRegistrationDto?> GetWorkflowTypeRegistrationAsync(string workflowType, CancellationToken ct = default)
+        => Task.FromResult<WorkflowTypeRegistrationDto?>(null);
+    public Task UnregisterWorkflowTypeAsync(string workflowType, CancellationToken ct = default)
+        => Task.CompletedTask;
+    public Task<WorkflowTypeRegistrationDto> ApproveWorkflowTypeAsync(string workflowType, CancellationToken ct = default)
+        => Task.FromResult(new WorkflowTypeRegistrationDto(
+            workflowType, null, WorkflowTypeStatus.Active, null, null, false,
+            null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+    public Task<WorkflowTypeRegistrationDto> DenyWorkflowTypeAsync(string workflowType, string reason, CancellationToken ct = default)
+        => Task.FromResult(new WorkflowTypeRegistrationDto(
+            workflowType, null, WorkflowTypeStatus.Denied, reason, null, false,
+            null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
 }

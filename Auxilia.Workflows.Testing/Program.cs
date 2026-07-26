@@ -11,6 +11,9 @@ await (workflowName switch
 {
     SimpleGitCommitWorkflow.WorkflowName => SimpleGitCommitWorkflow.RunAsync(args),
     SleepingWorkflow.WorkflowName => SleepingWorkflow.RunAsync(args),
+    EchoWorkflow.WorkflowName => EchoWorkflow.RunAsync(args),
+    EchoDecisionWorkflow.WorkflowName => EchoDecisionWorkflow.RunAsync(args),
+    EchoChoiceWorkflow.WorkflowName => EchoChoiceWorkflow.RunAsync(args),
     CredentialResolutionWorkflow.WorkflowName => CredentialResolutionWorkflow.RunAsync(args),
     WorkspaceRepositoryWorkflow.WorkflowName => WorkspaceRepositoryWorkflow.RunAsync(args),
     _ => throw new InvalidOperationException($"Unknown dummy workflow name: '{workflowName}'")

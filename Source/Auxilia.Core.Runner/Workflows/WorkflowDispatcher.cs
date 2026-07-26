@@ -269,6 +269,10 @@ public sealed class WorkflowDispatcher(
         var terminalPort = (await schemaStore.GetSchemaAsync(workflowType, ct))?.InteractiveTerminalPort;
         var terminalContainerName = terminalPort is null ? null : $"auxilia-session-{instanceId:N}";
 
+        // A crashed container must fail its run visibly — never leave it stuck in Queued/Running.
+        Func<ContainerExit, Task> onContainerExited =
+            exit => HandleContainerExitAsync(instanceId, workflowType, exit);
+
         // docker:// URI — skip download/verify/extract; use baked image
         if (packageUri.StartsWith("docker://", StringComparison.OrdinalIgnoreCase))
         {
@@ -281,7 +285,8 @@ public sealed class WorkflowDispatcher(
                     NetworkPolicy = networkPolicy,
                     WorkspaceDirectoryBind = workspaceRoot,
                     PublishTerminalPort = terminalPort,
-                    TerminalContainerName = terminalContainerName
+                    TerminalContainerName = terminalContainerName,
+                    OnExited = onContainerExited
                 },
                 ct);
             await MarkQueuedAsync(instanceId, workflowType, packageUri, ct);
@@ -336,7 +341,8 @@ public sealed class WorkflowDispatcher(
             NetworkPolicy = networkPolicy,
             WorkspaceDirectoryBind = workspaceRoot,
             PublishTerminalPort = terminalPort,
-            TerminalContainerName = terminalContainerName
+            TerminalContainerName = terminalContainerName,
+            OnExited = onContainerExited
         }, ct);
         await MarkQueuedAsync(instanceId, workflowType, packageUri, ct);
         await StampTerminalEndpointAsync(instanceId, launchResult, ct);
@@ -379,6 +385,45 @@ public sealed class WorkflowDispatcher(
         var separator = root.Contains('\\') ? '\\' : '/';
         return $"{root}{separator}{instanceId:N}";
     }
+
+    /// <summary>
+    /// The container exit watcher's report: after a short grace (in-flight completion events may
+    /// still land), a run whose state is not terminal is failed with the exit code and log tail.
+    /// A normal exit (the workflow reported Success/Failed/Cancelled over the bus, or a
+    /// long-living drain) changes nothing.
+    /// </summary>
+    internal async Task HandleContainerExitAsync(Guid instanceId, string workflowType, ContainerExit exit)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(dispatcherSettings.Value.ContainerExitGraceSeconds));
+
+            var record = await instanceRegistry.GetAsync(instanceId);
+            if (record?.State is null or "Success" or "Failed" or "Cancelled" or "PreFlightFailed" or "Draining")
+                return;
+
+            var reason = $"workflow container exited (code {exit.ExitCode}) before completing"
+                + (string.IsNullOrWhiteSpace(exit.LogTail)
+                    ? " — the container produced no output"
+                    : $" — last output: {Truncate(exit.LogTail, 2000)}");
+            logger.LogError(
+                "Workflow {InstanceId} container died without a terminal state. ExitCode={ExitCode} LastState={State}",
+                instanceId, exit.ExitCode, record.State);
+
+            await instanceRegistry.SetStateAsync(instanceId, "Failed", reason);
+            await statusPublisher.PublishAsync(instanceId, workflowType, "Failed", reason);
+            tokenRegistry.Consume(instanceId);
+            await auditLog.AppendAsync(
+                "core-runner", "workflow.container-exit", instanceId.ToString(), "failed", reason);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Handling the container exit of {InstanceId} failed.", instanceId);
+        }
+    }
+
+    private static string Truncate(string text, int maxLength)
+        => text.Length <= maxLength ? text : text[..maxLength] + "…";
 
     private async Task FailPreFlightAsync(Guid instanceId, string workflowType, string reason, CancellationToken ct)
     {
