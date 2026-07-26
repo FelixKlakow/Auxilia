@@ -1,10 +1,13 @@
 namespace Auxilia.Core.Contracts;
 
 /// <summary>
-/// A workflow slot bound to a stored connector (by id — secrets stay in the Core), to a raw
-/// provider type with inline settings, or — when <see cref="DelegatedResource"/> is set — to a
-/// token obtained on-behalf-of the triggering user at resolution time (OBO delegation).
-/// Connector-backed and delegated bindings carry no settings of their own.
+/// A workflow slot bound the ONE generic way every binding works: to a stored connector (by id —
+/// secrets stay in the Core), to a provider type with inline non-secret settings, to BOTH (the
+/// settings parameterize the binding, the connector supplies its credential — e.g. a workspace
+/// mount whose provider declares a required credential contract), or — when
+/// <see cref="DelegatedResource"/> is set — to a token obtained on-behalf-of the triggering user
+/// at resolution time (OBO delegation). A slot declaring <c>AllowMultiple</c> may appear in
+/// several bindings of one run or configuration.
 /// </summary>
 public sealed record SlotBinding(
     string SlotName,

@@ -1,28 +1,28 @@
 using Auxilia.Workflows;
 
-namespace Auxilia.ClaudeCode.Workflow;
+namespace Auxilia.Workflows.AiAgent.CodingAgent;
 
 /// <summary>
 /// Everything one run needs from its launch environment: the instruction assembled from the
 /// dispatch context, the workspace the agent works in, and the output directory.
 /// </summary>
-public sealed record ClaudeCodeRunContext(
+public sealed record AgentSessionContext(
     string Instruction,
     string WorkspaceDirectory,
     string OutputDirectory)
 {
-    public static ClaudeCodeRunContext FromEnvironment()
+    public static AgentSessionContext FromEnvironment()
         => FromValues(
-            Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__TITLE"),
-            Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__BODY"),
-            Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.WorkspaceDirectory),
-            Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.OutputDirectory));
+            System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__TITLE"),
+            System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__BODY"),
+            System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.WorkspaceDirectory),
+            System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.OutputDirectory));
 
     /// <summary>
     /// The instruction is Title + Body of the dispatch context — the mail subject/body for
     /// mail-triggered runs, the same shape for manual, scheduled, and rerun dispatches.
     /// </summary>
-    internal static ClaudeCodeRunContext FromValues(
+    public static AgentSessionContext FromValues(
         string? title, string? body, string? workspaceDirectory, string? outputDirectory)
     {
         var instruction = string.Join(
@@ -30,12 +30,12 @@ public sealed record ClaudeCodeRunContext(
             new[] { title, body }.Where(part => !string.IsNullOrWhiteSpace(part)));
         if (instruction.Length == 0)
             throw new InvalidOperationException(
-                "The dispatch context carries no instruction — a Claude Code run needs a Title and/or Body context entry.");
+                "The dispatch context carries no instruction — an agent session needs a Title and/or Body context entry.");
 
-        return new ClaudeCodeRunContext(
+        return new AgentSessionContext(
             instruction,
-            Fallback(workspaceDirectory, "claude-code-workspace"),
-            Fallback(outputDirectory, "claude-code-output"));
+            Fallback(workspaceDirectory, "agent-session-workspace"),
+            Fallback(outputDirectory, "agent-session-output"));
 
         static string Fallback(string? configured, string tempName)
         {

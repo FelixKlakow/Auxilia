@@ -59,7 +59,10 @@ public sealed class ProviderCatalogService(
             Enum.TryParse<SettingKind>(setting.Kind, ignoreCase: true, out var kind) ? kind : SettingKind.Text,
             setting.Required, setting.HelpText, setting.DefaultValue, setting.Choices)
         {
-            ConnectFlow = setting.ConnectFlow
+            ConnectFlow = setting.ConnectFlow,
+            Role = setting.Role,
+            Browse = setting.Browse,
+            BrowseDependsOn = setting.BrowseDependsOn
         }).ToList();
 
         var record = new SlotProviderRecord
@@ -71,7 +74,9 @@ public sealed class ProviderCatalogService(
             SettingDescriptorsJson = JsonSerializer.Serialize(descriptors),
             ContractsJson = JsonSerializer.Serialize(request.Contracts),
             Category = request.Category,
-            Description = request.Description
+            Description = request.Description,
+            RequiredCredentialContract = request.RequiredCredentialContract,
+            MountsIntoWorkspace = request.MountsIntoWorkspace
         };
         await providers.SaveAsync(record, ct);
         await auditLog.AppendAsync(actor, "provider-catalog.registered", request.ProviderType, "registered", ct: ct);
@@ -144,6 +149,15 @@ public sealed class ProviderCatalogService(
             .ToList();
     }
 
+    /// <summary>The catalog entry of one provider, or null when it is not registered.</summary>
+    public async Task<ProviderCatalogEntry?> FindAsync(string providerType, CancellationToken ct)
+    {
+        var provider = await providers.ReadAsync(SlotProviderRecord.IdFor(providerType), ct);
+        if (provider is null || !IsHandler(provider))
+            return null;
+        return ToEntry(provider, await catalog.ReadAsync(ProviderCatalogRecord.IdFor(providerType), ct));
+    }
+
     private async Task<(SlotProviderRecord Provider, ProviderCatalogRecord Curation)> RequireProviderAsync(
         string providerType, CancellationToken ct)
     {
@@ -176,11 +190,12 @@ public sealed class ProviderCatalogService(
         var descriptors = Merge(ParseDescriptors(provider.SettingDescriptorsJson), overrides)
             .Select(d => new ProviderSettingDescriptor(
                 d.Key, d.Label, d.Kind.ToString(), d.Required, d.HelpText, d.DefaultValue, d.Choices,
-                disabledKeys.Contains(d.Key), d.ConnectFlow))
+                disabledKeys.Contains(d.Key), d.ConnectFlow, d.Role, d.Browse, d.BrowseDependsOn))
             .ToList();
         return new ProviderCatalogEntry(
             provider.ProviderType, curation.Available, category,
-            descriptors, ParseContracts(provider.ContractsJson), provider.Description);
+            descriptors, ParseContracts(provider.ContractsJson), provider.Description,
+            provider.RequiredCredentialContract, provider.MountsIntoWorkspace);
     }
 
     private static IReadOnlyList<string> ParseContracts(string? json)

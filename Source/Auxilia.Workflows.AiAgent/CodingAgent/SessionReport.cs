@@ -1,4 +1,4 @@
-namespace Auxilia.ClaudeCode.Workflow;
+namespace Auxilia.Workflows.AiAgent.CodingAgent;
 
 /// <summary>The declared "session-report" output: one run's final result as a JSON document.</summary>
 public sealed record SessionReport(

@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace Auxilia.ClaudeCode.Workflow;
+namespace Auxilia.Workflows.AiAgent.CodingAgent;
 
 public sealed class SessionReportWriter(string outputDirectory)
 {

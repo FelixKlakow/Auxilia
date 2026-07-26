@@ -31,14 +31,14 @@ public sealed class ConnectorBrowseService(
         // client falls back to manual entry.
         return request.Kind switch
         {
-            BrowseConnector.Repositories => new ConnectorBrowseResult(await GitHubAsync(
+            "repositories" => new ConnectorBrowseResult(await GitHubAsync(
                 token, "https://api.github.com/user/repos?per_page=100&sort=pushed",
                 repo => new ConnectorBrowseItem(
                     repo.GetProperty("clone_url").GetString() ?? "",
                     repo.GetProperty("full_name").GetString() ?? ""), ct)),
-            BrowseConnector.Branches when !string.IsNullOrWhiteSpace(request.Repository)
+            "branches" when !string.IsNullOrWhiteSpace(request.Context)
                 => new ConnectorBrowseResult(await GitHubAsync(
-                    token, $"https://api.github.com/repos/{OwnerRepoOf(request.Repository)}/branches?per_page=100",
+                    token, $"https://api.github.com/repos/{OwnerRepoOf(request.Context)}/branches?per_page=100",
                     branch => new ConnectorBrowseItem(
                         branch.GetProperty("name").GetString() ?? "",
                         branch.GetProperty("name").GetString() ?? ""), ct)),

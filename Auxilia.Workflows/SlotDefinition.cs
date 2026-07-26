@@ -22,4 +22,7 @@ public sealed record SlotDefinition(
 
     /// <summary>An optional slot may stay unbound in a workflow configuration.</summary>
     public bool Optional { get; init; }
+
+    /// <summary>The slot accepts several bindings in one configuration or run (e.g. many repositories).</summary>
+    public bool AllowMultiple { get; init; }
 }

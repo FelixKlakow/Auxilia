@@ -1,25 +1,28 @@
 using Auxilia.Workflows;
-using Auxilia.Workflows.AiAgent.CodingAgent;
 using Auxilia.Workflows.AiAgent;
+using Auxilia.Workflows.AiAgent.CodingAgent;
 using Auxilia.Workflows.SourceControl;
 using Auxilia.Workflows.Views;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Auxilia.ClaudeCode.Workflow;
+namespace Auxilia.Copilot.Workflow;
 
 /// <summary>
-/// Runs an autonomous Claude Code session against the run's workspace, streaming the agent's
-/// conversation live to the dashboard's BlazorAgentView renderer.
+/// Runs an autonomous GitHub Copilot session against the run's workspace — the second coding
+/// agent on the platform, sharing the whole session engine
+/// (<see cref="AgentSessionApplication"/>) with the Claude Code workflow. Only the declared
+/// egress endpoints and the bound agent provider differ; everything else — views, steering,
+/// report, repositories — is the same generic machinery.
 /// </summary>
-public static class ClaudeCodeWorkflow
+public static class CopilotWorkflow
 {
-    public const string WorkflowType = "claude-code";
+    public const string WorkflowType = "github-copilot";
 
     public static Task Main(string[] args) =>
         WorkflowBuilder.Create(WorkflowType)
             .Requires<ICodingAgent>("coding-agent",
                 new AiCapabilities { MinContextWindow = 128_000, SupportedModalities = [Modality.Text] },
-                "The autonomous coding agent executing the instruction (e.g. the Claude Code CLI)")
+                "The autonomous coding agent executing the instruction (the GitHub Copilot CLI)")
             .Requires<ISourceControlAccess>("repository",
                 new SourceControlCapabilities { RequiredPermissions = [Permission.Read] },
                 "The repositories the agent works on — prepared into the run's workspace before launch",
@@ -45,9 +48,11 @@ public static class ClaudeCodeWorkflow
                 "A filtered mail starts a run; subject and body become the instruction.")
             .DeclaresTrigger(TriggerDeclaration.Artifact,
                 "Another workflow's output artifact starts a run.")
-            // Baseline egress policy (ARCHITECTURE §10). The CLI runs with nonessential
-            // traffic disabled, so inference is the only endpoint it needs.
-            .RequiresNetworkEndpoint("api.anthropic.com", "Claude API inference calls of the Claude Code CLI")
+            // Baseline egress policy (ARCHITECTURE §10): Copilot inference plus the GitHub API
+            // the CLI authenticates against — nothing else.
+            .RequiresNetworkEndpoint("api.githubcopilot.com", "GitHub Copilot inference calls")
+            .RequiresNetworkEndpoint("api.github.com", "GitHub API authentication of the Copilot CLI")
+            .RequiresNetworkEndpoint("github.com", "GitHub token validation of the Copilot CLI")
             .WithApplication(ExecuteAsync)
             .Run(args);
 

@@ -211,22 +211,29 @@ public sealed class WorkflowDispatcher(
                 note = networkPolicy.Note
             }), ct);
 
-        // Per-run repository workspace (ARCHITECTURE §9): repos declared in the stored schema plus
-        // per-run ones supplied on the command are prepared by the Workspace Manager and bind-mounted
-        // at /workspace. A per-run repo's auth (when present) is resolved from the Core just-in-time
-        // here — the credential is injected into the clone URL, used to clone, and never enters the
-        // container (the Workspace Manager strips it from the mounted copy).
+        // Workspace mounts (ARCHITECTURE §9): repos declared in the stored schema plus the run's
+        // generic workspace-mount bindings are prepared by the Workspace Manager and bind-mounted
+        // at /workspace. Mount settings arrive keyed by the provider's declared roles — THIS is the
+        // plane that interprets them (WorkspaceMountRoles). A mount's auth (when present) is
+        // resolved from the Core just-in-time here — the credential is injected into the clone URL,
+        // used to clone, and never enters the container (the Workspace Manager strips it).
         string? workspaceRoot = null;
         var repositories = (schema?.Repositories ?? []).ToList();
-        foreach (var repo in command.Repositories ?? [])
+        foreach (var mount in command.WorkspaceMounts ?? [])
         {
-            var cloneUrl = repo.CloneUrl;
-            if (repo.AuthSlotName is { } authSlotName)
+            if (!mount.SettingsByRole.TryGetValue(WorkspaceMountRoles.CloneUrl, out var cloneUrl)
+                || string.IsNullOrWhiteSpace(cloneUrl))
+            {
+                await FailPreFlightAsync(instanceId, workflowType,
+                    $"workspace mount '{mount.MountId}' ({mount.ProviderType}) declares no clone source", ct);
+                return;
+            }
+            if (mount.AuthSlotName is { } authSlotName)
             {
                 if (string.IsNullOrEmpty(command.ResolutionToken))
                 {
                     await FailPreFlightAsync(instanceId, workflowType,
-                        $"repository '{repo.Id}' requires authentication but the run carries no resolution token", ct);
+                        $"workspace mount '{mount.MountId}' requires authentication but the run carries no resolution token", ct);
                     return;
                 }
                 var auth = await repositoryAuthResolver.ResolveAsync(
@@ -234,12 +241,26 @@ public sealed class WorkflowDispatcher(
                 if (auth is null)
                 {
                     await FailPreFlightAsync(instanceId, workflowType,
-                        $"could not resolve the credential for repository '{repo.Id}'", ct);
+                        $"could not resolve the credential for workspace mount '{mount.MountId}'", ct);
                     return;
                 }
-                cloneUrl = RepositoryCloneUrl.WithCredentials(repo.CloneUrl, auth.Username, auth.Token);
+                cloneUrl = RepositoryCloneUrl.WithCredentials(cloneUrl, auth.Username, auth.Token);
             }
-            repositories.Add(new RepositoryDeclaration(repo.Id, cloneUrl, repo.Branch, repo.NoCache));
+            var branch = mount.SettingsByRole.GetValueOrDefault(WorkspaceMountRoles.Branch);
+            var noCache = string.Equals(
+                mount.SettingsByRole.GetValueOrDefault(WorkspaceMountRoles.NoCache),
+                "true", StringComparison.OrdinalIgnoreCase);
+            repositories.Add(new RepositoryDeclaration(
+                mount.MountId, cloneUrl,
+                string.IsNullOrWhiteSpace(branch) ? null : branch, noCache));
+
+            // Each mount's effective root (clone + optional working directory) is announced to the
+            // container generically; workflows resolve their mounts from these variables.
+            var workingDirectory = mount.SettingsByRole.GetValueOrDefault(WorkspaceMountRoles.WorkingDirectory);
+            var mountRoot = $"/workspace/repos/{mount.MountId}";
+            if (!string.IsNullOrWhiteSpace(workingDirectory))
+                mountRoot = $"{mountRoot}/{workingDirectory.Trim('/', '\\')}";
+            env[$"{WorkflowEnvironmentVariables.WorkspaceMountPrefix}{mount.MountId.ToUpperInvariant()}"] = mountRoot;
         }
         if (repositories.Count > 0)
         {

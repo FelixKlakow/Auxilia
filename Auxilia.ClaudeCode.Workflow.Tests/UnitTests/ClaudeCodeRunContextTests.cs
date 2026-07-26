@@ -1,14 +1,14 @@
-using Auxilia.ClaudeCode.Workflow;
+using Auxilia.Workflows.AiAgent.CodingAgent;
 
 namespace Auxilia.ClaudeCode.Workflow.Tests.UnitTests;
 
 [TestFixture, Category("Unit")]
-public sealed class ClaudeCodeRunContextTests
+public sealed class AgentSessionContextTests
 {
     [Test]
     public void TitleAndBody_AreJoinedIntoTheInstruction()
     {
-        var context = ClaudeCodeRunContext.FromValues(
+        var context = AgentSessionContext.FromValues(
             "Fix the login bug", "Users report 500s on /login.", "/workspace", "/output");
 
         Assert.Multiple(() =>
@@ -23,7 +23,7 @@ public sealed class ClaudeCodeRunContextTests
     [Test]
     public void TitleOnly_IsTheWholeInstruction()
     {
-        var context = ClaudeCodeRunContext.FromValues("Fix the login bug", null, "/w", "/o");
+        var context = AgentSessionContext.FromValues("Fix the login bug", null, "/w", "/o");
 
         Assert.That(context.Instruction, Is.EqualTo("Fix the login bug"));
     }
@@ -33,13 +33,13 @@ public sealed class ClaudeCodeRunContextTests
     public void MissingInstruction_FailsLoudly(string? title, string? body)
     {
         Assert.Throws<InvalidOperationException>(
-            () => ClaudeCodeRunContext.FromValues(title, body, "/w", "/o"));
+            () => AgentSessionContext.FromValues(title, body, "/w", "/o"));
     }
 
     [Test]
     public void MissingDirectories_FallBackToCreatedTempDirectories()
     {
-        var context = ClaudeCodeRunContext.FromValues("Do something", null, null, null);
+        var context = AgentSessionContext.FromValues("Do something", null, null, null);
 
         Assert.Multiple(() =>
         {

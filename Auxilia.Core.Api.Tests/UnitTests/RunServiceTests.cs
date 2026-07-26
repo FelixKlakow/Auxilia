@@ -43,8 +43,13 @@ public sealed class RunServiceTests
             Options.Create(new CoreApiSettings()),
             new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System),
             TimeProvider.System, NullLogger<WorkflowTypeRegistryService>.Instance);
+        var providerCatalog = new ProviderCatalogService(
+            new InMemoryDataAccess<SlotProviderRecord>(),
+            new InMemoryDataAccess<ProviderCatalogRecord>(),
+            new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System));
         var service = new RunService(
-            bus, configs, registry, resolver, accessPolicy, connectors, liveness, TimeProvider.System,
+            bus, configs, registry, providerCatalog, resolver, accessPolicy, connectors, liveness,
+            TimeProvider.System,
             Options.Create(new CoreApiSettings { AllowDispatchWithoutRunner = allowDispatchWithoutRunner }),
             NullLogger<RunService>.Instance);
         return (service, bus, configs, registry, liveness);

@@ -11,7 +11,8 @@ public interface IWorkflowBuilder
     /// <paramref name="optional"/> slot may stay unbound in a workflow configuration.
     /// </summary>
     IWorkflowBuilder Requires<TService>(
-        string name, ICapability capabilities, string? description = null, bool optional = false);
+        string name, ICapability capabilities, string? description = null, bool optional = false,
+        bool allowMultiple = false);
 
     IWorkflowBuilder RequiresEnvironment(Action<IEnvironmentBuilder> configure);
 
@@ -40,6 +41,12 @@ public interface IWorkflowBuilder
     /// </summary>
     IWorkflowBuilder RequiresInput(
         string name, string label, bool required = false, string? description = null);
+
+    /// <summary>
+    /// Declares a run input with its full descriptor — rendering kind, default value, and
+    /// choices included (see <see cref="WorkflowInputDescriptor"/>).
+    /// </summary>
+    IWorkflowBuilder RequiresInput(WorkflowInputDescriptor input);
 
     /// <summary>
     /// Declares an artifact type this workflow can process as input — the criteria used when

@@ -73,14 +73,32 @@ public sealed record WorkflowSlotDto(
     string? Contract,
     string? Description,
     bool Optional,
-    string? CapabilitiesJson);
+    string? CapabilitiesJson,
+    bool AllowMultiple = false);
 
 /// <summary>One run input a workflow declares; the dispatch/config UI renders these generically.</summary>
 public sealed record WorkflowInputDto(
     string Name,
     string Label,
     bool Required,
-    string? Description);
+    string? Description,
+    string Kind = InputKinds.Text,
+    string? DefaultValue = null,
+    IReadOnlyList<string>? Choices = null);
+
+/// <summary>
+/// Rendering kinds a declared input can carry — editors render inputs BY KIND, never by name.
+/// An unknown kind renders as <see cref="Text"/> so old editors stay usable with newer schemas.
+/// </summary>
+public static class InputKinds
+{
+    public const string Text = "Text";
+    public const string Multiline = "Multiline";
+    public const string Boolean = "Boolean";
+    /// <summary>One of <see cref="WorkflowInputDto.Choices"/>.</summary>
+    public const string Choice = "Choice";
+    public const string Number = "Number";
+}
 
 /// <summary>A schema-declared view the dashboard renders from these descriptors alone.</summary>
 public sealed record WorkflowViewDto(

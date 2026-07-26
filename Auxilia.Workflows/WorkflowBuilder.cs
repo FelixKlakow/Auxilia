@@ -52,7 +52,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     }
 
     public IWorkflowBuilder Requires<TService>(
-        string name, ICapability capabilities, string? description = null, bool optional = false)
+        string name, ICapability capabilities, string? description = null, bool optional = false,
+        bool allowMultiple = false)
     {
         if (_slots.Any(s => s.SlotName == name))
             throw new InvalidOperationException($"A slot with name '{name}' has already been declared.");
@@ -60,7 +61,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
         {
             ServiceType = typeof(TService),
             Contract = typeof(TService).FullName,
-            Optional = optional
+            Optional = optional,
+            AllowMultiple = allowMultiple
         });
         return this;
     }
@@ -102,12 +104,16 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
 
     public IWorkflowBuilder RequiresInput(
         string name, string label, bool required = false, string? description = null)
+        => RequiresInput(new WorkflowInputDescriptor(name, label, required, description));
+
+    public IWorkflowBuilder RequiresInput(WorkflowInputDescriptor input)
     {
-        ArgumentException.ThrowIfNullOrEmpty(name);
-        ArgumentException.ThrowIfNullOrEmpty(label);
-        if (_inputs.Any(i => i.Name == name))
-            throw new InvalidOperationException($"An input with name '{name}' has already been declared.");
-        _inputs.Add(new WorkflowInputDescriptor(name, label, required, description));
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentException.ThrowIfNullOrEmpty(input.Name);
+        ArgumentException.ThrowIfNullOrEmpty(input.Label);
+        if (_inputs.Any(i => i.Name == input.Name))
+            throw new InvalidOperationException($"An input with name '{input.Name}' has already been declared.");
+        _inputs.Add(input);
         return this;
     }
 

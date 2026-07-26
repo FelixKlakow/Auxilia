@@ -4,6 +4,12 @@ namespace Auxilia.Core.Contracts;
 /// One slot-provider setting as curated for editors: the plugin-manifest descriptor with any
 /// admin presentation overrides merged in. <see cref="Kind"/>, <see cref="Key"/>, <see cref="Required"/>,
 /// and <see cref="Choices"/> stay manifest-owned; <see cref="Disabled"/> is admin curation.
+/// <para>
+/// <see cref="Role"/> is an OPAQUE tag: the vocabulary belongs to whatever consumes the setting
+/// (a runner subsystem, a plugin) — the Core and its clients only carry it. <see cref="Browse"/>
+/// names a connector-browse kind that live-lists values for this setting in editors, with
+/// <see cref="BrowseDependsOn"/> pointing at the sibling setting whose value scopes the browse.
+/// </para>
 /// </summary>
 public sealed record ProviderSettingDescriptor(
     string Key,
@@ -14,7 +20,10 @@ public sealed record ProviderSettingDescriptor(
     string? DefaultValue,
     IReadOnlyList<string>? Choices,
     bool Disabled,
-    string? ConnectFlow = null);
+    string? ConnectFlow = null,
+    string? Role = null,
+    string? Browse = null,
+    string? BrowseDependsOn = null);
 
 /// <summary>
 /// One entry of the Core-owned slot-provider catalog: a registered slot-handler provider joined
@@ -27,7 +36,9 @@ public sealed record ProviderCatalogEntry(
     string Category,
     IReadOnlyList<ProviderSettingDescriptor> Descriptors,
     IReadOnlyList<string> Contracts,
-    string? Description);
+    string? Description,
+    string? RequiredCredentialContract = null,
+    bool MountsIntoWorkspace = false);
 
 /// <summary>
 /// Registers (or updates) a slot provider's descriptor in the Core catalog — normally mirrored
@@ -39,7 +50,9 @@ public sealed record RegisterSlotProvider(
     string Category,
     string? Description,
     IReadOnlyList<string> Contracts,
-    IReadOnlyList<RegisterProviderSetting> Settings);
+    IReadOnlyList<RegisterProviderSetting> Settings,
+    string? RequiredCredentialContract = null,
+    bool MountsIntoWorkspace = false);
 
 /// <summary>One manifest setting of a provider being registered.</summary>
 public sealed record RegisterProviderSetting(
@@ -50,7 +63,10 @@ public sealed record RegisterProviderSetting(
     string? HelpText = null,
     string? DefaultValue = null,
     IReadOnlyList<string>? Choices = null,
-    string? ConnectFlow = null);
+    string? ConnectFlow = null,
+    string? Role = null,
+    string? Browse = null,
+    string? BrowseDependsOn = null);
 
 /// <summary>Set (or clear) a provider's deny-by-default availability.</summary>
 public sealed record SetProviderAvailability(bool Available);

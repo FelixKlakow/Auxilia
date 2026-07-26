@@ -40,15 +40,13 @@ public sealed record SetConnectorGrants(IReadOnlyList<ConnectorGrant> Grants);
 
 /// <summary>
 /// Ask the Core to browse live data reachable with a connector's credential (the secret never
-/// leaves the Core): <c>repositories</c> lists the repositories the account can access,
-/// <c>branches</c> lists the branches of <see cref="Repository"/>. Callers must be eligible to
+/// leaves the Core). <see cref="Kind"/> names WHAT to list — the vocabulary comes from provider
+/// setting descriptors (their <c>Browse</c> metadata), not from this contract. <see cref="Context"/>
+/// optionally scopes the browse (e.g. list the branches OF one repository); editors fill it from
+/// the sibling setting the descriptor's <c>BrowseDependsOn</c> names. Callers must be eligible to
 /// use the connector (the same gate as dispatch).
 /// </summary>
-public sealed record BrowseConnector(string Kind, string? Repository = null)
-{
-    public const string Repositories = "repositories";
-    public const string Branches = "branches";
-}
+public sealed record BrowseConnector(string Kind, string? Context = null);
 
 /// <summary>One browsable item (id = machine value, label = display).</summary>
 public sealed record ConnectorBrowseItem(string Id, string Label);

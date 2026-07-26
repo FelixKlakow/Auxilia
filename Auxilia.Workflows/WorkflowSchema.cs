@@ -67,4 +67,17 @@ public sealed record WorkflowInputDescriptor(
     string Name,
     string Label,
     bool Required = false,
-    string? Description = null);
+    string? Description = null)
+{
+    /// <summary>
+    /// Rendering kind ("Text", "Multiline", "Boolean", "Choice", "Number") — editors render inputs
+    /// BY KIND and fall back to plain text on kinds they do not know.
+    /// </summary>
+    public string Kind { get; init; } = "Text";
+
+    /// <summary>Pre-filled value editors start from.</summary>
+    public string? DefaultValue { get; init; }
+
+    /// <summary>The selectable values of a "Choice" input.</summary>
+    public IReadOnlyList<string>? Choices { get; init; }
+}

@@ -16,6 +16,7 @@ public sealed class RunService(
     IMessageBusClient bus,
     RunConfigurationService configurations,
     WorkflowTypeRegistryService workflowTypes,
+    ProviderCatalogService providerCatalog,
     SlotCredentialResolver credentialResolver,
     ConnectorAccessPolicy connectorAccess,
     ConnectorService connectors,
@@ -24,14 +25,14 @@ public sealed class RunService(
     IOptions<CoreApiSettings> settings,
     ILogger<RunService> logger)
 {
-    /// <summary>Prefix of the synthetic slot a repository's auth connector is stashed under.</summary>
-    internal const string RepositoryAuthSlotPrefix = "repo-auth:";
+    /// <summary>Prefix of the synthetic slot a workspace mount's auth connector is stashed under.</summary>
+    internal const string MountAuthSlotPrefix = "mount-auth:";
 
     public Task<RunAccepted> RunInlineAsync(RunRequest request, Guid? triggeredBy, CancellationToken ct)
         => DispatchAsync(
             request.WorkflowType,
             new Dictionary<string, string>(request.Context ?? new Dictionary<string, string>()),
-            request.SlotBindings ?? [], request.Repositories ?? [], triggeredBy, ct);
+            request.SlotBindings ?? [], triggeredBy, ct);
 
     public async Task<RunAccepted> RunConfigurationAsync(
         Guid configurationId, Guid? triggeredBy, IReadOnlyDictionary<string, string>? context, CancellationToken ct)
@@ -49,7 +50,7 @@ public sealed class RunService(
                 merged[key] = value;
 
         return await DispatchAsync(
-            config.WorkflowType, merged, config.SlotBindings, [], triggeredBy, ct);
+            config.WorkflowType, merged, config.SlotBindings, triggeredBy, ct);
     }
 
     /// <summary>Requests cancellation of a run; the runner consumes the command and stops the container.</summary>
@@ -61,8 +62,7 @@ public sealed class RunService(
 
     private async Task<RunAccepted> DispatchAsync(
         string workflowType, Dictionary<string, string> context,
-        IReadOnlyList<SlotBinding> slotBindings, IReadOnlyList<RepositorySpec> repositories,
-        Guid? triggeredBy, CancellationToken ct)
+        IReadOnlyList<SlotBinding> slotBindings, Guid? triggeredBy, CancellationToken ct)
     {
         // Fail fast when nobody can execute the run: runners announce themselves over bus
         // heartbeats, so a dispatch with no live runner would queue silently and the caller would
@@ -74,14 +74,37 @@ public sealed class RunService(
                 "no live Core.Runner is connected — the run cannot execute. Start a runner "
                 + "(or set CoreApi:AllowDispatchWithoutRunner to queue deliberately).");
 
-        // Each authenticated repository's credential lives in a Core connector; stash it under a
-        // synthetic slot so the runner resolves it JIT at dispatch (never on the bus). The repo URL
-        // itself is non-secret and rides the command.
-        var authBindings = repositories
-            .Where(r => r.AuthConnectorId is not null)
-            .Select(r => new SlotBinding(RepositoryAuthSlotPrefix + r.Id, ConnectorId: r.AuthConnectorId))
-            .ToList();
-        var stashedBindings = slotBindings.Concat(authBindings).ToList();
+        // Bindings of providers that mount into the workspace become generic workspace mounts:
+        // the binding's settings are re-keyed by the provider's declared setting ROLES (a pure
+        // data transform — only the execution plane interprets the role vocabulary). A mount's
+        // credential connector is stashed under a synthetic slot the runner resolves JIT; the
+        // mount settings themselves are non-secret and ride the command.
+        var mounts = new List<WorkspaceMountDispatch>();
+        var pluginBindings = new List<SlotBinding>();
+        var stashedBindings = new List<SlotBinding>();
+        foreach (var binding in slotBindings)
+        {
+            var entry = await ResolveCatalogEntryAsync(binding, ct);
+            if (entry is not { MountsIntoWorkspace: true })
+            {
+                pluginBindings.Add(binding);
+                stashedBindings.Add(binding);
+                continue;
+            }
+
+            var mountId = UniqueMountId(mounts, binding.SlotName);
+            var settingsByRole = entry.Descriptors
+                .Where(d => d.Role is { Length: > 0 }
+                            && binding.Settings?.TryGetValue(d.Key, out _) == true)
+                .ToDictionary(d => d.Role!, d => binding.Settings![d.Key]);
+            string? authSlot = null;
+            if (binding.ConnectorId is not null)
+            {
+                authSlot = MountAuthSlotPrefix + mountId;
+                stashedBindings.Add(new SlotBinding(authSlot, ConnectorId: binding.ConnectorId));
+            }
+            mounts.Add(new WorkspaceMountDispatch(mountId, entry.ProviderType, settingsByRole, authSlot));
+        }
 
         // Gate identity-linked connectors — including each repo's auth connector: the triggering
         // principal must be allowed to use every connector this run binds. Company connectors pass
@@ -112,30 +135,26 @@ public sealed class RunService(
         // The runner ships each provider's plugin into the container at LAUNCH, so it must know
         // every provider type up front — including those hidden behind connector references (the
         // connector's provider type is not a secret; its settings stay Core-side until JIT).
+        // Workspace-mount bindings are consumed by the runner itself and ship no plugin.
         var connectorProviderTypes = new List<string>();
-        foreach (var connectorId in slotBindings
+        foreach (var connectorId in pluginBindings
                      .Where(b => string.IsNullOrEmpty(b.ProviderType) && b.ConnectorId is not null)
                      .Select(b => b.ConnectorId!.Value)
                      .Distinct())
             if ((await connectors.GetAsync(connectorId, ct))?.ProviderType is { Length: > 0 } providerType)
                 connectorProviderTypes.Add(providerType);
-        var providerTypes = slotBindings
+        var providerTypes = pluginBindings
             .Where(b => !string.IsNullOrEmpty(b.ProviderType))
             .Select(b => b.ProviderType!)
             .Concat(connectorProviderTypes)
             .Distinct()
-            .ToList();
-        var repositoryDispatch = repositories
-            .Select(r => new RepositoryDispatch(
-                r.Id, r.CloneUrl, r.Branch,
-                r.AuthConnectorId is not null ? RepositoryAuthSlotPrefix + r.Id : null, r.NoCache))
             .ToList();
 
         var command = new RunWorkflowCommand(
             commandId, workflowType, packageUri, context,
             RequestedBy: null, WorkflowConfigurationId: null, ResolutionToken: resolutionToken,
             SlotProviderTypes: providerTypes,
-            Repositories: repositoryDispatch.Count > 0 ? repositoryDispatch : null);
+            WorkspaceMounts: mounts.Count > 0 ? mounts : null);
 
         // Stash the resolution context AND the dispatch command itself (keyed by CommandId), so an
         // orphaned run can be re-dispatched once on failover without the Core reading the runner's DB.
@@ -145,8 +164,28 @@ public sealed class RunService(
 
         await bus.PublishAsync(settings.Value.RunCommandQueue, command, ct);
         logger.LogInformation(
-            "Dispatched run. CommandId={CommandId} WorkflowType={WorkflowType} Repositories={RepositoryCount}",
-            commandId, workflowType, repositoryDispatch.Count);
+            "Dispatched run. CommandId={CommandId} WorkflowType={WorkflowType} WorkspaceMounts={MountCount}",
+            commandId, workflowType, mounts.Count);
         return new RunAccepted(commandId, commandId);
+    }
+
+    /// <summary>The catalog entry behind a binding — inline provider type or the connector's.</summary>
+    private async Task<ProviderCatalogEntry?> ResolveCatalogEntryAsync(SlotBinding binding, CancellationToken ct)
+    {
+        var providerType = binding.ProviderType;
+        if (string.IsNullOrEmpty(providerType) && binding.ConnectorId is { } connectorId)
+            providerType = (await connectors.GetAsync(connectorId, ct))?.ProviderType;
+        if (string.IsNullOrEmpty(providerType))
+            return null;
+        return await providerCatalog.FindAsync(providerType, ct);
+    }
+
+    /// <summary>A slot bound several times (AllowMultiple) gets suffixed mount ids: slot, slot-2, …</summary>
+    private static string UniqueMountId(IReadOnlyList<WorkspaceMountDispatch> mounts, string slotName)
+    {
+        var count = mounts.Count(m =>
+            m.MountId == slotName
+            || m.MountId.StartsWith(slotName + "-", StringComparison.Ordinal));
+        return count == 0 ? slotName : $"{slotName}-{count + 1}";
     }
 }

@@ -129,7 +129,7 @@ public sealed class ProviderCatalogAdminTests : CoreApiComponentTestBase
         var client = CreateClient();
         var register = await client.PostAsJsonAsync("/api/provider-catalog", new RegisterSlotProvider(
             "claude-code-cli", "coding-agent", "Runs the Claude Code CLI.",
-            ["Auxilia.ClaudeCode.Workflow.ICodingAgent"],
+            ["Auxilia.Workflows.AiAgent.CodingAgent.ICodingAgent"],
             [
                 new RegisterProviderSetting("OAuthToken", "Claude account", "Secret",
                     Required: false, HelpText: "Connected Claude account.", ConnectFlow: "anthropic-claude"),

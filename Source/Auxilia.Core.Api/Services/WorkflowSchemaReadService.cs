@@ -70,8 +70,10 @@ public sealed class WorkflowSchemaReadService(IDataAccess<CoreWorkflowTypeRecord
                 s.Contract,
                 s.Description,
                 s.Optional,
-                s.Capabilities is null ? null : JsonSerializer.Serialize(s.Capabilities, JsonOptions))).ToList(),
-            schema.Inputs.Select(i => new WorkflowInputDto(i.Name, i.Label, i.Required, i.Description)).ToList(),
+                s.Capabilities is null ? null : JsonSerializer.Serialize(s.Capabilities, JsonOptions),
+                s.AllowMultiple)).ToList(),
+            schema.Inputs.Select(i => new WorkflowInputDto(
+                i.Name, i.Label, i.Required, i.Description, i.Kind, i.DefaultValue, i.Choices)).ToList(),
             schema.Views.Select(v => new WorkflowViewDto(
                 v.Name, v.Rendering.ToString(), v.Lifecycle.ToString(), v.RendererKey, v.ItemSchemaJson)).ToList(),
             schema.Triggers.Select(t => new WorkflowTriggerDto(t.Kind, t.Description)).ToList(),

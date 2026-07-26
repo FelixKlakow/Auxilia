@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using Auxilia.ClaudeCode.Workflow;
+using Auxilia.Workflows.AiAgent.CodingAgent;
 using Auxilia.Slots.ClaudeCode;
 using Auxilia.Workflows.Views;
 
@@ -174,6 +174,90 @@ public sealed class ClaudeCodeCliAgentTests
         Assert.That(factory.LastProcess!.Killed, Is.True);
     }
 
+    [Test]
+    public void BuildStartInfo_InteractiveSession_UsesStreamJsonInput_AndStdioPermissions()
+    {
+        var agent = new ClaudeCodeCliAgent(Options());
+        var interactive = Request with { Interaction = new FakeInteraction() };
+
+        var startInfo = agent.BuildStartInfo(interactive);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(startInfo.RedirectStandardInput, Is.True);
+            Assert.That(startInfo.ArgumentList, Does.Contain("--input-format"));
+            Assert.That(startInfo.ArgumentList, Does.Contain("--permission-prompt-tool"));
+            Assert.That(startInfo.ArgumentList, Does.Not.Contain("--dangerously-skip-permissions"),
+                "Interactive sessions route permissions to the operator instead of skipping them.");
+            Assert.That(startInfo.ArgumentList, Does.Not.Contain(Request.Instruction),
+                "The instruction travels as the first stream-json user message, not as an argument.");
+        });
+    }
+
+    [Test]
+    public async Task InteractiveSession_ControlRequest_IsAnsweredByTheOperator_OverStdin()
+    {
+        var stdout = """
+            {"type":"system","subtype":"init","session_id":"s","model":"m","tools":[]}
+            {"type":"control_request","request_id":"ctrl-1","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"a.md"}}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var interaction = new FakeInteraction(new AgentAnswer(["allow"]));
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        var result = await agent.RunAsync(
+            Request with { Interaction = interaction }, (_, _) => Task.CompletedTask);
+
+        var stdin = factory.LastProcess!.Input.ToString()!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Success, Is.True);
+            Assert.That(interaction.LastQuestion?.Prompt, Does.Contain("Write"));
+            Assert.That(stdin, Does.Contain(Request.Instruction),
+                "The instruction is the first stream-json user message on stdin.");
+            Assert.That(stdin, Does.Contain("control_response").And.Contain("\"behavior\":\"allow\""));
+            Assert.That(stdin, Does.Contain("ctrl-1"));
+            Assert.That(factory.LastProcess.InputClosed, Is.True,
+                "The result event closes stdin so the CLI can exit.");
+        });
+    }
+
+    [Test]
+    public async Task InteractiveSession_DeniedControlRequest_SendsDenyWithTheOperatorsReason()
+    {
+        var stdout = """
+            {"type":"control_request","request_id":"ctrl-2","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"rm -rf /"}}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var interaction = new FakeInteraction(new AgentAnswer(["deny"], "too dangerous"));
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        await agent.RunAsync(Request with { Interaction = interaction }, (_, _) => Task.CompletedTask);
+
+        var stdin = factory.LastProcess!.Input.ToString()!;
+        Assert.That(stdin, Does.Contain("\"behavior\":\"deny\"").And.Contain("too dangerous"));
+    }
+
+    private sealed class FakeInteraction(AgentAnswer? answer = null) : IAgentInteraction
+    {
+        public AgentQuestion? LastQuestion { get; private set; }
+
+        public Task<AgentAnswer> AskAsync(AgentQuestion question, CancellationToken cancellationToken)
+        {
+            LastQuestion = question;
+            return Task.FromResult(answer ?? new AgentAnswer(["allow"]));
+        }
+
+        public async Task<string> WaitForGuidanceAsync(CancellationToken cancellationToken)
+        {
+            // No guidance in these tests - wait until the session tears the pump down.
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new OperationCanceledException(cancellationToken);
+        }
+    }
+
     private sealed class FakeProcessFactory(
         string stdout, int exitCode, string stderr = "", bool blockOutput = false) : IClaudeCliProcessFactory
     {
@@ -194,7 +278,16 @@ public sealed class ClaudeCodeCliAgentTests
 
         public TextReader Error { get; } = new StringReader(stderr);
 
+        /// <summary>Captures everything the agent writes to the CLI's stdin.</summary>
+        public StringWriter Input { get; } = new();
+
+        TextWriter IClaudeCliProcess.Input => Input;
+
+        public bool InputClosed { get; private set; }
+
         public Task<int> WaitForExitAsync(CancellationToken cancellationToken) => Task.FromResult(exitCode);
+
+        public void CloseInput() => InputClosed = true;
 
         public void Kill() => Killed = true;
 

@@ -37,4 +37,16 @@ public sealed record SettingDescriptor(
     /// setting's value — editors then offer "Connect…" besides manual entry.
     /// </summary>
     public string? ConnectFlow { get; init; }
+
+    /// <summary>
+    /// Opaque role tag: the vocabulary belongs to whatever consumes the setting (a runner
+    /// subsystem, a plugin) — the control plane and its clients only carry it.
+    /// </summary>
+    public string? Role { get; init; }
+
+    /// <summary>Connector-browse kind that live-lists values for this setting in editors.</summary>
+    public string? Browse { get; init; }
+
+    /// <summary>Sibling setting key whose value scopes <see cref="Browse"/> (e.g. list branches OF a repo).</summary>
+    public string? BrowseDependsOn { get; init; }
 }

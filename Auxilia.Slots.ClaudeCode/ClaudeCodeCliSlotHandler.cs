@@ -1,4 +1,4 @@
-using Auxilia.ClaudeCode.Workflow;
+using Auxilia.Workflows.AiAgent.CodingAgent;
 using Auxilia.Workflows;
 using Microsoft.Extensions.DependencyInjection;
 
