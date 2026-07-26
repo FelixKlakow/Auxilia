@@ -432,3 +432,6 @@ FodyWeavers.xsd
 /.praetorium
 
 .prebuilt-images
+
+# codegraph MCP runtime (local index/daemon)
+.codegraph/

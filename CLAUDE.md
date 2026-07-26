@@ -14,6 +14,7 @@ Every project directory has a `<ProjectName>.project-instructions.md` beside its
 - **`docs/CommitConventions.md`** — commit format and hooks.
 - **`docs/steering-client-integration.md`** — human-steering of AI workflows; the steering client as a pure Core client (current source of truth).
 - **`docs/backend-service-retirement-plan.md`** — completed program: BackendService dissolved into Core.Api / Studio, its UI rehomed as `Auxilia.AdminConsole`.
+- **`docs/backlog.md`** — live tracker of known follow-ups (Core client-surface gaps, config-store move, the full steer loop, CI validation).
 - **`docs/workflow-sdk-design.md`** — the workflow SDK / builder contract.
 - **`docs/view-data-design.md`** — live views and status fan-out.
 
