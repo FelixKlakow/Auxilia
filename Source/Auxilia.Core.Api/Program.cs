@@ -5,6 +5,7 @@ using Auxilia.Core.Api.Services;
 using Auxilia.Core.Contracts;
 using Auxilia.Governance;
 using Auxilia.Governance.Identity;
+using Auxilia.Governance.IdentityImport;
 using Auxilia.Governance.Policy;
 using Auxilia.Messaging;
 using Auxilia.PlatformData;
@@ -12,6 +13,7 @@ using Auxilia.PlatformData.Entities;
 using System.Security.Claims;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 
@@ -35,8 +37,12 @@ builder.Services.AddPlatformEntity<CoreRunConfigurationRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreConnectorRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreRunRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreRunResolutionRecord>(platformData);
+builder.Services.AddPlatformEntity<CoreWorkflowSchemaRecord>(platformData);
 builder.Services.AddPlatformEntity<DelegatedUserTokenRecord>(platformData);
 builder.Services.AddPlatformEntity<AuditRecord>(platformData);
+// Provider catalog (Core-owned governance): the registered slot-handler plugins and their curation.
+builder.Services.AddPlatformEntity<SlotProviderRecord>(platformData);
+builder.Services.AddPlatformEntity<ProviderCatalogRecord>(platformData);
 builder.Services.AddSingleton<AuditLog>();
 
 // --- Governance: identity, RBAC, Policy Engine (the Core is the auth + audit authority) ---
@@ -81,8 +87,20 @@ builder.Services.AddSingleton<DelegatedTokenStore>();
 builder.Services.AddSingleton<RunConfigurationService>();
 builder.Services.AddSingleton<RunService>();
 builder.Services.AddSingleton<RunReadService>();
+builder.Services.AddSingleton<AuditReadService>();
+builder.Services.AddSingleton<ProviderCatalogService>();
+builder.Services.AddSingleton<WorkflowSchemaReadService>();
+builder.Services.AddSingleton<PrincipalAdminService>();
 builder.Services.AddSingleton<SlotCredentialResolver>();
+builder.Services.AddSingleton<RunStreamBroker>();
+builder.Services.AddSingleton<Auxilia.Workflows.Messaging.WorkflowStatusPublisher>();
+builder.Services.AddSingleton<RunnerLivenessTracker>();
+builder.Services.AddSingleton<FailoverMonitor>();
 builder.Services.AddHostedService<RunTrackingService>();
+builder.Services.AddHostedService<WorkflowSchemaTrackingService>();
+builder.Services.AddHostedService<RunStreamPublisher>();
+// Resolve the same FailoverMonitor instance for the hosted lifecycle (so tests can drive ScanOnceAsync).
+builder.Services.AddHostedService(sp => sp.GetRequiredService<FailoverMonitor>());
 
 // --- MCP: first-class, authenticated AI/service parity ---
 builder.Services.AddMcpServer()
@@ -173,6 +191,18 @@ app.MapPost("/auth/logout", async (HttpContext http) =>
     return Results.Ok();
 }).RequireAuthorization();
 
+// Mints a short-lived per-user bearer for a delegated console (Auxilia.AdminConsole) to call the Core
+// AS the signed-in user. Requires a live interactive cookie session (never an API key / another bearer),
+// so a service principal cannot self-issue a user-scoped token. The token binds only the principal id +
+// an expiry; roles are re-resolved server-side per request.
+app.MapPost("/auth/token", (HttpContext http, UserBearerTokenService tokens) =>
+{
+    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+        return Results.Unauthorized();
+    var (token, expiresUtc) = tokens.Issue(principalId);
+    return Results.Ok(new UserBearerToken(token, expiresUtc));
+}).RequireAuthorization(CoreAuthExtensions.CookieSessionPolicy);
+
 app.MapGet("/auth/me", (HttpContext http) =>
     CoreClaims.PrincipalIdOf(http.User) is { } principalId
         ? Results.Ok(new CurrentPrincipal(
@@ -183,18 +213,44 @@ app.MapGet("/auth/me", (HttpContext http) =>
 
 // --- Runs ---
 app.MapPost("/api/runs", async (
-        RunRequest request, HttpContext http, IPolicyEngine policy, RunService runs, CancellationToken ct) =>
+        RunRequest request, HttpContext http, IPolicyEngine policy, RunService runs, AuditLog audit,
+        CancellationToken ct) =>
 {
     if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
         return Results.Unauthorized();
+
+    // On-behalf-of: a service/automation caller may dispatch a run AS a target principal. The caller
+    // must hold run.on-behalf-of, and the target must itself pass the normal workflow.trigger gate —
+    // the delegation grants no capability the target lacks. When no distinct target is named the
+    // caller is both subject and triggeringPrincipal, exactly as a direct manual run.
+    var onBehalfOf = request.RequestedBy is { } requestedBy && requestedBy != principalId;
+    var triggeringPrincipal = onBehalfOf ? request.RequestedBy!.Value : principalId;
+
+    if (onBehalfOf)
+    {
+        var delegation = await policy.EvaluateAsync(
+            new PolicyContext(principalId, PermissionActions.RunOnBehalfOf, triggeringPrincipal.ToString()), ct);
+        if (!delegation.Allowed)
+        {
+            await audit.AppendAsync(principalId.ToString(), PermissionActions.RunOnBehalfOf,
+                triggeringPrincipal.ToString(), "denied", delegation.Reason, ct);
+            return Results.Json(new { error = delegation.Reason }, statusCode: StatusCodes.Status403Forbidden);
+        }
+    }
+
     var decision = await policy.EvaluateAsync(
-        new PolicyContext(principalId, PermissionActions.WorkflowTrigger, request.WorkflowType)
+        new PolicyContext(triggeringPrincipal, PermissionActions.WorkflowTrigger, request.WorkflowType)
         { WorkflowType = request.WorkflowType }, ct);
     if (!decision.Allowed)
         return Results.Json(new { error = decision.Reason }, statusCode: StatusCodes.Status403Forbidden);
     try
     {
-        return Results.Ok(await runs.RunInlineAsync(request, principalId, ct));
+        var accepted = await runs.RunInlineAsync(request, triggeringPrincipal, ct);
+        if (onBehalfOf)
+            await audit.AppendAsync(principalId.ToString(), PermissionActions.RunOnBehalfOf,
+                triggeringPrincipal.ToString(), "granted",
+                $"{{\"workflowType\":\"{request.WorkflowType}\",\"runId\":\"{accepted.RunId}\"}}", ct);
+        return Results.Ok(accepted);
     }
     catch (ConnectorAccessDeniedException ex)
     {
@@ -227,6 +283,44 @@ app.MapPost("/api/runs/{id:guid}/cancel", async (
         return Results.Json(new { error = decision.Reason }, statusCode: StatusCodes.Status403Forbidden);
     await runs.CancelAsync(id, ct);
     return Results.Accepted($"/api/runs/{id}");
+}).RequireAuthorization();
+
+// Live-view stream (SSE): status transitions + view items for a run, fanned from the bus via the
+// RunStreamBroker, until the run reaches a terminal state or the client disconnects. Replaces the
+// BackendService SignalR /hubs/views live push.
+app.MapGet("/api/runs/{id:guid}/stream", async (
+        Guid id, HttpContext http, IPolicyEngine policy, RunStreamBroker broker, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.RunObserve, ct) is { } fail)
+    {
+        await fail.ExecuteAsync(http);
+        return;
+    }
+
+    http.Response.Headers.ContentType = "text/event-stream";
+    http.Response.Headers.CacheControl = "no-cache";
+    http.Response.Headers["X-Accel-Buffering"] = "no";
+
+    using var subscription = broker.Subscribe(id);
+    // Flush headers so the client's SendAsync completes with the subscription already registered —
+    // no live event published after this point is lost.
+    await http.Response.Body.FlushAsync(ct);
+
+    try
+    {
+        await foreach (var evt in subscription.Reader.ReadAllAsync(ct))
+        {
+            await http.Response.WriteAsync(
+                $"data: {System.Text.Json.JsonSerializer.Serialize(evt, System.Text.Json.JsonSerializerOptions.Web)}\n\n", ct);
+            await http.Response.Body.FlushAsync(ct);
+            if (evt.Kind == RunStreamEvent.StatusKind && CoreRunStates.IsTerminalStatus(evt.PayloadJson))
+                break;
+        }
+    }
+    catch (OperationCanceledException)
+    {
+        // Client disconnected — expected end of an SSE stream.
+    }
 }).RequireAuthorization();
 
 // --- Internal: runner <-> Core just-in-time slot-credential resolution ---
@@ -266,22 +360,48 @@ app.MapGet("/api/configurations/{id:guid}", async (
     .RequireAuthorization();
 
 app.MapPost("/api/configurations/{id:guid}/run", async (
-        Guid id, HttpContext http, IPolicyEngine policy, RunService runs,
-        RunConfigurationService configurations, CancellationToken ct) =>
+        Guid id, Guid? onBehalfOf, [FromBody] IReadOnlyDictionary<string, string>? context,
+        HttpContext http, IPolicyEngine policy, RunService runs,
+        RunConfigurationService configurations, AuditLog audit, CancellationToken ct) =>
 {
     if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
         return Results.Unauthorized();
     var config = await configurations.GetAsync(id, ct);
     if (config is null)
         return Results.NotFound();
+
+    // On-behalf-of: a service/automation caller (WorkflowStudio's triggers) may dispatch a stored
+    // configuration AS a target principal. The caller must hold run.on-behalf-of, and the target must
+    // itself pass workflow.trigger — the delegation grants no capability the target lacks. Absent a
+    // distinct target the caller is both subject and triggering principal, exactly as a manual run.
+    var delegated = onBehalfOf is { } requestedBy && requestedBy != principalId;
+    var triggeringPrincipal = delegated ? onBehalfOf!.Value : principalId;
+
+    if (delegated)
+    {
+        var delegation = await policy.EvaluateAsync(
+            new PolicyContext(principalId, PermissionActions.RunOnBehalfOf, triggeringPrincipal.ToString()), ct);
+        if (!delegation.Allowed)
+        {
+            await audit.AppendAsync(principalId.ToString(), PermissionActions.RunOnBehalfOf,
+                triggeringPrincipal.ToString(), "denied", delegation.Reason, ct);
+            return Results.Json(new { error = delegation.Reason }, statusCode: StatusCodes.Status403Forbidden);
+        }
+    }
+
     var decision = await policy.EvaluateAsync(
-        new PolicyContext(principalId, PermissionActions.WorkflowTrigger, config.WorkflowType)
+        new PolicyContext(triggeringPrincipal, PermissionActions.WorkflowTrigger, config.WorkflowType)
         { WorkflowType = config.WorkflowType }, ct);
     if (!decision.Allowed)
         return Results.Json(new { error = decision.Reason }, statusCode: StatusCodes.Status403Forbidden);
     try
     {
-        return Results.Ok(await runs.RunConfigurationAsync(id, principalId, ct));
+        var accepted = await runs.RunConfigurationAsync(id, triggeringPrincipal, context, ct);
+        if (delegated)
+            await audit.AppendAsync(principalId.ToString(), PermissionActions.RunOnBehalfOf,
+                triggeringPrincipal.ToString(), "granted",
+                $"{{\"configurationId\":\"{id}\",\"runId\":\"{accepted.RunId}\"}}", ct);
+        return Results.Ok(accepted);
     }
     catch (ConnectorAccessDeniedException ex)
     {
@@ -291,6 +411,92 @@ app.MapPost("/api/configurations/{id:guid}/run", async (
     {
         return Results.BadRequest(new { error = ex.Message });
     }
+}).RequireAuthorization();
+
+// --- Audit (read-only; the Core owns the centralized audit log) ---
+app.MapGet("/api/audit", async (
+        string? actor, string? action, string? subject,
+        DateTimeOffset? fromUtc, DateTimeOffset? toUtc,
+        HttpContext http, IPolicyEngine policy, AuditReadService svc,
+        CancellationToken ct, int skip = 0, int take = 50) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.AuditRead, ct) is { } fail)
+        return fail;
+    return Results.Ok(await svc.QueryAsync(
+        new AuditQuery(actor, action, subject, fromUtc, toUtc, skip, take == 0 ? 50 : take), ct));
+}).RequireAuthorization();
+
+// --- Provider catalog (Core-owned governance: which slot providers may be configured; deny-by-default) ---
+// Availability gates whether a provider is OFFERED in configuration editors — it is a configuration-time
+// allowlist, not a dispatch gate (a run is not rejected for using an unavailable provider), matching the
+// BackendService semantics this was migrated from.
+app.MapGet("/api/provider-catalog", async (
+        bool? available, HttpContext http, IPolicyEngine policy, ProviderCatalogService svc,
+        CancellationToken ct, int skip = 0, int take = 50) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ProviderCatalogManage, ct) is { } fail)
+        return fail;
+    return Results.Ok(await svc.QueryAsync(
+        new ProviderCatalogQuery(available, skip, take == 0 ? 50 : take), ct));
+}).RequireAuthorization();
+
+app.MapPost("/api/provider-catalog/{providerType}/availability", async (
+        string providerType, SetProviderAvailability request, HttpContext http, IPolicyEngine policy,
+        ProviderCatalogService svc, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ProviderCatalogManage, ct) is { } fail)
+        return fail;
+    try
+    {
+        return Results.Ok(await svc.SetAvailabilityAsync(
+            CoreClaims.PrincipalIdOf(http.User)!.Value.ToString("D"), providerType, request.Available, ct));
+    }
+    catch (KeyNotFoundException ex)
+    {
+        return Results.NotFound(new { error = ex.Message });
+    }
+}).RequireAuthorization();
+
+app.MapPost("/api/provider-catalog/{providerType}/settings", async (
+        string providerType, SetProviderSetting request, HttpContext http, IPolicyEngine policy,
+        ProviderCatalogService svc, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ProviderCatalogManage, ct) is { } fail)
+        return fail;
+    try
+    {
+        return Results.Ok(await svc.SetSettingDisabledAsync(
+            CoreClaims.PrincipalIdOf(http.User)!.Value.ToString("D"),
+            providerType, request.SettingKey, request.Disabled, ct));
+    }
+    catch (KeyNotFoundException ex)
+    {
+        return Results.NotFound(new { error = ex.Message });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+}).RequireAuthorization();
+
+// --- Workflow types + schemas (Core-owned schema registry, mirrored from the runner over the bus) ---
+// The config editor reads these to drive "pick a workflow → bind its slots to connectors". Gated by
+// workflow-configuration.manage — the permission held by operators/admins who build configurations.
+app.MapGet("/api/workflow-types", async (
+        HttpContext http, IPolicyEngine policy, WorkflowSchemaReadService svc,
+        CancellationToken ct, int skip = 0, int take = 50) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.WorkflowConfigurationManage, ct) is { } fail)
+        return fail;
+    return Results.Ok(await svc.QueryTypesAsync(new WorkflowTypeQuery(skip, take == 0 ? 50 : take), ct));
+}).RequireAuthorization();
+
+app.MapGet("/api/workflow-types/{type}/schema", async (
+        string type, HttpContext http, IPolicyEngine policy, WorkflowSchemaReadService svc, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.WorkflowConfigurationManage, ct) is { } fail)
+        return fail;
+    return await svc.GetSchemaAsync(type, ct) is { } schema ? Results.Ok(schema) : Results.NotFound();
 }).RequireAuthorization();
 
 // --- Connectors ---
@@ -383,6 +589,97 @@ app.MapPost("/api/groups/{id:guid}/roles", async (
     }
 }).RequireAuthorization();
 
+// --- Principals (identity administration; principal.administer, mirrors the groups admin) ---
+app.MapGet("/api/principals", async (
+        string? kind, bool? enabled, string? search,
+        HttpContext http, IPolicyEngine policy, PrincipalAdminService svc,
+        CancellationToken ct, int skip = 0, int take = 50) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PrincipalAdminister, ct) is { } fail)
+        return fail;
+    return Results.Ok(await svc.QueryAsync(
+        new PrincipalQuery(kind, enabled, search, skip, take == 0 ? 50 : take), ct));
+}).RequireAuthorization();
+
+app.MapGet("/api/principals/{id:guid}", async (
+        Guid id, HttpContext http, IPolicyEngine policy, PrincipalAdminService svc, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PrincipalAdminister, ct) is { } fail)
+        return fail;
+    return await svc.GetAsync(id, ct) is { } principal ? Results.Ok(principal) : Results.NotFound();
+}).RequireAuthorization();
+
+// Create a human principal (local username/password). New principals are deny-by-default: they hold
+// only the roles explicitly assigned or derived from group membership.
+app.MapPost("/api/principals", async (
+        CreateHumanPrincipalRequest request, HttpContext http, IPolicyEngine policy,
+        PrincipalDirectory directory, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PrincipalAdminister, ct) is { } fail)
+        return fail;
+    var principal = await directory.CreateHumanAsync(request.DisplayName, request.Username, request.Password, ct);
+    return Results.Ok(PrincipalAdminService.ToDto(principal, []));
+}).RequireAuthorization();
+
+// Create an AI/service principal; the generated API key is returned exactly once (write-only after).
+app.MapPost("/api/principals/ai", async (
+        CreateApiKeyPrincipalRequest request, HttpContext http, IPolicyEngine policy,
+        PrincipalDirectory directory, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PrincipalAdminister, ct) is { } fail)
+        return fail;
+    try
+    {
+        var (principal, apiKey) = await directory.CreateApiKeyPrincipalAsync(request.DisplayName, request.Kind, ct);
+        return Results.Ok(new CreatedApiKeyPrincipal(PrincipalAdminService.ToDto(principal, []), apiKey));
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+}).RequireAuthorization();
+
+// Assign a Direct role (idempotent). Never touches Group-/GroupMapping-sourced roles.
+app.MapPost("/api/principals/{id:guid}/roles", async (
+        Guid id, AssignRoleRequest request, HttpContext http, IPolicyEngine policy,
+        PrincipalDirectory directory, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PrincipalAdminister, ct) is { } fail)
+        return fail;
+    try
+    {
+        await directory.AssignRoleAsync(id, request.RoleName, ct);
+        return Results.Accepted($"/api/principals/{id}");
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+}).RequireAuthorization();
+
+// Revoke a Direct role (idempotent — revoking an absent assignment is a no-op success). A role held
+// only through a group is not a Direct assignment and is therefore left untouched.
+app.MapDelete("/api/principals/{id:guid}/roles/{role}", async (
+        Guid id, string role, HttpContext http, IPolicyEngine policy,
+        PrincipalDirectory directory, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PrincipalAdminister, ct) is { } fail)
+        return fail;
+    await directory.RevokeRoleAsync(id, role, ct);
+    return Results.NoContent();
+}).RequireAuthorization();
+
+app.MapPost("/api/principals/{id:guid}/enabled", async (
+        Guid id, SetPrincipalEnabledRequest request, HttpContext http, IPolicyEngine policy,
+        PrincipalDirectory directory, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PrincipalAdminister, ct) is { } fail)
+        return fail;
+    return await directory.SetEnabledAsync(id, request.Enabled, ct)
+        ? Results.Accepted($"/api/principals/{id}")
+        : Results.NotFound();
+}).RequireAuthorization();
+
 // --- Identity: directory group → role mappings (consumed at federated sign-in) ---
 app.MapGet("/api/identity/group-mappings", async (
         HttpContext http, IPolicyEngine policy, GroupMappingDirectory mappings, CancellationToken ct) =>
@@ -416,6 +713,99 @@ app.MapDelete("/api/identity/group-mappings/{id:guid}", async (
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.IdentitySourceManage, ct) is { } fail)
         return fail;
     return await mappings.RemoveAsync(id, ct) ? Results.NoContent() : Results.NotFound();
+}).RequireAuthorization();
+
+// --- Identity: bulk/offline principal provisioning from a directory (LDAP/AD) or CSV ---
+// The Core owns identity: sources are administered here and imports upsert principals into the
+// Core identity store. Deny-by-default roles — a provisioned user is granted roles only via the
+// source's default role and group→role mappings, never with local credentials (an administrator
+// sets those before the user can sign in). Interactive OIDC/Entra sign-in is a separate feature.
+app.MapGet("/api/identity/connectors", async (
+        HttpContext http, IPolicyEngine policy, IdentityImportService import, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.IdentitySourceManage, ct) is { } fail)
+        return fail;
+    return Results.Ok(import.Connectors.Select(c => c.ToDescriptorDto()));
+}).RequireAuthorization();
+
+app.MapGet("/api/identity/sources", async (
+        HttpContext http, IPolicyEngine policy, IdentityImportService import, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.IdentitySourceManage, ct) is { } fail)
+        return fail;
+    return Results.Ok((await import.ListAsync(ct)).Select(s => s.ToDto()));
+}).RequireAuthorization();
+
+app.MapGet("/api/identity/sources/{id:guid}", async (
+        Guid id, HttpContext http, IPolicyEngine policy, IdentityImportService import, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.IdentitySourceManage, ct) is { } fail)
+        return fail;
+    return await import.GetAsync(id, ct) is { } view ? Results.Ok(view.ToDto()) : Results.NotFound();
+}).RequireAuthorization();
+
+app.MapPost("/api/identity/sources", async (
+        SaveIdentitySourceRequest request, HttpContext http, IPolicyEngine policy,
+        IdentityImportService import, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.IdentitySourceManage, ct) is { } fail)
+        return fail;
+    try
+    {
+        var saved = await import.SaveAsync(
+            CoreClaims.PrincipalIdOf(http.User)!.Value.ToString("D"), request.ToDraft(), ct);
+        return Results.Ok(saved.ToDto());
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+}).RequireAuthorization();
+
+app.MapDelete("/api/identity/sources/{id:guid}", async (
+        Guid id, HttpContext http, IPolicyEngine policy, IdentityImportService import, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.IdentitySourceManage, ct) is { } fail)
+        return fail;
+    return await import.DeleteAsync(CoreClaims.PrincipalIdOf(http.User)!.Value.ToString("D"), id, ct)
+        ? Results.NoContent()
+        : Results.NotFound();
+}).RequireAuthorization();
+
+app.MapPost("/api/identity/sources/{id:guid}/test", async (
+        Guid id, HttpContext http, IPolicyEngine policy, IdentityImportService import, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.IdentitySourceManage, ct) is { } fail)
+        return fail;
+    try
+    {
+        return Results.Ok((await import.TestConnectionAsync(id, ct)).ToDto());
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.NotFound(new { error = ex.Message });
+    }
+}).RequireAuthorization();
+
+app.MapPost("/api/identity/sources/{id:guid}/import", async (
+        Guid id, HttpContext http, IPolicyEngine policy, IdentityImportService import, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.IdentitySourceManage, ct) is { } fail)
+        return fail;
+    try
+    {
+        var summary = await import.ImportAsync(
+            CoreClaims.PrincipalIdOf(http.User)!.Value.ToString("D"), id, ct);
+        return Results.Ok(summary.ToDto());
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.NotFound(new { error = ex.Message });
+    }
 }).RequireAuthorization();
 
 // --- MCP (authenticated) + health ---

@@ -3,7 +3,7 @@ namespace Auxilia.Workflows;
 /// <summary>
 /// Manifest-declared lifetime (ARCHITECTURE.md §6). One-shot is the security default;
 /// long-living deployment additionally requires explicit operator approval on the
-/// Steering Instance.
+/// Core.Runner.
 /// </summary>
 public enum WorkflowLifetime
 {

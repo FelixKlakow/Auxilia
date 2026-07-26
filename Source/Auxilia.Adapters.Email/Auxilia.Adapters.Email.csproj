@@ -16,11 +16,16 @@
         <ProjectReference Include="..\Auxilia.Messaging\Auxilia.Messaging.csproj" />
         <ProjectReference Include="..\..\Auxilia.PlatformData\Auxilia.PlatformData.csproj" />
         <ProjectReference Include="..\..\Auxilia.Workflows\Auxilia.Workflows.csproj" />
+        <ProjectReference Include="..\..\Auxilia.Core.Client\Auxilia.Core.Client.csproj" />
+        <ProjectReference Include="..\..\Auxilia.Core.Contracts\Auxilia.Core.Contracts.csproj" />
     </ItemGroup>
 
     <ItemGroup>
         <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
             <_Parameter1>Auxilia.Adapters.Email.Tests</_Parameter1>
+        </AssemblyAttribute>
+        <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+            <_Parameter1>Auxilia.WorkflowStudio.Tests</_Parameter1>
         </AssemblyAttribute>
     </ItemGroup>
 

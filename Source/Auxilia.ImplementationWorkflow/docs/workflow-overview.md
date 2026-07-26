@@ -4,6 +4,8 @@
 
 The `Auxilia.ImplementationWorkflow` receives a work-item reference, checks out a new branch, runs a fully-autonomous AI implementation agent equipped with source-control, test-runner, and task-source tools, optionally runs a read-only reviewer pass, opens a pull request, writes back to the task source, persists an artifact summary, and emits output signals.
 
+> The pull-request step is **capability-declared but not production-backed**: `IPullRequestAccess.OpenPullRequestAsync` (and the credentialed push it relies on) is currently satisfied only by fakes/stubs — there is no production PR provider yet.
+
 ---
 
 ## Trigger
@@ -45,6 +47,8 @@ Emitted (before `Completed`) when `ReviewerEnabled = true` and the reviewer agen
 | `WorkItemId` | `string` | Work item that was implemented |
 | `ReviewNotes` | `ReviewNoteDto[]` | Array of flagged issues (`Description`, `FilePath?`, `Severity`) |
 
+> **Wire DTO vs. internal type.** `ReviewNoteDto` (`Signals/ReviewNotesFlaggedSignalPayload.cs`) is the **signal wire form** and deliberately carries `Severity` as a `string` (`CompletionSignalEmitter` maps it via `ReviewNoteSeverity.ToString()`). The workflow's **internal** review-note collection uses the typed `ReviewNote` record whose `Severity` is the `ReviewNoteSeverity` enum (`Info`, `Warning`, `Error`). Only the on-the-wire DTO uses a string; internal code never uses `ReviewNoteDto` or a string severity.
+
 ### `Failed`
 Emitted when the implementation agent throws an exception during its session.
 
@@ -69,13 +73,15 @@ Written to `{OutputDirectory}/implementation-summary.json`.
     {
       "description": "Potential null reference in handler",
       "filePath": "src/Handler.cs",
-      "severity": "warning"
+      "severity": 1
     }
   ]
 }
 ```
 
 `reviewNotes` is an empty array when `ReviewerEnabled = false` or the reviewer found no issues.
+
+> The artifact serializes the workflow's **internal** typed `ReviewNote` records (not the wire `ReviewNoteDto`), so `severity` is the `ReviewNoteSeverity` enum. `ImplementationSummaryWriter` uses `JsonSerializerDefaults.Web` with no string-enum converter, so the enum serializes as its integer value (`Info` = 0, `Warning` = 1, `Error` = 2). The string form of the severity exists **only** on the `ReviewNotesFlagged` signal wire (`ReviewNoteDto`), never internally.
 
 ---
 

@@ -61,7 +61,7 @@ public sealed class SlotCredentialResolverTests
         var runId = Guid.NewGuid();
         var token = Guid.NewGuid().ToString("N");
         await resolver.StashAsync(runId, token,
-            new List<SlotBinding> { new("sc", "github", connector.Id) }, triggeredBy: null, CancellationToken.None);
+            new List<SlotBinding> { new("sc", "github", connector.Id) }, triggeredBy: null, ct: CancellationToken.None);
 
         var (publicKey, rsa) = NewKeyPair();
         using (rsa)
@@ -82,7 +82,7 @@ public sealed class SlotCredentialResolverTests
         var runId = Guid.NewGuid();
         await resolver.StashAsync(runId, "the-real-token",
             new List<SlotBinding> { new("sc", "local", Settings: new Dictionary<string, string>()) },
-            triggeredBy: null, CancellationToken.None);
+            triggeredBy: null, ct: CancellationToken.None);
 
         var (publicKey, rsa) = NewKeyPair();
         using (rsa)
@@ -103,7 +103,7 @@ public sealed class SlotCredentialResolverTests
         var token = Guid.NewGuid().ToString("N");
         await resolver.StashAsync(runId, token,
             new List<SlotBinding> { new("sc", "local", Settings: new Dictionary<string, string>()) },
-            triggeredBy: null, CancellationToken.None);
+            triggeredBy: null, ct: CancellationToken.None);
 
         var (publicKey, rsa) = NewKeyPair();
         using (rsa)
@@ -163,7 +163,7 @@ public sealed class SlotCredentialResolverTests
         var token = Guid.NewGuid().ToString("N");
         await resolver.StashAsync(runId, token,
             new List<SlotBinding> { new("sc", "local", Settings: new Dictionary<string, string> { ["path"] = "/repos/x" }) },
-            triggeredBy: null, CancellationToken.None);
+            triggeredBy: null, ct: CancellationToken.None);
 
         var (publicKey, rsa) = NewKeyPair();
         using (rsa)
@@ -188,7 +188,7 @@ public sealed class SlotCredentialResolverTests
         var token = Guid.NewGuid().ToString("N");
         await resolver.StashAsync(runId, token,
             new List<SlotBinding> { new("sc", "ado", DelegatedResource: "499b/.default") },
-            triggeredBy: principalId, CancellationToken.None);
+            triggeredBy: principalId, ct: CancellationToken.None);
 
         var (publicKey, rsa) = NewKeyPair();
         using (rsa)
@@ -211,7 +211,7 @@ public sealed class SlotCredentialResolverTests
         var token = Guid.NewGuid().ToString("N");
         await resolver.StashAsync(runId, token,
             new List<SlotBinding> { new("sc", "ado", DelegatedResource: "r") },
-            triggeredBy: Guid.NewGuid(), CancellationToken.None);
+            triggeredBy: Guid.NewGuid(), ct: CancellationToken.None);
 
         var (publicKey, rsa) = NewKeyPair();
         using (rsa)

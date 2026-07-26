@@ -1,12 +1,12 @@
 using System.Diagnostics;
-using Auxilia.Governance;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using Auxilia.Core.Contracts;
 using Auxilia.Messaging;
-using Auxilia.PlatformData;
 using Auxilia.PlatformData.Entities;
 using Auxilia.SystemTestSuite.WorkflowDispatch;
 using Auxilia.UniversalDataAccess;
 using Auxilia.UniversalDataAccess.Settings;
-using Auxilia.Workflows.Messaging.Messages;
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
 using DotNet.Testcontainers.Networks;
@@ -17,17 +17,29 @@ using Testcontainers.RabbitMq;
 namespace Auxilia.SystemTestSuite.EndToEnd;
 
 /// <summary>
-/// Environment for the goal-v1 acceptance test (docs/goal-v1.md): the WHOLE platform on one
-/// Docker network — GreenMail (mail trigger + reply write-back), RabbitMQ, MongoDB (shared
-/// durable platform state), one Steering Instance (Mongo-backed, run-output shared with the
-/// host), and one Backend Service hosting the email task-source adapter. The Code Review
-/// workflow runs from its baked image; its work-items slot is the REAL email slot provider,
-/// all other slots are the happy fakes.
+/// Whole-platform acceptance environment, retargeted for the BackendService retirement (Phase 4).
+/// The BackendService host is gone; the mail path now runs on the split platform:
+/// <list type="bullet">
+///   <item><b>Core.Api</b> — the control plane + Run API. Owns the mail-review run configuration
+///         (with full slot bindings so it resolves every slot JIT), identity/RBAC (the run-as
+///         principal + the Studio service key), and audit. Its own (in-memory) store, never shared.</item>
+///   <item><b>WorkflowStudio</b> — hosts the email task-source adapter (ex-BackendService). It reads
+///         the mailbox trigger + slot-instance credential from its own Mongo DB and dispatches runs
+///         through the Core Run API on behalf of the trigger's principal — never a raw bus command.</item>
+///   <item><b>Core.Runner</b> — Mongo-backed execution plane; consumes the run-command queue, resolves
+///         every slot just-in-time from the Core (no local credential store), launches the workflow.</item>
+///   <item>GreenMail (mail trigger + reply write-back), RabbitMQ, MongoDB — unchanged topology.</item>
+/// </list>
 ///
-/// Run-output decision: the Docker daemon resolves bind sources on the HOST, so the SI
-/// container gets a host temp directory mounted at /run-output and passes the host view to
-/// workflow launches via the production WorkflowDispatcher__RunOutputHostDirectory setting —
-/// both containers then share the same physical directory and artifact persistence works.
+/// CI ASSUMPTIONS (validated only by the Docker run in CI; not runnable locally):
+///  - The Core resolves the code-review workflow's fake slots from the configuration's inline
+///    <see cref="SlotBinding"/>s (ProviderType + settings, no connector) — the resolver's inline path.
+///  - The runner loads each provider's plugin DLL from the mounted <c>/slot-plugins</c> directory via
+///    <c>WorkflowLauncher:SlotPackages:&lt;providerType&gt;</c>, and the real email provider's mail-stack
+///    dependencies (MailKit/MimeKit/...) are copied alongside it into the workflow container.
+///  - The exact declared-slot set of <c>pull-request-code-review</c> matches the bindings seeded below.
+///  - Audit for the run now lives in the Core.Api audit store (queried over <c>/api/audit</c>), not the
+///    runner's Mongo — the test reads it there.
 /// </summary>
 [SetUpFixture]
 public class EndToEndEnvironment
@@ -38,43 +50,31 @@ public class EndToEndEnvironment
     public   const string ClaudeWorkflowType       = "claude-code";
     public   const string ClaudeWorkflowImageName  = "auxilia-claude-code-workflow:system-test";
     public   const string ClaudeWorkflowPackageUri = "docker://" + ClaudeWorkflowImageName;
-    public   const string CodingSessionWorkflowType      = "coding-session";
-    public   const string CodingSessionImageName         = "auxilia-coding-session-workflow:system-test";
-    public   const string CodingSessionPackageUri        = "docker://" + CodingSessionImageName;
-    public   const string SessionNotifierWorkflowType    = "session-notifier";
-    public   const string SessionNotifierImageName       = "auxilia-session-notifier-workflow:system-test";
-    public   const string SessionNotifierPackageUri      = "docker://" + SessionNotifierImageName;
-    public   const string CodingSessionConfigurationName = "live-coding-demo";
-    /// <summary>How long the stub session CLI stays alive; the harness raises it so the live terminal is capturable.</summary>
-    public static int SessionStubSeconds { get; set; } = 6;
     /// <summary>In-image stand-in CLI — system tests never call real AI (cost rule).</summary>
     public   const string ClaudeStubCliPath        = "/usr/local/bin/claude-stub";
-    internal const string BackendImageName    = "auxilia-backendservice:system-test";
+
+    internal const string CoreApiImageName = "auxilia-core-api:system-test";
+    internal const string StudioImageName  = "auxilia-workflow-studio:system-test";
+    internal const string BootstrapApiKey  = "aux-system-test-key-e2e-0123456789abcd";
+
     public   const string CommandQueue        = "workflow.run-commands-e2e";
-    /// <summary>The configuration the mailbox trigger dispatches (single source of truth — no appsettings workflow).</summary>
+    /// <summary>The Core configuration the mailbox trigger dispatches.</summary>
     public   const string MailReviewConfigurationName = "mail-review";
 
-    /// <summary>
-    /// Presentation stand (set by the DevStand BEFORE setup, never by tests): the platform
-    /// boots with providers, the team-mailbox instance, and ONLY the coding-session package
-    /// pair registered — no pre-built workflow configurations, so the demo configures the
-    /// workflow live in the editor.
-    /// </summary>
+    /// <summary>Retained for DevStand compatibility (unused by the retargeted mail path).</summary>
+    public static int SessionStubSeconds { get; set; } = 6;
+    /// <summary>Retained for DevStand compatibility.</summary>
     public static bool PresentationMode { get; set; }
-
-    /// <summary>
-    /// Base name of named Docker volumes for durable state (set by the DevStand's
-    /// --keep-data, never by tests): Mongo data and the backend's data-protection keys
-    /// survive stand restarts, so slot instances, configurations, and the login cookie do
-    /// too. Null (the default) keeps everything ephemeral.
-    /// </summary>
+    /// <summary>Retained for DevStand compatibility (durable Mongo volume base name).</summary>
     public static string? DataVolumeName { get; set; }
+
     private static readonly Guid MailboxTriggerId = new("aaaaaaaa-e2e0-4000-8000-000000000001");
     internal const string AdapterMailbox      = "workflows@localhost";
     internal const string MailboxPassword     = "pw";
 
     private const string RabbitMqAlias        = "rabbitmq";
     private const string MongoAlias           = "mongo";
+    private const string CoreApiAlias         = "core-api";
     private const string GreenMailAlias       = "greenmail";
     private const string GreenMailImage       = "greenmail/standalone:2.1.3";
     private const int    ImapPort             = 3143;
@@ -98,15 +98,22 @@ public class EndToEndEnvironment
     private string            _runOutputDir = null!;
     private string            _workspaceDir = null!;
 
-    public static IContainer SteeringInstance { get; private set; } = null!;
-    public static IContainer Backend          { get; private set; } = null!;
+    public static IContainer Runner  { get; private set; } = null!;
+    /// <summary>Core.Api control plane (Run API + identity + audit + failover monitor).</summary>
+    public static IContainer CoreApi { get; private set; } = null!;
+    /// <summary>WorkflowStudio host running the email task-source adapter (ex-BackendService).</summary>
+    public static IContainer Studio  { get; private set; } = null!;
     public static IMessageBusClient MessageBusClient { get; private set; } = null!;
+    /// <summary>Authenticated (bootstrap Administrator) client for the Core Run/identity/audit API.</summary>
+    public static HttpClient CoreApiClient { get; private set; } = null!;
     public static string MongoConnectionString { get; private set; } = null!;
     public static string MailHost   { get; private set; } = null!;
     public static int    MappedImap { get; private set; }
     public static int    MappedSmtp { get; private set; }
     /// <summary>Service principal (role: User) on whose behalf mail-triggered runs dispatch.</summary>
     public static Guid RunAsPrincipalId { get; private set; }
+    /// <summary>The Core configuration id the mailbox trigger dispatches (returned by the Core on create).</summary>
+    public static Guid MailReviewConfigurationId { get; private set; }
 
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
@@ -118,43 +125,24 @@ public class EndToEndEnvironment
         Directory.CreateDirectory(_runOutputDir);
         Directory.CreateDirectory(_workspaceDir);
 
-        // Host-side publishes share a dependency graph — run sequentially to avoid obj/
-        // contention (CS2012). Both slot providers land in ONE plugins directory.
+        // Host-side publishes share a dependency graph — run sequentially to avoid obj/ contention.
+        // All slot providers land in ONE plugins directory the runner mounts and loads from.
         await PublishProjectAsync(
-            "Auxilia.FakeSlots.CodeReview.Happy/Auxilia.FakeSlots.CodeReview.Happy.csproj",
-            _publishDir);
-        await PublishProjectAsync(
-            "Auxilia.Slots.Email/Auxilia.Slots.Email.csproj",
-            _publishDir);
-        await PublishProjectAsync(
-            "Auxilia.Slots.ClaudeCode/Auxilia.Slots.ClaudeCode.csproj",
-            _publishDir);
-        // Light-dependency source-control/work-items provider for the live coding session: its
-        // only refs are assemblies baked into the coding-session image, so the shipped DLL's
-        // types resolve at load time (unlike the code-review fake, which drags CodeReview.Workflow).
-        await PublishProjectAsync(
-            "Auxilia.Slots.CodingSession/Auxilia.Slots.CodingSession.csproj",
-            _publishDir);
-        // The simple GitHub workspace connector — like the coding-session provider it only
-        // references assemblies baked into the workflow images.
-        await PublishProjectAsync(
-            "Auxilia.Slots.GitHub/Auxilia.Slots.GitHub.csproj",
-            _publishDir);
+            "Auxilia.FakeSlots.CodeReview.Happy/Auxilia.FakeSlots.CodeReview.Happy.csproj", _publishDir);
+        await PublishProjectAsync("Auxilia.Slots.Email/Auxilia.Slots.Email.csproj", _publishDir);
+        await PublishProjectAsync("Auxilia.Slots.ClaudeCode/Auxilia.Slots.ClaudeCode.csproj", _publishDir);
 
-        // Sequential on purpose: parallel docker builds have wedged Docker Desktop daemons
-        // (see FailoverEnvironment); the .prebuilt-images marker skips them locally anyway.
+        // Sequential on purpose: parallel docker builds have wedged Docker Desktop daemons.
         await WorkflowDispatchEnvironment.BuildImageAsync(
-            WorkflowDispatchEnvironment.SteeringImageName, "Source/Auxilia.Core.Runner/Dockerfile");
+            WorkflowDispatchEnvironment.RunnerImageName, "Source/Auxilia.Core.Runner/Dockerfile");
         await WorkflowDispatchEnvironment.BuildImageAsync(
-            BackendImageName, "Source/Auxilia.BackendService/Dockerfile");
+            CoreApiImageName, "Source/Auxilia.Core.Api/Dockerfile");
+        await WorkflowDispatchEnvironment.BuildImageAsync(
+            StudioImageName, "Source/Auxilia.WorkflowStudio/Dockerfile");
         await WorkflowDispatchEnvironment.BuildImageAsync(
             WorkflowImageName, "Source/Auxilia.CodeReview.Workflow/Dockerfile");
         await WorkflowDispatchEnvironment.BuildImageAsync(
             ClaudeWorkflowImageName, "Source/Auxilia.ClaudeCode.Workflow/Dockerfile");
-        await WorkflowDispatchEnvironment.BuildImageAsync(
-            CodingSessionImageName, "Source/Auxilia.CodingSession.Workflow/Dockerfile");
-        await WorkflowDispatchEnvironment.BuildImageAsync(
-            SessionNotifierImageName, "Source/Auxilia.SessionNotifier.Workflow/Dockerfile");
 
         _network = new NetworkBuilder().WithName(NetworkName).Build();
         await _network.CreateAsync();
@@ -162,8 +150,8 @@ public class EndToEndEnvironment
         _greenMail = new ContainerBuilder(GreenMailImage)
             .WithNetwork(_network)
             .WithNetworkAliases(GreenMailAlias)
-            // hostname=0.0.0.0 is essential: without it GreenMail binds to the container's
-            // loopback only and neither mapped host ports nor network peers reach it.
+            // hostname=0.0.0.0 is essential: without it GreenMail binds to loopback only and neither
+            // mapped host ports nor network peers reach it.
             .WithEnvironment("GREENMAIL_OPTS",
                 "-Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0 " +
                 "-Dgreenmail.auth.disabled -Dgreenmail.verbose")
@@ -189,50 +177,63 @@ public class EndToEndEnvironment
         MappedImap = _greenMail.GetMappedPublicPort(ImapPort);
         MappedSmtp = _greenMail.GetMappedPublicPort(SmtpPort);
 
-        // The run-as principal must exist BEFORE the Backend Service starts dispatching:
-        // seed it directly into the shared Mongo over the mapped port. A durable stand
-        // (--keep-data) reuses the one from the last boot instead of piling up duplicates.
-        await using (var provider = BuildPlatformDataProvider())
-        {
-            var existing = (await provider.GetRequiredService<IDataAccess<PrincipalRecord>>()
-                    .ReadAsync()).ToList()
-                .FirstOrDefault(p => p is { DisplayName: "E2E Mail Trigger", Kind: "Service" });
-            if (existing is not null)
-            {
-                RunAsPrincipalId = existing.Id;
-            }
-            else
-            {
-                var directory = provider.GetRequiredService<PrincipalDirectory>();
-                var (principal, _) = await directory.CreateApiKeyPrincipalAsync("E2E Mail Trigger", "Service");
-                await directory.AssignRoleAsync(principal.Id, BuiltInRoles.User);
-                RunAsPrincipalId = principal.Id;
-            }
-        }
+        // --- Core.Api: control plane. Own in-memory store; dispatches onto the shared command queue. ---
+        CoreApi = new ContainerBuilder(CoreApiImageName)
+            .WithNetwork(_network)
+            .WithNetworkAliases(CoreApiAlias)
+            .WithEnvironment("ASPNETCORE_URLS", "http://+:8080")
+            .WithEnvironment("RabbitMq__Host",     RabbitMqAlias)
+            .WithEnvironment("RabbitMq__Port",     "5672")
+            .WithEnvironment("RabbitMq__UserName", "guest")
+            .WithEnvironment("RabbitMq__Password", "guest")
+            .WithEnvironment("PlatformData__Backend", "InMemory")
+            .WithEnvironment("PlatformData__ProtectionKeyBase64", Convert.ToBase64String(new byte[32]))
+            .WithEnvironment("CoreSecurity__BootstrapApiKey", BootstrapApiKey)
+            .WithEnvironment("CoreApi__RunCommandQueue", CommandQueue)
+            .WithPortBinding(8080, true)
+            .WithWaitStrategy(
+                Wait.ForUnixContainer().UntilHttpRequestIsSucceeded(r => r.ForPort(8080).ForPath("/health")))
+            .Build();
+        await CoreApi.StartAsync();
 
-        SteeringInstance = new ContainerBuilder(WorkflowDispatchEnvironment.SteeringImageName)
+        CoreApiClient = new HttpClient
+        {
+            BaseAddress = new Uri($"http://localhost:{CoreApi.GetMappedPublicPort(8080)}")
+        };
+        CoreApiClient.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", BootstrapApiKey);
+
+        // Seed Core identity + the mail-review configuration over the REST API (bootstrap admin).
+        RunAsPrincipalId = await CreateCorePrincipalAsync("E2E Mail Trigger", "User");
+        var studioApiKey = await CreateCoreServiceKeyAsync("E2E Workflow Studio", "Operator");
+        MailReviewConfigurationId = await CreateMailReviewConfigurationAsync();
+
+        // --- Runner: Mongo-backed execution plane. Resolves every slot JIT from the Core. ---
+        Runner = new ContainerBuilder(WorkflowDispatchEnvironment.RunnerImageName)
             .WithNetwork(_network)
             .WithBindMount(DockerSocket, DockerSocket)
             .WithBindMount(_publishDir, ContainerPluginsDir)
-            // Shared run-output root: the SI sees /run-output, the Docker daemon (and thus
-            // workflow containers) see the same directory via its HOST path.
             .WithBindMount(_runOutputDir, ContainerRunOutput)
-            // Shared workspace root (ARCHITECTURE §9): same split for per-run repository clones.
             .WithBindMount(_workspaceDir, ContainerWorkspaces)
             .WithEnvironment("RabbitMq__Host",     RabbitMqAlias)
             .WithEnvironment("RabbitMq__Port",     "5672")
             .WithEnvironment("RabbitMq__UserName", "guest")
             .WithEnvironment("RabbitMq__Password", "guest")
+            // Slots resolve just-in-time from the Core over HTTP (no local credential store).
+            .WithEnvironment("WorkflowDispatcher__CoreApiBaseAddress", $"http://{CoreApiAlias}:8080")
             .WithEnvironment("WorkflowLauncher__NetworkName",      NetworkName)
             .WithEnvironment("WorkflowLauncher__RabbitMqHost",     RabbitMqAlias)
             .WithEnvironment("WorkflowLauncher__RabbitMqPort",     "5672")
             .WithEnvironment("WorkflowLauncher__RabbitMqUserName", "guest")
             .WithEnvironment("WorkflowLauncher__RabbitMqPassword", "guest")
             .WithEnvironment("WorkflowLauncher__ExtraEnvironmentVariables__AUXILIA_DEVELOPER_MODE", "1")
-            // Coding-session runs use the baked stub CLI (cost rule: never real AI in tests);
-            // the stub stays alive this long so the live web terminal is observable.
-            .WithEnvironment("WorkflowLauncher__ExtraEnvironmentVariables__CODING_SESSION_CLI", "claude-session-stub")
-            .WithEnvironment("WorkflowLauncher__ExtraEnvironmentVariables__STUB_SESSION_SECONDS", SessionStubSeconds.ToString())
+            // Provider plugin DLLs the launcher copies into the workflow container per provider type.
+            .WithEnvironment("WorkflowLauncher__SlotPackages__fake-code-review-happy",
+                $"{ContainerPluginsDir}/Auxilia.FakeSlots.CodeReview.Happy.slothandler.dll")
+            .WithEnvironment("WorkflowLauncher__SlotPackages__email-work-items",
+                $"{ContainerPluginsDir}/Auxilia.Slots.Email.slothandler.dll")
+            .WithEnvironment("WorkflowLauncher__SlotPackages__claude-code-cli",
+                $"{ContainerPluginsDir}/Auxilia.Slots.ClaudeCode.slothandler.dll")
             .WithEnvironment("WorkflowDispatcher__CommandQueueName",        CommandQueue)
             .WithEnvironment("WorkflowDispatcher__RegistrationQueueName",   "workflow-registration-e2e")
             .WithEnvironment("WorkflowDispatcher__AnnouncementQueueName",   "workflow.announcements-e2e")
@@ -241,254 +242,55 @@ public class EndToEndEnvironment
             .WithEnvironment("WorkflowDispatcher__RunOutputHostDirectory",  _runOutputDir)
             .WithEnvironment("WorkflowDispatcher__WorkspaceRootDirectory",     ContainerWorkspaces)
             .WithEnvironment("WorkflowDispatcher__WorkspaceRootHostDirectory", _workspaceDir)
-            // Long-living workflows need operator approval to register (ARCHITECTURE §6); the
-            // interactive coding session is the platform's one long-living type.
-            .WithEnvironment("WorkflowDispatcher__ApprovedLongLivingWorkflowTypes__0", CodingSessionWorkflowType)
             .WithEnvironment("PlatformData__Backend",               "MongoDb")
             .WithEnvironment("PlatformData__MongoConnectionString", $"mongodb://{MongoAlias}:27017")
-            .WithWaitStrategy(Wait.ForUnixContainer()
-                .UntilMessageIsLogged("WorkflowDispatcher started")
-                .UntilMessageIsLogged("SlotConfigurationSeedHandler started"))
+            .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("WorkflowDispatcher started"))
             .Build();
 
-        var backendBuilder = new ContainerBuilder(BackendImageName)
+        // --- Studio: email adapter + triggers, dispatching via the Core Run API. ---
+        // Studio reads the mailbox trigger + slot instance from its own DB (this Mongo) and drives runs
+        // through the Core using the service API key granted run.on-behalf-of (Operator role).
+        var studioBuilder = new ContainerBuilder(StudioImageName)
             .WithNetwork(_network)
-            // The dashboard is host-reachable so an operator (or Scripts/Run-SystemTests.ps1)
-            // can watch a run live in the browser while the test executes.
-            .WithPortBinding(8080, assignRandomHostPort: true)
             .WithEnvironment("RabbitMq__Host",     RabbitMqAlias)
             .WithEnvironment("RabbitMq__Port",     "5672")
             .WithEnvironment("RabbitMq__UserName", "guest")
             .WithEnvironment("RabbitMq__Password", "guest")
+            .WithEnvironment("Core__BaseAddress", $"http://{CoreApiAlias}:8080")
+            .WithEnvironment("Core__ApiKey",      studioApiKey)
             .WithEnvironment("PlatformData__Backend",               "MongoDb")
             .WithEnvironment("PlatformData__MongoConnectionString", $"mongodb://{MongoAlias}:27017")
-            .WithEnvironment("PlatformHost__CommandQueueName",      CommandQueue)
-            .WithEnvironment("Governance__BootstrapAdminUsername",  "admin")
-            .WithEnvironment("Governance__BootstrapAdminPassword",  "e2e-admin-pw")
-            // Which mailboxes exist is platform data (mailbox trigger records referencing
-            // email slot instances) — only the dispatch queue and sweep tick are deployment config.
-            .WithEnvironment("MailboxTriggers__CommandQueueName",    CommandQueue)
-            .WithEnvironment("MailboxTriggers__TickSeconds",         "1")
-            .WithWaitStrategy(Wait.ForUnixContainer()
-                .UntilMessageIsLogged("HeartbeatMonitor started")
-                .UntilMessageIsLogged("Email task source started"));
-        if (DataVolumeName is { Length: > 0 } keysVolume)
-            backendBuilder = backendBuilder
-                // Login cookies stay valid across restarts only when the signing keys do.
-                .WithVolumeMount(keysVolume + "-dpkeys", "/keys")
-                .WithEnvironment("DataProtection__KeysPath", "/keys");
-        Backend = backendBuilder.Build();
+            // Adapter sweep tick; each trigger additionally honours its own poll interval.
+            .WithEnvironment("MailboxTriggers__TickSeconds", "1")
+            .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("Email task source started"));
+        Studio = studioBuilder.Build();
 
-        await Task.WhenAll(SteeringInstance.StartAsync(), Backend.StartAsync());
+        await Task.WhenAll(Runner.StartAsync(), Studio.StartAsync());
 
         MessageBusClient = await RabbitMqClient.CreateAsync(
             _rabbitMq.Hostname, _rabbitMq.GetMappedPublicPort(5672));
 
-        // Seed slot providers and configurations via the SI's per-instance seed queues
-        // (targeted delivery — no fanout collisions with other environments).
-        var seedBase = CommandQueue + "-slot-seed";
-        // The published manifest sidecars are the source of truth for setting descriptors,
-        // capability contracts, and categories — registration carries them into the records.
-        var fakeManifest = System.Text.Json.JsonSerializer.Deserialize<Auxilia.Workflows.PluginManifest>(
-            await File.ReadAllTextAsync(Path.Combine(_publishDir, "Auxilia.FakeSlots.CodeReview.Happy.slothandler.manifest.json")))!;
-        await MessageBusClient.PublishAsync(seedBase + ".register",
-            new RegisterSlotProviderCommand(
-                "fake-code-review-happy",
-                $"{ContainerPluginsDir}/Auxilia.FakeSlots.CodeReview.Happy.slothandler.dll",
-                fakeManifest.Settings, fakeManifest.Contracts, fakeManifest.Category, fakeManifest.Description));
-        var emailManifest = System.Text.Json.JsonSerializer.Deserialize<Auxilia.Workflows.PluginManifest>(
-            await File.ReadAllTextAsync(Path.Combine(_publishDir, "Auxilia.Slots.Email.slothandler.manifest.json")))!;
-        await MessageBusClient.PublishAsync(seedBase + ".register",
-            new RegisterSlotProviderCommand(
-                "email-work-items",
-                $"{ContainerPluginsDir}/Auxilia.Slots.Email.slothandler.dll",
-                emailManifest.Settings, emailManifest.Contracts, emailManifest.Category, emailManifest.Description));
-
-        foreach (var slotName in new[] { "repository", "pull-request", "primary-reviewer",
-                                          "secondary-reviewer", "workflow-bootstrap" })
-            await MessageBusClient.PublishAsync(seedBase + ".upsert",
-                new UpsertSlotConfigurationCommand(
-                    WorkflowType, slotName, "fake-code-review-happy",
-                    new Dictionary<string, string>()));
-
-        // The work-items slot is the REAL email provider: the triggering mail is the work
-        // item, write-back comments become mail replies (container-internal endpoints).
-        await MessageBusClient.PublishAsync(seedBase + ".upsert",
-            new UpsertSlotConfigurationCommand(
-                WorkflowType, "work-items", "email-work-items",
-                new Dictionary<string, string>
-                {
-                    ["ImapHost"] = GreenMailAlias,
-                    ["ImapPort"] = ImapPort.ToString(),
-                    ["UseSsl"]   = "false",
-                    ["Username"] = AdapterMailbox,
-                    ["Password"] = MailboxPassword,
-                    ["SmtpHost"] = GreenMailAlias,
-                    ["SmtpPort"] = SmtpPort.ToString(),
-                    ["Folder"]   = "INBOX"
-                }));
-
-        // The e2e dependency fakes are pure test scaffolding — the presentation catalog stays clean.
-        var dependencyBindings = PresentationMode
-            ? []
-            : await SeedEmailSlotDependenciesAsync(seedBase);
-
-        // The Claude Code workflow: the REAL claude-code-cli provider, pointed at the
-        // in-image stub CLI (cost rule — a real key run stays a manual dev-stand exercise).
-        var claudeManifest = System.Text.Json.JsonSerializer.Deserialize<Auxilia.Workflows.PluginManifest>(
-            await File.ReadAllTextAsync(Path.Combine(_publishDir, "Auxilia.Slots.ClaudeCode.slothandler.manifest.json")))!;
-        await MessageBusClient.PublishAsync(seedBase + ".register",
-            new RegisterSlotProviderCommand(
-                "claude-code-cli",
-                $"{ContainerPluginsDir}/Auxilia.Slots.ClaudeCode.slothandler.dll",
-                claudeManifest.Settings, claudeManifest.Contracts, claudeManifest.Category, claudeManifest.Description));
-        var codingSessionManifest = System.Text.Json.JsonSerializer.Deserialize<Auxilia.Workflows.PluginManifest>(
-            await File.ReadAllTextAsync(Path.Combine(_publishDir, "Auxilia.Slots.CodingSession.slothandler.manifest.json")))!;
-        await MessageBusClient.PublishAsync(seedBase + ".register",
-            new RegisterSlotProviderCommand(
-                "coding-session-workspace",
-                $"{ContainerPluginsDir}/Auxilia.Slots.CodingSession.slothandler.dll",
-                codingSessionManifest.Settings, codingSessionManifest.Contracts,
-                codingSessionManifest.Category, codingSessionManifest.Description));
-        var gitHubManifest = System.Text.Json.JsonSerializer.Deserialize<Auxilia.Workflows.PluginManifest>(
-            await File.ReadAllTextAsync(Path.Combine(_publishDir, "Auxilia.Slots.GitHub.slothandler.manifest.json")))!;
-        await MessageBusClient.PublishAsync(seedBase + ".register",
-            new RegisterSlotProviderCommand(
-                "github-repository",
-                $"{ContainerPluginsDir}/Auxilia.Slots.GitHub.slothandler.dll",
-                gitHubManifest.Settings, gitHubManifest.Contracts, gitHubManifest.Category, gitHubManifest.Description));
-        await MessageBusClient.PublishAsync(seedBase + ".upsert",
-            new UpsertSlotConfigurationCommand(
-                ClaudeWorkflowType, "coding-agent", "claude-code-cli",
-                new Dictionary<string, string>
-                {
-                    ["ApiKey"]   = "e2e-stub-key",
-                    ["CliPath"]  = ClaudeStubCliPath,
-                    ["MaxTurns"] = "5"
-                }));
-
-        // A reusable slot instance ("configure the mailbox once, bind it anywhere") — the
-        // slots page and the configuration editor offer it for IWorkItemAccess slots.
-        await MessageBusClient.PublishAsync(seedBase + ".upsert-instance",
-            new UpsertSlotInstanceCommand(
-                "team-mailbox", "Team mailbox", "email-work-items",
-                new Dictionary<string, string>
-                {
-                    ["ImapHost"] = GreenMailAlias,
-                    ["ImapPort"] = ImapPort.ToString(),
-                    ["UseSsl"]   = "false",
-                    ["Username"] = AdapterMailbox,
-                    ["Password"] = MailboxPassword,
-                    ["SmtpHost"] = GreenMailAlias,
-                    ["SmtpPort"] = SmtpPort.ToString(),
-                    ["Folder"]   = "INBOX"
-                }));
-
-        // The configuration upsert validates the referenced instance — wait until the SI has
-        // applied the instance upsert (separate seed queues give no ordering guarantee).
+        // Seed Studio's trigger data into its Mongo: a reusable mailbox slot instance (the credential)
+        // and the mailbox trigger that points at the Core mail-review configuration.
         await using (var provider = BuildPlatformDataProvider())
         {
-            var instanceRecords = provider.GetRequiredService<IDataAccess<SlotInstanceRecord>>();
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
-            while (DateTime.UtcNow < deadline
-                   && await instanceRecords.ReadAsync(SlotInstanceRecord.IdFor("team-mailbox")) is null)
-                await Task.Delay(200);
-        }
-
-        // Presentation stand: stop after the reusable instance — no pre-built configuration,
-        // no mail-review trigger; the demo-able packages (session pair + Claude Code) are
-        // registered so the editor can configure them live.
-        if (PresentationMode)
-        {
-            await MessageBusClient.PublishAsync(seedBase + ".register-package",
-                new RegisterWorkflowPackageCommand(
-                    CodingSessionWorkflowType, CodingSessionPackageUri, "Live coding session",
-                    SchemaJson: await EmitSchemaAsync(CodingSessionImageName)));
-            await MessageBusClient.PublishAsync(seedBase + ".register-package",
-                new RegisterWorkflowPackageCommand(
-                    SessionNotifierWorkflowType, SessionNotifierPackageUri, "Session summary mail",
-                    SchemaJson: await EmitSchemaAsync(SessionNotifierImageName)));
-            await MessageBusClient.PublishAsync(seedBase + ".register-package",
-                new RegisterWorkflowPackageCommand(
-                    ClaudeWorkflowType, ClaudeWorkflowPackageUri, "Claude Code",
-                    SchemaJson: await EmitSchemaAsync(ClaudeWorkflowImageName)));
-
-            // "Platform ready" means the demo providers are already available in the catalog
-            // (availability is deny-by-default). Existing records are left untouched so a
-            // --keep-data stand keeps the admin's curation across restarts; the code-review
-            // fakes stay hidden — they are test scaffolding, not part of the presentation.
-            await using (var provider = BuildPlatformDataProvider())
+            var instances = provider.GetRequiredService<IDataAccess<SlotInstanceRecord>>();
+            // Studio runs without a protection key (NullSettingsProtector) — plain settings JSON is
+            // the correct stored format here.
+            await instances.SaveAsync(new SlotInstanceRecord
             {
-                var catalogRecords = provider.GetRequiredService<IDataAccess<ProviderCatalogRecord>>();
-                foreach (var providerType in new[]
-                         {
-                             "claude-code-cli", "coding-session-workspace",
-                             "email-work-items", "github-repository"
-                         })
-                {
-                    if (await catalogRecords.ReadAsync(ProviderCatalogRecord.IdFor(providerType)) is null)
-                        await catalogRecords.SaveAsync(new ProviderCatalogRecord
-                        {
-                            Id = ProviderCatalogRecord.IdFor(providerType),
-                            ProviderType = providerType,
-                            Available = true
-                        });
-                }
-            }
+                Id = SlotInstanceRecord.IdFor("team-mailbox"),
+                Name = "team-mailbox",
+                DisplayName = "Team mailbox",
+                ProviderType = "email-work-items",
+                ProtectedSettingsJson = System.Text.Json.JsonSerializer.Serialize(EmailSettings())
+            });
 
-            await Task.Delay(TimeSpan.FromMilliseconds(500)); // seed propagation window
-            return;
-        }
-
-        // The mail-triggered path is configuration-first: a named configuration binds the
-        // fakes plus the reusable mailbox instance, and a mailbox trigger record points the
-        // adapter at it. No workflow lives in appsettings.
-        await MessageBusClient.PublishAsync(seedBase + ".upsert-configuration",
-            new UpsertWorkflowConfigurationCommand(
-                MailReviewConfigurationName, "Mail-triggered code review",
-                WorkflowType, WorkflowPackageUri, Enabled: true,
-                new List<SlotBindingSeed>
-                {
-                    new("repository", "fake-code-review-happy", new Dictionary<string, string>()),
-                    new("pull-request", "fake-code-review-happy", new Dictionary<string, string>()),
-                    new("primary-reviewer", "fake-code-review-happy", new Dictionary<string, string>()),
-                    new("secondary-reviewer", "fake-code-review-happy", new Dictionary<string, string>()),
-                    new("work-items", "", new Dictionary<string, string>(),
-                        SlotInstanceRecord.IdFor("team-mailbox"))
-                }.Concat(dependencyBindings).ToList(),
-                RunAsPrincipalId));
-
-        // The live coding-session configuration. Both slots use the dedicated coding-session
-        // provider whose only dependencies are assemblies baked into the coding-session image
-        // (repository -> the mounted workspace path; work-items is optional but the SDK activates
-        // every DECLARED slot, so it must be bound). The code-review/Email providers are unusable
-        // here: their plugin DLLs drag CodeReview.Workflow / the mail stack, which the leaner
-        // coding-session image doesn't carry, so the plugin loader's type scan would fail.
-        await MessageBusClient.PublishAsync(seedBase + ".upsert-configuration",
-            new UpsertWorkflowConfigurationCommand(
-                CodingSessionConfigurationName, "Live coding session",
-                CodingSessionWorkflowType, CodingSessionPackageUri, Enabled: true,
-                new List<SlotBindingSeed>
-                {
-                    new("repository", "coding-session-workspace", new Dictionary<string, string>()),
-                    new("work-items", "coding-session-workspace", new Dictionary<string, string>()),
-                    // The session's account slot; the CODING_SESSION_CLI launcher env keeps
-                    // the stub CLI in charge, so the stub key is never exercised.
-                    new("coding-agent", "claude-code-cli", new Dictionary<string, string>
-                    {
-                        ["ApiKey"] = "e2e-stub-key",
-                        ["CliPath"] = ClaudeStubCliPath
-                    })
-                },
-                RunAsPrincipalId));
-
-        await using (var provider = BuildPlatformDataProvider())
-        {
             await provider.GetRequiredService<IDataAccess<MailboxTriggerRecord>>()
                 .SaveAsync(new MailboxTriggerRecord
                 {
                     Id = MailboxTriggerId,
-                    WorkflowConfigurationId = WorkflowConfigurationRecord.IdFor(MailReviewConfigurationName),
+                    WorkflowConfigurationId = MailReviewConfigurationId,
                     SlotInstanceId = SlotInstanceRecord.IdFor("team-mailbox"),
                     PollIntervalSeconds = 2,
                     Enabled = true,
@@ -496,136 +298,94 @@ public class EndToEndEnvironment
                 });
         }
 
-        // Workflow registry: register both baked packages with their emitted schemas so the
-        // configuration editor offers them (slots included) before any run happened.
-        await MessageBusClient.PublishAsync(seedBase + ".register-package",
-            new RegisterWorkflowPackageCommand(
-                WorkflowType, WorkflowPackageUri, "Pull-request code review",
-                SchemaJson: await EmitSchemaAsync(WorkflowImageName)));
-        await MessageBusClient.PublishAsync(seedBase + ".register-package",
-            new RegisterWorkflowPackageCommand(
-                ClaudeWorkflowType, ClaudeWorkflowPackageUri, "Claude Code",
-                SchemaJson: await EmitSchemaAsync(ClaudeWorkflowImageName)));
-        // The live coding-session pair: the interactive session and its chained notifier.
-        await MessageBusClient.PublishAsync(seedBase + ".register-package",
-            new RegisterWorkflowPackageCommand(
-                CodingSessionWorkflowType, CodingSessionPackageUri, "Live coding session",
-                SchemaJson: await EmitSchemaAsync(CodingSessionImageName)));
-        await MessageBusClient.PublishAsync(seedBase + ".register-package",
-            new RegisterWorkflowPackageCommand(
-                SessionNotifierWorkflowType, SessionNotifierPackageUri, "Session summary mail",
-                SchemaJson: await EmitSchemaAsync(SessionNotifierImageName)));
-
         await Task.Delay(TimeSpan.FromMilliseconds(500)); // seed propagation window
     }
 
-    /// <summary>
-    /// Captures a baked workflow image's schema via its SDK <c>--emit-schema</c> mode (prints
-    /// the schema JSON and exits without touching the message bus). Returns null when the run
-    /// fails — package registration then simply carries no schema.
-    /// </summary>
-    private static async Task<string?> EmitSchemaAsync(string imageName)
+    /// <summary>The GreenMail IMAP/SMTP settings shape shared by the slot instance and the config binding.</summary>
+    private static Dictionary<string, string> EmailSettings() => new()
     {
-        var psi = new ProcessStartInfo("docker", $"run --rm {imageName} --emit-schema")
+        ["ImapHost"] = GreenMailAlias,
+        ["ImapPort"] = ImapPort.ToString(),
+        ["UseSsl"]   = "false",
+        ["Username"] = AdapterMailbox,
+        ["Password"] = MailboxPassword,
+        ["SmtpHost"] = GreenMailAlias,
+        ["SmtpPort"] = SmtpPort.ToString(),
+        ["Folder"]   = "INBOX"
+    };
+
+    /// <summary>Creates a Core AI/service principal and assigns it a built-in role. Returns its id.</summary>
+    private static async Task<Guid> CreateCorePrincipalAsync(string displayName, string role)
+    {
+        var resp = await CoreApiClient.PostAsJsonAsync(
+            "/api/principals/ai", new CreateApiKeyPrincipalRequest(displayName, "Service"));
+        resp.EnsureSuccessStatusCode();
+        var created = (await resp.Content.ReadFromJsonAsync<CreatedApiKeyPrincipal>())!;
+        await AssignRoleAsync(created.Principal.Id, role);
+        return created.Principal.Id;
+    }
+
+    /// <summary>Like <see cref="CreateCorePrincipalAsync"/> but returns the one-time API key.</summary>
+    private static async Task<string> CreateCoreServiceKeyAsync(string displayName, string role)
+    {
+        var resp = await CoreApiClient.PostAsJsonAsync(
+            "/api/principals/ai", new CreateApiKeyPrincipalRequest(displayName, "Service"));
+        resp.EnsureSuccessStatusCode();
+        var created = (await resp.Content.ReadFromJsonAsync<CreatedApiKeyPrincipal>())!;
+        await AssignRoleAsync(created.Principal.Id, role);
+        return created.ApiKey;
+    }
+
+    private static async Task AssignRoleAsync(Guid principalId, string role)
+    {
+        var resp = await CoreApiClient.PostAsJsonAsync(
+            $"/api/principals/{principalId}/roles", new AssignRoleRequest(role));
+        resp.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>
+    /// Creates the mail-review Core configuration with full slot bindings so the Core resolves every
+    /// slot just-in-time: the code-review slots to the happy fake, the work-items slot to the real
+    /// email provider (its IMAP/SMTP settings inline). Returns the Core-assigned configuration id.
+    /// </summary>
+    private static async Task<Guid> CreateMailReviewConfigurationAsync()
+    {
+        var bindings = new List<SlotBinding>
         {
-            RedirectStandardOutput = true,
-            RedirectStandardError  = true,
-            UseShellExecute        = false
+            new("repository",         "fake-code-review-happy"),
+            new("pull-request",       "fake-code-review-happy"),
+            new("primary-reviewer",   "fake-code-review-happy"),
+            new("secondary-reviewer", "fake-code-review-happy"),
+            new("workflow-bootstrap", "fake-code-review-happy"),
+            new("work-items",         "email-work-items", Settings: EmailSettings())
         };
-
-        using var process = Process.Start(psi);
-        if (process is null)
-            return null;
-
-        var stdout = await process.StandardOutput.ReadToEndAsync();
-        _ = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        if (process.ExitCode != 0)
-        {
-            await Console.Error.WriteLineAsync(
-                $"--emit-schema for {imageName} exited with {process.ExitCode}; registering without schema.");
-            return null;
-        }
-
-        // The schema is the last JSON line — anything before it is incidental startup output.
-        return stdout
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .LastOrDefault(line => line.StartsWith('{'));
+        var resp = await CoreApiClient.PostAsJsonAsync("/api/configurations",
+            new CreateRunConfiguration(
+                MailReviewConfigurationName, WorkflowType, WorkflowPackageUri,
+                Context: new Dictionary<string, string>(), SlotBindings: bindings));
+        resp.EnsureSuccessStatusCode();
+        var config = (await resp.Content.ReadFromJsonAsync<RunConfiguration>())!;
+        return config.Id;
     }
 
     /// <summary>
-    /// The platform copies exactly the (dll, manifest) pair of every provider referenced by
-    /// the workflow's slot configurations into the workflow container — no dependency
-    /// closure (the fake providers never needed one; their dependencies coincide with the
-    /// workflow image's own assemblies). The REAL email provider additionally needs its mail
-    /// stack next to the handler DLL, so each dependency assembly from the publish output is
-    /// registered as an auxiliary provider wired to an unused slot name; the dispatcher then
-    /// ships the file with the launch and plugin discovery ignores it (not *.slothandler.dll).
-    /// </summary>
-    private async Task<List<SlotBindingSeed>> SeedEmailSlotDependenciesAsync(string seedBase)
-    {
-        string[] dependencyAssemblies =
-        [
-            "Auxilia.Adapters.Email.dll",
-            "MailKit.dll",
-            "MimeKit.dll",
-            "BouncyCastle.Cryptography.dll",
-            "System.Formats.Asn1.dll"
-        ];
-
-        var bindings = new List<SlotBindingSeed>();
-        var index = 0;
-        foreach (var assembly in dependencyAssemblies)
-        {
-            if (!File.Exists(Path.Combine(_publishDir, assembly)))
-                continue;
-
-            // The dispatcher always pairs a DLL with "<basename>.manifest.json" — create an
-            // inert stub so the file copy succeeds (never loaded as a plugin in the container).
-            var providerType = $"e2e-dep-{index}";
-            var stubName = Path.GetFileNameWithoutExtension(assembly) + ".manifest.json";
-            await File.WriteAllTextAsync(
-                Path.Combine(_publishDir, stubName),
-                $$"""{ "ProviderType": "{{providerType}}", "ContentHashBase64": "", "SignatureBase64": "", "PublicKeyBase64": "" }""");
-
-            await MessageBusClient.PublishAsync(seedBase + ".register",
-                new RegisterSlotProviderCommand(providerType, $"{ContainerPluginsDir}/{assembly}"));
-            await MessageBusClient.PublishAsync(seedBase + ".upsert",
-                new UpsertSlotConfigurationCommand(
-                    WorkflowType, $"e2e-dependency-{index}", providerType,
-                    new Dictionary<string, string>()));
-            bindings.Add(new SlotBindingSeed(
-                $"e2e-dependency-{index}", providerType, new Dictionary<string, string>()));
-            index++;
-        }
-
-        return bindings;
-    }
-
-    /// <summary>
-    /// Direct access to the shared platform state over the mapped Mongo port — the same
-    /// database (and DatabaseName "Auxilia") the services use via AddPlatformEntity.
+    /// Direct access to the shared Mongo state over the mapped port — the same database
+    /// (DatabaseName "Auxilia") Studio and the Runner use via AddPlatformEntity.
     /// </summary>
     public static ServiceProvider BuildPlatformDataProvider()
     {
         var services = new ServiceCollection();
-        AddEntity<PrincipalRecord>(services);
-        AddEntity<RoleAssignmentRecord>(services);
-        AddEntity<CredentialRecord>(services);
-        AddEntity<AuditRecord>(services);
         AddEntity<ArtifactRecord>(services);
         AddEntity<ViewDataRecord>(services);
         AddEntity<WorkflowInstanceRecord>(services);
-        AddEntity<SlotProviderRecord>(services);
-        AddEntity<ProviderCatalogRecord>(services);
-        AddEntity<IdentitySourceRecord>(services);
-        AddEntity<WorkflowConfigurationRecord>(services);
-        AddEntity<ScheduledTriggerRecord>(services);
+        // Studio (trigger.mail-dispatch) and the Runner (registration/slot/artifact) both write audit
+        // records into this shared Mongo DB. Core.Api's policy/on-behalf-of audit is in its own store
+        // and is read over the /api/audit REST endpoint instead.
+        AddEntity<AuditRecord>(services);
         AddEntity<MailboxTriggerRecord>(services);
         AddEntity<SlotInstanceRecord>(services);
+        AddEntity<TriggerHealthRecord>(services);
         services.AddSingleton(TimeProvider.System);
-        services.AddSingleton<AuditLog>();
-        services.AddSingleton<PrincipalDirectory>();
         return services.BuildServiceProvider();
 
         static void AddEntity<TEntity>(IServiceCollection services)
@@ -648,15 +408,18 @@ public class EndToEndEnvironment
     [OneTimeTearDown]
     public async Task OneTimeTearDown()
     {
+        CoreApiClient?.Dispose();
         if (MessageBusClient is IAsyncDisposable d) await d.DisposeAsync();
-        await Backend.DisposeAsync();
-        await SteeringInstance.DisposeAsync();
+        if (Studio  is not null) await Studio.DisposeAsync();
+        if (CoreApi is not null) await CoreApi.DisposeAsync();
+        if (Runner  is not null) await Runner.DisposeAsync();
         await _greenMail.DisposeAsync();
         await _rabbitMq.DisposeAsync();
         await _mongoDb.DisposeAsync();
         await _network.DisposeAsync();
         TryDelete(_publishDir);
         TryDelete(_runOutputDir);
+        TryDelete(_workspaceDir);
     }
 
     private static void TryDelete(string directory)
@@ -674,9 +437,8 @@ public class EndToEndEnvironment
 
     private static async Task PublishProjectAsync(string projectRelativePath, string outputDir)
     {
-        // -nodeReuse:false + UseSharedCompilation=false: persistent MSBuild/Roslyn worker
-        // processes inherit the redirected stdout/stderr pipes; with node reuse the workers
-        // outlive the publish and ReadToEndAsync stalls until their idle timeout (~15 min).
+        // -nodeReuse:false + UseSharedCompilation=false: persistent MSBuild/Roslyn workers inherit the
+        // redirected pipes; with node reuse they outlive the publish and ReadToEndAsync stalls.
         var psi = new ProcessStartInfo("dotnet",
             $"publish {projectRelativePath} -c Release -o {outputDir} --no-self-contained -nodeReuse:false -p:UseSharedCompilation=false")
         {

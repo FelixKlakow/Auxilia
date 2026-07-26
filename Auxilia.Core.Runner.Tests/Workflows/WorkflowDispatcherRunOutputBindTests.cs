@@ -3,7 +3,7 @@ using Auxilia.Core.Runner.Workflows;
 namespace Auxilia.Core.Runner.Tests.Workflows;
 
 /// <summary>
-/// Path selection for the run-output bind source (containerized Steering Instance support):
+/// Path selection for the run-output bind source (containerized Core.Runner support):
 /// without a host directory the local RunOutputDirectory is the bind source; with one, the
 /// launcher gets the host view while the dispatcher keeps its container-local view.
 /// </summary>

@@ -15,6 +15,9 @@ namespace Auxilia.Core.Api.Auth;
 /// </summary>
 public static class CoreAuthExtensions
 {
+    /// <summary>Authorization policy that accepts ONLY an interactive session cookie (for <c>POST /auth/token</c>).</summary>
+    public const string CookieSessionPolicy = "CookieSession";
+
     public static IServiceCollection AddCoreAuthentication(
         this IServiceCollection services, IConfiguration configuration)
     {
@@ -29,6 +32,11 @@ public static class CoreAuthExtensions
         });
 
         auth.AddScheme<AuthenticationSchemeOptions, CoreApiKeyAuthenticationHandler>(AuthSchemes.ApiKey, null);
+
+        // Per-user bearer: a delegated console calling AS the signed-in user. A distinct token shape
+        // (auxu_…) and scheme from the API key, minted by POST /auth/token from a live cookie session.
+        services.AddSingleton<UserBearerTokenService>();
+        auth.AddScheme<AuthenticationSchemeOptions, CoreUserBearerAuthenticationHandler>(AuthSchemes.UserBearer, null);
 
         auth.AddCookie(AuthSchemes.Cookie, options =>
         {
@@ -94,12 +102,18 @@ public static class CoreAuthExtensions
             });
         }
 
-        // Protected endpoints accept either the API key or a session cookie; the resolved principal
-        // is the same either way. No credentials → the default (API-key) challenge → 401.
+        // Protected endpoints accept the API key, a per-user bearer, or a session cookie; the resolved
+        // principal is the same either way. No credentials → the default (API-key) challenge → 401.
         services.AddAuthorizationBuilder()
-            .SetDefaultPolicy(new AuthorizationPolicyBuilder(AuthSchemes.ApiKey, AuthSchemes.Cookie)
-                .RequireAuthenticatedUser()
-                .Build());
+            .SetDefaultPolicy(
+                new AuthorizationPolicyBuilder(AuthSchemes.ApiKey, AuthSchemes.UserBearer, AuthSchemes.Cookie)
+                    .RequireAuthenticatedUser()
+                    .Build())
+            // A per-user bearer is minted ONLY from an interactive cookie session — never from an API
+            // key or another bearer — so a service principal cannot self-issue a user-scoped token.
+            .AddPolicy(CookieSessionPolicy, policy => policy
+                .AddAuthenticationSchemes(AuthSchemes.Cookie)
+                .RequireAuthenticatedUser());
 
         return services;
     }

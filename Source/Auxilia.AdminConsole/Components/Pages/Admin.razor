@@ -1,0 +1,342 @@
+@page "/admin"
+@attribute [Authorize]
+@inject ICoreClient Core
+
+<PageTitle>Principals — Auxilia</PageTitle>
+
+<PageHeader Title="Principals"
+            Subtitle="Everyone — and everything — that can act on this platform: people, services, and AI agents."/>
+
+@if (!_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else if (_denied)
+{
+    <div class="panel denied">Access denied: @_error</div>
+}
+else
+{
+    @if (_error is { Length: > 0 })
+    {
+        <div class="panel denied">@_error</div>
+    }
+    @if (_createdApiKey is not null)
+    {
+        <div class="panel success">
+            API key for the new principal — shown once, copy it now:
+            <code class="api-key">@_createdApiKey</code>
+        </div>
+    }
+
+    <div class="toolbar">
+        <label>
+            Kind
+            <select @bind="_kind">
+                <option value="">any</option>
+                <option value="Human">Human</option>
+                <option value="AiAgent">AiAgent</option>
+                <option value="Service">Service</option>
+            </select>
+        </label>
+        <label>
+            Status
+            <select @bind="_enabled">
+                <option value="">any</option>
+                <option value="true">enabled</option>
+                <option value="false">disabled</option>
+            </select>
+        </label>
+        <label>
+            Search
+            <input @bind="_search" placeholder="name / subject"/>
+        </label>
+        <button class="btn btn-secondary" @onclick="ApplyAsync">Apply</button>
+    </div>
+
+    <section class="card">
+        <div class="card-header">
+            <h2>Principals</h2>
+        </div>
+        @if (_principals.Count == 0)
+        {
+            <div class="card-body"><p class="muted view-empty">No principals match the current filter.</p></div>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Kind</th>
+                    <th>Status</th>
+                    <th>Roles</th>
+                    <th>Actions</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var principal in _principals)
+                {
+                    var directRoles = principal.Roles.Where(r => r.Source == "Direct").Select(r => r.RoleName).ToList();
+                    var held = principal.Roles.Select(r => r.RoleName).ToHashSet(StringComparer.Ordinal);
+                    var assignable = BuiltInRoles.Except(held).ToList();
+                    <tr>
+                        <td>
+                            <span class="cell-strong">@principal.DisplayName</span>
+                            @if (principal.ExternalSubject is { Length: > 0 } subject)
+                            {
+                                <span class="cell-sub">@subject</span>
+                            }
+                        </td>
+                        <td>@principal.Kind</td>
+                        <td>
+                            <span class="badge badge-state @(IsActive(principal) ? "badge-success" : "badge-cancelled")">
+                                @principal.Status
+                            </span>
+                        </td>
+                        <td>
+                            @foreach (var role in principal.Roles.OrderBy(r => r.RoleName))
+                            {
+                                <span class="badge badge-role" title="@role.Source">
+                                    @role.RoleName
+                                    @if (role.Source == "Direct")
+                                    {
+                                        <button class="chip-x" title="Revoke role"
+                                                @onclick="() => RevokeRoleAsync(principal.Id, role.RoleName)">✕</button>
+                                    }
+                                </span>
+                            }
+                        </td>
+                        <td>
+                            <div class="cell-actions">
+                                @if (assignable.Count > 0)
+                                {
+                                    <select class="select-inline" @bind="_roleSelections[principal.Id]">
+                                        @foreach (var role in assignable)
+                                        {
+                                            <option value="@role">@role</option>
+                                        }
+                                    </select>
+                                    <button class="btn btn-secondary btn-sm" @onclick="() => AssignRoleAsync(principal.Id)" disabled="@_busy">Assign</button>
+                                }
+                                else
+                                {
+                                    <span class="muted">All roles assigned</span>
+                                }
+                                @if (IsActive(principal))
+                                {
+                                    <button class="btn btn-danger btn-sm" @onclick="() => SetEnabledAsync(principal.Id, false)" disabled="@_busy">Disable</button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-secondary btn-sm" @onclick="() => SetEnabledAsync(principal.Id, true)" disabled="@_busy">Enable</button>
+                                }
+                            </div>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            @if (_skip + _principals.Count < _total)
+            {
+                <div class="card-body table-more">
+                    <button class="btn btn-secondary" @onclick="ShowMoreAsync">
+                        Show more (@(_skip + _principals.Count) of @_total)
+                    </button>
+                </div>
+            }
+        }
+    </section>
+
+    <div class="card-row">
+        <section class="card">
+            <div class="card-header">
+                <h2>Create human principal</h2>
+                <p class="card-subtitle">A person who signs in with a username and password.</p>
+            </div>
+            <div class="card-body form-grid">
+                <label>Display name <input @bind="_humanDisplayName"/></label>
+                <label>Username <input @bind="_humanUsername"/></label>
+                <label>Password <input type="password" @bind="_humanPassword"/></label>
+                <div class="button-row">
+                    <button class="btn btn-primary" @onclick="CreateHumanAsync" disabled="@_busy">Create human</button>
+                </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <div class="card-header">
+                <h2>Create AI / service principal</h2>
+                <p class="card-subtitle">
+                    A service or AI agent that authenticates with an API key — the key is shown once after creation.
+                </p>
+            </div>
+            <div class="card-body form-grid">
+                <label>Display name <input @bind="_aiDisplayName" placeholder="e.g. ci-bot"/></label>
+                <label>
+                    Kind
+                    <select @bind="_aiKind">
+                        <option value="AiAgent">AiAgent</option>
+                        <option value="Service">Service</option>
+                    </select>
+                </label>
+                <div class="button-row">
+                    <button class="btn btn-primary" @onclick="CreateAiAsync" disabled="@_busy">Create principal</button>
+                </div>
+            </div>
+        </section>
+    </div>
+}
+
+@code {
+
+    // The four built-in RBAC roles. The Core exposes no "list roles" endpoint (these are fixed platform
+    // roles), so they are enumerated here for the assign dropdown.
+    private static readonly string[] BuiltInRoles = ["Administrator", "Operator", "User", "Auditor"];
+
+    private const int PageSize = 50;
+
+    private bool _loaded;
+    private bool _denied;
+    private bool _busy;
+    private string? _error;
+    private string? _createdApiKey;
+
+    private string _kind = "";
+    private string _enabled = "";
+    private string _search = "";
+
+    private int _skip;
+    private int _total;
+    private List<PrincipalDto> _principals = [];
+    private readonly Dictionary<Guid, string> _roleSelections = new();
+
+    private string _humanDisplayName = "";
+    private string _humanUsername = "";
+    private string _humanPassword = "";
+    private string _aiDisplayName = "";
+    private string _aiKind = "AiAgent";
+
+    private static bool IsActive(PrincipalDto p) => p.Status == "Active";
+
+    protected override Task OnInitializedAsync() => LoadAsync(reset: true);
+
+    private Task ApplyAsync() => LoadAsync(reset: true);
+
+    private Task ShowMoreAsync() => LoadAsync(reset: false);
+
+    private async Task LoadAsync(bool reset)
+    {
+        if (reset)
+        {
+            _skip = 0;
+            _principals = [];
+        }
+
+        var query = new PrincipalQuery(
+            Kind: Empty(_kind),
+            Enabled: _enabled switch { "true" => true, "false" => false, _ => null },
+            Search: Empty(_search),
+            Skip: _skip,
+            Take: PageSize);
+
+        try
+        {
+            var page = await Core.QueryPrincipalsAsync(query);
+            _denied = false;
+            _error = null;
+            _total = page.Total;
+            _principals.AddRange(page.Items);
+            _skip += page.Items.Count;
+            SyncRoleSelections();
+        }
+        catch (CoreApiException ex)
+        {
+            _denied = ex.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+
+        _loaded = true;
+    }
+
+    private void SyncRoleSelections()
+    {
+        foreach (var principal in _principals)
+        {
+            var held = principal.Roles.Select(r => r.RoleName).ToHashSet(StringComparer.Ordinal);
+            var assignable = BuiltInRoles.Except(held).ToList();
+            if (!_roleSelections.TryGetValue(principal.Id, out var selected) || !assignable.Contains(selected))
+                _roleSelections[principal.Id] = assignable.FirstOrDefault() ?? "";
+        }
+    }
+
+    private async Task CreateHumanAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_humanDisplayName) ||
+            string.IsNullOrWhiteSpace(_humanUsername) ||
+            string.IsNullOrWhiteSpace(_humanPassword))
+        {
+            _error = "Display name, username, and password are required.";
+            return;
+        }
+
+        await MutateAsync(async () =>
+        {
+            await Core.CreateHumanPrincipalAsync(
+                new CreateHumanPrincipalRequest(_humanDisplayName.Trim(), _humanUsername.Trim(), _humanPassword));
+            _humanDisplayName = _humanUsername = _humanPassword = "";
+        });
+    }
+
+    private async Task CreateAiAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_aiDisplayName))
+        {
+            _error = "Display name is required.";
+            return;
+        }
+
+        await MutateAsync(async () =>
+        {
+            var created = await Core.CreateApiKeyPrincipalAsync(
+                new CreateApiKeyPrincipalRequest(_aiDisplayName.Trim(), _aiKind));
+            _createdApiKey = created.ApiKey;
+            _aiDisplayName = "";
+        });
+    }
+
+    private Task AssignRoleAsync(Guid id)
+        => MutateAsync(async () =>
+        {
+            if (_roleSelections.TryGetValue(id, out var role) && !string.IsNullOrEmpty(role))
+                await Core.AssignPrincipalRoleAsync(id, new AssignRoleRequest(role));
+        });
+
+    private Task RevokeRoleAsync(Guid id, string role)
+        => MutateAsync(() => Core.RevokePrincipalRoleAsync(id, role));
+
+    private Task SetEnabledAsync(Guid id, bool enabled)
+        => MutateAsync(() => Core.SetPrincipalEnabledAsync(id, new SetPrincipalEnabledRequest(enabled)));
+
+    private async Task MutateAsync(Func<Task> action)
+    {
+        _error = null;
+        _busy = true;
+        try
+        {
+            await action();
+            await LoadAsync(reset: true);
+        }
+        catch (CoreApiException ex)
+        {
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string? Empty(string value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+}

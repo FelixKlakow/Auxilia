@@ -12,6 +12,9 @@
         <ProjectReference Include="..\..\Auxilia.Core.Client\Auxilia.Core.Client.csproj" />
         <ProjectReference Include="..\..\Auxilia.Core.Contracts\Auxilia.Core.Contracts.csproj" />
         <ProjectReference Include="..\..\Auxilia.PlatformData\Auxilia.PlatformData.csproj" />
+        <ProjectReference Include="..\Auxilia.Messaging\Auxilia.Messaging.csproj" />
+        <ProjectReference Include="..\..\Auxilia.Workflows\Auxilia.Workflows.csproj" />
+        <ProjectReference Include="..\Auxilia.Adapters.Email\Auxilia.Adapters.Email.csproj" />
     </ItemGroup>
 
     <ItemGroup>

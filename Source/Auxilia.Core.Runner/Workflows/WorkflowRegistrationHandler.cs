@@ -105,7 +105,16 @@ public sealed class WorkflowRegistrationHandler(
 
         // The manifest is the authoritative schema of this package version: persist it so the
         // dispatcher knows the workflow's slots, network endpoints, repositories, and terminal port.
-        await schemaStore.SetSchemaAsync(request.Manifest.WorkflowName, SchemaOf(request.Manifest), cancellationToken);
+        var schema = SchemaOf(request.Manifest);
+        await schemaStore.SetSchemaAsync(request.Manifest.WorkflowName, schema, cancellationToken);
+
+        // Announce the registered type + schema on the bus so Core.Api (and any other consumer) can
+        // catalog it into its OWN store — the config editor reads schemas without a cross-DB read.
+        await messageBus.DeclareExchangeAsync(WorkflowSchemaPublished.ExchangeName, cancellationToken);
+        await messageBus.PublishToExchangeAsync(
+            WorkflowSchemaPublished.ExchangeName,
+            new WorkflowSchemaPublished(request.Manifest.WorkflowName, schema, DateTimeOffset.UtcNow),
+            cancellationToken);
 
         // Workflows that declare no slots need no configuration resolution.
         if (request.Manifest.Slots.Count == 0)

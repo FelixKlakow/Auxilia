@@ -2,12 +2,10 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Auxilia.Messaging;
 using Auxilia.PlatformData;
 using Auxilia.PlatformData.Entities;
 using Auxilia.PlatformData.Protection;
 using Auxilia.UniversalDataAccess;
-using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -17,7 +15,7 @@ namespace Auxilia.Adapters.Email;
 /// <summary>Adapter-level settings; the mailboxes themselves come from trigger records.</summary>
 public sealed class MailboxTriggerAdapterSettings
 {
-    /// <summary>Dispatch command queue consumed by the Steering Instance pool.</summary>
+    /// <summary>Dispatch command queue consumed by the Core.Runner pool.</summary>
     public string CommandQueueName { get; set; } = "workflow.run-commands";
 
     /// <summary>Tick of the trigger sweep; each trigger additionally honours its own poll interval.</summary>
@@ -38,7 +36,7 @@ public sealed class EmailTaskSourceAdapter(
     IDataAccess<TriggerHealthRecord> health,
     ISettingsProtector protector,
     IMailboxClientFactory mailboxFactory,
-    IMessageBusClient messageBus,
+    ITaskSourceRunDispatcher dispatcher,
     AuditLog auditLog,
     TimeProvider timeProvider,
     IOptions<MailboxTriggerAdapterSettings> options,
@@ -143,33 +141,33 @@ public sealed class EmailTaskSourceAdapter(
             }
 
             var workItemId = WorkItemIdFor(mail.MessageId);
-            var command = new RunWorkflowCommand(
-                Guid.NewGuid(), null, null,
-                new Dictionary<string, string>
-                {
-                    ["WorkItemId"] = workItemId,
-                    ["Title"] = mail.Subject,
-                    ["From"] = mail.From,
-                    ["Body"] = mail.BodyText,
-                    // Protocol handle so the workflow's work-items slot can refetch the
-                    // mail's attachments in-container — attachments never ride the bus.
-                    ["MailUid"] = mail.Uid.ToString()
-                },
-                trigger.RunAsPrincipalId,
-                trigger.WorkflowConfigurationId);
+            var context = new Dictionary<string, string>
+            {
+                ["WorkItemId"] = workItemId,
+                ["Title"] = mail.Subject,
+                ["From"] = mail.From,
+                ["Body"] = mail.BodyText,
+                // Protocol handle so the workflow's work-items slot can refetch the
+                // mail's attachments in-container — attachments never ride the bus.
+                ["MailUid"] = mail.Uid.ToString()
+            };
 
-            await messageBus.PublishAsync(options.Value.CommandQueueName, command, ct);
+            // The dispatch seam decides how the run reaches the platform (bus command or Core Run
+            // API); mail dispatches carry no type/URI — the trigger's workflow configuration supplies them.
+            var dispatchId = await dispatcher.DispatchAsync(
+                trigger.WorkflowConfigurationId, workflowType: null, packageUri: null,
+                context, trigger.RunAsPrincipalId, ct);
 
-            // Marked seen only after the dispatch is on the bus: a crash in between causes a
+            // Marked seen only after the dispatch was accepted: a crash in between causes a
             // re-dispatch, which the platform's idempotency contract absorbs (same WorkItemId).
             await mailbox.MarkSeenAsync(mail.Uid, ct);
 
             await auditLog.AppendAsync("email-adapter", "trigger.mail-dispatch",
-                workItemId, command.CommandId.ToString(), ct: ct);
+                workItemId, dispatchId.ToString(), ct: ct);
 
             logger.LogInformation(
-                "Mail dispatched as work item. WorkItem={WorkItemId} Configuration={ConfigurationId} Command={CommandId}",
-                workItemId, trigger.WorkflowConfigurationId, command.CommandId);
+                "Mail dispatched as work item. WorkItem={WorkItemId} Configuration={ConfigurationId} Dispatch={DispatchId}",
+                workItemId, trigger.WorkflowConfigurationId, dispatchId);
             dispatched++;
         }
 

@@ -1,54 +1,52 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Minimal guidance for working in this repo. **Depth lives in the linked docs — read the relevant one, don't duplicate it here.**
 
 ## Rule 0: Read project instructions first
 
-Every project directory contains a `<ProjectName>.project-instructions.md` co-located with its `.csproj`. **Read it before touching any file in that project.** It covers the project's purpose, architecture, and non-obvious invariants.
+Every project directory has a `<ProjectName>.project-instructions.md` beside its `.csproj`. **Read it before touching that project** — purpose, architecture, non-obvious invariants.
 
-## Stack & Commands
+## Documentation map (update these; don't create new ones)
 
-.NET 10, ASP.NET Core, Blazor Server, NUnit 4, Moq, Testcontainers. Solution file: `Auxilia.slnx`.
+**Live design & reference:**
+- **`docs/ARCHITECTURE.md`** — full system architecture, the credential/trust model, dispatch lifecycle, security.
+- **`docs/TestStrategy.md`** — the test pyramid in detail.
+- **`docs/CommitConventions.md`** — commit format and hooks.
+- **`docs/steering-client-integration.md`** — human-steering of AI workflows; the steering client as a pure Core client (current source of truth).
+- **`docs/backend-service-retirement-plan.md`** — completed program: BackendService dissolved into Core.Api / Studio, its UI rehomed as `Auxilia.AdminConsole`.
+- **`docs/workflow-sdk-design.md`** — the workflow SDK / builder contract.
+- **`docs/view-data-design.md`** — live views and status fan-out.
+
+**Delivered / historical (`docs/delivered/` — context only, not live design):** core-platform-separation-plan, security-consolidation-plan, governance-rbac-design, enterprise-login-design, goal-v1, workflow-dispatch-test-strategy, human-steering-design (superseded by the steering doc above), and STATS.
+
+## Stack & commands
+
+.NET 10, ASP.NET Core, Blazor Server, NUnit 4, Moq, Testcontainers. Solution: `Auxilia.slnx`.
 
 ```powershell
-dotnet build Auxilia.slnx                                  # build everything
-dotnet test Auxilia.slnx                                   # full test suite (run after finishing a feature/fix)
-dotnet test --filter "Category=Unit"                       # unit tests (also run by pre-commit hook)
-dotnet test --filter "Category=Component"                  # component tests
-dotnet test Auxilia.SystemTestSuite/ --filter "Category=System"   # system tests (Docker must be running)
-dotnet test <Project>.Tests/ --filter "FullyQualifiedName~<TestName>"   # single test
+dotnet build Auxilia.slnx                                              # build everything
+dotnet test Auxilia.slnx                                               # full suite (run after a feature/fix)
+dotnet test --filter "Category=Unit"                                   # unit (also the pre-commit hook)
+dotnet test --filter "Category=Component"                              # component
+dotnet test Auxilia.SystemTestSuite/ --filter "Category=System"        # system (Docker required)
+dotnet test <Project>.Tests/ --filter "FullyQualifiedName~<TestName>"  # single test
 ```
 
-## Test pyramid (see TestStrategy.md)
+## Architecture (see `docs/ARCHITECTURE.md`)
 
-When implementing a feature, add tests at all applicable levels. Every fixture carries an NUnit `[Category(...)]` attribute.
+Work items from external task sources trigger **signed, stateful workflow programs** that run in isolated containers and communicate **exclusively via the message bus** (`IMessageBusClient`). AI agents have full UI parity via an MCP server. The platform is four deployables sharing `Auxilia.Core.Contracts`/`Auxilia.Core.Client`: **`Auxilia.Core.Api`** (control plane — REST + authenticated MCP, identity/RBAC/groups, connector admin, audit, Run API, live-view SSE, failover monitor), **`Auxilia.Core.Runner`** (execution plane — container launch, egress policy, JIT credential delivery), **`Auxilia.WorkflowStudio`** (workflow product — types/packages, triggers + integration adapters; a pure Core client), and **`Auxilia.AdminConsole`** (operator/admin Blazor UI, a pure Core client with no database). The Core services each own their own database; **secrets live only in the Core**. (The original `Auxilia.BackendService` monolith has been retired — see `docs/backend-service-retirement-plan.md`.)
 
-1. **Unit** (`*.Tests/UnitTests/`, `Category=Unit`) — single class, all deps mocked with Moq (prefer `MockBehavior.Strict`), no I/O. Runs on every commit via the pre-commit hook.
-2. **Component** (`*.Tests/ComponentTests/`, `Category=Component`) — real DI container via `IHost`/`WebApplicationFactory`, infra replaced with in-memory fakes (`FakeMessageBusClient`), no network.
-3. **System** (`Auxilia.SystemTestSuite/`, `Category=System`) — real infrastructure in Docker via Testcontainers; only cost-generating third-party calls (Azure DevOps, AI) are stubbed. Each environment is a namespace-scoped `[SetUpFixture]` under `Environments/`; test classes in the matching namespace under `SystemTests/` share it automatically. Images are rebuilt from local source before containers start.
-4. **Manual** — real external services, pre-release only.
-
-## Architecture (see ARCHITECTURE.md for full detail)
-
-Auxilia is a workflow-driven distributed system: work items from external task sources (Jira, ADO, Trello, GitHub) trigger **signed, stateful workflow programs** that run in isolation and communicate **exclusively via the message bus**. AI agents are first-class citizens with full UI parity through an MCP server.
-
-**Core platform separation (see `docs/core-platform-separation-plan.md`):** the platform is split into three deployables — `Auxilia.Core.Api` (the secure control plane: REST + authenticated MCP, identity/RBAC/groups, connector admin with secrets encrypted at rest, and the Run API), `Auxilia.Core.Runner` (the execution plane, formerly `Auxilia.SteeringInstance`), and `Auxilia.WorkflowStudio` (the workflow-domain product, a pure `Auxilia.Core.Client` consumer). Each owns its **own database**; secrets live only in the Core.
-
-Key flow: Integration Adapters pull work items → pre-flight (signature, account bundles, resources) → the **Core.Runner** execution plane launches the workflow via `IWorkflowRunner` → workflow reaches external systems only through the audited **Resource Proxy** and declarative **Network Egress Layer** (default-deny allowlist) → outputs are pushed back by the **Workspace Manager** using scoped credentials — workflows never hold raw credentials.
-
-Project layout:
-- `Source/` — platform services: `Auxilia.Core.Api` (control plane), `Auxilia.Core.Runner` (execution plane, ex-`SteeringInstance`), `Auxilia.WorkflowStudio` (workflow-domain product), `Auxilia.BackendService` (existing Blazor host + dashboard; its config pages are being superseded by Core.Api + Studio), `Auxilia.Messaging` (the `IMessageBusClient` abstraction), workflow capability libraries (`Auxilia.Workflows.SourceControl`, `.TaskSource`, `.AiAgent`, `.PullRequestAccess`, `.TestRunner`), and concrete workflows (`Auxilia.CodeReview.Workflow`, `Auxilia.ImplementationWorkflow`).
-- Repo root — the Core contract/client libraries (`Auxilia.Core.Contracts`, `Auxilia.Core.Client`), the workflow SDK (`Auxilia.Workflows`), packaging (`Auxilia.Workflows.Packer`), AI integration (`Auxilia.AI`), data access (`Auxilia.UniversalDataAccess`), test projects, and `Auxilia.FakeSlots.*` (fake slot plugin DLLs used by workflow tests).
+**Credential/trust model** (details in `docs/ARCHITECTURE.md`): a workflow is **signature-trusted** and receives **scoped** credentials **just-in-time, per slot, encrypted for that instance**, decrypted and used inside the container under a default-deny **egress policy**. The protection is *who gets a credential and when*, not hiding it from the workflow. (Exception: the initial repo clone is done Core-side and its token stripped before the workspace is mounted.)
 
 ## Rules
 
 - All RabbitMQ interaction goes through `IMessageBusClient` (`Source/Auxilia.Messaging`) so tests can inject `FakeMessageBusClient`.
 - Retry/resilience logic belongs inside the service implementation — never in a decorator or caller-side retry loop.
-- AI: never instruct the model to emit structured text ("Respond with JSON"). Use a result-sink `ICapabilityMcpTools` in `AiSessionOptions.CapabilityTools` to collect structured output via typed tool calls.
-- XML doc comments (`///`) only when purpose isn't obvious from name and signature; keep them to one sentence.
-- Use Mermaid for all diagrams in markdown documents.
-- Don't generate documentation files, README updates, or changelogs unless explicitly asked.
+- AI: never instruct the model to emit structured text ("Respond with JSON"). Collect structured output via typed tool calls on a result-sink `ICapabilityMcpTools` in `AiSessionOptions.CapabilityTools`.
+- XML doc comments (`///`) only when purpose isn't obvious from name and signature; one sentence.
+- Use Mermaid for all diagrams in markdown.
+- **Documentation hygiene:** don't create new markdown docs, READMEs, or changelogs. Update the existing doc in the map above and, if a genuinely new topic needs a home, add it to the map. Keep this file minimal — detail belongs in the linked docs.
 
-## Commits (see CommitConventions.md)
+## Commits (see `docs/CommitConventions.md`)
 
-Conventional Commits: `<type>(optional scope)!: <description>` with types `feat fix refactor plan docs style merge revert`. A `commit-msg` hook auto-appends `Refs: #<ticket>` from branch names containing a 4+-digit ticket number — never add it manually. The pre-commit hook runs unit tests.
+Conventional Commits: `<type>(scope)!: <description>`, types `feat fix refactor plan docs style merge revert`. A `commit-msg` hook appends `Refs: #<ticket>` from the branch name — never add it manually. The pre-commit hook runs unit tests.

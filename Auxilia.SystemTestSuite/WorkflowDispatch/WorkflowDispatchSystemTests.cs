@@ -6,7 +6,7 @@ namespace Auxilia.SystemTestSuite.WorkflowDispatch;
 
 /// <summary>
 /// System tests for the workflow dispatch pipeline.
-/// Publishes a <see cref="RunWorkflowCommand"/> to the live SteeringInstance and asserts that
+/// Publishes a <see cref="RunWorkflowCommand"/> to the live Runner and asserts that
 /// the workflow container runs to completion, producing a <see cref="WorkflowStateMessage"/>
 /// with <see cref="WorkflowState.Success"/>.
 ///
@@ -65,7 +65,7 @@ public class WorkflowDispatchSystemTests
 
         Assert.That(completed, Is.EqualTo(stateTcs.Task),
             "No WorkflowStateMessage received within 90 seconds. " +
-            "Check SteeringInstance logs and ensure the dummy-workflows image was built.");
+            "Check Runner logs and ensure the dummy-workflows image was built.");
 
         var stateMsg = stateTcs.Task.Result;
         Assert.That(stateMsg.State, Is.EqualTo(WorkflowState.Success),

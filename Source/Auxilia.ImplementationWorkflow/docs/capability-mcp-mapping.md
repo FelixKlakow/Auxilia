@@ -14,10 +14,15 @@ For policy configuration, add entries to `SlotConfiguration.Settings["policy:all
 | `repository.create_branch` | `source_control.create_branch` | ✓ | — |
 | `repository.write_file` | `source_control.write_file` | ✓ | — |
 | `repository.commit` | `source_control.commit` | ✓ | — |
-| `repository.push` | `source_control.push` | ✓ | — |
+| `repository.push` | `source_control.push` | ✓¹ | — |
 | `repository.list_files` | `source_control.list_files` | ✓ | ✓ |
 | `repository.read_file` | `source_control.read_file` | ✓ | ✓ |
 | `repository.get_changed_files` | `source_control.get_changed_files` | ✓ | ✓ |
+
+> ¹ **Capability-declared but not production-backed.** `repository.push` / `source_control.push`
+> (`ISourceControlWriteAccess.PushAsync`) and `pull-request.open_pull_request`
+> (`IPullRequestAccess.OpenPullRequestAsync`) are currently satisfied only by fakes/stubs — there is
+> no credentialed production push or PR provider yet. The tools are exposed, but no real remote write occurs.
 
 ---
 
@@ -49,7 +54,7 @@ For policy configuration, add entries to `SlotConfiguration.Settings["policy:all
 | `pull-request.get_comments` | `pull_request.get_comments` | — | ✓ |
 | `pull-request.get_linked_work_items` | `pull_request.get_linked_work_items` | — | ✓ |
 | `pull-request.post_comment` | `pull_request.post_comment` | — | ✓ |
-| `pull-request.open_pull_request` | `pull_request.open_pull_request` | ✓ | — |
+| `pull-request.open_pull_request` | `pull_request.open_pull_request` | ✓¹ | — |
 
 ---
 

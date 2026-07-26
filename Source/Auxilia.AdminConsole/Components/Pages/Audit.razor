@@ -1,0 +1,154 @@
+@page "/audit"
+@attribute [Authorize]
+@inject ICoreClient Core
+
+<PageTitle>Audit — Auxilia</PageTitle>
+
+<PageHeader Title="Audit log"
+            Subtitle="Every policy decision and administrative change, newest first. Entries are immutable."/>
+
+@if (!_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else if (_denied)
+{
+    <div class="panel denied">Access denied: @_error</div>
+}
+else if (_error is { Length: > 0 })
+{
+    <div class="panel denied">Could not load the audit log: @_error</div>
+}
+else
+{
+    <div class="toolbar audit-toolbar">
+        <label>
+            Actor
+            <input @bind="_actor" placeholder="principal id / service"/>
+        </label>
+        <label>
+            Action
+            <input @bind="_action" placeholder="e.g. policy.allowed"/>
+        </label>
+        <label>
+            Subject
+            <input @bind="_subject" placeholder="resource"/>
+        </label>
+        <label>
+            From
+            <input type="date" @bind="_from"/>
+        </label>
+        <label>
+            To
+            <input type="date" @bind="_to"/>
+        </label>
+        <button class="btn btn-secondary" @onclick="ApplyAsync">Apply</button>
+    </div>
+
+    @if (_entries.Count == 0)
+    {
+        <EmptyState Title="No audit entries"
+                    Description="Nothing matches the current filter."/>
+    }
+    else
+    {
+        <div class="card">
+            <table class="data-table">
+                <thead>
+                <tr>
+                    <th>Timestamp (UTC)</th>
+                    <th>Actor</th>
+                    <th>Action</th>
+                    <th>Subject</th>
+                    <th>Outcome</th>
+                    <th>Details</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var entry in _entries)
+                {
+                    <tr>
+                        <td class="cell-mono">@entry.TimestampUtc.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td><span class="cell-truncate" title="@entry.Actor">@entry.Actor</span></td>
+                        <td class="cell-strong">@entry.Action</td>
+                        <td><span class="cell-mono cell-truncate" title="@entry.Subject">@entry.Subject</span></td>
+                        <td>@entry.Outcome</td>
+                        <td><span class="cell-mono cell-truncate" title="@entry.DetailJson">@entry.DetailJson</span></td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            @if (_skip + _entries.Count < _total)
+            {
+                <div class="card-body table-more">
+                    <button class="btn btn-secondary" @onclick="ShowMoreAsync">
+                        Show more (@(_skip + _entries.Count) of @_total)
+                    </button>
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+
+    private const int PageSize = 100;
+
+    private bool _loaded;
+    private bool _denied;
+    private string? _error;
+
+    private string _actor = "";
+    private string _action = "";
+    private string _subject = "";
+    private DateTime? _from;
+    private DateTime? _to;
+
+    private int _skip;
+    private int _total;
+    private List<AuditEntry> _entries = [];
+
+    protected override Task OnInitializedAsync() => LoadAsync(reset: true);
+
+    private Task ApplyAsync() => LoadAsync(reset: true);
+
+    private Task ShowMoreAsync() => LoadAsync(reset: false);
+
+    private async Task LoadAsync(bool reset)
+    {
+        if (reset)
+        {
+            _skip = 0;
+            _entries = [];
+        }
+
+        var query = new AuditQuery(
+            Actor: Empty(_actor),
+            Action: Empty(_action),
+            Subject: Empty(_subject),
+            FromUtc: _from is { } f ? new DateTimeOffset(f, TimeSpan.Zero) : null,
+            ToUtc: _to is { } t ? new DateTimeOffset(t.AddDays(1), TimeSpan.Zero) : null,
+            Skip: _skip,
+            Take: PageSize);
+
+        try
+        {
+            var page = await Core.QueryAuditAsync(query);
+            _denied = false;
+            _error = null;
+            _total = page.Total;
+            _entries.AddRange(page.Items);
+            _skip += page.Items.Count;
+        }
+        catch (CoreApiException ex)
+        {
+            _denied = ex.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+
+        _loaded = true;
+    }
+
+    private static string? Empty(string value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+}

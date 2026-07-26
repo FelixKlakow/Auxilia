@@ -4,6 +4,10 @@ Autonomous AI implementation workflow. Receives a work-item reference, checks ou
 implementation agent equipped with source-control, test-runner, and task-source tools, optionally runs a
 read-only reviewer pass via `ReviewerOrchestrator`, opens a pull request, and emits output signals.
 
+> The PR step is **capability-declared but not production-backed**: `IPullRequestAccess.OpenPullRequestAsync`
+> (and the credentialed push it depends on) is currently satisfied only by fakes/stubs — there is no
+> production PR provider yet.
+
 ## Architecture
 
 ```mermaid

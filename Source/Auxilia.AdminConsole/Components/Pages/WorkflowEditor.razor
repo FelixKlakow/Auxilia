@@ -1,0 +1,363 @@
+@page "/workflows/new"
+@page "/workflows/{ConfigurationId:guid}/edit"
+@attribute [Authorize]
+@implements IDisposable
+@inject ICoreClient Core
+@inject NavigationManager Navigation
+
+<PageTitle>@(IsEdit ? "Edit workflow" : "New workflow") — Auxilia</PageTitle>
+
+<div class="page-back"><a href="workflows">← All workflows</a></div>
+
+<PageHeader Title="@(IsEdit ? "Edit workflow configuration" : "New workflow configuration")"
+            Subtitle="Pick a workflow type, bind its capability slots to connectors, fill any inputs, then save."/>
+
+@if (!_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else if (_denied)
+{
+    <div class="panel denied">Access denied: @_error</div>
+}
+else if (_notFound)
+{
+    <div class="panel denied">Workflow configuration not found.</div>
+}
+else
+{
+    @if (_error is { Length: > 0 })
+    {
+        <div class="panel denied">@_error</div>
+    }
+
+    @* ---- Step 1: pick the workflow type ---- *@
+    <section class="card">
+        <div class="card-header">
+            <h2><span class="step-number">1</span> Basics</h2>
+            <p class="card-subtitle">Name the configuration and choose which workflow type it runs.</p>
+        </div>
+        <div class="card-body form-grid">
+            <label>
+                Name
+                <input @bind="_name" placeholder="e.g. Nightly code review"/>
+            </label>
+            <label>
+                Workflow type
+                <select @bind="SelectedType">
+                    <option value="">Pick a workflow type…</option>
+                    @foreach (var type in _types)
+                    {
+                        <option value="@type.WorkflowType">
+                            @type.WorkflowType@(type.Version.Length > 0 ? $" · v{type.Version}" : "")
+                        </option>
+                    }
+                </select>
+                @if (_types.Count == 0)
+                {
+                    <span class="field-hint">No workflow types are registered on this platform yet.</span>
+                }
+            </label>
+            <label>
+                Package URI
+                <input @bind="_packageUri" placeholder="e.g. pkg://code-review/1.0.0"/>
+                <span class="field-hint">
+                    The signed package the runner loads. The current Core client surface exposes no
+                    package coordinate per workflow type, so it is entered here (prefilled on edit).
+                </span>
+            </label>
+            <label class="check-label">
+                <input type="checkbox" @bind="_enabled"/> Enabled
+                <span class="field-hint">When disabled, every dispatch of this configuration is rejected.</span>
+            </label>
+        </div>
+    </section>
+
+    @if (string.IsNullOrWhiteSpace(_selectedType))
+    {
+        <section class="card">
+            <div class="card-body">
+                <p class="muted">Pick a workflow type above — its capability slots and inputs appear here.</p>
+            </div>
+        </section>
+    }
+    else if (_schema is null)
+    {
+        <section class="card">
+            <div class="card-body">
+                <p class="field-hint">
+                    The platform has no registered schema for <span class="cell-strong">@_selectedType</span> —
+                    slots and inputs cannot be shown. Save records the type and package only.
+                </p>
+            </div>
+        </section>
+    }
+    else
+    {
+        @* ---- Step 2: bind slots to connectors ---- *@
+        <section class="card">
+            <div class="card-header">
+                <h2><span class="step-number">2</span> Slots &amp; connectors</h2>
+                <p class="card-subtitle">Bind each capability slot to a connector. Optional slots may be left unbound.</p>
+            </div>
+            <div class="card-body">
+                @if (_schema.Slots.Count == 0)
+                {
+                    <p class="muted">This workflow declares no capability slots.</p>
+                }
+                @foreach (var slot in _schema.Slots)
+                {
+                    <div class="slot-binding">
+                        <div class="slot-binding-header">
+                            <div>
+                                <span class="cell-strong">@slot.SlotName</span>
+                                <span class="type-chip">@(slot.Optional ? "optional" : "required")</span>
+                                @if (slot.Contract is { Length: > 0 })
+                                {
+                                    <span class="type-chip">@slot.Contract</span>
+                                }
+                                @if (slot.Description is { Length: > 0 })
+                                {
+                                    <p class="muted slot-description">@slot.Description</p>
+                                }
+                            </div>
+                        </div>
+                        <label>
+                            Connector
+                            <select value="@(_bindings.GetValueOrDefault(slot.SlotName))"
+                                    @onchange="e => SetBinding(slot.SlotName, e.Value?.ToString())">
+                                <option value="">@(slot.Optional ? "— leave unbound —" : "— pick a connector —")</option>
+                                @foreach (var connector in _connectors)
+                                {
+                                    <option value="@connector.Id">@connector.Name (@connector.ProviderType)</option>
+                                }
+                            </select>
+                            @if (_connectors.Count == 0)
+                            {
+                                <span class="field-hint">No connectors exist yet — create one on the Connectors page.</span>
+                            }
+                        </label>
+                    </div>
+                }
+            </div>
+        </section>
+
+        @* ---- Inputs ---- *@
+        @if (_schema.Inputs.Count > 0)
+        {
+            <section class="card">
+                <div class="card-header">
+                    <h2>Inputs</h2>
+                    <p class="card-subtitle">Values passed into every run of this configuration.</p>
+                </div>
+                <div class="card-body form-grid">
+                    @foreach (var input in _schema.Inputs)
+                    {
+                        <label>
+                            @input.Label@(input.Required ? " *" : " (optional)")
+                            <input @bind="_inputs[input.Name]"/>
+                            @if (input.Description is { Length: > 0 })
+                            {
+                                <span class="field-hint">@input.Description</span>
+                            }
+                        </label>
+                    }
+                </div>
+            </section>
+        }
+
+        @* ---- Step 3: triggers (link-out placeholder) ---- *@
+        <section class="card">
+            <div class="card-header">
+                <h2><span class="step-number">3</span> Triggers</h2>
+                <p class="card-subtitle">How this workflow's runs start automatically.</p>
+            </div>
+            <div class="card-body">
+                <div class="panel">
+                    Triggers are managed in Workflow Studio. This console has no trigger-editing API yet,
+                    so a saved configuration is run on demand (or from Workflow Studio's triggers).
+                </div>
+            </div>
+        </section>
+    }
+
+    <div class="button-row editor-actions">
+        <button class="btn btn-primary" disabled="@(_busy || !CanSave)" @onclick="SaveAsync">
+            @(IsEdit ? "Save as new configuration" : "Create configuration")
+        </button>
+        <a class="btn btn-secondary" href="workflows">Cancel</a>
+    </div>
+    @if (IsEdit)
+    {
+        <p class="field-hint">
+            The Core client surface exposes only <span class="cell-mono">CreateConfigurationAsync</span> —
+            there is no update endpoint, so saving an edit creates a new configuration.
+        </p>
+    }
+}
+
+@code {
+
+    [Parameter]
+    public Guid? ConfigurationId { get; set; }
+
+    private bool _loaded;
+    private bool _denied;
+    private bool _busy;
+    private bool _notFound;
+    private string? _error;
+
+    private string _name = "";
+    private string _selectedType = "";
+    private string _packageUri = "";
+    private bool _enabled = true;
+
+    private List<WorkflowTypeDto> _types = [];
+    private List<Connector> _connectors = [];
+    private WorkflowSchemaDto? _schema;
+
+    // slot name → connector id (as string; "" = unbound)
+    private readonly Dictionary<string, string> _bindings = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _inputs = new(StringComparer.Ordinal);
+
+    private readonly CancellationTokenSource _cts = new();
+
+    private bool IsEdit => ConfigurationId is not null;
+
+    private bool CanSave
+        => !string.IsNullOrWhiteSpace(_name)
+           && !string.IsNullOrWhiteSpace(_selectedType)
+           && !string.IsNullOrWhiteSpace(_packageUri);
+
+    private string SelectedType
+    {
+        get => _selectedType;
+        set => _ = OnTypeChangedAsync(value);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var types = await Core.ListWorkflowTypesAsync(new WorkflowTypeQuery(Take: 200), _cts.Token);
+            _types = types.Items.ToList();
+            var connectors = await Core.QueryConnectorsAsync(new ConnectorQuery(Take: 200), _cts.Token);
+            _connectors = connectors.Items.ToList();
+
+            if (ConfigurationId is { } id)
+            {
+                var configuration = await Core.GetConfigurationAsync(id, _cts.Token);
+                if (configuration is null)
+                    _notFound = true;
+                else
+                    await PrefillFromAsync(configuration);
+            }
+        }
+        catch (CoreApiException ex)
+        {
+            _denied = ex.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+
+        _loaded = true;
+    }
+
+    private async Task PrefillFromAsync(RunConfiguration configuration)
+    {
+        _name = configuration.Name;
+        _selectedType = configuration.WorkflowType;
+        _packageUri = configuration.PackageUri;
+        _enabled = configuration.Enabled;
+        foreach (var (key, value) in configuration.Context)
+            _inputs[key] = value;
+        foreach (var binding in configuration.SlotBindings)
+        {
+            if (binding.ConnectorId is { } connectorId)
+                _bindings[binding.SlotName] = connectorId.ToString();
+        }
+        await LoadSchemaAsync(configuration.WorkflowType);
+    }
+
+    private async Task OnTypeChangedAsync(string workflowType)
+    {
+        _selectedType = workflowType;
+        _bindings.Clear();
+        _inputs.Clear();
+        if (string.IsNullOrWhiteSpace(workflowType))
+        {
+            _schema = null;
+            return;
+        }
+        await LoadSchemaAsync(workflowType);
+        StateHasChanged();
+    }
+
+    private async Task LoadSchemaAsync(string workflowType)
+    {
+        try
+        {
+            _schema = await Core.GetWorkflowSchemaAsync(workflowType, _cts.Token);
+            if (_schema is not null)
+            {
+                foreach (var input in _schema.Inputs)
+                    _inputs.TryAdd(input.Name, "");
+            }
+        }
+        catch (CoreApiException ex)
+        {
+            _error = ex.ErrorDetail ?? ex.Message;
+            _schema = null;
+        }
+    }
+
+    private void SetBinding(string slotName, string? connectorId)
+    {
+        if (string.IsNullOrEmpty(connectorId))
+            _bindings.Remove(slotName);
+        else
+            _bindings[slotName] = connectorId;
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        _busy = true;
+        try
+        {
+            var slotBindings = _bindings
+                .Where(b => Guid.TryParse(b.Value, out _))
+                .Select(b => new SlotBinding(b.Key, ConnectorId: Guid.Parse(b.Value)))
+                .ToList();
+
+            var context = _inputs
+                .Where(i => !string.IsNullOrWhiteSpace(i.Value))
+                .ToDictionary(i => i.Key, i => i.Value, StringComparer.Ordinal);
+
+            var request = new CreateRunConfiguration(
+                Name: _name.Trim(),
+                WorkflowType: _selectedType.Trim(),
+                PackageUri: _packageUri.Trim(),
+                Context: context.Count == 0 ? null : context,
+                SlotBindings: slotBindings.Count == 0 ? null : slotBindings,
+                Enabled: _enabled);
+
+            await Core.CreateConfigurationAsync(request, _cts.Token);
+            Navigation.NavigateTo("workflows");
+        }
+        catch (CoreApiException ex)
+        {
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+
+}

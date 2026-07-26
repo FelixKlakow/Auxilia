@@ -4,7 +4,7 @@ namespace Auxilia.Workflows.Testing.DummyWorkflows;
 
 /// <summary>
 /// Minimal dummy workflow used by the WorkflowDispatch system tests.
-/// Declares no slots so the SteeringInstance's no-slot short-circuit is exercised
+/// Declares no slots so the Runner's no-slot short-circuit is exercised
 /// (no external configuration store required).
 ///
 /// The workflow creates a fresh local git repo, writes <c>test.txt</c>, and commits.

@@ -11,4 +11,10 @@ public sealed class CoreSecuritySettings
     public string? BootstrapApiKey { get; set; }
 
     public string BootstrapPrincipalName { get; set; } = "core-bootstrap";
+
+    /// <summary>
+    /// Lifetime (in minutes) of a per-user bearer token minted by <c>POST /auth/token</c> for a
+    /// delegated console caller. Kept short — the console re-mints from its live cookie session.
+    /// </summary>
+    public int UserTokenLifetimeMinutes { get; set; } = 30;
 }

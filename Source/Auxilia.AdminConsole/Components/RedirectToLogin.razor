@@ -1,0 +1,17 @@
+@inject NavigationManager Navigation
+
+@code {
+
+    // Sign-in is delegated to the Core (the relying party to Entra). Assuming the console and
+    // Core.Api are served same-origin behind a gateway, redirecting the browser to Core's
+    // /auth/login establishes the shared "auxilia.core.session" cookie, after which the console
+    // mints a per-user bearer via POST /auth/token. returnUrl brings the user back here.
+    protected override void OnInitialized()
+    {
+        var returnUrl = Navigation.ToBaseRelativePath(Navigation.Uri);
+        Navigation.NavigateTo(
+            $"/auth/login?returnUrl={Uri.EscapeDataString("/" + returnUrl)}",
+            forceLoad: true);
+    }
+
+}

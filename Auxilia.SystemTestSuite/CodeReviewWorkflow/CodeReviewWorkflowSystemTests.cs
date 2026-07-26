@@ -140,13 +140,13 @@ public sealed class CodeReviewWorkflowSystemTests
         Assert.That(stateMsg.State, Is.EqualTo(WorkflowState.Success),
             $"Workflow ended with state {stateMsg.State}. Error: {stateMsg.ErrorMessage}");
 
-        // The instance record (JSON platform-data backend inside the steering container) must
+        // The instance record (JSON platform-data backend inside the runner container) must
         // carry the configuration ID and name so run history can group by configuration.
-        var exec = await CodeReviewWorkflowEnvironment.HappySteeringInstance.ExecAsync(
+        var exec = await CodeReviewWorkflowEnvironment.HappyRunner.ExecAsync(
             ["cat", $"{CodeReviewWorkflowEnvironment.HappyPlatformDataDir}/WorkflowInstanceRecord.json"],
             cancellationToken);
         Assert.That(exec.ExitCode, Is.Zero,
-            $"Could not read instance records from the steering container: {exec.Stderr}");
+            $"Could not read instance records from the runner container: {exec.Stderr}");
 
         var records = JsonSerializer.Deserialize<List<WorkflowInstanceRecord>>(
             exec.Stdout, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });

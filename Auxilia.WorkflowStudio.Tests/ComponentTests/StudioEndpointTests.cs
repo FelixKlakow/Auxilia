@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using Auxilia.Core.Client;
+using Auxilia.Messaging;
 using Auxilia.WorkflowStudio;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -31,6 +32,10 @@ public sealed class StudioEndpointTests
             {
                 services.RemoveAll<ICoreClient>();
                 services.AddSingleton<ICoreClient>(_core);
+                // Replace the real broker so booting the host (which starts the trigger schedulers)
+                // never touches RabbitMQ.
+                services.RemoveAll<IMessageBusClient>();
+                services.AddSingleton<IMessageBusClient>(new FakeMessageBusClient());
             });
         });
     }

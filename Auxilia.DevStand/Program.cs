@@ -1,19 +1,20 @@
-using System.Diagnostics;
 using Auxilia.DevStand;
 using Auxilia.SystemTestSuite.EndToEnd;
-using Auxilia.Workflows.Messaging.Messages;
 using MailKit;
 using MailKit.Net.Imap;
 using MailKit.Security;
 
 // Interactive dev stand: boots the SAME environment as the EndToEnd acceptance test —
-// GreenMail, RabbitMQ, MongoDB, Steering Instance, Backend Service with the email task
-// source and seeded Code Review slot configurations — and keeps it running until you quit,
-// so the dashboard can be explored in a browser. F5-able from Visual Studio.
+// GreenMail, RabbitMQ, MongoDB, Core.Runner, Core.Api, and WorkflowStudio (email task source),
+// with the mail-review configuration seeded — and keeps it running until you quit, so the mail
+// path can be exercised. F5-able from Visual Studio.
 //
-// Screenshot mode (`-- --screenshots [outputDir]`): no interactive loop — triggers one demo
-// run, captures every dashboard page as a full-page PNG, tears down, and exits.
+// NOTE (BackendService retirement, Phase 4): the operator dashboard has moved out of the retired
+// BackendService into the new Auxilia.AdminConsole (a pure Core.Api client). The console is NOT yet
+// wired into this dev stand, so there is no dashboard URL to open. TODO(Phase 4+): boot the
+// AdminConsole container here (same-origin with Core.Api) and restore the browser + screenshot flows.
 
+// Screenshot mode (`-- --screenshots [outputDir]`): parked until the AdminConsole is wired in.
 if (args.Length > 0 && args[0] == "--screenshots")
     return await ScreenshotHarness.RunAsync(args.Length > 1 ? args[1] : null);
 
@@ -27,13 +28,9 @@ if (args.Contains("--print-session-mail"))
     return 0;
 }
 
-// Presentation stand: platform ready (providers, team mailbox, demo-able packages), but
-// NO pre-built workflow configurations — the coding-session workflow is configured live.
-var presentation = args.Contains("--presentation");
-EndToEndEnvironment.PresentationMode = presentation;
+EndToEndEnvironment.PresentationMode = args.Contains("--presentation");
 
-// Durable stand: Mongo data and the dashboard's cookie-signing keys live in named Docker
-// volumes, so configured slots/workflows and the login survive restarts.
+// Durable stand: Mongo data lives in a named Docker volume, so configured triggers survive restarts.
 if (args.Contains("--keep-data"))
     EndToEndEnvironment.DataVolumeName = "auxilia-devstand";
 
@@ -48,59 +45,19 @@ var environment = new EndToEndEnvironment();
 await environment.OneTimeSetUp();
 try
 {
-    var dashboardUrl = $"http://localhost:{EndToEndEnvironment.Backend.GetMappedPublicPort(8080)}";
-
-    // With a real key on the host, Claude Code runs are the real thing: override the
-    // stub-CLI seed with the default `claude` binary baked into the workflow image.
-    var anthropicKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
-    var claudeIsReal = !string.IsNullOrWhiteSpace(anthropicKey);
-    if (claudeIsReal)
-    {
-        await EndToEndEnvironment.MessageBusClient.PublishAsync(
-            EndToEndEnvironment.CommandQueue + "-slot-seed.upsert",
-            new UpsertSlotConfigurationCommand(
-                EndToEndEnvironment.ClaudeWorkflowType, "coding-agent", "claude-code-cli",
-                new Dictionary<string, string> { ["ApiKey"] = anthropicKey! }));
-    }
-
     Console.WriteLine();
     Console.WriteLine("=== Auxilia dev stand is up ===");
-    Console.WriteLine($"  Dashboard : {dashboardUrl}   (login: admin / e2e-admin-pw)");
+    Console.WriteLine($"  Core.Api  : http://localhost:{EndToEndEnvironment.CoreApi.GetMappedPublicPort(8080)}   (bearer API key)");
     Console.WriteLine($"  GreenMail : IMAP localhost:{EndToEndEnvironment.MappedImap}, " +
                       $"SMTP localhost:{EndToEndEnvironment.MappedSmtp}  (auth disabled — any address logs in)");
     Console.WriteLine($"  MongoDB   : {EndToEndEnvironment.MongoConnectionString}  (database 'Auxilia')");
-    Console.WriteLine($"  Claude    : {(claudeIsReal
-        ? "REAL Claude Code CLI (ANTHROPIC_API_KEY found)"
-        : "stub CLI (set ANTHROPIC_API_KEY before starting for real runs)")}");
+    Console.WriteLine("  Dashboard : moved to Auxilia.AdminConsole — not yet wired into this stand (TODO Phase 4+).");
     Console.WriteLine($"  Data      : {(EndToEndEnvironment.DataVolumeName is null
-        ? "ephemeral (start with --keep-data to keep slots, workflows, and the login across restarts)"
+        ? "ephemeral (start with --keep-data to keep seeded triggers across restarts)"
         : $"durable in Docker volumes '{EndToEndEnvironment.DataVolumeName}-*'")}");
     Console.WriteLine();
-    if (presentation)
-    {
-        Console.WriteLine("  === PRESENTATION MODE — nothing is pre-configured; the manual steps: ===");
-        Console.WriteLine("  1. My slots -> New personal instance -> claude-code-cli -> 'Connect Claude account'");
-        Console.WriteLine("     (or paste an API key as the fallback).");
-        Console.WriteLine("  2. Workflows -> New workflow configuration -> 'Live coding session'");
-        Console.WriteLine("     repository -> new instance 'coding-session-workspace' | coding-agent -> your Claude account");
-        Console.WriteLine("     work-items -> instance 'Team mailbox'");
-        Console.WriteLine("     Trigger: + Mailbox -> Team mailbox, poll 2 s, subject filter 'session'");
-        Console.WriteLine("  3. Flow -> drag 'Session summary mail' onto the coding-session-result output,");
-        Console.WriteLine("     then bind its work-items to 'Team mailbox' in its editor.");
-        Console.WriteLine("  4. Press [s] (or mail workflows@localhost, subject containing 'session').");
-        Console.WriteLine($"     The mail [s] sends is yours to edit: {DemoMail.SessionMailFileName} in the repo root.");
-        Console.WriteLine("  5. Runs -> Open live session -> work -> /exit -> reply mail lands.");
-        Console.WriteLine("  (Own mailbox instead? Create a slot instance with imap.gmail.com + app password.)");
-        Console.WriteLine();
-        Console.WriteLine("  [s] send a session mail   [o] open dashboard   [q] quit");
-    }
-    else
-    {
-        Console.WriteLine("  [m] send a demo mail (triggers a Code Review run)   [c] run Claude Code   [s] send a session mail   [o] open dashboard   [q] quit");
-    }
+    Console.WriteLine("  [m] send a demo mail (triggers a Code Review run via Studio)   [s] send a session mail   [q] quit");
     Console.WriteLine();
-
-    OpenBrowser(dashboardUrl);
 
     if (Console.IsInputRedirected)
     {
@@ -124,39 +81,18 @@ try
                 case ConsoleKey.Q:
                     cts.Cancel();
                     break;
-                case ConsoleKey.O:
-                    OpenBrowser(dashboardUrl);
-                    break;
-                case ConsoleKey.M when !presentation:
+                case ConsoleKey.M:
                     var subject = $"Please review PR-{++demoCounter} (dev stand)";
                     await DemoMail.SendAsync(subject, cts.Token);
-                    Console.WriteLine($"  -> mail sent: \"{subject}\" — the run appears on the dashboard within a few seconds.");
+                    Console.WriteLine($"  -> mail sent: \"{subject}\" — the run dispatches once the trigger polls.");
                     _ = WatchForReplyAsync(subject, cts.Token);
                     break;
                 case ConsoleKey.S:
                     var (sessionSubject, sessionBody, mailSource) = DemoMail.LoadSessionMail(++demoCounter);
                     await DemoMail.SendAsync(sessionSubject, sessionBody, cts.Token);
                     Console.WriteLine($"  -> mail sent: \"{sessionSubject}\" " +
-                                      $"({(mailSource is null ? "built-in mail" : mailSource)}) — the session run " +
-                                      "starts once the trigger polls; open the run and click 'Open live session'.");
+                                      $"({(mailSource is null ? "built-in mail" : mailSource)}).");
                     _ = WatchForReplyAsync(sessionSubject, cts.Token);
-                    break;
-                case ConsoleKey.C when !presentation:
-                    await EndToEndEnvironment.MessageBusClient.PublishAsync(
-                        EndToEndEnvironment.CommandQueue,
-                        new RunWorkflowCommand(
-                            Guid.NewGuid(),
-                            EndToEndEnvironment.ClaudeWorkflowType,
-                            EndToEndEnvironment.ClaudeWorkflowPackageUri,
-                            new Dictionary<string, string>
-                            {
-                                ["Title"] = $"Dev-stand Claude Code session #{++demoCounter}",
-                                ["Body"] = "Look around the workspace and leave a short note about what you find."
-                            },
-                            RequestedBy: EndToEndEnvironment.RunAsPrincipalId),
-                        cts.Token);
-                    Console.WriteLine(
-                        "  -> Claude Code run dispatched — open the dashboard's Live now section to watch the agent chat.");
                     break;
             }
         }
@@ -169,18 +105,6 @@ finally
 }
 
 return 0;
-
-static void OpenBrowser(string url)
-{
-    try
-    {
-        Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-    }
-    catch
-    {
-        // No default browser (headless host) — the URL is printed either way.
-    }
-}
 
 // The Code Review workflow writes its summary back as a mail reply — announce it when it lands.
 static async Task WatchForReplyAsync(string subject, CancellationToken ct)

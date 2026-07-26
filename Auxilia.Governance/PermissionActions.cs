@@ -4,6 +4,7 @@ namespace Auxilia.Governance;
 public static class PermissionActions
 {
     public const string WorkflowTrigger = "workflow.trigger";
+    public const string RunOnBehalfOf = "run.on-behalf-of";
     public const string WorkflowCancel = "workflow.cancel";
     public const string WorkflowApprove = "workflow.approve";
     public const string RunObserve = "run.observe";

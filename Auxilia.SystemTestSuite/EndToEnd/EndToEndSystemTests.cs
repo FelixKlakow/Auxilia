@@ -1,5 +1,8 @@
 using System.Collections.Concurrent;
-using Auxilia.Governance;
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using Auxilia.Core.Contracts;
 using Auxilia.PlatformData.Entities;
 using Auxilia.UniversalDataAccess;
 using Auxilia.Workflows.Messaging.Messages;
@@ -13,11 +16,12 @@ using MimeKit;
 namespace Auxilia.SystemTestSuite.EndToEnd;
 
 /// <summary>
-/// Goal-v1 acceptance (docs/goal-v1.md): one real, governed, fully observable Code Review run
-/// end to end — an incoming mail triggers the workflow through the whole platform (adapter →
-/// pre-flight policy check → dispatch → registration handshake → JIT slot activation → live
-/// views → artifact persistence → mail reply write-back), every step audited; plus the RBAC
-/// negative: an unprivileged principal is denied at pre-flight, visibly and audited.
+/// Goal-v1 acceptance, retargeted for the BackendService retirement (Phase 4): one real, governed,
+/// fully observable Code Review run end to end — an incoming mail triggers the workflow through the
+/// split platform (WorkflowStudio email adapter → Core Run API on-behalf-of → runner dispatch →
+/// registration handshake → JIT slot activation → live views → artifact persistence → mail reply
+/// write-back), every step audited; plus the RBAC negative: an unprivileged principal is denied at
+/// the Core Run API, visibly and audited.
 /// </summary>
 [TestFixture]
 [Category("System")]
@@ -47,7 +51,9 @@ public sealed class EndToEndSystemTests
             (msg, _) => { artifactEvents.Enqueue(msg); return Task.CompletedTask; },
             cancellationToken);
 
-        // 1. The external trigger: a human mails the watched mailbox.
+        // 1. The external trigger: a human mails the watched mailbox. Studio's adapter polls it and
+        //    dispatches the mail-review configuration through the Core Run API on-behalf-of the
+        //    trigger's principal.
         await SendMailAsync(
             from: ReviewerMailbox, to: EndToEndEnvironment.AdapterMailbox,
             subject: MailSubject, body: "Please take a look at PR-42, it touches Widget.cs.",
@@ -77,10 +83,8 @@ public sealed class EndToEndSystemTests
             .ToList();
         Assert.Multiple(() =>
         {
-            Assert.That(states, Does.Contain("Received"), "Dispatch receipt must be a visible lifecycle state.");
-            Assert.That(states, Does.Contain("Queued"),   "Pre-flight completion must be a visible lifecycle state.");
-            Assert.That(states, Does.Contain("Running"),  "The accepted registration must surface as Running.");
-            Assert.That(states, Does.Contain("Success"),  "The completed run must surface as Success.");
+            Assert.That(states, Does.Contain("Running"), "The accepted registration must surface as Running.");
+            Assert.That(states, Does.Contain("Success"), "The completed run must surface as Success.");
         });
 
         // 3. Artifact persistence is announced on the bus (reference + hash, never payloads).
@@ -93,7 +97,9 @@ public sealed class EndToEndSystemTests
                 $"An ArtifactPersistedEvent for run {instanceId} (code-review-result) must be published.",
                 statusEvents, cancellationToken);
 
-        // 4. Durable platform state: artifact metadata, persisted views, and the audit trail.
+        // 4. Durable platform state: artifact metadata, persisted views, and the audit trail written
+        //    by Studio (trigger.mail-dispatch) and the runner (registration/slot/artifact) into the
+        //    shared Mongo. The Core-side policy/on-behalf-of audit is read over /api/audit below.
         await using var provider = EndToEndEnvironment.BuildPlatformDataProvider();
 
         var artifacts = await provider.GetRequiredService<IDataAccess<ArtifactRecord>>()
@@ -124,11 +130,7 @@ public sealed class EndToEndSystemTests
         Assert.Multiple(() =>
         {
             Assert.That(auditRecords.Any(r => r.Action == "trigger.mail-dispatch"),
-                Is.True, "The mail trigger must be audited.");
-            Assert.That(auditRecords.Any(r =>
-                    r.Action == "policy.allowed" &&
-                    r.Actor == EndToEndEnvironment.RunAsPrincipalId.ToString()),
-                Is.True, "The pre-flight policy allow for the run-as principal must be audited.");
+                Is.True, "The mail trigger must be audited by the Studio adapter.");
             Assert.That(auditRecords.Any(r =>
                     r.Action == "workflow.registration.accepted" &&
                     r.Subject == instanceId.ToString()),
@@ -143,8 +145,15 @@ public sealed class EndToEndSystemTests
                 Is.True, "The artifact persistence must be audited.");
         });
 
-        // 5. Write-back: the review summary must arrive as a mail reply in the
-        //    original sender's mailbox.
+        // The Core audits the on-behalf-of delegation (the trigger dispatching AS the run-as principal).
+        var delegationAudited = await WaitForAsync(
+            () => CoreAuditContainsAsync("run.on-behalf-of", EndToEndEnvironment.RunAsPrincipalId.ToString())
+                .GetAwaiter().GetResult(),
+            TimeSpan.FromSeconds(30), cancellationToken);
+        Assert.That(delegationAudited, Is.True,
+            "The Core must audit the mail trigger's on-behalf-of delegation for the run-as principal.");
+
+        // 5. Write-back: the review summary must arrive as a mail reply in the original sender's mailbox.
         var reply = await WaitForMessageAsync(
             ReviewerMailbox,
             m => m.Subject is not null &&
@@ -157,141 +166,78 @@ public sealed class EndToEndSystemTests
         Assert.That(reply!.TextBody, Does.Contain("Code Review Summary"),
             "The reply must carry the review summary.");
 
-        // 6. RERUN (#20): re-dispatch the completed run's ORIGINAL command over the same bus
-        //    path the dashboard uses — fresh command ID, RERUN_OF back-reference, requester set.
-        var instanceStore = provider.GetRequiredService<IDataAccess<WorkflowInstanceRecord>>();
-        var firstRun = await instanceStore.ReadAsync(instanceId, cancellationToken);
-        Assert.That(firstRun?.DispatchCommandJson, Is.Not.Null,
-            "The completed run must keep its dispatch command for policy-driven re-dispatch.");
+        // 6. RERUN: re-dispatch the mail-review configuration through the Core Run API (on-behalf-of the
+        //    same principal) — the governed, tokenized path the console uses, not a raw bus command.
+        var rerunResp = await EndToEndEnvironment.CoreApiClient.PostAsJsonAsync(
+            $"/api/configurations/{EndToEndEnvironment.MailReviewConfigurationId}/run" +
+            $"?onBehalfOf={EndToEndEnvironment.RunAsPrincipalId}",
+            new Dictionary<string, string>(), cancellationToken);
+        rerunResp.EnsureSuccessStatusCode();
 
-        var originalCommand = System.Text.Json.JsonSerializer
-            .Deserialize<RunWorkflowCommand>(firstRun!.DispatchCommandJson!)!;
-        var rerunCommand = originalCommand with
-        {
-            CommandId = Guid.NewGuid(),
-            Context = new Dictionary<string, string>(originalCommand.Context)
-            {
-                ["RERUN_OF"] = instanceId.ToString("D")
-            },
-            RequestedBy = EndToEndEnvironment.RunAsPrincipalId
-        };
-        await bus.PublishAsync(EndToEndEnvironment.CommandQueue, rerunCommand, cancellationToken);
-
-        Guid rerunInstanceId = default;
         var rerunComplete = await WaitForAsync(() =>
-        {
-            var complete = statusEvents
+            statusEvents
                 .Where(e => e.WorkflowType == EndToEndEnvironment.WorkflowType &&
                             e.WorkflowInstanceId != instanceId)
                 .GroupBy(e => e.WorkflowInstanceId)
-                .FirstOrDefault(g => g.Any(e => e.State == "Success"));
-            if (complete is null)
-                return false;
-            rerunInstanceId = complete.Key;
-            return true;
-        }, TimeSpan.FromSeconds(210), cancellationToken);
+                .Any(g => g.Any(e => e.State == "Success")),
+            TimeSpan.FromSeconds(210), cancellationToken);
         if (!rerunComplete)
             await FailWithDiagnosticsAsync(
                 "The rerun must reach Success like the original run.", statusEvents, cancellationToken);
-
-        var rerunRecord = await instanceStore.ReadAsync(rerunInstanceId, cancellationToken);
-        Assert.That(rerunRecord?.DispatchCommandJson, Is.Not.Null,
-            "The rerun must keep its own dispatch command.");
-        var recordedCommand = System.Text.Json.JsonSerializer
-            .Deserialize<RunWorkflowCommand>(rerunRecord!.DispatchCommandJson!)!;
-        Assert.That(recordedCommand.Context.GetValueOrDefault("RERUN_OF"),
-            Is.EqualTo(instanceId.ToString("D")),
-            "The rerun must record its predecessor via the RERUN_OF context entry.");
     }
 
     [Test]
     [CancelAfter(120_000)]
-    public async Task WhenUnprivilegedPrincipalTriggers_PreFlightFailsAndDenialIsAudited(
+    public async Task WhenUnprivilegedPrincipalTriggers_TheCoreDeniesAndAuditsIt(
         CancellationToken cancellationToken)
     {
-        var bus = EndToEndEnvironment.MessageBusClient;
+        // A fresh Core AI/service principal with NO role — deny-by-default.
+        var createResp = await EndToEndEnvironment.CoreApiClient.PostAsJsonAsync(
+            "/api/principals/ai",
+            new CreateApiKeyPrincipalRequest("E2E Unprivileged", "Service"), cancellationToken);
+        createResp.EnsureSuccessStatusCode();
+        var nobody = (await createResp.Content.ReadFromJsonAsync<CreatedApiKeyPrincipal>(cancellationToken))!;
 
-        await using var provider = EndToEndEnvironment.BuildPlatformDataProvider();
-        var directory = provider.GetRequiredService<PrincipalDirectory>();
-        var (nobody, _) = await directory.CreateApiKeyPrincipalAsync(
-            "E2E Unprivileged", "Service", cancellationToken); // deliberately NO role
-
-        var statusEvents = new ConcurrentQueue<WorkflowStatusEvent>();
-        await bus.DeclareExchangeAsync(WorkflowStatusEvent.ExchangeName, cancellationToken);
-        await using var subscription = await bus.SubscribeToExchangeAsync<WorkflowStatusEvent>(
-            WorkflowStatusEvent.ExchangeName,
-            (msg, _) => { statusEvents.Enqueue(msg); return Task.CompletedTask; },
-            cancellationToken);
-
-        var command = new RunWorkflowCommand(
-            Guid.NewGuid(), EndToEndEnvironment.WorkflowType, EndToEndEnvironment.WorkflowPackageUri,
-            new Dictionary<string, string>(), RequestedBy: nobody.Id);
-        await bus.PublishAsync(EndToEndEnvironment.CommandQueue, command, cancellationToken);
-
-        var denied = await WaitForAsync(
-            () => statusEvents.Any(e =>
-                e.WorkflowType == EndToEndEnvironment.WorkflowType &&
-                e.State == "PreFlightFailed" &&
-                e.ErrorMessage is not null &&
-                e.ErrorMessage.Contains("policy", StringComparison.OrdinalIgnoreCase)),
-            TimeSpan.FromSeconds(60), cancellationToken);
-        if (!denied)
-            await FailWithDiagnosticsAsync(
-                "An unprivileged dispatch must fail pre-flight with a policy error — never silently.",
-                statusEvents, cancellationToken);
-
-        var auditRecords = await provider.GetRequiredService<IDataAccess<AuditRecord>>()
-            .ReadAsync(cancellationToken);
-        Assert.That(auditRecords.Any(r =>
-                r.Action == "policy.denied" && r.Actor == nobody.Id.ToString()),
-            Is.True, "The policy denial for the unprivileged principal must be audited.");
-    }
-
-    [Test]
-    [CancelAfter(60_000)]
-    public async Task AfterSeeding_EmailProviderRecordCarriesItsSettingDescriptors(
-        CancellationToken cancellationToken)
-    {
-        await using var provider = EndToEndEnvironment.BuildPlatformDataProvider();
-        var providers = provider.GetRequiredService<IDataAccess<SlotProviderRecord>>();
-
-        // The seed commands are applied asynchronously by the SI — poll the shared store.
-        SlotProviderRecord? record = null;
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
-        while (DateTime.UtcNow < deadline)
+        using var nobodyClient = new HttpClient
         {
-            record = await providers.ReadAsync(SlotProviderRecord.IdFor("email-work-items"), cancellationToken);
-            if (record?.SettingDescriptorsJson is not null)
-                break;
-            await Task.Delay(500, cancellationToken);
-        }
+            BaseAddress = EndToEndEnvironment.CoreApiClient.BaseAddress
+        };
+        nobodyClient.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", nobody.ApiKey);
 
-        Assert.That(record, Is.Not.Null, "The email slot provider must be registered.");
-        Assert.That(record!.SettingDescriptorsJson, Is.Not.Null,
-            "The registration must carry the manifest's setting descriptors into the record.");
+        var runResp = await nobodyClient.PostAsJsonAsync("/api/runs",
+            new RunRequest(EndToEndEnvironment.WorkflowType, EndToEndEnvironment.WorkflowPackageUri,
+                new Dictionary<string, string>()), cancellationToken);
 
-        var descriptors = System.Text.Json.JsonSerializer
-            .Deserialize<List<Auxilia.Workflows.SettingDescriptor>>(record.SettingDescriptorsJson!)!;
-        Assert.Multiple(() =>
-        {
-            Assert.That(descriptors.Select(d => d.Key), Is.EquivalentTo(new[]
-            {
-                "ImapHost", "ImapPort", "UseSsl", "Username",
-                "Password", "SmtpHost", "SmtpPort", "Folder"
-            }), "All eight email settings must be described.");
-            Assert.That(descriptors.Single(d => d.Key == "Password").Kind,
-                Is.EqualTo(Auxilia.Workflows.SettingKind.Secret), "The password must be a secret.");
-            Assert.That(descriptors.Single(d => d.Key == "UseSsl").Kind,
-                Is.EqualTo(Auxilia.Workflows.SettingKind.Boolean));
-            Assert.That(descriptors.Single(d => d.Key == "ImapPort").Kind,
-                Is.EqualTo(Auxilia.Workflows.SettingKind.Number));
-            Assert.That(descriptors.Single(d => d.Key == "SmtpPort").Kind,
-                Is.EqualTo(Auxilia.Workflows.SettingKind.Number));
-            Assert.That(descriptors.Single(d => d.Key == "Folder").DefaultValue, Is.EqualTo("INBOX"));
-        });
+        Assert.That(runResp.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden),
+            "An unprivileged dispatch must be denied by the Core Run API — never silently accepted.");
+
+        var denialAudited = await WaitForAsync(
+            () => CoreAuditContainsAsync("policy.denied", null, nobody.Principal.Id.ToString())
+                .GetAwaiter().GetResult(),
+            TimeSpan.FromSeconds(30), cancellationToken);
+        Assert.That(denialAudited, Is.True,
+            "The policy denial for the unprivileged principal must be audited by the Core.");
     }
 
     // ------------------------------------------------------------------ helpers
+
+    /// <summary>Queries the Core audit REST endpoint for a record matching action/subject/actor.</summary>
+    private static async Task<bool> CoreAuditContainsAsync(
+        string action, string? subject = null, string? actor = null)
+    {
+        var query = $"/api/audit?action={Uri.EscapeDataString(action)}";
+        if (subject is not null) query += $"&subject={Uri.EscapeDataString(subject)}";
+        if (actor is not null) query += $"&actor={Uri.EscapeDataString(actor)}";
+        var resp = await EndToEndEnvironment.CoreApiClient.GetAsync(query);
+        if (!resp.IsSuccessStatusCode)
+            return false;
+        var page = await resp.Content.ReadFromJsonAsync<PagedResult<AuditEntry>>();
+        return page is { Items.Count: > 0 };
+    }
+
+    /// <summary>Minimal shape for deserializing Core audit rows (only what the assertions need).</summary>
+    private sealed record AuditEntry(string Actor, string Action, string Subject);
 
     private static async Task SendMailAsync(
         string from, string to, string subject, string body, CancellationToken ct)
@@ -354,7 +300,7 @@ public sealed class EndToEndSystemTests
         return condition();
     }
 
-    /// <summary>Fails with the observed status events plus SI/Backend log tails.</summary>
+    /// <summary>Fails with the observed status events plus Runner/Studio log tails.</summary>
     private static async Task FailWithDiagnosticsAsync(
         string message, ConcurrentQueue<WorkflowStatusEvent> statusEvents, CancellationToken ct)
     {
@@ -362,12 +308,12 @@ public sealed class EndToEndSystemTests
             ? "  <none>"
             : string.Join("\n", statusEvents.Select(e =>
                 $"  {e.TimestampUtc:HH:mm:ss} {e.WorkflowInstanceId} {e.WorkflowType} {e.State} {e.ErrorMessage}"));
-        var siLogs = await EndToEndEnvironment.LogTailAsync(EndToEndEnvironment.SteeringInstance);
-        var beLogs = await EndToEndEnvironment.LogTailAsync(EndToEndEnvironment.Backend);
+        var siLogs = await EndToEndEnvironment.LogTailAsync(EndToEndEnvironment.Runner);
+        var studioLogs = await EndToEndEnvironment.LogTailAsync(EndToEndEnvironment.Studio);
         Assert.Fail(
             $"{message}\n" +
             $"Observed status events:\n{observed}\n\n" +
-            $"--- SteeringInstance logs (tail) ---\n{siLogs}\n\n" +
-            $"--- BackendService logs (tail) ---\n{beLogs}");
+            $"--- Runner logs (tail) ---\n{siLogs}\n\n" +
+            $"--- WorkflowStudio logs (tail) ---\n{studioLogs}");
     }
 }

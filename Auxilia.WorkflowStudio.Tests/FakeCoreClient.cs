@@ -26,9 +26,16 @@ public sealed class FakeCoreClient : ICoreClient
             request.SlotBindings ?? new List<SlotBinding>(), request.Enabled, DateTimeOffset.UtcNow));
     }
 
-    public Task<RunAccepted> RunConfigurationAsync(Guid id, CancellationToken ct = default)
+    public List<Guid?> RunConfigurationOnBehalfOf { get; } = new();
+    public List<IReadOnlyDictionary<string, string>?> RunConfigurationContexts { get; } = new();
+
+    public Task<RunAccepted> RunConfigurationAsync(
+        Guid id, Guid? onBehalfOf = null, IReadOnlyDictionary<string, string>? context = null,
+        CancellationToken ct = default)
     {
         RunConfigurationIds.Add(id);
+        RunConfigurationOnBehalfOf.Add(onBehalfOf);
+        RunConfigurationContexts.Add(context);
         var commandId = Guid.NewGuid();
         return Task.FromResult(new RunAccepted(commandId, commandId));
     }
@@ -49,13 +56,23 @@ public sealed class FakeCoreClient : ICoreClient
         => Task.FromResult<RunConfiguration?>(null);
     public Task<PagedResult<RunConfiguration>> QueryConfigurationsAsync(ConfigurationQuery query, CancellationToken ct = default)
         => Task.FromResult(new PagedResult<RunConfiguration>(new List<RunConfiguration>(), 0, query.Skip, query.Take));
+    public List<RunRequest> RunRequests { get; } = new();
     public Task<RunAccepted> RunAsync(RunRequest request, CancellationToken ct = default)
-        => Task.FromResult(new RunAccepted(Guid.NewGuid(), Guid.NewGuid()));
+    {
+        RunRequests.Add(request);
+        return Task.FromResult(new RunAccepted(Guid.NewGuid(), Guid.NewGuid()));
+    }
     public Task<RunStatus?> GetRunAsync(Guid id, CancellationToken ct = default)
         => Task.FromResult<RunStatus?>(null);
     public Task<PagedResult<RunStatus>> QueryRunsAsync(RunQuery query, CancellationToken ct = default)
         => Task.FromResult(new PagedResult<RunStatus>(new List<RunStatus>(), 0, query.Skip, query.Take));
     public Task CancelRunAsync(Guid id, CancellationToken ct = default) => Task.CompletedTask;
+    public async IAsyncEnumerable<RunStreamEvent> StreamRunAsync(
+        Guid runId, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        await Task.CompletedTask;
+        yield break;
+    }
     public Task<Connector?> GetConnectorAsync(Guid id, CancellationToken ct = default)
         => Task.FromResult(Connectors.FirstOrDefault(c => c.Id == id));
     public Task SetConnectorGrantsAsync(Guid id, SetConnectorGrants request, CancellationToken ct = default)
@@ -68,13 +85,55 @@ public sealed class FakeCoreClient : ICoreClient
         => Task.CompletedTask;
     public Task AssignGroupRoleAsync(Guid groupId, AssignGroupRoleRequest request, CancellationToken ct = default)
         => Task.CompletedTask;
+    public Task<PagedResult<PrincipalDto>> QueryPrincipalsAsync(PrincipalQuery query, CancellationToken ct = default)
+        => Task.FromResult(new PagedResult<PrincipalDto>([], 0, query.Skip, query.Take));
+    public Task<PrincipalDto?> GetPrincipalAsync(Guid id, CancellationToken ct = default)
+        => Task.FromResult<PrincipalDto?>(null);
+    public Task<PrincipalDto> CreateHumanPrincipalAsync(CreateHumanPrincipalRequest request, CancellationToken ct = default)
+        => Task.FromResult(new PrincipalDto(Guid.NewGuid(), "Human", request.DisplayName, "Active", null, []));
+    public Task<CreatedApiKeyPrincipal> CreateApiKeyPrincipalAsync(CreateApiKeyPrincipalRequest request, CancellationToken ct = default)
+        => Task.FromResult(new CreatedApiKeyPrincipal(
+            new PrincipalDto(Guid.NewGuid(), request.Kind, request.DisplayName, "Active", null, []), "aux_fake-key"));
+    public Task AssignPrincipalRoleAsync(Guid id, AssignRoleRequest request, CancellationToken ct = default)
+        => Task.CompletedTask;
+    public Task RevokePrincipalRoleAsync(Guid id, string roleName, CancellationToken ct = default)
+        => Task.CompletedTask;
+    public Task SetPrincipalEnabledAsync(Guid id, SetPrincipalEnabledRequest request, CancellationToken ct = default)
+        => Task.CompletedTask;
     public Task<IReadOnlyList<GroupMappingDto>> ListGroupMappingsAsync(CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<GroupMappingDto>>([]);
     public Task<GroupMappingDto> CreateGroupMappingAsync(CreateGroupMappingRequest request, CancellationToken ct = default)
         => Task.FromResult(new GroupMappingDto(
             Guid.NewGuid(), request.IdentityProvider, request.GroupClaim, request.RoleName));
     public Task RemoveGroupMappingAsync(Guid id, CancellationToken ct = default) => Task.CompletedTask;
+    public Task<IReadOnlyList<IdentityConnectorDescriptorDto>> ListIdentityConnectorsAsync(CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<IdentityConnectorDescriptorDto>>([]);
+    public Task<IReadOnlyList<IdentitySourceDto>> ListIdentitySourcesAsync(CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<IdentitySourceDto>>([]);
+    public Task<IdentitySourceDto?> GetIdentitySourceAsync(Guid id, CancellationToken ct = default)
+        => Task.FromResult<IdentitySourceDto?>(null);
+    public Task<IdentitySourceDto> SaveIdentitySourceAsync(SaveIdentitySourceRequest request, CancellationToken ct = default)
+        => Task.FromResult(new IdentitySourceDto(
+            Guid.NewGuid(), request.Name, request.ConnectorType, request.DisableMissing, request.DefaultRole,
+            request.GroupRoleMappings, request.Settings, [], null, null));
+    public Task DeleteIdentitySourceAsync(Guid id, CancellationToken ct = default) => Task.CompletedTask;
+    public Task<IdentityConnectorTestResult> TestIdentitySourceAsync(Guid id, CancellationToken ct = default)
+        => Task.FromResult(new IdentityConnectorTestResult(true, "0 user(s)"));
+    public Task<IdentityImportSummaryDto> ImportIdentitySourceAsync(Guid id, CancellationToken ct = default)
+        => Task.FromResult(new IdentityImportSummaryDto(0, 0, 0, 0, []));
     public Task<CurrentPrincipal> GetCurrentPrincipalAsync(CancellationToken ct = default)
         => Task.FromResult(new CurrentPrincipal(Guid.NewGuid(), "fake", []));
     public Task<bool> CheckHealthAsync(CancellationToken ct = default) => Task.FromResult(true);
+    public Task<PagedResult<AuditEntry>> QueryAuditAsync(AuditQuery query, CancellationToken ct = default)
+        => Task.FromResult(new PagedResult<AuditEntry>(new List<AuditEntry>(), 0, query.Skip, query.Take));
+    public Task<PagedResult<ProviderCatalogEntry>> QueryProviderCatalogAsync(ProviderCatalogQuery query, CancellationToken ct = default)
+        => Task.FromResult(new PagedResult<ProviderCatalogEntry>(new List<ProviderCatalogEntry>(), 0, query.Skip, query.Take));
+    public Task<ProviderCatalogEntry> SetProviderAvailabilityAsync(string providerType, bool available, CancellationToken ct = default)
+        => Task.FromResult(new ProviderCatalogEntry(providerType, available, "", [], [], null));
+    public Task<ProviderCatalogEntry> SetProviderSettingDisabledAsync(string providerType, string settingKey, bool disabled, CancellationToken ct = default)
+        => Task.FromResult(new ProviderCatalogEntry(providerType, false, "", [], [], null));
+    public Task<PagedResult<Auxilia.Core.Contracts.WorkflowTypeDto>> ListWorkflowTypesAsync(Auxilia.Core.Contracts.WorkflowTypeQuery query, CancellationToken ct = default)
+        => Task.FromResult(new PagedResult<Auxilia.Core.Contracts.WorkflowTypeDto>([], 0, query.Skip, query.Take));
+    public Task<Auxilia.Core.Contracts.WorkflowSchemaDto?> GetWorkflowSchemaAsync(string workflowType, CancellationToken ct = default)
+        => Task.FromResult<Auxilia.Core.Contracts.WorkflowSchemaDto?>(null);
 }

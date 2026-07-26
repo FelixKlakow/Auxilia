@@ -30,6 +30,9 @@ public sealed class LocalIdentityProvider(
         return await SessionForAsync(credential.PrincipalId, ct);
     }
 
+    public Task<IdentitySession?> ResolveSessionAsync(Guid principalId, CancellationToken ct = default)
+        => SessionForAsync(principalId, ct);
+
     private async Task<IdentitySession?> SessionForAsync(Guid principalId, CancellationToken ct)
     {
         var principal = await principals.ReadAsync(principalId, ct);

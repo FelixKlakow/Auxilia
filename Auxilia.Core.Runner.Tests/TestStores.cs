@@ -71,6 +71,6 @@ internal static class TestStores
         => new(Options.Create(settings ?? new WorkflowDispatcherSettings()),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<WorkspaceManager>.Instance);
 
-    public static SteeringInstanceInfo NewInstanceInfo()
+    public static CoreRunnerInfo NewInstanceInfo()
         => new(Guid.NewGuid(), DateTime.UtcNow);
 }

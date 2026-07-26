@@ -12,7 +12,7 @@
     <Project Path="Source\Auxilia.Messaging\Auxilia.Messaging.csproj" />
   </Folder>
   <Folder Name="/02_FrontendDomain/" />
-  <Folder Name="/03_SteeringDomain/">
+  <Folder Name="/03_RunnerDomain/">
     <Project Path="Auxilia.Core.Runner.Tests\Auxilia.Core.Runner.Tests.csproj" />
     <Project Path="Source\Auxilia.Core.Runner\Auxilia.Core.Runner.csproj" />
   </Folder>
@@ -20,9 +20,7 @@
     <Project Path="Auxilia.Adapters.Email.Tests\Auxilia.Adapters.Email.Tests.csproj" />
     <Project Path="Auxilia.Ai.Tests\Auxilia.Ai.Tests.csproj" />
     <Project Path="Auxilia.AI\Auxilia.AI.csproj" />
-    <Project Path="Auxilia.BackendService.Tests\Auxilia.BackendService.Tests.csproj" />
     <Project Path="Source\Auxilia.Adapters.Email\Auxilia.Adapters.Email.csproj" />
-    <Project Path="Source\Auxilia.BackendService\Auxilia.BackendService.csproj" />
   </Folder>
   <Folder Name="/Hooks/">
     <File Path="Hooks\commit-msg" />
@@ -34,12 +32,12 @@
     <Project Path="Auxilia.DevStand\Auxilia.DevStand.csproj" />
   </Folder>
   <Folder Name="/Overview/">
-    <File Path="ARCHITECTURE.md" />
+    <File Path="docs/ARCHITECTURE.md" />
     <File Path="docs/workflow-sdk-design.md" />
     <File Path="README.md" />
-    <File Path="CommitConventions.md" />
-    <File Path="TestStrategy.md" />
-    <File Path="USE-CASES.md" />
+    <File Path="docs/CommitConventions.md" />
+    <File Path="docs/TestStrategy.md" />
+    <File Path="docs/USE-CASES.md" />
   </Folder>
   <Folder Name="/05_WorkflowsDomain/">
     <Project Path="Auxilia.Workflows.Packer.Tests\Auxilia.Workflows.Packer.Tests.csproj" />
@@ -81,9 +79,11 @@
     <Project Path="Source\Auxilia.CodeReview.Workflow\Auxilia.CodeReview.Workflow.csproj" />
   </Folder>
   <Folder Name="/Source/">
+    <Project Path="Source/Auxilia.AdminConsole/Auxilia.AdminConsole.csproj" />
     <Project Path="Source/Auxilia.Core.Api/Auxilia.Core.Api.csproj" />
     <Project Path="Source/Auxilia.WorkflowStudio/Auxilia.WorkflowStudio.csproj" />
   </Folder>
+  <Project Path="Auxilia.AdminConsole.Tests/Auxilia.AdminConsole.Tests.csproj" />
   <Project Path="Auxilia.Core.Api.Tests/Auxilia.Core.Api.Tests.csproj" />
   <Project Path="Auxilia.Core.Client/Auxilia.Core.Client.csproj" />
   <Project Path="Auxilia.Core.Contracts/Auxilia.Core.Contracts.csproj" />

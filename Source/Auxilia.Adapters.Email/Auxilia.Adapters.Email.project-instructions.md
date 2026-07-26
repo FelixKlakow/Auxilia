@@ -1,6 +1,6 @@
 # Auxilia.Adapters.Email
 
-The v1 task-source integration adapter (ARCHITECTURE §4, docs/goal-v1.md): a generic IMAP
+The v1 task-source integration adapter (ARCHITECTURE §4, docs/delivered/goal-v1.md): a generic IMAP
 mailbox adapter that turns incoming mail into work items and dispatches the configured
 workflow per message. Gmail is a configuration of this adapter (IMAP + app password), not a
 separate implementation.

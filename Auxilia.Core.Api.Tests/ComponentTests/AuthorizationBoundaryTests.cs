@@ -55,6 +55,25 @@ public sealed class AuthorizationBoundaryTests : CoreApiComponentTestBase
         Assert.That(response.StatusCode, Is.EqualTo(expected));
     }
 
+    [TestCase(BuiltInRoles.Administrator, HttpStatusCode.OK)]
+    [TestCase(BuiltInRoles.Operator, HttpStatusCode.Forbidden)]
+    [TestCase(BuiltInRoles.User, HttpStatusCode.Forbidden)]
+    [TestCase(BuiltInRoles.Auditor, HttpStatusCode.Forbidden)]
+    public async Task SaveIdentitySource_IsAdministratorOnly(string role, HttpStatusCode expected)
+    {
+        var client = await ClientForRolesAsync(role);
+        var response = await client.PostAsJsonAsync("/api/identity/sources", new
+        {
+            name = $"src-{Guid.NewGuid():N}",
+            connectorType = "csv",
+            settings = new Dictionary<string, string> { ["Csv"] = "ada,ada" },
+            defaultRole = "User",
+            groupRoleMappings = new Dictionary<string, string>(),
+            disableMissing = false
+        });
+        Assert.That(response.StatusCode, Is.EqualTo(expected));
+    }
+
     // --- Configuration: slot-config.write → Operator and above ---
 
     [TestCase(BuiltInRoles.Administrator, HttpStatusCode.OK)]

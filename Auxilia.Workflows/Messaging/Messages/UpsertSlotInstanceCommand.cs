@@ -1,7 +1,7 @@
 namespace Auxilia.Workflows.Messaging.Messages;
 
 /// <summary>
-/// Seeds (creates or updates) a named, reusable slot instance on the Steering Instance via the
+/// Seeds (creates or updates) a named, reusable slot instance on the Core.Runner via the
 /// <c>slot-configurations</c> exchange — the same seeding family as slot configurations. The
 /// instance binds one provider with its settings and is referenced from workflow configuration
 /// bindings by ID, so updating it updates every workflow using it.

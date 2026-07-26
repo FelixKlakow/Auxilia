@@ -13,10 +13,10 @@ namespace Auxilia.SystemTestSuite.WorkflowDispatch;
 /// Topology:
 /// <list type="bullet">
 ///   <item>RabbitMQ — message broker (alias <c>rabbitmq</c>).</item>
-///   <item>SteeringInstance — control plane; has the Docker socket bind-mounted so it can
+///   <item>Runner — control plane; has the Docker socket bind-mounted so it can
 ///         launch workflow containers via the Docker API (<c>DockerWorkflowLauncher</c>).</item>
 ///   <item>Dummy-workflows image — pre-built before the test run; launched on demand by the
-///         SteeringInstance when a <c>RunWorkflowCommand</c> is received.</item>
+///         Runner when a <c>RunWorkflowCommand</c> is received.</item>
 /// </list>
 ///
 /// MongoDB is intentionally omitted — it is not required for the dispatch smoke test.
@@ -25,19 +25,19 @@ namespace Auxilia.SystemTestSuite.WorkflowDispatch;
 public class WorkflowDispatchEnvironment
 {
     internal const string DummyWorkflowsImageName = "auxilia-dummy-workflows:system-test";
-    internal const string SteeringImageName        = "auxilia-core-runner:system-test";
+    internal const string RunnerImageName        = "auxilia-core-runner:system-test";
     private  const string RabbitMqAlias            = "rabbitmq";
     private  const string RabbitMqImage            = "rabbitmq:3.13-management";
 
     // Generated once per test session — used as the Docker network name so the
-    // SteeringInstance can attach workflow containers to the same network.
+    // Runner can attach workflow containers to the same network.
     private static readonly string NetworkName =
         $"auxilia-dispatch-{Guid.NewGuid():N}".Substring(0, 30); // max 30 chars for Docker network names
 
     private static readonly string RepoRoot = Path.GetFullPath(
         Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
 
-    private IContainer _steeringInstance = null!;
+    private IContainer _runner = null!;
     private INetwork   _network          = null!;
     private RabbitMqContainer _rabbitMq  = null!;
 
@@ -48,12 +48,12 @@ public class WorkflowDispatchEnvironment
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
     {
-        // Build the SteeringInstance and dummy-workflows images in parallel from source.
+        // Build the Runner and dummy-workflows images in parallel from source.
         await Task.WhenAll(
-            BuildImageAsync(SteeringImageName,     "Source/Auxilia.Core.Runner/Dockerfile"),
+            BuildImageAsync(RunnerImageName,     "Source/Auxilia.Core.Runner/Dockerfile"),
             BuildImageAsync(DummyWorkflowsImageName, "Auxilia.Workflows.Testing/Dockerfile"));
 
-        // Named network — name is passed to the SteeringInstance so it can attach
+        // Named network — name is passed to the Runner so it can attach
         // workflow containers to the same network.
         _network = new NetworkBuilder()
             .WithName(NetworkName)
@@ -72,17 +72,17 @@ public class WorkflowDispatchEnvironment
         RabbitMqHost = _rabbitMq.Hostname;
         RabbitMqPort = _rabbitMq.GetMappedPublicPort(5672);
 
-        // SteeringInstance — bind-mount the Docker socket so DockerWorkflowLauncher
+        // Runner — bind-mount the Docker socket so DockerWorkflowLauncher
         // can call the Docker API from inside the container.
         const string dockerSocket = "/var/run/docker.sock";
 
-        _steeringInstance = new ContainerBuilder(SteeringImageName)
+        _runner = new ContainerBuilder(RunnerImageName)
             .WithNetwork(_network)
             .WithBindMount(dockerSocket, dockerSocket)
             // Note: on Docker Desktop (Windows/Mac) the socket is world-accessible (mode 777).
             // On Linux CI the socket may require root; if so, override the user in the pipeline
             // via a Testcontainers future API or by adjusting socket group permissions.
-            // RabbitMQ — SteeringInstance connects on the Docker-internal address.
+            // RabbitMQ — Runner connects on the Docker-internal address.
             .WithEnvironment("RabbitMq__Host",     RabbitMqAlias)
             .WithEnvironment("RabbitMq__Port",     "5672")
             .WithEnvironment("RabbitMq__UserName", "guest")
@@ -97,7 +97,7 @@ public class WorkflowDispatchEnvironment
             .WithWaitStrategy(
                 Wait.ForUnixContainer().UntilMessageIsLogged("WorkflowDispatcher started"))
             .Build();
-        await _steeringInstance.StartAsync();
+        await _runner.StartAsync();
 
         // Test-side message bus — connects to the host-mapped RabbitMQ port.
         MessageBusClient = await RabbitMqClient.CreateAsync(RabbitMqHost, RabbitMqPort);
@@ -107,7 +107,7 @@ public class WorkflowDispatchEnvironment
     public async Task OneTimeTearDown()
     {
         if (MessageBusClient is IAsyncDisposable d) await d.DisposeAsync();
-        await _steeringInstance.DisposeAsync();
+        await _runner.DisposeAsync();
         await _rabbitMq.DisposeAsync();
         await _network.DisposeAsync();
     }

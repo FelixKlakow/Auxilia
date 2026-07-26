@@ -25,17 +25,12 @@ Do **not** include: configuration samples, test category rules, dependency table
 
 ## Test Pyramid
 
-~~Three levels of automated tests exist. **Add all three when implementing a feature. For bug fixes, add a test at the appropriate level if the bug is testable.**
-
-| Level | Project | Filter | When run |
-|---|---|---|---|
-| 1 Unit | `*.Tests/UnitTests/` | `Category=Unit` | Every commit (pre-commit hook) |
-| 2 Component | `*.Tests/ComponentTests/` | `Category=Component` | On demand / CI |
-| 3 System | `Auxilia.SystemTestSuite/` | `Category=System` | On demand / CI |~~
+Four tiers, as defined in `docs/TestStrategy.md` — **Unit / Component / System / Manual**. Add tests at all applicable levels when implementing a feature; for bug fixes, add a test at the appropriate level if the bug is testable.
 
 - **Unit** – single class, all deps mocked with Moq, no I/O.
 - **Component** – real DI container, fake infra (`FakeMessageBusClient`), no network.
 - **System** – full Docker environment via Testcontainers; only cost-generating third-party calls are stubbed.
+- **Manual** – real external services, pre-release only.
 
 ## Completing work
 After finishing a feature or bug fix, run the full test suite:
@@ -51,5 +46,5 @@ Use `IMessageBusClient` (abstraction in `Auxilia.Messaging`) for all RabbitMQ in
 - Never instruct the AI model to emit structured text (e.g. "Respond with JSON"). Use a result-sink `ICapabilityMcpTools` in `AiSessionOptions.CapabilityTools` to collect structured output via typed tool calls.
 
 ## Commit convention
-`<type>: <description>` – allowed types: `feat fix refactor plan docs style merge revert`.
+`<type>(optional scope)!: <description>` – allowed types: `feat fix refactor plan docs style merge revert`.
 

@@ -1,6 +1,6 @@
 {
   "profiles": {
-    "Auxilia.SteeringInstance": {
+    "Auxilia.Core.Runner": {
       "commandName": "Project",
       "launchBrowser": true,
       "environmentVariables": {

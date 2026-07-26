@@ -26,8 +26,8 @@ public class ImplementationWorkflowEnvironment
     private static readonly string RepoRoot = Path.GetFullPath(
         Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
 
-    private IContainer        _happySteeringInstance = null!;
-    private IContainer        _edgeSteeringInstance  = null!;
+    private IContainer        _happyRunner = null!;
+    private IContainer        _edgeRunner  = null!;
     private INetwork          _network               = null!;
     private RabbitMqContainer _rabbitMq              = null!;
     private string            _happyPublishDir       = null!;
@@ -49,7 +49,7 @@ public class ImplementationWorkflowEnvironment
         // contention (CS2012); the Docker builds compile inside containers and stay parallel.
         var imageBuilds = Task.WhenAll(
             WorkflowDispatchEnvironment.BuildImageAsync(
-                WorkflowDispatchEnvironment.SteeringImageName,
+                WorkflowDispatchEnvironment.RunnerImageName,
                 "Source/Auxilia.Core.Runner/Dockerfile"),
             WorkflowDispatchEnvironment.BuildImageAsync(
                 ProductionImageName,
@@ -78,7 +78,7 @@ public class ImplementationWorkflowEnvironment
         RabbitMqHost = _rabbitMq.Hostname;
         RabbitMqPort = _rabbitMq.GetMappedPublicPort(5672);
 
-        _happySteeringInstance = new ContainerBuilder(WorkflowDispatchEnvironment.SteeringImageName)
+        _happyRunner = new ContainerBuilder(WorkflowDispatchEnvironment.RunnerImageName)
             .WithNetwork(_network)
             .WithBindMount(DockerSocket, DockerSocket)
             .WithBindMount(_happyPublishDir, ContainerPluginsDir)
@@ -101,7 +101,7 @@ public class ImplementationWorkflowEnvironment
                 .UntilMessageIsLogged("SlotConfigurationSeedHandler started"))
             .Build();
 
-        _edgeSteeringInstance = new ContainerBuilder(WorkflowDispatchEnvironment.SteeringImageName)
+        _edgeRunner = new ContainerBuilder(WorkflowDispatchEnvironment.RunnerImageName)
             .WithNetwork(_network)
             .WithBindMount(DockerSocket, DockerSocket)
             .WithBindMount(_edgePublishDir, ContainerPluginsDir)
@@ -125,8 +125,8 @@ public class ImplementationWorkflowEnvironment
             .Build();
 
         await Task.WhenAll(
-            _happySteeringInstance.StartAsync(),
-            _edgeSteeringInstance.StartAsync());
+            _happyRunner.StartAsync(),
+            _edgeRunner.StartAsync());
 
         MessageBusClient = await RabbitMqClient.CreateAsync(RabbitMqHost, RabbitMqPort);
 
@@ -170,8 +170,8 @@ public class ImplementationWorkflowEnvironment
     public async Task OneTimeTearDown()
     {
         if (MessageBusClient is IAsyncDisposable d) await d.DisposeAsync();
-        await _happySteeringInstance.DisposeAsync();
-        await _edgeSteeringInstance.DisposeAsync();
+        await _happyRunner.DisposeAsync();
+        await _edgeRunner.DisposeAsync();
         await _rabbitMq.DisposeAsync();
         await _network.DisposeAsync();
         if (Directory.Exists(_happyPublishDir)) Directory.Delete(_happyPublishDir, recursive: true);

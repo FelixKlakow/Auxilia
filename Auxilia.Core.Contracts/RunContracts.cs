@@ -50,3 +50,21 @@ public sealed record RunQuery(
 
 /// <summary>A page of results plus the total number of matches before paging.</summary>
 public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Total, int Skip, int Take);
+
+/// <summary>
+/// One frame of a run's live-view stream (SSE). A discriminated envelope so a client can tell a
+/// lifecycle transition from a view item without a second round-trip: <see cref="Kind"/> is
+/// <c>"status"</c> (the payload is a serialized <c>WorkflowStatusEvent</c>) or <c>"view"</c> (the
+/// payload is a serialized <c>ViewDataMessage</c>). <see cref="Sequence"/> is the view item's
+/// per-(run, view) monotonic sequence for view frames, and <c>0</c> for status frames.
+/// </summary>
+public sealed record RunStreamEvent(
+    string Kind,
+    Guid RunId,
+    long Sequence,
+    string PayloadJson,
+    DateTimeOffset TimestampUtc)
+{
+    public const string StatusKind = "status";
+    public const string ViewKind = "view";
+}

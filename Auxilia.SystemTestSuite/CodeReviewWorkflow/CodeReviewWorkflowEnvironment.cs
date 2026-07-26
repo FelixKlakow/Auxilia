@@ -30,8 +30,8 @@ public class CodeReviewWorkflowEnvironment
     private static readonly string RepoRoot = Path.GetFullPath(
         Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
 
-    private IContainer        _happySteeringInstance = null!;
-    private IContainer        _edgeSteeringInstance  = null!;
+    private IContainer        _happyRunner = null!;
+    private IContainer        _edgeRunner  = null!;
     private INetwork          _network               = null!;
     private RabbitMqContainer _rabbitMq              = null!;
     private string            _happyPublishDir       = null!;
@@ -40,8 +40,8 @@ public class CodeReviewWorkflowEnvironment
     public static IMessageBusClient MessageBusClient { get; private set; } = null!;
     public static string            RabbitMqHost     { get; private set; } = null!;
     public static int               RabbitMqPort     { get; private set; }
-    /// <summary>The happy steering container, exposed so tests can inspect its platform data.</summary>
-    public static IContainer        HappySteeringInstance { get; private set; } = null!;
+    /// <summary>The happy runner container, exposed so tests can inspect its platform data.</summary>
+    public static IContainer        HappyRunner { get; private set; } = null!;
 
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
@@ -57,7 +57,7 @@ public class CodeReviewWorkflowEnvironment
         // builds compile inside containers and can stay parallel.
         var imageBuilds = Task.WhenAll(
             WorkflowDispatchEnvironment.BuildImageAsync(
-                WorkflowDispatchEnvironment.SteeringImageName,
+                WorkflowDispatchEnvironment.RunnerImageName,
                 "Source/Auxilia.Core.Runner/Dockerfile"),
             WorkflowDispatchEnvironment.BuildImageAsync(
                 ProductionImageName,
@@ -86,7 +86,7 @@ public class CodeReviewWorkflowEnvironment
         RabbitMqHost = _rabbitMq.Hostname;
         RabbitMqPort = _rabbitMq.GetMappedPublicPort(5672);
 
-        _happySteeringInstance = new ContainerBuilder(WorkflowDispatchEnvironment.SteeringImageName)
+        _happyRunner = new ContainerBuilder(WorkflowDispatchEnvironment.RunnerImageName)
             .WithNetwork(_network)
             .WithBindMount(DockerSocket, DockerSocket)
             .WithBindMount(_happyPublishDir, ContainerPluginsDir)
@@ -110,7 +110,7 @@ public class CodeReviewWorkflowEnvironment
                 .UntilMessageIsLogged("SlotConfigurationSeedHandler started"))
             .Build();
 
-        _edgeSteeringInstance = new ContainerBuilder(WorkflowDispatchEnvironment.SteeringImageName)
+        _edgeRunner = new ContainerBuilder(WorkflowDispatchEnvironment.RunnerImageName)
             .WithNetwork(_network)
             .WithBindMount(DockerSocket, DockerSocket)
             .WithBindMount(_edgePublishDir, ContainerPluginsDir)
@@ -134,10 +134,10 @@ public class CodeReviewWorkflowEnvironment
             .Build();
 
         await Task.WhenAll(
-            _happySteeringInstance.StartAsync(),
-            _edgeSteeringInstance.StartAsync());
+            _happyRunner.StartAsync(),
+            _edgeRunner.StartAsync());
 
-        HappySteeringInstance = _happySteeringInstance;
+        HappyRunner = _happyRunner;
         MessageBusClient = await RabbitMqClient.CreateAsync(RabbitMqHost, RabbitMqPort);
 
         var happySeedBase = HappyCommandQueue + "-slot-seed";
@@ -186,8 +186,8 @@ public class CodeReviewWorkflowEnvironment
     public async Task OneTimeTearDown()
     {
         if (MessageBusClient is IAsyncDisposable d) await d.DisposeAsync();
-        await _happySteeringInstance.DisposeAsync();
-        await _edgeSteeringInstance.DisposeAsync();
+        await _happyRunner.DisposeAsync();
+        await _edgeRunner.DisposeAsync();
         await _rabbitMq.DisposeAsync();
         await _network.DisposeAsync();
         if (Directory.Exists(_happyPublishDir)) Directory.Delete(_happyPublishDir, recursive: true);

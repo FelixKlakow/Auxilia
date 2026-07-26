@@ -13,7 +13,7 @@ Use this workflow when you want a consistent, configurable code-review process d
 | Slot name | Capability record | Required capabilities |
 |---|---|---|
 | `repository` | `SourceControlCapabilities` | `RequiredPermissions = [Permission.Read]` — read-only access to the mounted repository snapshot |
-| `pull-request` | `PullRequestAccessCapabilities` | `RequiredPermissions = ["ReadWrite"]` — read changed files, diff hunks, linked work-item refs; post review comments |
+| `pull-request` | `PullRequestAccessCapabilities` | `RequiredPermissions = [PullRequestPermission.Read, PullRequestPermission.Write]` — read changed files, diff hunks, linked work-item refs; post review comments |
 | `work-items` | `TaskSourceCapabilities` | `SupportedItemTypes = [UserStory, Bug, Feature, Epic]` — batch-fetch linked work items; optionally post summary comments |
 | `primary-reviewer` | `AiCapabilities` | `MinContextWindow = 128 000`, `SupportedModalities = [Text]` — per-file review loop; produces staged findings |
 | `secondary-reviewer` | `AiCapabilities` | `MinContextWindow = 128 000`, `SupportedModalities = [Text]` — per-finding two-eyes validation; only active when `TwoEyesConfiguration.Enabled = true` |
@@ -75,6 +75,8 @@ Phase 2 — Context Assembly (ContextAssembler)
 Phase 3 — Primary Review Pass (PrimaryReviewOrchestrator)
   Opens a single IAiSession for "primary-reviewer".
   Iterates every ReviewableFile; sends hunk content to the session.
+  Structured verdict + findings are collected via the result-sink typed MCP tools
+  (CodeReviewResultSinkMcpTools) — never by parsing the session's ExecuteAsync text.
   Records FileVerdict in VerdictMap; stages findings in IStagedFindingsStore.
   Enforces: Skipped verdict on Critical file → FileVerdict.Failed.
   Triggers ContextCompactionService when accumulated token usage exceeds threshold:

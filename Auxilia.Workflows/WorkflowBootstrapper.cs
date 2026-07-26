@@ -18,7 +18,7 @@ public sealed class WorkflowBootstrapper(
         if (response.Slots.Count > 0)
         {
             // Eager delivery: all slot configurations arrived with the registration response
-            // (test harness / dev mode without a Steering Instance activation handler).
+            // (test harness / dev mode without a Core.Runner activation handler).
             foreach (var (slotName, encryptedSlot) in response.Slots)
             {
                 var definition = slotDefinitions.FirstOrDefault(d => d.SlotName == slotName);

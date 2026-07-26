@@ -1,0 +1,187 @@
+@page "/dashboard"
+@attribute [Authorize]
+@implements IDisposable
+@inject ICoreClient Core
+
+<PageTitle>Dashboard — Auxilia</PageTitle>
+
+<PageHeader Title="Dashboard" Subtitle="What is running now, and what ran recently."/>
+
+@if (!_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else if (_denied)
+{
+    <div class="panel denied">Access denied: @_error</div>
+}
+else
+{
+    @if (_error is { Length: > 0 })
+    {
+        <div class="panel denied">@_error</div>
+    }
+
+    <div class="stat-grid">
+        <div class="stat-tile">
+            <span class="stat-value">@_active.Count</span>
+            <span class="stat-label">Active now</span>
+        </div>
+        <div class="stat-tile">
+            <span class="stat-value">@CountOf("Success")</span>
+            <span class="stat-label">Recent success</span>
+        </div>
+        <div class="stat-tile @(CountOf("Failed") > 0 ? "stat-bad" : null)">
+            <span class="stat-value">@CountOf("Failed")</span>
+            <span class="stat-label">Recent failed</span>
+        </div>
+        <div class="stat-tile">
+            <span class="stat-value">@_total</span>
+            <span class="stat-label">Runs (recent window)</span>
+        </div>
+    </div>
+
+    <section class="live-now-section">
+        <h2 class="section-title">Live now</h2>
+        @if (_active.Count == 0)
+        {
+            <EmptyState Title="Nothing running"
+                        Description="Active runs appear here as soon as a trigger dispatches a workflow."/>
+        }
+        else
+        {
+            <div class="card">
+                <table class="data-table">
+                    <thead>
+                    <tr>
+                        <th>State</th>
+                        <th>Workflow</th>
+                        <th>Started</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var run in _active)
+                    {
+                        <tr>
+                            <td><span class="badge badge-state badge-@run.State.ToLowerInvariant()">@run.State</span></td>
+                            <td><a href="runs/@run.RunId" class="cell-strong">@run.WorkflowType</a></td>
+                            <td>@TimeText.Relative(run.CreatedUtc)</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    <section class="recent-runs-section">
+        <h2 class="section-title">Recent runs</h2>
+        @if (_recent.Count == 0)
+        {
+            <EmptyState Title="No runs yet"
+                        Description="Runs appear here as soon as a task source, schedule, or trigger dispatches a workflow."/>
+        }
+        else
+        {
+            <div class="card">
+                <table class="data-table">
+                    <thead>
+                    <tr>
+                        <th>State</th>
+                        <th>Workflow</th>
+                        <th>Started</th>
+                        <th>Error</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var run in _recent)
+                    {
+                        <tr>
+                            <td><span class="badge badge-state badge-@run.State.ToLowerInvariant()">@run.State</span></td>
+                            <td><a href="runs/@run.RunId" class="cell-strong">@run.WorkflowType</a></td>
+                            <td>@TimeText.Relative(run.CreatedUtc)</td>
+                            <td class="error-cell">@run.Error</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+}
+
+@code {
+
+    private const int Window = 50;
+
+    private bool _loaded;
+    private bool _denied;
+    private string? _error;
+
+    private int _total;
+    private List<RunStatus> _all = [];
+    private IReadOnlyList<RunStatus> _active = [];
+    private List<RunStatus> _recent = [];
+
+    private readonly CancellationTokenSource _cts = new();
+    private PeriodicTimer? _timer;
+
+    private int CountOf(string state) => _all.Count(r => r.State == state);
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender || _timer is not null || _denied)
+            return;
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+        _ = PollAsync();
+    }
+
+    private async Task PollAsync()
+    {
+        try
+        {
+            while (await _timer!.WaitForNextTickAsync(_cts.Token))
+            {
+                await LoadAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Component disposed — polling ends.
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            // A single recent-window query drives every surface; counts are computed client-side
+            // (there is no stats endpoint yet).
+            var page = await Core.QueryRunsAsync(new RunQuery(Skip: 0, Take: Window), _cts.Token);
+            _denied = false;
+            _error = null;
+            _total = page.Total;
+            _all = page.Items.ToList();
+            _active = LiveNow.ActiveOf(_all);
+            _recent = _all.Where(r => !LiveNow.IsActive(r.State)).Take(10).ToList();
+        }
+        catch (CoreApiException ex)
+        {
+            _denied = ex.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+
+        _loaded = true;
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+        _timer?.Dispose();
+    }
+
+}

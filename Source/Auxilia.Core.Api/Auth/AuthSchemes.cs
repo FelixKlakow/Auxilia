@@ -6,6 +6,9 @@ public static class AuthSchemes
     /// <summary>Bearer API key — AI/service principals and MCP (the programmatic default).</summary>
     public const string ApiKey = CoreApiKeyAuthenticationHandler.SchemeName;
 
+    /// <summary>Short-lived, Core-minted per-user bearer — a delegated console acting AS the signed-in user.</summary>
+    public const string UserBearer = CoreUserBearerAuthenticationHandler.SchemeName;
+
     /// <summary>Browser session cookie issued after an interactive sign-in.</summary>
     public const string Cookie = "CoreCookie";
 

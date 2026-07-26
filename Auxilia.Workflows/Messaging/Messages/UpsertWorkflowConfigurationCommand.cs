@@ -1,7 +1,7 @@
 namespace Auxilia.Workflows.Messaging.Messages;
 
 /// <summary>
-/// Seeds (creates or updates) a named workflow configuration on the Steering Instance via the
+/// Seeds (creates or updates) a named workflow configuration on the Core.Runner via the
 /// <c>slot-configurations</c> exchange or the per-instance <c>*-slot-seed.upsert-configuration</c>
 /// queue — the same seeding family as slot configurations.
 /// </summary>

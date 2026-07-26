@@ -10,7 +10,7 @@ namespace Auxilia.SystemTestSuite.CoreApiDispatch;
 /// configured-on-the-fly (dynamic) and from a startup-seeded (static) configuration.
 ///
 /// End-to-end path per test:
-/// <c>Core.Api REST → RunWorkflowCommand → SteeringInstance → DockerWorkflowLauncher → dummy
+/// <c>Core.Api REST → RunWorkflowCommand → Runner → DockerWorkflowLauncher → dummy
 /// container → WorkflowStateMessage(Success) → WorkflowStatusEvent → Core.Api run view</c>.
 /// </summary>
 [TestFixture]

@@ -1,0 +1,70 @@
+@page "/"
+@attribute [Authorize]
+@inject ICoreClient Core
+
+<PageTitle>Home — Auxilia</PageTitle>
+
+<PageHeader Title="Auxilia admin console"
+            Subtitle="Operator and administrator surface — a pure Core client."/>
+
+@if (!_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else
+{
+    <div class="card">
+        <div class="card-body">
+            <h2>Signed in as</h2>
+            @if (_principal is { } p)
+            {
+                <p class="cell-strong">@(p.DisplayName ?? p.PrincipalId.ToString())</p>
+                <p class="cell-mono">@p.PrincipalId</p>
+                @if (p.Roles.Count > 0)
+                {
+                    <p>Roles: <span class="cell-strong">@string.Join(", ", p.Roles)</span></p>
+                }
+                else
+                {
+                    <p class="muted">No roles assigned.</p>
+                }
+            }
+            else
+            {
+                <p class="muted">Could not resolve the current principal.</p>
+            }
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            <h2>Core status</h2>
+            <p>
+                <span class="status-dot @(_healthy ? "ok" : "bad")"></span>
+                @(_healthy ? "Core API is healthy" : "Core API is unreachable")
+            </p>
+        </div>
+    </div>
+}
+
+@code {
+
+    private bool _loaded;
+    private bool _healthy;
+    private CurrentPrincipal? _principal;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _healthy = await Core.CheckHealthAsync();
+        try
+        {
+            _principal = await Core.GetCurrentPrincipalAsync();
+        }
+        catch (CoreApiException)
+        {
+            _principal = null;
+        }
+        _loaded = true;
+    }
+
+}

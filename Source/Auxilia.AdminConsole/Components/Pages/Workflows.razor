@@ -1,0 +1,176 @@
+@page "/workflows"
+@attribute [Authorize]
+@implements IDisposable
+@inject ICoreClient Core
+
+<PageTitle>Workflows — Auxilia</PageTitle>
+
+<PageHeader Title="Workflows"
+            Subtitle="Stored run configurations: a workflow type with its slots bound to connectors. Run one, or edit its bindings."/>
+
+@if (!_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else if (_denied)
+{
+    <div class="panel denied">Access denied: @_error</div>
+}
+else
+{
+    @if (_error is { Length: > 0 })
+    {
+        <div class="panel denied">@_error</div>
+    }
+    @if (_notice is not null)
+    {
+        <div class="panel success">@_notice</div>
+    }
+
+    <div class="toolbar">
+        <label>
+            Workflow type
+            <input @bind="_workflowType" placeholder="e.g. code-review" @bind:after="ApplyAsync"/>
+        </label>
+        <button class="btn btn-secondary" @onclick="RefreshAsync">Refresh</button>
+        <a class="btn btn-primary" href="workflows/new">New configuration</a>
+    </div>
+
+    @if (_configurations.Count == 0)
+    {
+        <EmptyState Title="No workflow configurations"
+                    Description="A configuration binds a workflow type's capability slots to connectors so it can be run.">
+            <a class="btn btn-primary" href="workflows/new">Configure your first workflow</a>
+        </EmptyState>
+    }
+    else
+    {
+        <div class="card">
+            <table class="data-table">
+                <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Workflow type</th>
+                    <th>Slots</th>
+                    <th>State</th>
+                    <th>Updated</th>
+                    <th>Actions</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var configuration in _configurations)
+                {
+                    <tr>
+                        <td class="cell-strong">@configuration.Name</td>
+                        <td>@configuration.WorkflowType</td>
+                        <td>@configuration.SlotBindings.Count</td>
+                        <td>
+                            <span class="badge badge-state @(configuration.Enabled ? "badge-success" : "badge-cancelled")">
+                                @(configuration.Enabled ? "Enabled" : "Disabled")
+                            </span>
+                        </td>
+                        <td>@TimeText.Relative(configuration.UpdatedUtc)</td>
+                        <td>
+                            <button class="btn btn-primary btn-sm" disabled="@(_busy || !configuration.Enabled)"
+                                    title="@(configuration.Enabled ? "Run this configuration as yourself" : "Enable the configuration first")"
+                                    @onclick="() => RunAsync(configuration)">Run</button>
+                            <a class="btn btn-secondary btn-sm" href="workflows/@configuration.Id/edit">Edit</a>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            @if (_skip + _configurations.Count < _total)
+            {
+                <div class="card-body table-more">
+                    <button class="btn btn-secondary" @onclick="ShowMoreAsync">
+                        Show more (@(_skip + _configurations.Count) of @_total)
+                    </button>
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+
+    private const int PageSize = 50;
+
+    private bool _loaded;
+    private bool _denied;
+    private bool _busy;
+    private string? _error;
+    private string? _notice;
+
+    private string _workflowType = "";
+
+    private int _skip;
+    private int _total;
+    private List<RunConfiguration> _configurations = [];
+
+    private readonly CancellationTokenSource _cts = new();
+
+    protected override Task OnInitializedAsync() => LoadAsync(reset: true);
+
+    private Task ApplyAsync() => LoadAsync(reset: true);
+    private Task RefreshAsync() => LoadAsync(reset: true);
+    private Task ShowMoreAsync() => LoadAsync(reset: false);
+
+    private async Task LoadAsync(bool reset)
+    {
+        if (reset)
+        {
+            _skip = 0;
+            _configurations = [];
+        }
+
+        var query = new ConfigurationQuery(
+            WorkflowType: string.IsNullOrWhiteSpace(_workflowType) ? null : _workflowType.Trim(),
+            Skip: _skip,
+            Take: PageSize);
+
+        try
+        {
+            var page = await Core.QueryConfigurationsAsync(query, _cts.Token);
+            _denied = false;
+            _error = null;
+            _total = page.Total;
+            _configurations.AddRange(page.Items);
+            _skip += page.Items.Count;
+        }
+        catch (CoreApiException ex)
+        {
+            _denied = ex.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+
+        _loaded = true;
+    }
+
+    /// <summary>Dispatches the configuration as the signed-in user — no on-behalf-of delegation.</summary>
+    private async Task RunAsync(RunConfiguration configuration)
+    {
+        _error = _notice = null;
+        _busy = true;
+        try
+        {
+            var accepted = await Core.RunConfigurationAsync(configuration.Id, ct: _cts.Token);
+            _notice = $"Run of \"{configuration.Name}\" dispatched ({accepted.RunId.ToString("N")[..8]}) — it appears under Runs shortly.";
+        }
+        catch (CoreApiException ex)
+        {
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+
+}

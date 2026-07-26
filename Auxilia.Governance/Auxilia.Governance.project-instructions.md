@@ -1,6 +1,6 @@
 # Auxilia.Governance
 
-Identity, accounts, and authorization for the platform (ARCHITECTURE.md §16, docs/governance-rbac-design.md). Every operation — human, AI, or service — is performed by an authenticated principal and authorized by the deny-by-default `IPolicyEngine`. Entity records live in `Auxilia.PlatformData`; this project owns the behavior.
+Identity, accounts, and authorization for the platform (docs/ARCHITECTURE.md §16, docs/delivered/governance-rbac-design.md). Every operation — human, AI, or service — is performed by an authenticated principal and authorized by the deny-by-default `IPolicyEngine`. Entity records live in `Auxilia.PlatformData`; this project owns the behavior.
 
 ## Architecture
 

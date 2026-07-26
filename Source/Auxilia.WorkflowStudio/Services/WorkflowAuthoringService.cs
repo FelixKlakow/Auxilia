@@ -43,5 +43,5 @@ public sealed class WorkflowAuthoringService(WorkflowTypeCatalog catalog, ICoreC
     }
 
     public Task<RunAccepted> RunAsync(Guid coreConfigurationId, CancellationToken ct)
-        => core.RunConfigurationAsync(coreConfigurationId, ct);
+        => core.RunConfigurationAsync(coreConfigurationId, ct: ct);
 }

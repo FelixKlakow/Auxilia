@@ -1,0 +1,279 @@
+@page "/runs/{Id:guid}"
+@attribute [Authorize]
+@using System.Text.Json
+@using Auxilia.Workflows.Messaging.Messages
+@implements IDisposable
+@inject ICoreClient Core
+
+<PageTitle>@(_run is null ? "Run" : $"{_run.WorkflowType} · run {ShortId}") — Auxilia</PageTitle>
+
+<div class="page-back"><a href="runs">← All runs</a></div>
+
+@if (!_loaded)
+{
+    <h1>Run</h1>
+    <p class="muted">Loading…</p>
+}
+else if (_denied)
+{
+    <h1>Run</h1>
+    <div class="panel denied">Access denied: @_error</div>
+}
+else if (_run is null)
+{
+    <h1>Run</h1>
+    <div class="panel denied">Run not found.</div>
+}
+else
+{
+    <header class="page-header">
+        <h1>
+            @_run.WorkflowType · run @ShortId
+            @if (LiveNow.IsActive(_state))
+            {
+                <span class="badge badge-state badge-running live-badge"><span class="live-dot"></span> Live</span>
+            }
+        </h1>
+        <p class="page-subtitle run-id-line" title="Full run ID — select to copy">@Id</p>
+    </header>
+
+    @if (!IsTerminal)
+    {
+        <div class="button-row rerun-row">
+            <button class="btn btn-danger" disabled="@_busy" @onclick="CancelAsync">Cancel this run</button>
+        </div>
+    }
+
+    @if (_error is { Length: > 0 })
+    {
+        <div class="panel denied">@_error</div>
+    }
+    @if (_cancelNotice is not null)
+    {
+        <div class="panel success">@_cancelNotice</div>
+    }
+
+    <div class="card">
+        <dl class="card-body meta-grid">
+            <div>
+                <dt>State</dt>
+                <dd><span class="badge badge-state badge-@_state.ToLowerInvariant()">@_state</span></dd>
+            </div>
+            <div>
+                <dt>Started</dt>
+                <dd>
+                    @TimeText.Relative(_run.CreatedUtc)
+                    <span class="cell-sub">@_run.CreatedUtc.ToString("yyyy-MM-dd HH:mm:ss") UTC</span>
+                </dd>
+            </div>
+            <div>
+                <dt>Configuration</dt>
+                <dd>@(_run.ConfigurationName ?? "—")</dd>
+            </div>
+        </dl>
+    </div>
+
+    <p class="muted view-live-hint">
+        Showing live updates streamed from the Core. History before you opened this page is not
+        backfilled yet — items appear as the workflow publishes them.
+    </p>
+
+    @if (_buffers.Count == 0)
+    {
+        <EmptyState Title="No view items yet"
+                    Description="Views appear here the moment the workflow publishes progress, results, or an agent conversation."/>
+    }
+    @foreach (var (viewName, buffer) in _buffers)
+    {
+        var items = buffer.Items;
+        var descriptor = DescriptorFor(viewName, items);
+        <section class="card view-card">
+            <div class="card-header">
+                <h2 class="view-title">
+                    @viewName
+                    <span class="type-chip">@descriptor.Rendering.ToString().ToLowerInvariant()</span>
+                </h2>
+            </div>
+            <div class="card-body">
+                <ViewRenderer Descriptor="descriptor" Items="items" IsLive="!IsTerminal"/>
+            </div>
+        </section>
+    }
+}
+
+@code {
+
+    [Parameter]
+    public Guid Id { get; set; }
+
+    private readonly CancellationTokenSource _cts = new();
+    // One ordered item list per view name, keyed by the view's monotonic sequence.
+    private readonly Dictionary<string, ViewItemBuffer> _buffers = new(StringComparer.Ordinal);
+
+    private bool _loaded;
+    private bool _denied;
+    private bool _busy;
+    private bool _streamStarted;
+    private string? _error;
+    private string? _cancelNotice;
+    private RunStatus? _run;
+    private string _state = "";
+
+    private string ShortId => Id.ToString("N")[..8];
+
+    private bool IsTerminal => !LiveNow.IsActive(_state);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _run = await Core.GetRunAsync(Id, _cts.Token);
+            _state = _run?.State ?? "";
+            _error = _run?.Error;
+        }
+        catch (CoreApiException ex)
+        {
+            _denied = ex.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+
+        _loaded = true;
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        // Live path: consume the Core's SSE run stream for the whole circuit. Started once, after
+        // the first render so prerender never blocks on the open stream.
+        if (!firstRender || _streamStarted || _denied || _run is null)
+            return;
+        _streamStarted = true;
+        _ = ConsumeStreamAsync();
+    }
+
+    private async Task ConsumeStreamAsync()
+    {
+        try
+        {
+            await foreach (var evt in Core.StreamRunAsync(Id, _cts.Token))
+            {
+                Apply(evt);
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Circuit disposed — the stream ends with it.
+        }
+        catch (CoreApiException ex)
+        {
+            _error = ex.ErrorDetail ?? ex.Message;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>Decode one SSE frame: a status transition updates run state; a view frame buffers an item.</summary>
+    private void Apply(RunStreamEvent evt)
+    {
+        switch (evt.Kind)
+        {
+            case RunStreamEvent.StatusKind:
+                if (Decode<WorkflowStatusEvent>(evt.PayloadJson) is { } status)
+                {
+                    _state = status.State;
+                    if (status.ErrorMessage is { Length: > 0 } message)
+                        _error = message;
+                }
+                break;
+
+            case RunStreamEvent.ViewKind:
+                if (Decode<ViewDataMessage>(evt.PayloadJson) is { } view)
+                {
+                    var record = new ViewDataRecord
+                    {
+                        Id = Guid.NewGuid(),
+                        WorkflowInstanceId = view.WorkflowInstanceId,
+                        ViewName = view.ViewName,
+                        Sequence = evt.Sequence,
+                        PayloadJson = view.PayloadJson,
+                        TimestampUtc = evt.TimestampUtc
+                    };
+                    BufferOf(view.ViewName).Add(record);
+                }
+                break;
+        }
+    }
+
+    private ViewItemBuffer BufferOf(string viewName)
+    {
+        if (!_buffers.TryGetValue(viewName, out var buffer))
+            _buffers[viewName] = buffer = new ViewItemBuffer();
+        return buffer;
+    }
+
+    /// <summary>
+    /// The console has no persisted view descriptor over the live stream, so synthesize one per view:
+    /// items shaped like an <see cref="AgentChatEntry"/> render through the agent-chat plug-in; everything
+    /// else falls back to the generic log rendering (structured key/value or raw lines).
+    /// </summary>
+    private static ViewDescriptor DescriptorFor(string viewName, IReadOnlyList<ViewDataRecord> items)
+        => LooksLikeAgentChat(items)
+            ? new ViewDescriptor(viewName, "", ViewRendering.Custom, ViewLifecycle.Live, AgentChatEntry.RendererKey)
+            : new ViewDescriptor(viewName, "", ViewRendering.Log, ViewLifecycle.Live);
+
+    private static bool LooksLikeAgentChat(IReadOnlyList<ViewDataRecord> items)
+    {
+        if (items.Count == 0)
+            return false;
+        try
+        {
+            var element = JsonSerializer.Deserialize<JsonElement>(items[0].PayloadJson);
+            return element is { ValueKind: JsonValueKind.Object }
+                   && element.TryGetProperty("role", out var role)
+                   && role.ValueKind == JsonValueKind.String
+                   && Enum.TryParse<AgentChatRole>(role.GetString(), ignoreCase: true, out _)
+                   && element.TryGetProperty("content", out _);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static T? Decode<T>(string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<T>(json);
+        }
+        catch (JsonException)
+        {
+            return default;
+        }
+    }
+
+    private async Task CancelAsync()
+    {
+        _error = _cancelNotice = null;
+        _busy = true;
+        try
+        {
+            await Core.CancelRunAsync(Id, _cts.Token);
+            _cancelNotice = "Cancellation requested — the state flips once the workflow acknowledges.";
+        }
+        catch (CoreApiException ex)
+        {
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+
+}

@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Net.Http.Json;
+using Auxilia.Core.Contracts;
 using Auxilia.PlatformData.Entities;
 using Auxilia.UniversalDataAccess;
 using Auxilia.Workflows.Messaging.Messages;
@@ -32,18 +34,30 @@ public sealed class ClaudeCodeWorkflowSystemTests
             (msg, _) => { statusEvents.Enqueue(msg); return Task.CompletedTask; },
             cancellationToken);
 
-        // 1. Dispatch an instruction the way any top-level service would.
-        var command = new RunWorkflowCommand(
-            Guid.NewGuid(),
-            EndToEndEnvironment.ClaudeWorkflowType,
-            EndToEndEnvironment.ClaudeWorkflowPackageUri,
-            new Dictionary<string, string>
-            {
-                ["Title"] = "Leave a note in the workspace",
-                ["Body"]  = "Create STUB_NOTES.md summarizing what you find."
-            },
-            RequestedBy: EndToEndEnvironment.RunAsPrincipalId);
-        await bus.PublishAsync(EndToEndEnvironment.CommandQueue, command, cancellationToken);
+        // 1. Dispatch an instruction through the Core Run API (the governed, tokenized path). The
+        //    coding-agent slot is bound inline to the real claude-code-cli provider pointed at the
+        //    in-image stub CLI (cost rule: never real AI in tests); the Core resolves it JIT.
+        var runResp = await EndToEndEnvironment.CoreApiClient.PostAsJsonAsync(
+            "/api/runs",
+            new RunRequest(
+                EndToEndEnvironment.ClaudeWorkflowType,
+                EndToEndEnvironment.ClaudeWorkflowPackageUri,
+                new Dictionary<string, string>
+                {
+                    ["Title"] = "Leave a note in the workspace",
+                    ["Body"]  = "Create STUB_NOTES.md summarizing what you find."
+                },
+                SlotBindings: new List<SlotBinding>
+                {
+                    new("coding-agent", "claude-code-cli", Settings: new Dictionary<string, string>
+                    {
+                        ["ApiKey"]   = "e2e-stub-key",
+                        ["CliPath"]  = EndToEndEnvironment.ClaudeStubCliPath,
+                        ["MaxTurns"] = "5"
+                    })
+                }),
+            cancellationToken);
+        runResp.EnsureSuccessStatusCode();
 
         // 2. The run must complete successfully.
         Guid instanceId = default;
@@ -118,10 +132,10 @@ public sealed class ClaudeCodeWorkflowSystemTests
             ? "  <none>"
             : string.Join("\n", statusEvents.Select(e =>
                 $"  {e.TimestampUtc:HH:mm:ss} {e.WorkflowInstanceId} {e.WorkflowType} {e.State} {e.ErrorMessage}"));
-        var siLogs = await EndToEndEnvironment.LogTailAsync(EndToEndEnvironment.SteeringInstance);
+        var siLogs = await EndToEndEnvironment.LogTailAsync(EndToEndEnvironment.Runner);
         Assert.Fail(
             $"{message}\n" +
             $"Observed status events:\n{observed}\n\n" +
-            $"--- SteeringInstance logs (tail) ---\n{siLogs}");
+            $"--- Runner logs (tail) ---\n{siLogs}");
     }
 }

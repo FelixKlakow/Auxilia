@@ -19,7 +19,8 @@ the CLI exits.
 ## Invariants
 
 - **No credentials in this container beyond the CLI's own token.** Git operations are
-  LOCAL ONLY (branch, diff); pushing is the Workspace Manager's job. The account credential
+  LOCAL ONLY by design (branch, diff — never push); no credentialed push path exists yet
+  (production push/PR is not implemented — see `GitWorkspace.cs`). The account credential
   arrives via JIT activation of the required `coding-agent` slot (bind a `claude-code-cli`
   instance — the connected account): the handler registers `CodingAgentCredentials`, which
   the session exports as `CLAUDE_CODE_OAUTH_TOKEN` (or `ANTHROPIC_API_KEY` fallback) into

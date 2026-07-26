@@ -68,7 +68,7 @@ public sealed class RunServiceTests
                 new Dictionary<string, string> { ["WORKFLOW_NAME"] = "x" }),
             CancellationToken.None);
 
-        await service.RunConfigurationAsync(config.Id, null, CancellationToken.None);
+        await service.RunConfigurationAsync(config.Id, null, null, CancellationToken.None);
 
         var command = bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>().Single();
         Assert.That(command.WorkflowType, Is.EqualTo("wt"));
@@ -81,6 +81,6 @@ public sealed class RunServiceTests
     {
         var (service, _, _) = New();
         Assert.ThrowsAsync<KeyNotFoundException>(
-            () => service.RunConfigurationAsync(Guid.NewGuid(), null, CancellationToken.None));
+            () => service.RunConfigurationAsync(Guid.NewGuid(), null, null, CancellationToken.None));
     }
 }

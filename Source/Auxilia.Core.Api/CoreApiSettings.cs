@@ -20,6 +20,15 @@ public sealed class CoreApiSettings
 
     /// <summary>Max slot-credential resolution requests accepted per run (keyed by resolution token) per minute.</summary>
     public int ResolutionRateLimitPermitsPerMinute { get; set; } = 60;
+
+    /// <summary>A Core.Runner whose bus heartbeat is older than this is considered dead (failover). Mirrors PlatformHostSettings.</summary>
+    public int HeartbeatTimeoutSeconds { get; set; } = 30;
+
+    /// <summary>How often the failover monitor scans for dead runners.</summary>
+    public int FailoverScanIntervalSeconds { get; set; } = 10;
+
+    /// <summary>Re-dispatch runs orphaned by a dead Core.Runner (once per run, guarded against loops).</summary>
+    public bool RedispatchOnFailover { get; set; } = true;
 }
 
 /// <summary>A run configuration provided through host settings (appsettings / environment).</summary>

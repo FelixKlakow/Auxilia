@@ -46,7 +46,7 @@ public sealed class WorkflowDispatcher(
     WorkspaceManager workspaceManager,
     IRepositoryAuthResolver repositoryAuthResolver,
     AuditLog auditLog,
-    SteeringInstanceInfo instanceInfo,
+    CoreRunnerInfo instanceInfo,
     ILogger<WorkflowDispatcher> logger)
 {
     private IAsyncDisposable? _subscription;
@@ -79,7 +79,10 @@ public sealed class WorkflowDispatcher(
         await instanceRegistry.CreateAsync(
             instanceId, workflowType, "Received",
             instanceInfo.ServiceId, JsonSerializer.Serialize(command), ct: ct);
-        await statusPublisher.PublishAsync(instanceId, workflowType, "Received", ct: ct);
+        // Claim transition: stamp the owning runner + originating command so a bus consumer can
+        // attribute this run to us (and recover our stored dispatch command) without reading our DB.
+        await statusPublisher.PublishAsync(instanceId, workflowType, "Received",
+            ownerServiceId: instanceInfo.ServiceId, commandId: command.CommandId, ct: ct);
 
         // Pre-flight authorization: the trigger permission of the requesting principal.
         if (command.RequestedBy is { } principalId)
@@ -349,7 +352,7 @@ public sealed class WorkflowDispatcher(
 
     /// <summary>
     /// Selects the run-output bind source handed to the launcher. The Docker daemon resolves
-    /// bind sources on the HOST, so when the Steering Instance runs in a container (its
+    /// bind sources on the HOST, so when the Core.Runner runs in a container (its
     /// RunOutputDirectory being a container-local mount of a host directory), the launcher
     /// must receive the host view ({RunOutputHostDirectory}/{id}) of the directory the
     /// dispatcher created as {RunOutputDirectory}/{id}. The host path's separator style is
@@ -380,7 +383,7 @@ public sealed class WorkflowDispatcher(
     private async Task FailPreFlightAsync(Guid instanceId, string workflowType, string reason, CancellationToken ct)
     {
         await instanceRegistry.SetStateAsync(instanceId, "PreFlightFailed", reason, ct);
-        await statusPublisher.PublishAsync(instanceId, workflowType, "PreFlightFailed", reason, ct);
+        await statusPublisher.PublishAsync(instanceId, workflowType, "PreFlightFailed", reason, ct: ct);
         tokenRegistry.Consume(instanceId);
     }
 

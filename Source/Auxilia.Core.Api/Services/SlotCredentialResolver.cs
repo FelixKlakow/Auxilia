@@ -27,13 +27,14 @@ public sealed class SlotCredentialResolver(
     /// <summary>Records the run's resolution context at dispatch time (references only, never secrets).</summary>
     public Task StashAsync(
         Guid runId, string resolutionToken, IReadOnlyList<SlotBinding> bindings,
-        Guid? triggeredBy, CancellationToken ct)
+        Guid? triggeredBy, string? dispatchCommandJson = null, CancellationToken ct = default)
         => store.SaveAsync(new CoreRunResolutionRecord
         {
             Id = runId,
             ResolutionToken = resolutionToken,
             SlotBindingsJson = JsonSerializer.Serialize(bindings),
             TriggeredByPrincipalId = triggeredBy,
+            DispatchCommandJson = dispatchCommandJson,
             CreatedUtc = clock.GetUtcNow()
         }, ct);
 

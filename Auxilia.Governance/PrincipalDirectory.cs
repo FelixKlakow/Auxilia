@@ -96,15 +96,20 @@ public sealed class PrincipalDirectory(
         return removed;
     }
 
-    public async Task<bool> DisableAsync(Guid principalId, CancellationToken ct = default)
+    public Task<bool> DisableAsync(Guid principalId, CancellationToken ct = default)
+        => SetEnabledAsync(principalId, false, ct);
+
+    /// <summary>Enables or disables a principal; a disabled principal can no longer authenticate.</summary>
+    public async Task<bool> SetEnabledAsync(Guid principalId, bool enabled, CancellationToken ct = default)
     {
         var principal = await principals.ReadAsync(principalId, ct);
         if (principal is null)
             return false;
 
-        await principals.SaveAsync(principal with { Status = "Disabled" }, ct);
-        await auditLog.AppendAsync("principal-directory", "principal.disabled",
-            principalId.ToString(), "disabled", ct: ct);
+        var status = enabled ? "Active" : "Disabled";
+        await principals.SaveAsync(principal with { Status = status }, ct);
+        await auditLog.AppendAsync("principal-directory", enabled ? "principal.enabled" : "principal.disabled",
+            principalId.ToString(), status.ToLowerInvariant(), ct: ct);
         return true;
     }
 

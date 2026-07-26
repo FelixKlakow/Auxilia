@@ -124,7 +124,7 @@ public class WorkflowDispatchPipelineComponentTests
 
                 services.AddSingleton(TimeProvider.System);
                 services.AddSingleton<WorkflowStatusPublisher>();
-                services.AddSingleton(new SteeringInstanceInfo(Guid.NewGuid(), DateTime.UtcNow));
+                services.AddSingleton(new CoreRunnerInfo(Guid.NewGuid(), DateTime.UtcNow));
                 services.AddSingleton<WorkflowInstanceTokenRegistry>();
                 services.AddSingleton<SlotProviderRegistry>();
                 services.AddSingleton<SignalHandlerStore>();

@@ -9,9 +9,9 @@
 
 - Workflows declare their **capability requirements** upfront in code (builder pattern).
 - On startup the workflow node sends its requirements to the **Core.Runner** via RabbitMQ.
-- The Core.Runner resolves which concrete providers satisfy each requirement, pushes back an encrypted **configuration envelope**, and the workflow boots with fully-resolved dependencies.
+- The **Core.Api** resolves which concrete connector instance satisfies each slot and RSA-encrypts that slot's configuration for the workflow instance's ephemeral public key; the **Core.Runner only relays the ciphertext** (it never sees plaintext connector settings) and the workflow boots with fully-resolved dependencies.
 - New workflow types can be added without touching the Core.Runner core – it only needs to know about capability contracts, not concrete workflow logic.
-- Workflows are **one-shot by default**: they run exactly once and always shut down afterwards to prevent data leaks and maximise security. A manifest-declared **long-living** lifetime exists for service-style workflows (standing agents, monitors) — declared via `.WithLifetime(WorkflowLifetime.LongLiving)`, which requires operator approval on the Core.Runner (`WorkflowDispatcher:ApprovedLongLivingWorkflowTypes`). Long-living instances receive a `WorkflowDrainSignal` via DI; when its token fires (stored configuration changed or a new version registered) the application must finish in-flight work and return — the Core.Runner marks the run `Draining` and starts a replacement with the fresh configuration once it exits. See ARCHITECTURE.md §6 for the full lifetime model (credential expiry + re-request arrives with per-slot JIT delivery).
+- Workflows are **one-shot by default**: they run exactly once and always shut down afterwards to prevent data leaks and maximise security. A manifest-declared **long-living** lifetime exists for service-style workflows (standing agents, monitors) — declared via `.WithLifetime(WorkflowLifetime.LongLiving)`, which requires operator approval on the Core.Runner (`WorkflowDispatcher:ApprovedLongLivingWorkflowTypes`). Long-living instances receive a `WorkflowDrainSignal` via DI; when its token fires (stored configuration changed or a new version registered) the application must finish in-flight work and return — the Core.Runner marks the run `Draining` and starts a replacement with the fresh configuration once it exits. See docs/ARCHITECTURE.md §6 for the full lifetime model (credential expiry + re-request arrives with per-slot JIT delivery).
 - Workflows operate in two modes driven by **command-line arguments**: `run` (execute business logic) and `schema` (emit a JSON schema — invoked by the Packer at packaging time so the signed package always carries a current schema and the frontend can render a typed configuration UI).
 - **Environment requirements** are first-class – a workflow can declare what must be present in its execution environment (tools, ports, OS). Multi-container orchestration is deferred to a future iteration.
 
@@ -26,7 +26,7 @@
 | **EnvironmentRequirement** | A typed descriptor of what the execution environment must provide (installed tools, exposed ports, OS constraints). |
 | **WorkflowManifest** | The serialisable output of the builder – sent to the Core.Runner in `run` mode. |
 | **WorkflowSchema** | The JSON schema emitted in `schema` mode – describes all slots, their capabilities, and environment requirements so the Core.Runner and frontend stay in sync. |
-| **WorkflowConfiguration** | The resolved, encrypted answer from the Core.Runner – contains connection details and secrets per slot. |
+| **WorkflowConfiguration** | The resolved, encrypted answer for a slot – resolved and RSA-encrypted by the Core.Api and relayed by the Core.Runner; contains connection details and secrets per slot. |
 | **WorkflowBootstrapper** | Receives the `WorkflowConfiguration`, decrypts it, and wires up real DI services. |
 
 ---
@@ -205,14 +205,14 @@ sequenceDiagram
     participant S as Core.Runner
 
     W->>S: WorkflowRegistrationRequest\n{ manifest, publicKey, responseTopic }
-    Note over S: Validate environment requirements against runner\nResolve providers for each slot\nEncrypt SlotConfigurations with W's public key
+    Note over S: Validate environment requirements against runner\n(Core.Api resolves the connector + encrypts each SlotConfiguration\nwith W's public key; runner relays ciphertext)
     S->>W: WorkflowConfigurationResponse\n{ encryptedSlots, success, errorMessage }
     Note over W: Decrypt with private key\nBootstrapper wires up DI\nWorkflow runs → exits
 ```
 
 - The workflow generates an **ephemeral asymmetric key pair** on each startup.
 - The public key is included in `WorkflowRegistrationRequest`.
-- The Core.Runner validates `EnvironmentRequirements` against the registered runner profile, then encrypts each `SlotConfiguration` payload with the public key.
+- The Core.Runner validates `EnvironmentRequirements` against the registered runner profile. **Slot resolution and encryption happen in the Core.Api** (`SlotCredentialResolver`): it resolves each slot's connector settings and RSA-encrypts them for the instance's public key, and the runner relays that ciphertext — plaintext connector settings never enter the runner process.
 - The workflow decrypts with its private key inside the SDK.
 - Once the workflow exits the private key is discarded.
 
@@ -288,7 +288,7 @@ sequenceDiagram
     Bus->>Builder: WorkflowDirective (Run)
 
     Builder->>Bus: Publish WorkflowRegistrationRequest<br/>(instanceId, manifest, publicKey, responseTopic)
-    Note over SI: Validate environment requirements<br/>Resolve provider for each slot<br/>Encrypt SlotConfiguration with workflow's public key
+    Note over SI: Validate environment requirements<br/>(Core.Api resolves the connector + encrypts SlotConfiguration<br/>with workflow's public key; runner relays ciphertext)
     SI->>Bus: WorkflowConfigurationResponse<br/>(encryptedSlots per slot name)
     Bus->>Builder: WorkflowConfigurationResponse
 
@@ -312,7 +312,7 @@ sequenceDiagram
 
 1. **Builder call-site** – The workflow's `Program.cs` calls typed extension methods (e.g. `RequiresAiAgent`), each of which calls `builder.Requires<TService>(name, capabilities, description)`. The builder accumulates a `SlotDefinition` list.
 2. **Announcement / directive** – On `Run(args)`, the builder publishes a `WorkflowAnnouncementMessage`; the Core.Runner responds with a `WorkflowDirective` confirming it should proceed.
-3. **Registration request** – The builder sends a `WorkflowRegistrationRequest` carrying the manifest and an ephemeral public key. The Core.Runner validates environment requirements, resolves the appropriate provider for each slot, and returns a `WorkflowConfigurationResponse` with each slot's settings encrypted under the workflow's public key.
+3. **Registration request** – The builder sends a `WorkflowRegistrationRequest` carrying the manifest and an ephemeral public key. The Core.Runner validates environment requirements; the **Core.Api** resolves the appropriate connector for each slot and encrypts its settings under the workflow's public key, and the runner relays that ciphertext in the `WorkflowConfigurationResponse` (or per-slot activation).
 4. **Plugin loading** – `PluginLoader` discovers `*.slothandler.dll` files under `AppContext.BaseDirectory` via `FileSystemPluginDiscovery`, verifies each manifest signature, loads the assembly, locates the single `ISlotHandler` implementation by reflection, and registers it in `ISlotHandlerResolver` keyed by `providerType` string.
 5. **Bootstrapping** – `WorkflowBootstrapper.Apply` iterates over the response slots, decrypts each `EncryptedSlotConfiguration` with the private key, resolves the matching `ISlotHandler`, and calls `Register(services, slotName, serviceType, configuration)`. Each handler registers keyed DI services using `slotName` as the key so multiple slots of the same interface type can coexist.
 6. **Execution** – The `IServiceProvider` is built and the workflow body runs. On exit the private key is discarded.
@@ -366,15 +366,12 @@ Each `ISlotHandler` implementation already knows its target service interface an
 ## 10. Core.Runner responsibilities
 
 1. On new workflow type registration: read the embedded `workflow-schema.json` from the verified package, store the `WorkflowSchema`.
-2. On each new deployment: diff the newly embedded schema against the stored one, mark affected configurations dirty.
-3. On `WorkflowRegistrationRequest` (`run` mode):
+2. On `WorkflowRegistrationRequest` (`run` mode):
    - Validate `EnvironmentRequirements` against the runner's registered profile; reject if unsatisfied.
-   - Look up the stored configuration for the workflow type; reject if dirty.
-   - Encrypt each `SlotConfiguration` with the workflow's `PublicKey`.
-   - Publish `WorkflowConfigurationResponse` to `request.ResponseTopic`.
-4. Track `WorkflowInstanceId` → manifest for monitoring dashboards.
+   - **Relay** each slot's ciphertext: the runner calls the Core.Api's token-authenticated resolve-slot endpoint, which resolves the slot's connector and RSA-encrypts its settings for the instance's public key, then forwards the returned `EncryptedSlotConfiguration` on the instance's response queue (per-slot JIT activation). The runner never resolves connectors or holds plaintext secrets.
+3. Track `WorkflowInstanceId` → manifest for monitoring dashboards.
 
-Frontend reads `WorkflowSchema` to render a typed configuration UI. The Core.Runner reads stored provider mappings on demand.
+The **Core owns the workflow schema registry.** At registration the Core.Runner stores each workflow type's embedded `WorkflowSchema` in `WorkflowSchemaStore`, so the Core knows which workflow types exist. The Core keeps the schema because it **validates every client-submitted configuration against it** — the client cannot self-certify. A **client** (Workflow Studio, the steering client) **fetches a schema from the Core** to render a typed configuration UI and build a valid configuration; the Core.Api owns connector instances and secrets. Deciding which stored configurations are stale after a schema change (dirty-detection) is a client concern.
 
 ---
 
@@ -435,10 +432,11 @@ Source/
   Auxilia.Core.Runner/
     Workflows/
       WorkflowRegistrationHandler.cs      ← mirrors IdentificationRequestHandler
-      WorkflowSchemaStore.cs
-      ConfigurationResolver.cs
-      DirtyConfigurationDetector.cs
+      SlotActivationHandler.cs            ← relays per-slot ciphertext from Core.Api
+      CoreCredentialClient.cs             ← HTTP client to Core.Api's resolve-slot endpoint
+      Storage/WorkflowSchemaStore.cs
       EnvironmentValidator.cs
+    (slot resolution + encryption live in Auxilia.Core.Api/Services/SlotCredentialResolver.cs)
 ```
 
 ---

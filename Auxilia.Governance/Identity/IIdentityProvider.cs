@@ -11,4 +11,11 @@ public interface IIdentityProvider
 
     /// <summary>Returns null when the API key does not authenticate an active principal.</summary>
     Task<IdentitySession?> AuthenticateApiKeyAsync(string apiKey, CancellationToken ct = default);
+
+    /// <summary>
+    /// Resolves the session for an already-identified principal (e.g. one bound to a signed,
+    /// short-lived bearer token minted by the Core). Returns null when the principal no longer
+    /// exists or is not Active — a disabled principal's outstanding token must never authenticate.
+    /// </summary>
+    Task<IdentitySession?> ResolveSessionAsync(Guid principalId, CancellationToken ct = default);
 }

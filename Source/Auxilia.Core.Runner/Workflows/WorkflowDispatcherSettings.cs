@@ -9,22 +9,22 @@ public sealed class WorkflowDispatcherSettings
     public string RegistrationQueueName { get; set; } = "workflow-registration";
 
     /// <summary>
-    /// Queue this instance listens on for workflow announcements. Must be unique per Steering
-    /// Instance when several share a broker: the launching instance holds the instance token,
+    /// Queue this instance listens on for workflow announcements. Must be unique per runner
+    /// when several share a broker: the launching instance holds the instance token,
     /// the pending package, and the slot configurations, so it must receive the announcement.
     /// The dispatcher injects this name into every launched workflow.
     /// </summary>
     public string AnnouncementQueueName { get; set; } = "workflow.announcements";
 
     /// <summary>
-    /// Queue for just-in-time slot activation requests. Unique per Steering Instance when
+    /// Queue for just-in-time slot activation requests. Unique per runner when
     /// several share a broker (same locality rule as the announcement queue).
     /// </summary>
     public string SlotActivationQueueName { get; set; } = "workflow-slot-activation";
 
     /// <summary>
     /// Queue this instance listens on for audited Resource Proxy calls (ARCHITECTURE §8).
-    /// Unique per Steering Instance when several share a broker (same locality rule as the
+    /// Unique per runner when several share a broker (same locality rule as the
     /// announcement queue). The dispatcher injects this name into every launched workflow.
     /// </summary>
     public string ResourceProxyQueueName { get; set; } = "workflow-resource-proxy";
@@ -60,7 +60,7 @@ public sealed class WorkflowDispatcherSettings
 
     /// <summary>
     /// Host path of the directory mounted at <see cref="RunOutputDirectory"/> when the
-    /// Steering Instance itself runs in a container. Bind-mount sources are resolved by the
+    /// Core.Runner itself runs in a container. Bind-mount sources are resolved by the
     /// Docker daemon on the HOST, so a container-local <see cref="RunOutputDirectory"/> is
     /// invisible to it. When set, the dispatcher keeps creating and reading
     /// {RunOutputDirectory}/{id} (its own view) but hands {RunOutputHostDirectory}/{id}
@@ -78,7 +78,7 @@ public sealed class WorkflowDispatcherSettings
 
     /// <summary>
     /// Host path of the directory mounted at <see cref="WorkspaceRootDirectory"/> when the
-    /// Steering Instance itself runs in a container — same split as
+    /// Core.Runner itself runs in a container — same split as
     /// <see cref="RunOutputHostDirectory"/>: the dispatcher prepares under its own view, the
     /// launcher binds the daemon's view. Null (default) means
     /// <see cref="WorkspaceRootDirectory"/> is already a host path.

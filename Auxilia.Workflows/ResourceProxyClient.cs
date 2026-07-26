@@ -5,7 +5,7 @@ using Auxilia.Workflows.Messaging.Messages;
 namespace Auxilia.Workflows;
 
 /// <summary>
-/// Workflow-side client for the Steering Instance's audited Resource Proxy (ARCHITECTURE §8):
+/// Workflow-side client for the Core.Runner's audited Resource Proxy (ARCHITECTURE §8):
 /// every structured external call is published as a <see cref="ResourceRequest"/> authenticated
 /// by the instance token and answered on the instance's exclusive response queue, correlated
 /// by request id — the workflow itself never holds resource credentials.

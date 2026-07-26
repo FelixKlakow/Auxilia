@@ -1,5 +1,8 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Runtime.CompilerServices;
+using System.Text.Json;
 using Auxilia.Core.Contracts;
 
 namespace Auxilia.Core.Client;
@@ -22,8 +25,12 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
             ("skip", query.Skip.ToString()),
             ("take", query.Take.ToString())), ct);
 
-    public Task<RunAccepted> RunConfigurationAsync(Guid id, CancellationToken ct = default)
-        => PostAsync<RunAccepted>($"/api/configurations/{id}/run", ct);
+    public Task<RunAccepted> RunConfigurationAsync(
+        Guid id, Guid? onBehalfOf = null, IReadOnlyDictionary<string, string>? context = null,
+        CancellationToken ct = default)
+        => PostAsync<IReadOnlyDictionary<string, string>?, RunAccepted>(
+            $"/api/configurations/{id}/run" + (onBehalfOf is { } target ? $"?onBehalfOf={target}" : ""),
+            context, ct);
 
     // --- Runs ---
 
@@ -44,6 +51,38 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
     public Task CancelRunAsync(Guid id, CancellationToken ct = default)
         => PostAsync($"/api/runs/{id}/cancel", ct);
 
+    public async IAsyncEnumerable<RunStreamEvent> StreamRunAsync(
+        Guid runId, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/runs/{runId}/stream");
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        await EnsureSuccessAsync(response, ct);
+
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        using var reader = new StreamReader(stream);
+        while (await reader.ReadLineAsync(ct) is { } line)
+        {
+            if (!line.StartsWith("data: ", StringComparison.Ordinal))
+                continue;
+            var evt = JsonSerializer.Deserialize<RunStreamEvent>(line["data: ".Length..], JsonSerializerOptions.Web);
+            if (evt is not null)
+                yield return evt;
+        }
+    }
+
+    // --- Audit ---
+
+    public Task<PagedResult<AuditEntry>> QueryAuditAsync(AuditQuery query, CancellationToken ct = default)
+        => GetAsync<PagedResult<AuditEntry>>("/api/audit?" + Query(
+            ("actor", query.Actor),
+            ("action", query.Action),
+            ("subject", query.Subject),
+            ("fromUtc", query.FromUtc?.ToString("O")),
+            ("toUtc", query.ToUtc?.ToString("O")),
+            ("skip", query.Skip.ToString()),
+            ("take", query.Take.ToString())), ct);
+
     // --- Connectors ---
 
     public Task<Connector> CreateConnectorAsync(CreateConnector request, CancellationToken ct = default)
@@ -61,6 +100,36 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
     public Task SetConnectorGrantsAsync(Guid id, SetConnectorGrants request, CancellationToken ct = default)
         => PostAsync($"/api/connectors/{id}/grants", request, ct);
 
+    // --- Provider catalog ---
+
+    public Task<PagedResult<ProviderCatalogEntry>> QueryProviderCatalogAsync(ProviderCatalogQuery query, CancellationToken ct = default)
+        => GetAsync<PagedResult<ProviderCatalogEntry>>("/api/provider-catalog?" + Query(
+            ("available", query.Available?.ToString()),
+            ("skip", query.Skip.ToString()),
+            ("take", query.Take.ToString())), ct);
+
+    public Task<ProviderCatalogEntry> SetProviderAvailabilityAsync(string providerType, bool available, CancellationToken ct = default)
+        => PostAsync<SetProviderAvailability, ProviderCatalogEntry>(
+            $"/api/provider-catalog/{Uri.EscapeDataString(providerType)}/availability",
+            new SetProviderAvailability(available), ct);
+
+    public Task<ProviderCatalogEntry> SetProviderSettingDisabledAsync(
+        string providerType, string settingKey, bool disabled, CancellationToken ct = default)
+        => PostAsync<SetProviderSetting, ProviderCatalogEntry>(
+            $"/api/provider-catalog/{Uri.EscapeDataString(providerType)}/settings",
+            new SetProviderSetting(settingKey, disabled), ct);
+
+    // --- Workflow types + schemas ---
+
+    public Task<PagedResult<WorkflowTypeDto>> ListWorkflowTypesAsync(WorkflowTypeQuery query, CancellationToken ct = default)
+        => GetAsync<PagedResult<WorkflowTypeDto>>("/api/workflow-types?" + Query(
+            ("skip", query.Skip.ToString()),
+            ("take", query.Take.ToString())), ct);
+
+    public Task<WorkflowSchemaDto?> GetWorkflowSchemaAsync(string workflowType, CancellationToken ct = default)
+        => GetOrNullAsync<WorkflowSchemaDto>(
+            $"/api/workflow-types/{Uri.EscapeDataString(workflowType)}/schema", ct);
+
     // --- Groups ---
 
     public Task<GroupDto> CreateGroupAsync(CreateGroupRequest request, CancellationToken ct = default)
@@ -75,6 +144,34 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
     public Task AssignGroupRoleAsync(Guid groupId, AssignGroupRoleRequest request, CancellationToken ct = default)
         => PostAsync($"/api/groups/{groupId}/roles", request, ct);
 
+    // --- Principals ---
+
+    public Task<PagedResult<PrincipalDto>> QueryPrincipalsAsync(PrincipalQuery query, CancellationToken ct = default)
+        => GetAsync<PagedResult<PrincipalDto>>("/api/principals?" + Query(
+            ("kind", query.Kind),
+            ("enabled", query.Enabled?.ToString()),
+            ("search", query.Search),
+            ("skip", query.Skip.ToString()),
+            ("take", query.Take.ToString())), ct);
+
+    public Task<PrincipalDto?> GetPrincipalAsync(Guid id, CancellationToken ct = default)
+        => GetOrNullAsync<PrincipalDto>($"/api/principals/{id}", ct);
+
+    public Task<PrincipalDto> CreateHumanPrincipalAsync(CreateHumanPrincipalRequest request, CancellationToken ct = default)
+        => PostAsync<CreateHumanPrincipalRequest, PrincipalDto>("/api/principals", request, ct);
+
+    public Task<CreatedApiKeyPrincipal> CreateApiKeyPrincipalAsync(CreateApiKeyPrincipalRequest request, CancellationToken ct = default)
+        => PostAsync<CreateApiKeyPrincipalRequest, CreatedApiKeyPrincipal>("/api/principals/ai", request, ct);
+
+    public Task AssignPrincipalRoleAsync(Guid id, AssignRoleRequest request, CancellationToken ct = default)
+        => PostAsync($"/api/principals/{id}/roles", request, ct);
+
+    public Task RevokePrincipalRoleAsync(Guid id, string roleName, CancellationToken ct = default)
+        => DeleteAsync($"/api/principals/{id}/roles/{Uri.EscapeDataString(roleName)}", ct);
+
+    public Task SetPrincipalEnabledAsync(Guid id, SetPrincipalEnabledRequest request, CancellationToken ct = default)
+        => PostAsync($"/api/principals/{id}/enabled", request, ct);
+
     // --- Directory group → role mappings ---
 
     public async Task<IReadOnlyList<GroupMappingDto>> ListGroupMappingsAsync(CancellationToken ct = default)
@@ -85,6 +182,29 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
 
     public Task RemoveGroupMappingAsync(Guid id, CancellationToken ct = default)
         => DeleteAsync($"/api/identity/group-mappings/{id}", ct);
+
+    // --- Identity sources ---
+
+    public async Task<IReadOnlyList<IdentityConnectorDescriptorDto>> ListIdentityConnectorsAsync(CancellationToken ct = default)
+        => await GetAsync<List<IdentityConnectorDescriptorDto>>("/api/identity/connectors", ct);
+
+    public async Task<IReadOnlyList<IdentitySourceDto>> ListIdentitySourcesAsync(CancellationToken ct = default)
+        => await GetAsync<List<IdentitySourceDto>>("/api/identity/sources", ct);
+
+    public Task<IdentitySourceDto?> GetIdentitySourceAsync(Guid id, CancellationToken ct = default)
+        => GetOrNullAsync<IdentitySourceDto>($"/api/identity/sources/{id}", ct);
+
+    public Task<IdentitySourceDto> SaveIdentitySourceAsync(SaveIdentitySourceRequest request, CancellationToken ct = default)
+        => PostAsync<SaveIdentitySourceRequest, IdentitySourceDto>("/api/identity/sources", request, ct);
+
+    public Task DeleteIdentitySourceAsync(Guid id, CancellationToken ct = default)
+        => DeleteAsync($"/api/identity/sources/{id}", ct);
+
+    public Task<IdentityConnectorTestResult> TestIdentitySourceAsync(Guid id, CancellationToken ct = default)
+        => PostAsync<IdentityConnectorTestResult>($"/api/identity/sources/{id}/test", ct);
+
+    public Task<IdentityImportSummaryDto> ImportIdentitySourceAsync(Guid id, CancellationToken ct = default)
+        => PostAsync<IdentityImportSummaryDto>($"/api/identity/sources/{id}/import", ct);
 
     // --- Identity / diagnostics ---
 

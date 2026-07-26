@@ -1,7 +1,7 @@
 namespace Auxilia.Workflows.Messaging.Messages;
 
 /// <summary>
-/// Removes a named workflow configuration on the Steering Instance via the
+/// Removes a named workflow configuration on the Core.Runner via the
 /// <c>slot-configurations</c> exchange or the per-instance
 /// <c>*-slot-seed.remove-configuration</c> queue — the same seeding family as
 /// <see cref="UpsertWorkflowConfigurationCommand"/>.

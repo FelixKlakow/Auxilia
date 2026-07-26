@@ -1,0 +1,264 @@
+@page "/runs"
+@attribute [Authorize]
+@implements IDisposable
+@inject ICoreClient Core
+
+<PageTitle>Runs — Auxilia</PageTitle>
+
+<PageHeader Title="Runs" Subtitle="Every workflow execution on this platform, newest first."/>
+
+@if (!_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else if (_denied)
+{
+    <div class="panel denied">Access denied: @_error</div>
+}
+else
+{
+    @if (_error is { Length: > 0 })
+    {
+        <div class="panel denied">@_error</div>
+    }
+    @if (_notice is not null)
+    {
+        <div class="panel success">@_notice</div>
+    }
+
+    <div class="chip-bar" role="group" aria-label="Filter runs by state">
+        @foreach (var state in StateOptions)
+        {
+            <button class="chip @(_stateFilter == state ? "active" : null)"
+                    @onclick="() => ApplyStateAsync(state)">
+                @state
+            </button>
+        }
+        <input class="chip-search" placeholder="Workflow type (exact) …"
+               @bind="_workflowType" @bind:after="ApplyAsync"/>
+        <button class="btn btn-secondary btn-sm" @onclick="RefreshAsync">Refresh</button>
+    </div>
+
+    @if (_liveCount > 0)
+    {
+        <p class="muted">@_liveCount run(s) active right now.</p>
+    }
+
+    @if (_runs.Count == 0)
+    {
+        <EmptyState Title="No workflow runs"
+                    Description="Runs appear here as soon as a task source, schedule, or trigger dispatches a workflow."/>
+    }
+    else
+    {
+        <div class="card">
+            <table class="data-table">
+                <thead>
+                <tr>
+                    <th>State</th>
+                    <th>Workflow</th>
+                    <th>Configuration</th>
+                    <th>Started</th>
+                    <th>Error</th>
+                    <th>Actions</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var run in _runs)
+                {
+                    <tr>
+                        <td><span class="badge badge-state badge-@run.State.ToLowerInvariant()">@run.State</span></td>
+                        <td>
+                            <span class="cell-strong">@run.WorkflowType</span>
+                            <span class="muted mono"> @ShortId(run.RunId)</span>
+                        </td>
+                        <td>@ConfigurationLabel(run)</td>
+                        <td>
+                            @TimeText.Relative(run.CreatedUtc)
+                            <span class="cell-sub">@run.CreatedUtc.ToString("yyyy-MM-dd HH:mm:ss") UTC</span>
+                        </td>
+                        <td class="error-cell">@run.Error</td>
+                        <td>
+                            @if (LiveNow.IsActive(run.State))
+                            {
+                                <button class="btn btn-danger btn-sm" disabled="@_busy"
+                                        @onclick="() => CancelAsync(run.RunId)">Cancel</button>
+                            }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            @if (_skip + _runs.Count < _total)
+            {
+                <div class="card-body table-more">
+                    <button class="btn btn-secondary" @onclick="ShowMoreAsync">
+                        Show more (@(_skip + _runs.Count) of @_total)
+                    </button>
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+
+    private static readonly string[] StateOptions =
+        ["All", "Running", "Queued", "Success", "Failed", "Cancelled", "PreFlightFailed"];
+
+    private const int PageSize = 50;
+
+    private bool _loaded;
+    private bool _denied;
+    private bool _busy;
+    private string? _error;
+    private string? _notice;
+
+    private string _stateFilter = "All";
+    private string _workflowType = "";
+
+    private int _skip;
+    private int _total;
+    private int _liveCount;
+    private List<RunStatus> _runs = [];
+    private readonly Dictionary<Guid, string> _configurationNames = new();
+
+    private readonly CancellationTokenSource _cts = new();
+    private PeriodicTimer? _timer;
+
+    private static string ShortId(Guid id) => id.ToString("N")[..8];
+
+    private string ConfigurationLabel(RunStatus run)
+    {
+        if (run.ConfigurationName is { Length: > 0 } name)
+            return name;
+        if (run.ConfigurationId is { } id)
+            return _configurationNames.TryGetValue(id, out var resolved) ? resolved : ShortId(id);
+        return "—";
+    }
+
+    protected override Task OnInitializedAsync() => LoadAsync(reset: true);
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender || _timer is not null || _denied)
+            return;
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+        _ = PollAsync();
+    }
+
+    private async Task PollAsync()
+    {
+        try
+        {
+            while (await _timer!.WaitForNextTickAsync(_cts.Token))
+            {
+                await LoadAsync(reset: true);
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Component disposed — polling ends.
+        }
+    }
+
+    private Task ApplyStateAsync(string state)
+    {
+        _stateFilter = state;
+        return LoadAsync(reset: true);
+    }
+
+    private Task ApplyAsync() => LoadAsync(reset: true);
+
+    private Task RefreshAsync() => LoadAsync(reset: true);
+
+    private Task ShowMoreAsync() => LoadAsync(reset: false);
+
+    private async Task LoadAsync(bool reset)
+    {
+        if (reset)
+        {
+            _skip = 0;
+            _runs = [];
+        }
+
+        var query = new RunQuery(
+            State: _stateFilter == "All" ? null : _stateFilter,
+            WorkflowType: string.IsNullOrWhiteSpace(_workflowType) ? null : _workflowType.Trim(),
+            Skip: _skip,
+            Take: PageSize);
+
+        try
+        {
+            var page = await Core.QueryRunsAsync(query, _cts.Token);
+            _denied = false;
+            _error = null;
+            _total = page.Total;
+            _runs.AddRange(page.Items);
+            _skip += page.Items.Count;
+            _liveCount = LiveNow.ActiveOf(_runs).Count;
+            await ResolveConfigurationNamesAsync();
+        }
+        catch (CoreApiException ex)
+        {
+            _denied = ex.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+
+        _loaded = true;
+    }
+
+    /// <summary>Fill in names for runs that carry only a configuration id (cheap, cached, best-effort).</summary>
+    private async Task ResolveConfigurationNamesAsync()
+    {
+        var pending = _runs
+            .Where(r => r.ConfigurationName is null or "")
+            .Select(r => r.ConfigurationId)
+            .OfType<Guid>()
+            .Distinct()
+            .Where(id => !_configurationNames.ContainsKey(id))
+            .ToList();
+
+        foreach (var id in pending)
+        {
+            try
+            {
+                if (await Core.GetConfigurationAsync(id, _cts.Token) is { } configuration)
+                    _configurationNames[id] = configuration.Name;
+            }
+            catch (CoreApiException)
+            {
+                // Not readable (deleted / not permitted): fall back to showing the id.
+            }
+        }
+    }
+
+    private async Task CancelAsync(Guid runId)
+    {
+        _error = _notice = null;
+        _busy = true;
+        try
+        {
+            await Core.CancelRunAsync(runId, _cts.Token);
+            _notice = $"Cancellation of {ShortId(runId)} requested — the state flips once the workflow acknowledges.";
+            await LoadAsync(reset: true);
+        }
+        catch (CoreApiException ex)
+        {
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+        _timer?.Dispose();
+    }
+
+}

@@ -14,7 +14,7 @@ namespace Auxilia.SystemTestSuite.CoreApiDispatch;
 /// Topology:
 /// <list type="bullet">
 ///   <item>RabbitMQ — message broker (alias <c>rabbitmq</c>).</item>
-///   <item>SteeringInstance — the runner; Docker socket bind-mounted so it launches workflow
+///   <item>Runner — the runner; Docker socket bind-mounted so it launches workflow
 ///         containers via the Docker API (<c>DockerWorkflowLauncher</c>).</item>
 ///   <item>Core.Api — the control plane; its own in-memory database, a bootstrap Administrator
 ///         API key, and one seeded static configuration. Drives the runner over the bus.</item>
@@ -28,7 +28,7 @@ namespace Auxilia.SystemTestSuite.CoreApiDispatch;
 public class CoreApiDispatchEnvironment
 {
     internal const string DummyWorkflowsImageName = "auxilia-dummy-workflows:system-test";
-    internal const string SteeringImageName        = "auxilia-core-runner:system-test";
+    internal const string RunnerImageName        = "auxilia-core-runner:system-test";
     internal const string CoreApiImageName         = "auxilia-core-api:system-test";
     internal const string DummyPackageUri          = "docker://auxilia-dummy-workflows:system-test";
     internal const string DummyWorkflowType        = "simple-git-commit-workflow";
@@ -61,7 +61,7 @@ public class CoreApiDispatchEnvironment
     private static readonly string RepoRoot = Path.GetFullPath(
         Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
 
-    private IContainer _steeringInstance = null!;
+    private IContainer _runner = null!;
     private IContainer _coreApi = null!;
     private IContainer _gitServer = null!;
     private string _runOutputDir = null!;
@@ -76,7 +76,7 @@ public class CoreApiDispatchEnvironment
     public async Task OneTimeSetUp()
     {
         await Task.WhenAll(
-            BuildImageAsync(SteeringImageName, "Source/Auxilia.Core.Runner/Dockerfile"),
+            BuildImageAsync(RunnerImageName, "Source/Auxilia.Core.Runner/Dockerfile"),
             BuildImageAsync(DummyWorkflowsImageName, "Auxilia.Workflows.Testing/Dockerfile"),
             BuildImageAsync(CoreApiImageName, "Source/Auxilia.Core.Api/Dockerfile"),
             BuildImageAsync(GitServerImageName, "Auxilia.SystemTestSuite/GitServer/Dockerfile"));
@@ -103,7 +103,7 @@ public class CoreApiDispatchEnvironment
         Directory.CreateDirectory(_workspaceDir);
 
         const string dockerSocket = "/var/run/docker.sock";
-        _steeringInstance = new ContainerBuilder(SteeringImageName)
+        _runner = new ContainerBuilder(RunnerImageName)
             .WithNetwork(_network)
             .WithBindMount(dockerSocket, dockerSocket)
             // Shared run-output + workspace roots so per-run repository clones are visible to the
@@ -138,7 +138,7 @@ public class CoreApiDispatchEnvironment
             .WithWaitStrategy(
                 Wait.ForUnixContainer().UntilMessageIsLogged("WorkflowDispatcher started"))
             .Build();
-        await _steeringInstance.StartAsync();
+        await _runner.StartAsync();
 
         _coreApi = new ContainerBuilder(CoreApiImageName)
             .WithNetwork(_network)
@@ -179,7 +179,7 @@ public class CoreApiDispatchEnvironment
         if (MessageBusClient is IAsyncDisposable disposable) await disposable.DisposeAsync();
         if (_coreApi is not null) await _coreApi.DisposeAsync();
         if (_gitServer is not null) await _gitServer.DisposeAsync();
-        if (_steeringInstance is not null) await _steeringInstance.DisposeAsync();
+        if (_runner is not null) await _runner.DisposeAsync();
         if (_rabbitMq is not null) await _rabbitMq.DisposeAsync();
         if (_network is not null) await _network.DisposeAsync();
         foreach (var dir in new[] { _runOutputDir, _workspaceDir })

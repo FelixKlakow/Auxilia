@@ -7,7 +7,7 @@ namespace Auxilia.Workflows;
 
 /// <summary>
 /// Just-in-time slot activation: each declared slot's configuration is requested individually
-/// from the Steering Instance (audited, expiring, encrypted for the instance's ephemeral key,
+/// from the Core.Runner (audited, expiring, encrypted for the instance's ephemeral key,
 /// answered only on the pre-created response queue) — credentials never arrive as a bundle at
 /// registration. Activation happens at bootstrap because <see cref="ISlotHandler"/> contributes
 /// arbitrary registrations to the workflow's service collection; per-use re-activation is a

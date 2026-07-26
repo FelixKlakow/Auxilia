@@ -11,7 +11,7 @@ public sealed record WorkflowInstanceRecord : IEntity
     public DateTimeOffset CreatedUtc { get; init; }
     public DateTimeOffset? CompletedUtc { get; init; }
     public string? ErrorMessage { get; init; }
-    /// <summary>Service ID of the Steering Instance owning this run (failover detection).</summary>
+    /// <summary>Service ID of the Core.Runner owning this run (failover detection).</summary>
     public Guid? OwnerServiceId { get; init; }
     /// <summary>"OneShot" or "LongLiving" — drives drain-and-replace behaviour.</summary>
     public string Lifetime { get; init; } = "OneShot";

@@ -22,7 +22,7 @@ var logDir = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
     "Auxilia", "Logs");
 Directory.CreateDirectory(logDir);
-var logPath = Path.Combine(logDir, $"SteeringInstance_{serviceId}.log");
+var logPath = Path.Combine(logDir, $"CoreRunner_{serviceId}.log");
 
 // Bootstrap logger (used before the DI host is built)
 Log.Logger = new LoggerConfiguration()
@@ -44,7 +44,7 @@ try
         .WriteTo.File(logPath, rollingInterval: RollingInterval.Day, retainedFileCountLimit: 31));
 
     // --- Service identity ---
-    builder.Services.AddSingleton(new SteeringInstanceInfo(serviceId, startupTime));
+    builder.Services.AddSingleton(new CoreRunnerInfo(serviceId, startupTime));
 
     // --- Messaging ---
     builder.Services.AddSingleton<IMessageBusClient>(_ =>
@@ -108,7 +108,7 @@ try
     builder.Services.AddSingleton<WorkflowStateHandler>();
     builder.Services.AddSingleton<Auxilia.Workflows.Messaging.WorkflowStatusPublisher>();
     builder.Services.AddSingleton<LongLivingDrainCoordinator>();
-    builder.Services.AddHostedService<SteeringHeartbeatService>();
+    builder.Services.AddHostedService<RunnerHeartbeatService>();
     builder.Services.AddSingleton<IWorkflowLauncher, DockerWorkflowLauncher>();
     builder.Services.AddSingleton<IDockerClientFactory, DefaultDockerClientFactory>();
     builder.Services.AddSingleton<IDeveloperModeProvider, EnvironmentDeveloperModeProvider>();
@@ -225,7 +225,7 @@ try
     app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
     app.MapPrometheusScrapingEndpoint(); // GET /metrics
 
-    Log.Information("SteeringInstance ServiceId={ServiceId}", serviceId);
+    Log.Information("CoreRunner ServiceId={ServiceId}", serviceId);
 
     app.Run();
 }
@@ -238,4 +238,4 @@ public partial class Program
 {
 }
 
-public sealed record SteeringInstanceInfo(Guid ServiceId, DateTime StartupTimeUtc);
+public sealed record CoreRunnerInfo(Guid ServiceId, DateTime StartupTimeUtc);

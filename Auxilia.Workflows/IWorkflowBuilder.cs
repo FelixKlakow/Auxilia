@@ -20,7 +20,7 @@ public interface IWorkflowBuilder
     /// <summary>
     /// Declares the workflow's lifetime. Long-living workflows receive a
     /// <see cref="WorkflowDrainSignal"/> via DI and must honour it; deployment additionally
-    /// requires operator approval on the Steering Instance.
+    /// requires operator approval on the Core.Runner.
     /// </summary>
     IWorkflowBuilder WithLifetime(WorkflowLifetime lifetime);
 

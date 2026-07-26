@@ -29,16 +29,23 @@ public sealed class RunService(
             new Dictionary<string, string>(request.Context ?? new Dictionary<string, string>()),
             request.SlotBindings ?? [], request.Repositories ?? [], triggeredBy, ct);
 
-    public async Task<RunAccepted> RunConfigurationAsync(Guid configurationId, Guid? triggeredBy, CancellationToken ct)
+    public async Task<RunAccepted> RunConfigurationAsync(
+        Guid configurationId, Guid? triggeredBy, IReadOnlyDictionary<string, string>? context, CancellationToken ct)
     {
         var config = await configurations.GetAsync(configurationId, ct)
                      ?? throw new KeyNotFoundException($"configuration '{configurationId}' not found");
         if (!config.Enabled)
             throw new InvalidOperationException($"configuration '{config.Name}' is disabled");
 
+        // The stored configuration's context is the base; a trigger's runtime context (artifact id,
+        // work-item id, mail fields) overlays it — runtime values win on a key collision.
+        var merged = new Dictionary<string, string>(config.Context);
+        if (context is not null)
+            foreach (var (key, value) in context)
+                merged[key] = value;
+
         return await DispatchAsync(
-            config.WorkflowType, config.PackageUri,
-            new Dictionary<string, string>(config.Context), config.SlotBindings, [], triggeredBy, ct);
+            config.WorkflowType, config.PackageUri, merged, config.SlotBindings, [], triggeredBy, ct);
     }
 
     /// <summary>Requests cancellation of a run; the runner consumes the command and stops the container.</summary>
@@ -77,11 +84,10 @@ public sealed class RunService(
         // Core-dispatched commands and cannot resolve a Core-database principal against its own.
         var commandId = Guid.NewGuid();
 
-        // Stash the run's slot→connector references under a run-scoped resolution token; the runner
+        // Build the run's slot→connector references under a run-scoped resolution token; the runner
         // presents the token to resolve credentialed slots (and repo auth) JIT. No secrets travel in
         // the command — only the provider types, so the runner can load the matching slot plugins.
         var resolutionToken = Guid.NewGuid().ToString("N");
-        await credentialResolver.StashAsync(commandId, resolutionToken, stashedBindings, triggeredBy, ct);
         var providerTypes = slotBindings
             .Where(b => !string.IsNullOrEmpty(b.ProviderType))
             .Select(b => b.ProviderType!)
@@ -98,6 +104,13 @@ public sealed class RunService(
             RequestedBy: null, WorkflowConfigurationId: null, ResolutionToken: resolutionToken,
             SlotProviderTypes: providerTypes,
             Repositories: repositoryDispatch.Count > 0 ? repositoryDispatch : null);
+
+        // Stash the resolution context AND the dispatch command itself (keyed by CommandId), so an
+        // orphaned run can be re-dispatched once on failover without the Core reading the runner's DB.
+        await credentialResolver.StashAsync(
+            commandId, resolutionToken, stashedBindings, triggeredBy,
+            System.Text.Json.JsonSerializer.Serialize(command), ct);
+
         await bus.PublishAsync(settings.Value.RunCommandQueue, command, ct);
         logger.LogInformation(
             "Dispatched run. CommandId={CommandId} WorkflowType={WorkflowType} Repositories={RepositoryCount}",

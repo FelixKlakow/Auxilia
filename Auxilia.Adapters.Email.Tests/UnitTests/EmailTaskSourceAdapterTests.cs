@@ -112,7 +112,8 @@ public class EmailTaskSourceAdapterTests
         _protector = new NullSettingsProtector();
         _settings = new MailboxTriggerAdapterSettings { CommandQueueName = "workflow.run-commands" };
         _sut = new EmailTaskSourceAdapter(
-            _triggers, _instances, _health, _protector, _factory, _bus,
+            _triggers, _instances, _health, _protector, _factory,
+            new BusRunDispatcher(_bus, Options.Create(_settings)),
             new AuditLog(_audit, _time), _time,
             Options.Create(_settings), NullLogger<EmailTaskSourceAdapter>.Instance);
     }

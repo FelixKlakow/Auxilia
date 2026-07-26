@@ -1,0 +1,207 @@
+@page "/admin/provider-catalog"
+@attribute [Authorize]
+@inject ICoreClient Core
+
+<PageTitle>Provider catalog — Auxilia</PageTitle>
+
+<PageHeader Title="Provider catalog"
+            Subtitle="Which slot providers may be configured for workflows on this platform. Provider availability is deny-by-default."/>
+
+@if (!_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else if (_denied)
+{
+    <div class="panel denied">Access denied: @_error</div>
+}
+else
+{
+    @if (_error is { Length: > 0 })
+    {
+        <div class="panel denied">@_error</div>
+    }
+
+    <section class="card">
+        <div class="card-header">
+            <h2>Registered workflows</h2>
+            <p class="card-subtitle">Which workflows may run is managed in Workflow Studio.</p>
+        </div>
+        <div class="card-body">
+            <p class="muted view-empty">
+                Enabling and disabling registered workflows is a Workflow Studio concern — the Core exposes
+                no endpoint for it here. Manage workflow availability in Workflow Studio.
+            </p>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">
+            <h2>Registered providers</h2>
+            <p class="card-subtitle">A provider is offered in the editors only after it is made available here.</p>
+        </div>
+        @if (_entries.Count == 0)
+        {
+            <div class="card-body"><p class="muted view-empty">No slot-handler plugins registered.</p></div>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                <tr>
+                    <th>Provider type</th>
+                    <th>Category</th>
+                    <th>Contracts</th>
+                    <th>Availability</th>
+                    <th>Actions</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var entry in _entries)
+                {
+                    <tr>
+                        <td>
+                            <span class="cell-strong">@entry.ProviderType</span>
+                            @if (entry.Description is { Length: > 0 })
+                            {
+                                <span class="cell-sub">@entry.Description</span>
+                            }
+                        </td>
+                        <td>
+                            @if (entry.Category.Length == 0)
+                            {
+                                <span class="muted">(uncategorized)</span>
+                            }
+                            else
+                            {
+                                <span class="type-chip">@entry.Category</span>
+                            }
+                        </td>
+                        <td>
+                            @if (entry.Contracts.Count == 0)
+                            {
+                                <span class="muted">none</span>
+                            }
+                            @foreach (var contract in entry.Contracts)
+                            {
+                                <span class="type-chip">@contract</span>
+                            }
+                        </td>
+                        <td>
+                            @if (entry.Available)
+                            {
+                                <span class="badge badge-state badge-valid">available</span>
+                            }
+                            else
+                            {
+                                <span class="badge badge-state">hidden</span>
+                            }
+                        </td>
+                        <td>
+                            <div class="cell-actions">
+                                <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                        @onclick="() => ToggleAvailabilityAsync(entry)">
+                                    @(entry.Available ? "Make unavailable" : "Make available")
+                                </button>
+                                @if (entry.Descriptors.Count > 0)
+                                {
+                                    <button class="btn btn-secondary btn-sm"
+                                            @onclick="() => _curatedProvider = _curatedProvider == entry.ProviderType ? null : entry.ProviderType">
+                                        @(_curatedProvider == entry.ProviderType ? "Close settings" : "Curate settings")
+                                    </button>
+                                }
+                            </div>
+                        </td>
+                    </tr>
+                    @if (_curatedProvider == entry.ProviderType)
+                    {
+                        <tr>
+                            <td colspan="5">
+                                <p class="field-hint">
+                                    A disabled setting disappears from every editor and is no longer required —
+                                    e.g. disable an external API key to only allow preassigned credentials.
+                                    Stored values are kept.
+                                </p>
+                                <div class="cell-actions">
+                                    @foreach (var descriptor in entry.Descriptors)
+                                    {
+                                        <span class="badge badge-secret" title="@descriptor.HelpText">
+                                            @descriptor.Label (@descriptor.Kind)@(descriptor.Required ? " *" : "")
+                                            @if (descriptor.Disabled)
+                                            {
+                                                <em> — disabled</em>
+                                            }
+                                        </span>
+                                        <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                                @onclick="() => ToggleSettingAsync(entry, descriptor.Key, !descriptor.Disabled)">
+                                            @(descriptor.Disabled ? "Enable" : "Disable")
+                                        </button>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                }
+                </tbody>
+            </table>
+        }
+    </section>
+}
+
+@code {
+
+    private const int PageSize = 200;
+
+    private bool _loaded;
+    private bool _denied;
+    private bool _busy;
+    private string? _error;
+    private string? _curatedProvider;
+    private List<ProviderCatalogEntry> _entries = [];
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var page = await Core.QueryProviderCatalogAsync(new ProviderCatalogQuery(Skip: 0, Take: PageSize));
+            _entries = page.Items.OrderBy(e => e.ProviderType, StringComparer.Ordinal).ToList();
+            _denied = false;
+            _error = null;
+        }
+        catch (CoreApiException ex)
+        {
+            _denied = ex.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+
+        _loaded = true;
+    }
+
+    private Task ToggleAvailabilityAsync(ProviderCatalogEntry entry)
+        => MutateAsync(() => Core.SetProviderAvailabilityAsync(entry.ProviderType, !entry.Available));
+
+    private Task ToggleSettingAsync(ProviderCatalogEntry entry, string key, bool disabled)
+        => MutateAsync(() => Core.SetProviderSettingDisabledAsync(entry.ProviderType, key, disabled));
+
+    private async Task MutateAsync(Func<Task> action)
+    {
+        _error = null;
+        _busy = true;
+        try
+        {
+            await action();
+            await LoadAsync();
+        }
+        catch (CoreApiException ex)
+        {
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+}

@@ -9,7 +9,7 @@ namespace Auxilia.Core.Runner.Workflows;
 
 /// <summary>
 /// Launches workflow containers via the Docker API over the local (or configured) Docker socket.
-/// No Docker CLI is required inside the SteeringInstance container — only socket access.
+/// No Docker CLI is required inside the Core.Runner container — only socket access.
 /// The container is started with <c>AutoRemove = true</c> so it is cleaned up on exit.
 /// The extracted workflow package is bind-mounted read-only into the container at <c>/workflow</c>.
 /// </summary>

@@ -4,7 +4,7 @@ namespace Auxilia.Workflows.Messaging.Messages;
 
 /// <summary>
 /// Sent by any top-level service (frontend, MCP server, automation API) to ask the
-/// Steering Instance to launch a named workflow.
+/// Core.Runner to launch a named workflow.
 /// </summary>
 public sealed record RunWorkflowCommand(
     /// <summary>Unique identifier for this dispatch request (used for logging and correlation).</summary>
