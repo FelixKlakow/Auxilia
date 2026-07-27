@@ -44,6 +44,8 @@ builder.Services.AddPlatformEntity<AuditRecord>(platformData);
 // Provider catalog (Core-owned governance): the registered slot-handler plugins and their curation.
 builder.Services.AddPlatformEntity<SlotProviderRecord>(platformData);
 builder.Services.AddPlatformEntity<ProviderCatalogRecord>(platformData);
+// Admin-managed environment layers (Dockerfile fragments the runner composes onto workflow images).
+builder.Services.AddPlatformEntity<EnvironmentLayerRecord>(platformData);
 builder.Services.AddSingleton<AuditLog>();
 
 // --- Governance: identity, RBAC, Policy Engine (the Core is the auth + audit authority) ---
@@ -96,6 +98,7 @@ builder.Services.AddSingleton<RunService>();
 builder.Services.AddSingleton<RunReadService>();
 builder.Services.AddSingleton<AuditReadService>();
 builder.Services.AddSingleton<ProviderCatalogService>();
+builder.Services.AddSingleton<EnvironmentLayerService>();
 builder.Services.AddSingleton<WorkflowSchemaReadService>();
 builder.Services.AddSingleton<PrincipalAdminService>();
 builder.Services.AddSingleton<SlotCredentialResolver>();
@@ -687,6 +690,73 @@ app.MapPost("/api/provider-catalog/{providerType}/settings", async (
         return Results.BadRequest(new { error = ex.Message });
     }
 }).RequireAuthorization();
+
+// --- Environment layers (admin-managed session software; composes onto workflow images) ---
+// Managing layers rides the provider-catalog permission: an environment IS a catalog entry.
+app.MapGet("/api/environment-layers", async (
+        HttpContext http, IPolicyEngine policy, EnvironmentLayerService svc, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ProviderCatalogManage, ct) is { } fail)
+        return fail;
+    return Results.Ok(await svc.ListAsync(ct));
+}).RequireAuthorization();
+
+app.MapGet("/api/environment-layers/{providerType}", async (
+        string providerType, HttpContext http, IPolicyEngine policy, EnvironmentLayerService svc,
+        CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ProviderCatalogManage, ct) is { } fail)
+        return fail;
+    return await svc.FindAsync(providerType, ct) is { } layer ? Results.Ok(layer) : Results.NotFound();
+}).RequireAuthorization();
+
+app.MapPost("/api/environment-layers", async (
+        UpsertEnvironmentLayer request, HttpContext http, IPolicyEngine policy,
+        EnvironmentLayerService svc, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ProviderCatalogManage, ct) is { } fail)
+        return fail;
+    try
+    {
+        return Results.Ok(await svc.UpsertAsync(CoreClaims.PrincipalIdOf(http.User), request, ct));
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+}).RequireAuthorization();
+
+app.MapDelete("/api/environment-layers/{providerType}", async (
+        string providerType, HttpContext http, IPolicyEngine policy, EnvironmentLayerService svc,
+        CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ProviderCatalogManage, ct) is { } fail)
+        return fail;
+    return await svc.DeleteAsync(CoreClaims.PrincipalIdOf(http.User), providerType, ct)
+        ? Results.NoContent()
+        : Results.NotFound();
+}).RequireAuthorization();
+
+// Fragment download for the RUNNER, authorized by the run's resolution token (same trust as the
+// package download): only runs the Core dispatched can read layer content.
+app.MapGet("/api/environment-layers/{providerType}/content", async (
+        string providerType, Guid runId, string token, HttpContext http, EnvironmentLayerService svc,
+        Auxilia.UniversalDataAccess.IDataAccess<CoreRunResolutionRecord> resolutions,
+        CancellationToken ct) =>
+{
+    var resolution = await resolutions.ReadAsync(runId, ct);
+    if (resolution is null || resolution.ResolutionToken != token)
+        return Results.Json(new { error = "invalid resolution token" }, statusCode: StatusCodes.Status403Forbidden);
+    var signed = await svc.ReadFragmentAsync(providerType, ct);
+    if (signed is null)
+        return Results.NotFound();
+    if (signed.SignatureBase64 is { Length: > 0 } signature)
+    {
+        http.Response.Headers["X-Auxilia-Signature"] = signature;
+        http.Response.Headers["X-Auxilia-Publisher-Key"] = signed.PublisherKeyBase64;
+    }
+    return Results.Text(signed.Fragment, "text/plain");
+});
 
 // --- Workflow-type registry (ARCHITECTURE §7: the deploy-time trust gate) ---
 // Types are registered permanently with their signed package coordinate; only Active types run.

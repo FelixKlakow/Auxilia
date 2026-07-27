@@ -153,6 +153,16 @@ public sealed class FakeCoreClient : ICoreClient
 
     public Task DeleteConfigurationAsync(Guid id, CancellationToken ct = default) => Task.CompletedTask;
     public Task DeleteProviderAsync(string providerType, CancellationToken ct = default) => Task.CompletedTask;
+
+    public Task<IReadOnlyList<EnvironmentLayerDto>> ListEnvironmentLayersAsync(CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<EnvironmentLayerDto>>([]);
+    public Task<EnvironmentLayerDto?> GetEnvironmentLayerAsync(string providerType, CancellationToken ct = default)
+        => Task.FromResult<EnvironmentLayerDto?>(null);
+    public Task<EnvironmentLayerDto> UpsertEnvironmentLayerAsync(UpsertEnvironmentLayer request, CancellationToken ct = default)
+        => Task.FromResult(new EnvironmentLayerDto(
+            request.ProviderType, request.Description, request.BaseEnvironment,
+            request.SetupScript, request.Version, DateTimeOffset.UtcNow));
+    public Task DeleteEnvironmentLayerAsync(string providerType, CancellationToken ct = default) => Task.CompletedTask;
     public Task DeleteConnectorAsync(Guid id, CancellationToken ct = default) => Task.CompletedTask;
     public Task<ConnectorBrowseResult> BrowseConnectorAsync(Guid id, BrowseConnector request, CancellationToken ct = default)
         => Task.FromResult(new ConnectorBrowseResult([]));

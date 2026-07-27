@@ -76,6 +76,13 @@ public interface ICoreClient
     Task<ProviderCatalogEntry> SetProviderAvailabilityAsync(string providerType, bool available, CancellationToken ct = default);
     Task<ProviderCatalogEntry> SetProviderSettingDisabledAsync(string providerType, string settingKey, bool disabled, CancellationToken ct = default);
 
+    // --- Environment layers (admin-managed session software; requires provider-catalog.manage) ---
+    Task<IReadOnlyList<EnvironmentLayerDto>> ListEnvironmentLayersAsync(CancellationToken ct = default);
+    Task<EnvironmentLayerDto?> GetEnvironmentLayerAsync(string providerType, CancellationToken ct = default);
+    /// <summary>Creates or updates a layer AND its (available) catalog entry.</summary>
+    Task<EnvironmentLayerDto> UpsertEnvironmentLayerAsync(UpsertEnvironmentLayer request, CancellationToken ct = default);
+    Task DeleteEnvironmentLayerAsync(string providerType, CancellationToken ct = default);
+
     // --- Workflow-type registry (types are registered permanently with their signed package; only
     //     Active types run; reads require workflow-configuration.manage, writes workflow-type.manage,
     //     approve/deny the workflow-type.sign signing authority) ---

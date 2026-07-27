@@ -216,16 +216,24 @@ public sealed class WorkflowDispatcher(
                 pluginFiles.Count, workflowType,
                 string.Join(", ", pluginFiles.Select(f => f.DllPath)));
 
-        // Resolve environment-capability layers (the runner-owned side of the environment
-        // catalog: capability id → Dockerfile fragment). A capability this runner has no layer
-        // recipe for fails pre-flight — never launch with a silently wrong environment.
+        // Resolve environment-capability layers (capability id → Dockerfile fragment). A locally
+        // configured layer is the host's override; anything else is fetched from the Core's
+        // admin-managed layer store, authorized by the run's resolution token. A capability with
+        // neither fails pre-flight — never launch with a silently wrong environment.
         var environmentLayers = new List<string>();
         foreach (var capability in (command.EnvironmentCapabilities ?? []).Distinct())
         {
-            if (!launcherSettings.Value.EnvironmentLayers.TryGetValue(capability, out var fragmentPath)
-                || !File.Exists(fragmentPath))
+            string? fragment = null;
+            if (launcherSettings.Value.EnvironmentLayers.TryGetValue(capability, out var fragmentPath)
+                && File.Exists(fragmentPath))
+                fragment = await File.ReadAllTextAsync(fragmentPath, ct);
+            else
+                fragment = await FetchEnvironmentLayerAsync(capability, command, ct);
+
+            if (fragment is null)
             {
-                var reason = $"run selects environment capability '{capability}' this runner has no layer for";
+                var reason = $"run selects environment capability '{capability}' with no layer — "
+                             + "neither configured on this runner nor managed in the Core";
                 logger.LogWarning(
                     "Dispatch rejected: {Reason}. CommandId={CommandId}", reason, command.CommandId);
                 await auditLog.AppendAsync(
@@ -234,13 +242,54 @@ public sealed class WorkflowDispatcher(
                 await FailPreFlightAsync(instanceId, workflowType, reason, ct);
                 return;
             }
-            environmentLayers.Add(await File.ReadAllTextAsync(fragmentPath, ct));
+            environmentLayers.Add(fragment);
         }
         if (environmentLayers.Count > 0)
             logger.LogInformation(
                 "Resolved {Count} environment layer(s) for {WorkflowType}: {Capabilities}",
                 environmentLayers.Count, workflowType,
                 string.Join(", ", command.EnvironmentCapabilities!.Distinct()));
+
+        async Task<string?> FetchEnvironmentLayerAsync(
+            string capability, RunWorkflowCommand cmd, CancellationToken token)
+        {
+            if (dispatcherSettings.Value.CoreApiBaseAddress is not { Length: > 0 } baseAddress)
+                return null;
+            try
+            {
+                var http = httpClientFactory.CreateClient("workflow-packages");
+                var url = $"{baseAddress.TrimEnd('/')}/api/environment-layers/"
+                          + $"{Uri.EscapeDataString(capability)}/content"
+                          + $"?runId={cmd.CommandId}&token={Uri.EscapeDataString(cmd.ResolutionToken ?? "")}";
+                using var response = await http.GetAsync(url, token);
+                if (!response.IsSuccessStatusCode)
+                    return null;
+                var fragment = await response.Content.ReadAsStringAsync(token);
+
+                // Environments are build-time code: verify the Core's signature against the
+                // runner's trusted keys (permissive only when no trust keys are configured).
+                var signature = response.Headers.TryGetValues("X-Auxilia-Signature", out var sigValues)
+                    ? sigValues.FirstOrDefault() : null;
+                var publisherKey = response.Headers.TryGetValues("X-Auxilia-Publisher-Key", out var keyValues)
+                    ? keyValues.FirstOrDefault() : null;
+                if (!EnvironmentFragmentVerifier.Verify(
+                        fragment, signature, publisherKey,
+                        dispatcherSettings.Value.TrustedEnvironmentSigningKeys))
+                {
+                    logger.LogWarning(
+                        "Rejected environment layer '{Capability}': signature missing, untrusted, or invalid.",
+                        capability);
+                    return null;
+                }
+                return fragment;
+            }
+            catch (HttpRequestException ex)
+            {
+                logger.LogWarning(ex,
+                    "Could not fetch environment layer '{Capability}' from the Core.", capability);
+                return null;
+            }
+        }
 
         // Effective network policy (ARCHITECTURE §10): manifest baseline (last stored schema)
         // merged with run-configuration extras, clamped by platform policy, audited per run.

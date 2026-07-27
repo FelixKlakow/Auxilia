@@ -288,7 +288,19 @@ public sealed class DockerWorkflowLauncher(
     private async Task<string> EnsureComposedImageAsync(
         IDockerClient client, string baseImage, IReadOnlyList<string> layers, CancellationToken ct)
     {
-        var tag = ComposedImageTag(baseImage, layers);
+        // The base image's ID (content digest) goes into the tag: a rebuilt workflow image with
+        // the same name must never reuse a composed image built from its predecessor.
+        string baseIdentity;
+        try
+        {
+            baseIdentity = baseImage + "@" + (await client.Images.InspectImageAsync(baseImage, ct)).ID;
+        }
+        catch (DockerImageNotFoundException)
+        {
+            // Not local yet (the compose build will pull it) — no stale composition can exist.
+            baseIdentity = baseImage;
+        }
+        var tag = ComposedImageTag(baseIdentity, layers);
         try
         {
             await client.Images.InspectImageAsync(tag, ct);

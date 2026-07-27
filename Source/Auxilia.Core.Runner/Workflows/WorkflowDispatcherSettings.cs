@@ -50,6 +50,13 @@ public sealed class WorkflowDispatcherSettings
     public List<string> BlockedEndpoints { get; set; } = [];
 
     /// <summary>
+    /// SPKI public keys (base64) trusted to sign Core-delivered environment fragments — the same
+    /// trust bar as workflow packages, since environment scripts execute at image build. Empty =
+    /// permissive (dev hosts; the host configuration is the operator's trust decision).
+    /// </summary>
+    public List<string> TrustedEnvironmentSigningKeys { get; set; } = [];
+
+    /// <summary>
     /// Directory under which each run gets its output folder ({dir}/{instanceId}). Mounted
     /// into workflow containers at /workflow-output; declared outputs found there are
     /// persisted to the artifact store when the run succeeds. Must be a path the Docker
