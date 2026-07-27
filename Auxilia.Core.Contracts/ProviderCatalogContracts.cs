@@ -56,6 +56,23 @@ public sealed record ProviderOAuthRefresh(
     string ExpiresAtKey);
 
 /// <summary>
+/// Declares, as pure data, how the provider's MODEL catalog is listed live: the endpoint, how
+/// the connector's credential authenticates the call (an API-key header and/or a bearer
+/// setting), and where ids/labels sit in the response. The Core executes this generically —
+/// like <see cref="ProviderOAuthRefresh"/>, the vendor knowledge lives in the registration.
+/// </summary>
+public sealed record ProviderModelCatalog(
+    string Endpoint,
+    string ItemsPath,
+    string IdField,
+    string? LabelField = null,
+    IReadOnlyDictionary<string, string>? Headers = null,
+    string? ApiKeyHeader = null,
+    string? ApiKeySettingKey = null,
+    string? BearerSettingKey = null,
+    IReadOnlyDictionary<string, string>? BearerHeaders = null);
+
+/// <summary>
 /// Registers (or updates) a slot provider's descriptor in the Core catalog — normally mirrored
 /// from a plugin manifest by deployment tooling; also the API a runner or operator uses to make
 /// a provider configurable. Registration does NOT make it available (deny-by-default curation).
@@ -69,7 +86,8 @@ public sealed record RegisterSlotProvider(
     string? RequiredCredentialContract = null,
     bool MountsIntoWorkspace = false,
     bool ComposesEnvironment = false,
-    ProviderOAuthRefresh? OAuthRefresh = null);
+    ProviderOAuthRefresh? OAuthRefresh = null,
+    ProviderModelCatalog? ModelCatalog = null);
 
 /// <summary>One manifest setting of a provider being registered.</summary>
 public sealed record RegisterProviderSetting(

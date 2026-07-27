@@ -79,16 +79,17 @@ public sealed class ConnectorBrowseAzureDevOpsTests
         var protector = new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32));
         var connectors = new ConnectorService(
             new InMemoryDataAccess<Auxilia.Core.Api.Data.CoreConnectorRecord>(), protector, TimeProvider.System);
+        var catalog = new ProviderCatalogService(
+            new InMemoryDataAccess<Auxilia.PlatformData.Entities.SlotProviderRecord>(),
+            new InMemoryDataAccess<Auxilia.PlatformData.Entities.ProviderCatalogRecord>(),
+            new AuditLog(new InMemoryDataAccess<Auxilia.PlatformData.Entities.AuditRecord>(), TimeProvider.System));
         var refresher = new ConnectorTokenRefresher(
-            connectors,
-            new ProviderCatalogService(
-                new InMemoryDataAccess<Auxilia.PlatformData.Entities.SlotProviderRecord>(),
-                new InMemoryDataAccess<Auxilia.PlatformData.Entities.ProviderCatalogRecord>(),
-                new AuditLog(new InMemoryDataAccess<Auxilia.PlatformData.Entities.AuditRecord>(), TimeProvider.System)),
+            connectors, catalog,
             new StubHttpClientFactory(handler), TimeProvider.System,
             NullLogger<ConnectorTokenRefresher>.Instance);
         _sut = new ConnectorBrowseService(
-            refresher, new StubHttpClientFactory(handler), NullLogger<ConnectorBrowseService>.Instance);
+            refresher, connectors, catalog,
+            new StubHttpClientFactory(handler), NullLogger<ConnectorBrowseService>.Instance);
 
         _connectorId = (await connectors.CreateAsync(
             new CreateConnector("tfs", "tfs-account", new Dictionary<string, string>

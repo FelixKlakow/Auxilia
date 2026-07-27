@@ -14,6 +14,8 @@ namespace Auxilia.Core.Api.Services;
 /// </summary>
 public sealed class ConnectorBrowseService(
     ConnectorTokenRefresher tokenRefresher,
+    ConnectorService connectors,
+    ProviderCatalogService providerCatalog,
     IHttpClientFactory httpClientFactory,
     ILogger<ConnectorBrowseService> logger)
 {
@@ -24,6 +26,20 @@ public sealed class ConnectorBrowseService(
         // Refreshed-on-use: browsing with a rotated OAuth token would 401 pointlessly.
         var settings = await tokenRefresher.ResolveFreshSettingsAsync(connectorId, ct)
                        ?? throw new KeyNotFoundException();
+
+        // Model listing is DATA-DRIVEN: the provider's registration declares endpoint, auth,
+        // and response shape (ProviderModelCatalog); the Core executes the spec without any
+        // vendor knowledge — providers without a spec fall back to manual entry.
+        if (request.Kind == "models")
+        {
+            var providerType = (await connectors.GetAsync(connectorId, ct))?.ProviderType
+                ?? throw new KeyNotFoundException();
+            var spec = await providerCatalog.GetModelCatalogAsync(providerType, ct)
+                ?? throw new NotSupportedException(
+                    $"'{providerType}' declares no model catalog — enter the model manually");
+            return await ExecuteModelCatalogAsync(spec, settings, ct);
+        }
+
         var token = TokenKeys.Select(key => settings.GetValueOrDefault(key))
             .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
             ?? throw new NotSupportedException(
@@ -50,6 +66,58 @@ public sealed class ConnectorBrowseService(
                         branch.GetProperty("name").GetString() ?? ""), ct)),
             _ => throw new NotSupportedException($"unknown browse kind '{request.Kind}'"),
         };
+    }
+
+    /// <summary>Executes a provider's model-catalog spec: auth from the connector's settings, ids/labels from the declared response paths.</summary>
+    private async Task<ConnectorBrowseResult> ExecuteModelCatalogAsync(
+        ProviderModelCatalog spec, IReadOnlyDictionary<string, string> settings, CancellationToken ct)
+    {
+        var http = httpClientFactory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, spec.Endpoint);
+        foreach (var (name, value) in spec.Headers ?? new Dictionary<string, string>())
+            request.Headers.TryAddWithoutValidation(name, value);
+
+        var apiKey = spec.ApiKeySettingKey is { Length: > 0 } apiKeyKey
+            ? settings.GetValueOrDefault(apiKeyKey) : null;
+        var bearer = spec.BearerSettingKey is { Length: > 0 } bearerKey
+            ? settings.GetValueOrDefault(bearerKey) : null;
+        if (apiKey is { Length: > 0 } && spec.ApiKeyHeader is { Length: > 0 })
+            request.Headers.TryAddWithoutValidation(spec.ApiKeyHeader, apiKey);
+        else if (bearer is { Length: > 0 })
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+            foreach (var (name, value) in spec.BearerHeaders ?? new Dictionary<string, string>())
+                request.Headers.TryAddWithoutValidation(name, value);
+        }
+        else
+            throw new NotSupportedException(
+                "this connector holds no credential the model catalog can authenticate with");
+
+        using var response = await http.SendAsync(request, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            logger.LogInformation(
+                "Model catalog against {Endpoint} answered {Status}.", spec.Endpoint, response.StatusCode);
+            throw new NotSupportedException(
+                $"the credential could not list models ({(int)response.StatusCode}) — enter the model manually");
+        }
+
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+        var items = doc.RootElement.TryGetProperty(spec.ItemsPath, out var array)
+                    && array.ValueKind == JsonValueKind.Array
+            ? array.EnumerateArray()
+            : [];
+        return new ConnectorBrowseResult(items
+            .Select(item =>
+            {
+                var id = item.TryGetProperty(spec.IdField, out var idValue) ? idValue.GetString() ?? "" : "";
+                var label = spec.LabelField is { Length: > 0 } labelField
+                            && item.TryGetProperty(labelField, out var labelValue)
+                    ? labelValue.GetString() ?? id : id;
+                return new ConnectorBrowseItem(id, label);
+            })
+            .Where(item => item.Id.Length > 0)
+            .ToList());
     }
 
     // --- Azure DevOps / TFS (the same Git REST API serves dev.azure.com and on-prem servers) ---

@@ -80,7 +80,10 @@ public sealed class ProviderCatalogService(
             ComposesEnvironment = request.ComposesEnvironment,
             OAuthRefreshJson = request.OAuthRefresh is null
                 ? null
-                : JsonSerializer.Serialize(request.OAuthRefresh)
+                : JsonSerializer.Serialize(request.OAuthRefresh),
+            ModelCatalogJson = request.ModelCatalog is null
+                ? null
+                : JsonSerializer.Serialize(request.ModelCatalog)
         };
         await providers.SaveAsync(record, ct);
         await auditLog.AppendAsync(actor, "provider-catalog.registered", request.ProviderType, "registered", ct: ct);
@@ -152,6 +155,13 @@ public sealed class ProviderCatalogService(
                 })
             .ToList();
     }
+
+    /// <summary>The provider's data-driven model-listing spec, or null when it declares none.</summary>
+    public async Task<ProviderModelCatalog?> GetModelCatalogAsync(string providerType, CancellationToken ct)
+        => await providers.ReadAsync(SlotProviderRecord.IdFor(providerType), ct) is
+               { ModelCatalogJson.Length: > 0 } record
+            ? JsonSerializer.Deserialize<ProviderModelCatalog>(record.ModelCatalogJson)
+            : null;
 
     /// <summary>The catalog entry of one provider, or null when it is not registered.</summary>
     public async Task<ProviderCatalogEntry?> FindAsync(string providerType, CancellationToken ct)

@@ -27,6 +27,9 @@ public sealed record SlotProviderRecord : IEntity
     /// <summary>Serialized <c>ProviderOAuthRefresh</c> — the data-driven token-refresh spec, when any.</summary>
     public string? OAuthRefreshJson { get; init; }
 
+    /// <summary>Serialized <c>ProviderModelCatalog</c> — the data-driven model-listing spec, when any.</summary>
+    public string? ModelCatalogJson { get; init; }
+
     /// <summary>Manifest-declared plain-language description of what the provider does.</summary>
     public string? Description { get; init; }
 
