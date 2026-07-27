@@ -487,6 +487,14 @@ operator permission forms. Session semantics on top of the channel (2026-07-27):
   `plan` view, via `CodingAgentRequest.OnPlanUpdate`): Claude from TodoWrite (auto-approved
   bookkeeping, never a decision card), Copilot from markdown-checklist output lines.
 
+Both agent providers offer the full loop: Claude over the CLI's stdio control protocol,
+Copilot via `CopilotSdkAgent` (GitHub.Copilot.SDK session protocol, opt-in per connector
+through the `UseSdkSession` setting; the plain line mode remains for stubs). Plugins with
+NuGet dependencies the image does not carry declare `BundleDependencies` in their manifest —
+the runner ships every sibling non-`Auxilia.*` DLL into the container beside the plugin
+(pair it with `CopyLocalLockFileAssemblies` in the plugin project; manifest sidecars
+deserialize case-SENSITIVELY — PascalCase keys).
+
 Schema declarations also grew generically: `Requires<T>(..., allowMultiple: true)` lets one slot
 carry several bindings (multi-repository runs); `Requires<T>(..., providerTypes: [...])` narrows
 the contract match to the providers the workflow's package can actually execute (enforced at
