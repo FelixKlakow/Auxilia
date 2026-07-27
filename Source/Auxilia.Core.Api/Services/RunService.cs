@@ -86,11 +86,20 @@ public sealed class RunService(
         // credential connector is stashed under a synthetic slot the runner resolves JIT; the
         // mount settings themselves are non-secret and ride the command.
         var mounts = new List<WorkspaceMountDispatch>();
+        var environmentCapabilities = new List<string>();
         var pluginBindings = new List<SlotBinding>();
         var stashedBindings = new List<SlotBinding>();
         foreach (var binding in slotBindings)
         {
             var entry = await ResolveCatalogEntryAsync(binding, ct);
+            // Environment-composing bindings are pure selections: the provider type IS the
+            // capability id — no plugin, no credential, interpreted only by the runner.
+            if (entry is { ComposesEnvironment: true })
+            {
+                if (!environmentCapabilities.Contains(entry.ProviderType))
+                    environmentCapabilities.Add(entry.ProviderType);
+                continue;
+            }
             if (entry is not { MountsIntoWorkspace: true })
             {
                 pluginBindings.Add(binding);
@@ -160,7 +169,8 @@ public sealed class RunService(
             commandId, workflowType, packageUri, context,
             RequestedBy: null, WorkflowConfigurationId: null, ResolutionToken: resolutionToken,
             SlotProviderTypes: providerTypes,
-            WorkspaceMounts: mounts.Count > 0 ? mounts : null);
+            WorkspaceMounts: mounts.Count > 0 ? mounts : null,
+            EnvironmentCapabilities: environmentCapabilities.Count > 0 ? environmentCapabilities : null);
 
         // Stash the resolution context AND the dispatch command itself (keyed by CommandId), so an
         // orphaned run can be re-dispatched once on failover without the Core reading the runner's DB.

@@ -19,7 +19,9 @@ namespace Auxilia.Core.Api.Tests.UnitTests;
 [Category("Unit")]
 public sealed class RunServiceTests
 {
-    private static (RunService Service, FakeMessageBusClient Bus, RunConfigurationService Configs,
+    private ProviderCatalogService _providerCatalog = null!;
+
+    private (RunService Service, FakeMessageBusClient Bus, RunConfigurationService Configs,
         WorkflowTypeRegistryService Registry, RunnerLivenessTracker Liveness) New(bool allowDispatchWithoutRunner = true)
     {
         var bus = new FakeMessageBusClient();
@@ -44,7 +46,7 @@ public sealed class RunServiceTests
             Options.Create(new CoreApiSettings()),
             new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System),
             TimeProvider.System, NullLogger<WorkflowTypeRegistryService>.Instance);
-        var providerCatalog = new ProviderCatalogService(
+        var providerCatalog = _providerCatalog = new ProviderCatalogService(
             new InMemoryDataAccess<SlotProviderRecord>(),
             new InMemoryDataAccess<ProviderCatalogRecord>(),
             new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System));
@@ -140,6 +142,33 @@ public sealed class RunServiceTests
         Assert.That(
             bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>().Count(),
             Is.EqualTo(1));
+    }
+
+    [Test]
+    public async Task RunInline_EnvironmentComposingBindings_RideAsCapabilities_NotAsPlugins()
+    {
+        var (service, bus, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
+            "dotnet-10", "environment", null, ["exec-env"], [], ComposesEnvironment: true),
+            CancellationToken.None);
+
+        await service.RunInlineAsync(
+            new RunRequest("wt", SlotBindings:
+            [
+                new SlotBinding("environment", ProviderType: "dotnet-10"),
+                new SlotBinding("environment", ProviderType: "dotnet-10"), // duplicates collapse
+            ]),
+            triggeredBy: null, CancellationToken.None);
+
+        var command = bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>().Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(command.EnvironmentCapabilities, Is.EqualTo(new[] { "dotnet-10" }),
+                "an environment binding is a capability selection, deduplicated");
+            Assert.That(command.SlotProviderTypes, Is.Null.Or.Empty,
+                "environment capabilities ship no slot plugin");
+        });
     }
 
     [Test]

@@ -45,6 +45,13 @@ public sealed record WorkflowLaunchRequest(
     public string? TerminalContainerName { get; init; }
 
     /// <summary>
+    /// Ordered Dockerfile fragments (one per selected environment capability) layered on top of
+    /// the workflow image before launch; the composed image is cached by content hash. Only
+    /// meaningful for baked-image launches.
+    /// </summary>
+    public IReadOnlyList<string>? EnvironmentLayers { get; init; }
+
+    /// <summary>
     /// Invoked (from a background watcher) when the workflow container exits, with its exit code
     /// and captured log tail. The dispatcher uses this to fail runs whose container died without
     /// reporting a terminal state — a crash must never leave a run stuck in Queued/Running.

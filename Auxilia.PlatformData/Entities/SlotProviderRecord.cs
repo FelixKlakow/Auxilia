@@ -21,6 +21,9 @@ public sealed record SlotProviderRecord : IEntity
     /// <summary>Bindings of this provider are materialized into the run's workspace before launch.</summary>
     public bool MountsIntoWorkspace { get; init; }
 
+    /// <summary>Bindings of this provider compose the run's container environment (a capability layer).</summary>
+    public bool ComposesEnvironment { get; init; }
+
     /// <summary>Manifest-declared plain-language description of what the provider does.</summary>
     public string? Description { get; init; }
 

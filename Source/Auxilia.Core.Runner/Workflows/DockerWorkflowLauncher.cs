@@ -27,6 +27,16 @@ public sealed class DockerWorkflowLauncher(
 
         using var client = clientFactory.CreateClient(settings.DockerSocketPath);
 
+        // Environment capabilities layer ON TOP of the workflow image: the composed image is
+        // content-addressed (base + fragments), so every distinct combination builds once and
+        // every later run with the same selection starts instantly from the cache.
+        if (request is { DockerImageUri: { } baseImage, EnvironmentLayers.Count: > 0 })
+        {
+            var composed = await EnsureComposedImageAsync(
+                client, baseImage, request.EnvironmentLayers, ct);
+            request = request with { DockerImageUri = composed };
+        }
+
         var createParams = request.DockerImageUri is not null
             ? BuildBakedImageContainerParameters(request, settings)
             : BuildCreateContainerParameters(request, settings);
@@ -154,6 +164,77 @@ public sealed class DockerWorkflowLauncher(
         {
             logger.LogError(ex, "Container exit watcher failed for {ContainerId}.", containerId);
         }
+    }
+
+    /// <summary>
+    /// Builds (or reuses) the composed environment image: the workflow image plus one Dockerfile
+    /// fragment per selected capability, tagged by the content hash of base + fragments.
+    /// </summary>
+    private async Task<string> EnsureComposedImageAsync(
+        IDockerClient client, string baseImage, IReadOnlyList<string> layers, CancellationToken ct)
+    {
+        var tag = ComposedImageTag(baseImage, layers);
+        try
+        {
+            await client.Images.InspectImageAsync(tag, ct);
+            logger.LogInformation("Composed environment image cached. Tag={Tag}", tag);
+            return tag;
+        }
+        catch (DockerImageNotFoundException)
+        {
+            // fall through to build
+        }
+
+        var dockerfile = ComposeDockerfile(baseImage, layers);
+        logger.LogInformation(
+            "Composing environment image. Base={Base} Layers={LayerCount} Tag={Tag}",
+            baseImage, layers.Count, tag);
+
+        using var context = BuildDockerfileTar(dockerfile);
+        string? buildError = null;
+        var progress = new Progress<JSONMessage>(m =>
+        {
+            if (m.ErrorMessage is { Length: > 0 } error)
+                buildError = error;
+        });
+        await client.Images.BuildImageFromDockerfileAsync(
+            new ImageBuildParameters { Dockerfile = "Dockerfile", Tags = [tag] },
+            context, null, null, progress, ct);
+        if (buildError is not null)
+            throw new InvalidOperationException($"environment image build failed: {buildError}");
+
+        // The build API streams; make sure the tagged image actually exists before launch.
+        await client.Images.InspectImageAsync(tag, ct);
+        logger.LogInformation("Composed environment image built. Tag={Tag}", tag);
+        return tag;
+    }
+
+    /// <summary>Content-addressed tag: same base + same fragments = the same cached image.</summary>
+    internal static string ComposedImageTag(string baseImage, IReadOnlyList<string> layers)
+    {
+        var content = baseImage + "\n " + string.Join("\n ", layers);
+        var hash = Convert.ToHexStringLower(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(content)));
+        return $"auxilia-env:{hash[..16]}";
+    }
+
+    /// <summary>The generated Dockerfile: the workflow image as base, one fragment per capability.</summary>
+    internal static string ComposeDockerfile(string baseImage, IReadOnlyList<string> layers)
+        => $"FROM {baseImage}\n" + string.Join("\n", layers.Select(l => l.TrimEnd())) + "\n";
+
+    private static MemoryStream BuildDockerfileTar(string dockerfile)
+    {
+        var stream = new MemoryStream();
+        using (var writer = new TarWriter(stream, leaveOpen: true))
+        {
+            var entry = new PaxTarEntry(TarEntryType.RegularFile, "Dockerfile")
+            {
+                DataStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(dockerfile)),
+            };
+            writer.WriteEntry(entry);
+        }
+        stream.Position = 0;
+        return stream;
     }
 
     /// <summary>

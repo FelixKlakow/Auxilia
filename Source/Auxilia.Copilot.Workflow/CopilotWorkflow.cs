@@ -29,6 +29,11 @@ public static class CopilotWorkflow
                 new SourceControlCapabilities { RequiredPermissions = [Permission.Read] },
                 "The repositories the agent works on — prepared into the run's workspace before launch",
                 optional: true, allowMultiple: true)
+            .Requires<Auxilia.Workflows.Environment.IExecutionEnvironment>("environment",
+                new Auxilia.Workflows.Environment.ExecutionEnvironmentCapabilities(),
+                "Software the session's container comes preinstalled with (SDKs, runtimes, tools) — "
+                + "pick any combination; the runner composes and caches the matching image",
+                optional: true, allowMultiple: true)
             .DeclaresView<AgentChatEntry>(AgentSessionApplication.ChatViewName,
                 ViewRendering.Custom, ViewLifecycle.LiveAndPersisted, AgentChatEntry.RendererKey)
             .DeclaresView<SessionProgressEntry>(AgentSessionApplication.ProgressViewName,

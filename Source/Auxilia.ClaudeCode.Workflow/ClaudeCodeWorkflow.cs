@@ -26,6 +26,11 @@ public static class ClaudeCodeWorkflow
                 new SourceControlCapabilities { RequiredPermissions = [Permission.Read] },
                 "The repositories the agent works on — prepared into the run's workspace before launch",
                 optional: true, allowMultiple: true)
+            .Requires<Auxilia.Workflows.Environment.IExecutionEnvironment>("environment",
+                new Auxilia.Workflows.Environment.ExecutionEnvironmentCapabilities(),
+                "Software the session's container comes preinstalled with (SDKs, runtimes, tools) — "
+                + "pick any combination; the runner composes and caches the matching image",
+                optional: true, allowMultiple: true)
             .DeclaresView<AgentChatEntry>(AgentSessionApplication.ChatViewName,
                 ViewRendering.Custom, ViewLifecycle.LiveAndPersisted, AgentChatEntry.RendererKey)
             .DeclaresView<SessionProgressEntry>(AgentSessionApplication.ProgressViewName,
@@ -58,6 +63,22 @@ public static class ClaudeCodeWorkflow
                 {
                     [AgentPermissionModes.AskOperator] = "Ask me for every tool use",
                     [AgentPermissionModes.AutoAllow] = "Auto-approve (sandboxed)",
+                }
+            })
+            .RequiresInput(new WorkflowInputDescriptor(
+                "push-policy", "Git pushes", Required: false,
+                Description: "Pushes have their OWN policy, independent of the general permission "
+                             + "mode — auto-approve edits but confirm each push, or the inverse. "
+                             + "Only matters for repositories bound with pushing allowed. "
+                             + "Changeable live while the session runs.")
+            {
+                Kind = "Choice",
+                DefaultValue = AgentPermissionModes.AskOperator,
+                Choices = [AgentPermissionModes.AskOperator, AgentPermissionModes.AutoAllow],
+                ChoiceLabels = new Dictionary<string, string>
+                {
+                    [AgentPermissionModes.AskOperator] = "Ask me before each push",
+                    [AgentPermissionModes.AutoAllow] = "Auto-approve pushes",
                 }
             })
             .DeclaresTrigger(TriggerDeclaration.Mailbox,

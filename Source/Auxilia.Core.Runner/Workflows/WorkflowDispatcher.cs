@@ -197,6 +197,32 @@ public sealed class WorkflowDispatcher(
                 pluginFiles.Count, workflowType,
                 string.Join(", ", pluginFiles.Select(f => f.DllPath)));
 
+        // Resolve environment-capability layers (the runner-owned side of the environment
+        // catalog: capability id → Dockerfile fragment). A capability this runner has no layer
+        // recipe for fails pre-flight — never launch with a silently wrong environment.
+        var environmentLayers = new List<string>();
+        foreach (var capability in (command.EnvironmentCapabilities ?? []).Distinct())
+        {
+            if (!launcherSettings.Value.EnvironmentLayers.TryGetValue(capability, out var fragmentPath)
+                || !File.Exists(fragmentPath))
+            {
+                var reason = $"run selects environment capability '{capability}' this runner has no layer for";
+                logger.LogWarning(
+                    "Dispatch rejected: {Reason}. CommandId={CommandId}", reason, command.CommandId);
+                await auditLog.AppendAsync(
+                    "steering-instance", "workflow.dispatch.rejected",
+                    instanceId.ToString(), reason, ct: ct);
+                await FailPreFlightAsync(instanceId, workflowType, reason, ct);
+                return;
+            }
+            environmentLayers.Add(await File.ReadAllTextAsync(fragmentPath, ct));
+        }
+        if (environmentLayers.Count > 0)
+            logger.LogInformation(
+                "Resolved {Count} environment layer(s) for {WorkflowType}: {Capabilities}",
+                environmentLayers.Count, workflowType,
+                string.Join(", ", command.EnvironmentCapabilities!.Distinct()));
+
         // Effective network policy (ARCHITECTURE §10): manifest baseline (last stored schema)
         // merged with run-configuration extras, clamped by platform policy, audited per run.
         var schema = await schemaStore.GetSchemaAsync(workflowType, ct);
@@ -250,9 +276,17 @@ public sealed class WorkflowDispatcher(
             var noCache = string.Equals(
                 mount.SettingsByRole.GetValueOrDefault(WorkspaceMountRoles.NoCache),
                 "true", StringComparison.OrdinalIgnoreCase);
+            var allowPush = string.Equals(
+                mount.SettingsByRole.GetValueOrDefault(WorkspaceMountRoles.AllowPush),
+                "true", StringComparison.OrdinalIgnoreCase);
             repositories.Add(new RepositoryDeclaration(
                 mount.MountId, cloneUrl,
-                string.IsNullOrWhiteSpace(branch) ? null : branch, noCache));
+                string.IsNullOrWhiteSpace(branch) ? null : branch, noCache)
+            {
+                AllowPush = allowPush,
+                CommitName = mount.SettingsByRole.GetValueOrDefault(WorkspaceMountRoles.CommitName),
+                CommitEmail = mount.SettingsByRole.GetValueOrDefault(WorkspaceMountRoles.CommitEmail),
+            });
 
             // Each mount's effective root (clone + optional working directory) is announced to the
             // container generically; workflows resolve their mounts from these variables.
@@ -302,6 +336,7 @@ public sealed class WorkflowDispatcher(
                 new WorkflowLaunchRequest(string.Empty, env, pluginFiles)
                 {
                     DockerImageUri = imageName,
+                    EnvironmentLayers = environmentLayers.Count > 0 ? environmentLayers : null,
                     OutputDirectoryBind = outputDirectoryBind,
                     NetworkPolicy = networkPolicy,
                     WorkspaceDirectoryBind = workspaceRoot,

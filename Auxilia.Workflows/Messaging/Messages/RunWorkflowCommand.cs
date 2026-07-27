@@ -53,4 +53,10 @@ public sealed record RunWorkflowCommand(
     /// provider's declared roles; a mount needing auth names a synthetic slot the runner resolves
     /// just-in-time — the credential itself never rides the command.
     /// </summary>
-    IReadOnlyList<WorkspaceMountDispatch>? WorkspaceMounts = null);
+    IReadOnlyList<WorkspaceMountDispatch>? WorkspaceMounts = null,
+    /// <summary>
+    /// Environment capabilities the run's container must provide, built generically from slot
+    /// bindings of providers that declare <c>ComposesEnvironment</c>. Opaque provider-type ids —
+    /// only the runner knows how each maps onto an image layer.
+    /// </summary>
+    IReadOnlyList<string>? EnvironmentCapabilities = null);

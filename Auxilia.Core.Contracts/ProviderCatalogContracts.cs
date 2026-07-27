@@ -38,7 +38,8 @@ public sealed record ProviderCatalogEntry(
     IReadOnlyList<string> Contracts,
     string? Description,
     string? RequiredCredentialContract = null,
-    bool MountsIntoWorkspace = false);
+    bool MountsIntoWorkspace = false,
+    bool ComposesEnvironment = false);
 
 /// <summary>
 /// Registers (or updates) a slot provider's descriptor in the Core catalog — normally mirrored
@@ -52,7 +53,8 @@ public sealed record RegisterSlotProvider(
     IReadOnlyList<string> Contracts,
     IReadOnlyList<RegisterProviderSetting> Settings,
     string? RequiredCredentialContract = null,
-    bool MountsIntoWorkspace = false);
+    bool MountsIntoWorkspace = false,
+    bool ComposesEnvironment = false);
 
 /// <summary>One manifest setting of a provider being registered.</summary>
 public sealed record RegisterProviderSetting(
