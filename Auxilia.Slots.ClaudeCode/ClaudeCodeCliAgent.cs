@@ -382,7 +382,7 @@ public sealed class ClaudeCodeCliAgent(
                 isPush
                     ? "A git push was allowed automatically (push policy: auto-allow)."
                     : $"Tool '{control.ToolName}' was allowed automatically (permission mode: auto-allow).",
-                _time.GetUtcNow(), Label: "Permission"), ct);
+                _time.GetUtcNow(), Label: "Permission", DetailTag: "permissions"), ct);
             return;
         }
 
@@ -433,7 +433,7 @@ public sealed class ClaudeCodeCliAgent(
             AgentChatRole.System,
             $"Tool '{control.ToolName}' was {(allowed ? "allowed" : "denied")} by the operator"
             + (suggestion is not null ? $" ({DescribeSuggestion(suggestion)})" : "") + ".",
-            _time.GetUtcNow(), Label: "Permission"), ct);
+            _time.GetUtcNow(), Label: "Permission", DetailTag: "permissions"), ct);
     }
 
     /// <summary>

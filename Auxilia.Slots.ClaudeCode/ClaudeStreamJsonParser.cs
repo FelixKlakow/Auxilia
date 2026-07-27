@@ -94,7 +94,8 @@ public sealed class ClaudeStreamJsonParser
                     entries.Add(new AgentChatEntry(
                         AgentChatRole.Tool, input, timestampUtc,
                         Label: item.TryGetProperty("input", out var labelInput) ? LabelOf(labelInput) : null,
-                        ToolName: toolName, ToolState: "Running", ToolUseId: useId));
+                        ToolName: toolName, ToolState: "Running", ToolUseId: useId,
+                        DetailTag: DetailTagOf(toolName)));
                     break;
 
                 case "tool_result" when !isAssistant:
@@ -111,7 +112,7 @@ public sealed class ClaudeStreamJsonParser
                     entries.Add(new AgentChatEntry(
                         AgentChatRole.Tool, Truncate(FlattenContent(item)), timestampUtc,
                         ToolName: resolvedName, ToolState: isError ? "Error" : "Success",
-                        ToolUseId: resultUseId));
+                        ToolUseId: resultUseId, DetailTag: DetailTagOf(resolvedName)));
                     break;
             }
         }
@@ -149,6 +150,15 @@ public sealed class ClaudeStreamJsonParser
             ? [new AgentChatEntry(AgentChatRole.System, $"Session failed ({subtype}).", timestampUtc, Label: "Claude Code")]
             : [];
     }
+
+    /// <summary>
+    /// Plan/task bookkeeping tools are ADDITIONAL information (the plan view carries them) —
+    /// tagged so clients hide them by default behind a generic toggle.
+    /// </summary>
+    private static string? DetailTagOf(string toolName)
+        => toolName is "TaskCreate" or "TaskUpdate" or "TodoWrite" or "ExitPlanMode"
+            ? "bookkeeping"
+            : null;
 
     /// <summary>
     /// The one input value a human wants on the tool card (the command, the file, the

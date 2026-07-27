@@ -6,12 +6,18 @@
 @* Reference custom view renderer (key "agent-chat"): renders AgentChatEntry items as a
    live left/right chat conversation via the BlazorAgentView package. *@
 
-@if (_hiddenCount > 0 || _showDetails)
+@if (_tagCounts.Count > 0)
 {
-    <label class="agent-chat-filter">
-        <input type="checkbox" checked="@_showDetails" @onchange="ToggleDetails"/>
-        Show permission &amp; bookkeeping entries (@_hiddenCount hidden)
-    </label>
+    <div class="agent-chat-filter">
+        @foreach (var tag in _tagCounts.Keys.OrderBy(t => t, StringComparer.OrdinalIgnoreCase))
+        {
+            <label>
+                <input type="checkbox" checked="@_shownTags.Contains(tag)"
+                       @onchange="args => ToggleTag(tag, args)"/>
+                Show @tag (@_tagCounts[tag])
+            </label>
+        }
+    </div>
 }
 <div class="agent-chat-host" style="height: 480px;">
     <AgentChatView Messages="_messages" Options="ChatOptions"/>
@@ -27,12 +33,12 @@
         ToolCallDisplay = ToolCallDisplayMode.Collapsible
     };
 
-    // Plan bookkeeping tools already surface on the plan view; their raw calls are noise here.
-    private static readonly string[] BookkeepingTools = ["TaskCreate", "TaskUpdate", "TodoWrite"];
+    // The generic detail contract: the WORKFLOW tags additional entries (DetailTag, default
+    // hidden); the renderer offers one toggle per tag it has seen — no tag semantics here.
+    private readonly Dictionary<string, int> _tagCounts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _shownTags = new(StringComparer.OrdinalIgnoreCase);
 
     private List<ChatMessage> _messages = [];
-    private int _hiddenCount;
-    private bool _showDetails;
 
     [Parameter, EditorRequired]
     public required IReadOnlyList<ViewDataRecord> Items { get; set; }
@@ -42,9 +48,12 @@
 
     protected override void OnParametersSet() => Rebuild();
 
-    private void ToggleDetails(ChangeEventArgs args)
+    private void ToggleTag(string tag, ChangeEventArgs args)
     {
-        _showDetails = args.Value is true;
+        if (args.Value is true)
+            _shownTags.Add(tag);
+        else
+            _shownTags.Remove(tag);
         Rebuild();
     }
 
@@ -54,17 +63,18 @@
         // conversation shows them as ONE card — input and output in their own sections.
         var messages = new List<ChatMessage>();
         var openToolCards = new Dictionary<string, ToolCall>(StringComparer.Ordinal);
-        _hiddenCount = 0;
+        _tagCounts.Clear();
         foreach (var item in Items)
         {
             var entry = Deserialize(item);
             if (entry is null)
                 continue;
 
-            if (!_showDetails && IsDetailEntry(entry))
+            if (entry.DetailTag is { Length: > 0 } tag)
             {
-                _hiddenCount++;
-                continue;
+                _tagCounts[tag] = _tagCounts.GetValueOrDefault(tag) + 1;
+                if (!_shownTags.Contains(tag))
+                    continue;
             }
 
             if (entry.Role == AgentChatRole.Tool
@@ -128,13 +138,6 @@
 
         return message;
     }
-
-    /// <summary>Hidden by default: permission narration and plan-bookkeeping tool calls.</summary>
-    private static bool IsDetailEntry(AgentChatEntry entry)
-        => (entry.Role == AgentChatRole.System
-            && string.Equals(entry.Label, "Permission", StringComparison.OrdinalIgnoreCase))
-           || (entry.Role == AgentChatRole.Tool
-               && BookkeepingTools.Contains(entry.ToolName, StringComparer.OrdinalIgnoreCase));
 
     /// <summary>Bash runs constantly — its card shows the command itself, not the input JSON.</summary>
     private static string ToolInputOf(AgentChatEntry entry)

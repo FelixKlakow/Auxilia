@@ -81,6 +81,14 @@ folders + persisted UI state, transcript export/copy, dark-themed chat, Environm
 CLAUDE.md gained the standing rule: **the Core has NO custom/vendor logic** — provider
 knowledge only in dynamically registered data/plugins.
 
+Follow-ups landed 2026-07-28 early: **detail-tag contract** (`AgentChatEntry.DetailTag` — the
+workflow tags additional entries default-hidden; clients render generic per-tag show toggles;
+tagged today: permission narration + plan/task bookkeeping incl. `ExitPlanMode`, whose approved
+plan now feeds the plan view); turn boundaries no longer produce chat entries (steering-only);
+chat follow-scroll enforced in the WebView host; wall layout = HARD tile capacity (◻/◫◫/2×2/2×3,
+Agents ▾ picks which runs fill the slots; tabs uncapped); wall tiles carry plan + decision
+cards (answers route to the OWNING monitor).
+
 ## CI validation — Docker system tests (Phase-4 assumptions, not runnable locally)
 - Email slot **plugin-dependency loading** (highest risk — MailKit/MimeKit/BouncyCastle copied alongside the provider DLL).
 - Core resolves fake code-review slots from inline `ProviderType`+`Settings` bindings.

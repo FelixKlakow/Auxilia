@@ -221,7 +221,7 @@ public sealed class CopilotSdkAgent(
             await onChatEntry(new AgentChatEntry(
                 AgentChatRole.System,
                 $"{summary} was allowed automatically ({(isPush ? "push policy" : "permission mode")}: auto-allow).",
-                _time.GetUtcNow(), Label: "Permission"), ct);
+                _time.GetUtcNow(), Label: "Permission", DetailTag: "permissions"), ct);
             return PermissionDecision.ApproveOnce();
         }
 
@@ -236,7 +236,7 @@ public sealed class CopilotSdkAgent(
         await onChatEntry(new AgentChatEntry(
             AgentChatRole.System,
             $"{summary} was {(allowed ? "allowed" : "denied")} by the operator.",
-            _time.GetUtcNow(), Label: "Permission"), ct);
+            _time.GetUtcNow(), Label: "Permission", DetailTag: "permissions"), ct);
         return allowed ? PermissionDecision.ApproveOnce() : PermissionDecision.Reject();
     }
 
