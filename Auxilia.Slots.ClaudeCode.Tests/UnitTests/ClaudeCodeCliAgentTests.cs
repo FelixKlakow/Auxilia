@@ -241,6 +241,57 @@ public sealed class ClaudeCodeCliAgentTests
     }
 
     [Test]
+    public async Task InteractiveSession_AskUserQuestion_SurfacesAndReturnsAnswersInUpdatedInput()
+    {
+        var stdout = """
+            {"type":"control_request","request_id":"ctrl-q","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"Which identity should I commit with?","header":"Git identity","options":[{"label":"FelixKlakow","description":"Matches the repo history"},{"label":"Agent identity","description":"Generic co-author"}],"multiSelect":false}]}}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var interaction = new FakeInteraction(new AgentAnswer(["FelixKlakow"]));
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        // Even in auto-allow: a question is a question, not a permission.
+        await agent.RunAsync(
+            Request with { Interaction = interaction, PermissionMode = AgentPermissionModes.AutoAllow },
+            (_, _) => Task.CompletedTask);
+
+        var stdin = factory.LastProcess!.Input.ToString()!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(interaction.LastQuestion!.Prompt, Is.EqualTo("Which identity should I commit with?"));
+            Assert.That(interaction.LastQuestion.Options.Select(o => o.Id),
+                Is.EqualTo(new[] { "FelixKlakow", "Agent identity" }));
+            Assert.That(interaction.LastQuestion.AllowFreeText, Is.True,
+                "Free text is the host-side 'Other' affordance the tool contract expects.");
+            Assert.That(stdin, Does.Contain("updatedInput").And.Contain("answers"));
+            Assert.That(stdin, Does.Contain("\"Which identity should I commit with?\":\"FelixKlakow\""),
+                "Answers are keyed by question text and valued by the selected label.");
+        });
+    }
+
+    [Test]
+    public async Task InteractiveSession_OperatorModelChange_IsForwardedAsSetModelControlRequest()
+    {
+        var stdout = """
+            {"type":"control_request","request_id":"ctrl-5","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"}}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var interaction = new FakeInteraction(new AgentAnswer(["allow"]))
+        {
+            PendingSetting = new AgentSetting(AgentSettingKeys.Model, "claude-opus-4-8"),
+        };
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        await agent.RunAsync(Request with { Interaction = interaction }, (_, _) => Task.CompletedTask);
+
+        var stdin = factory.LastProcess!.Input.ToString()!;
+        Assert.That(stdin, Does.Contain("set_model").And.Contain("claude-opus-4-8"),
+            "A live model change rides to the CLI as a set_model control request.");
+    }
+
+    [Test]
     public async Task InteractiveSession_AutoAllowMode_ApprovesWithoutAskingTheOperator()
     {
         var stdout = """
@@ -294,10 +345,13 @@ public sealed class ClaudeCodeCliAgentTests
     {
         public AgentQuestion? LastQuestion { get; private set; }
 
-        public Task<AgentAnswer> AskAsync(AgentQuestion question, CancellationToken cancellationToken)
+        public async Task<AgentAnswer> AskAsync(AgentQuestion question, CancellationToken cancellationToken)
         {
+            // Deterministic ordering: a queued setting is consumed by the pump before any answer.
+            while (PendingSetting is not null)
+                await Task.Yield();
             LastQuestion = question;
-            return Task.FromResult(answer ?? new AgentAnswer(["allow"]));
+            return answer ?? new AgentAnswer(["allow"]);
         }
 
         public async Task<string> WaitForGuidanceAsync(CancellationToken cancellationToken)
@@ -306,6 +360,19 @@ public sealed class ClaudeCodeCliAgentTests
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             throw new OperationCanceledException(cancellationToken);
         }
+
+        public async Task<AgentSetting> WaitForSettingAsync(CancellationToken cancellationToken)
+        {
+            if (PendingSetting is { } setting)
+            {
+                PendingSetting = null;
+                return setting;
+            }
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new OperationCanceledException(cancellationToken);
+        }
+
+        public AgentSetting? PendingSetting { get; set; }
     }
 
     private sealed class FakeProcessFactory(

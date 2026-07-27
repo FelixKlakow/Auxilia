@@ -45,12 +45,20 @@ public static class ClaudeCodeWorkflow
             })
             .RequiresInput(new WorkflowInputDescriptor(
                 "permission-mode", "Permissions", Required: false,
-                Description: "How the agent's permission requests are handled: ask the operator "
-                             + "per request, or approve automatically (the container stays the sandbox).")
+                Description: "How the agent's tool-permission requests are handled. Ask me: every "
+                             + "request becomes a decision card you answer from the steering client. "
+                             + "Auto-approve: requests are allowed automatically — the isolated "
+                             + "container stays the safety net, and you can still guide or halt. "
+                             + "Changeable live while the session runs.")
             {
                 Kind = "Choice",
                 DefaultValue = AgentPermissionModes.AskOperator,
-                Choices = [AgentPermissionModes.AskOperator, AgentPermissionModes.AutoAllow]
+                Choices = [AgentPermissionModes.AskOperator, AgentPermissionModes.AutoAllow],
+                ChoiceLabels = new Dictionary<string, string>
+                {
+                    [AgentPermissionModes.AskOperator] = "Ask me for every tool use",
+                    [AgentPermissionModes.AutoAllow] = "Auto-approve (sandboxed)",
+                }
             })
             .DeclaresTrigger(TriggerDeclaration.Mailbox,
                 "A filtered mail starts a run; subject and body become the instruction.")

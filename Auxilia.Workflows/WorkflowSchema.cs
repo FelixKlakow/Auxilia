@@ -80,4 +80,7 @@ public sealed record WorkflowInputDescriptor(
 
     /// <summary>The selectable values of a "Choice" input.</summary>
     public IReadOnlyList<string>? Choices { get; init; }
+
+    /// <summary>Optional human labels per choice value — editors show the label, store the value.</summary>
+    public IReadOnlyDictionary<string, string>? ChoiceLabels { get; init; }
 }

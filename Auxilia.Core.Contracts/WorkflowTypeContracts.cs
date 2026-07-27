@@ -87,7 +87,8 @@ public sealed record WorkflowInputDto(
     string? Description,
     string Kind = InputKinds.Text,
     string? DefaultValue = null,
-    IReadOnlyList<string>? Choices = null);
+    IReadOnlyList<string>? Choices = null,
+    IReadOnlyDictionary<string, string>? ChoiceLabels = null);
 
 /// <summary>
 /// Rendering kinds a declared input can carry — editors render inputs BY KIND, never by name.

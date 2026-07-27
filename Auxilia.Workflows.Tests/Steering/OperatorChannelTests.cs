@@ -17,7 +17,7 @@ public sealed class OperatorChannelTests
 
         var capabilities = views.Single("capabilities");
         Assert.That(capabilities.GetProperty("accepts").EnumerateArray().Select(a => a.GetString()),
-            Is.EquivalentTo(new[] { "guidance", "form-answer", "halt" }));
+            Is.EquivalentTo(new[] { "guidance", "form-answer", "halt", "setting" }));
         Assert.That(views.ViewNames, Has.All.EqualTo(OperatorChannel.ViewName));
     }
 
@@ -76,6 +76,22 @@ public sealed class OperatorChannelTests
         Assert.That(channel.HaltToken.IsCancellationRequested, Is.False);
         inputs.Push("""{"$type":"halt","reason":"stop"}""");
         await WaitUntilAsync(() => channel.HaltToken.IsCancellationRequested);
+    }
+
+    [Test]
+    public async Task SettingChange_ReachesTheWaiter()
+    {
+        var inputs = new FakeInputs();
+        await using var channel = await OperatorChannel.StartAsync(new RecordingViewPublisher(), inputs);
+
+        var waiting = channel.WaitForSettingAsync(CancellationToken.None);
+        inputs.Push("""{"$type":"setting","key":"permission-mode","value":"auto-allow"}""");
+        var setting = await waiting.AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Multiple(() =>
+        {
+            Assert.That(setting.Key, Is.EqualTo("permission-mode"));
+            Assert.That(setting.Value, Is.EqualTo("auto-allow"));
+        });
     }
 
     [Test]

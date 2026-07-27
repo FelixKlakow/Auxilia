@@ -43,6 +43,22 @@ public interface IAgentInteraction
 
     /// <summary>Waits for the next guidance text the operator sends; blocks until one arrives.</summary>
     Task<string> WaitForGuidanceAsync(CancellationToken cancellationToken);
+
+    /// <summary>Waits for the operator's next live setting change (e.g. permission mode, model).</summary>
+    Task<AgentSetting> WaitForSettingAsync(CancellationToken cancellationToken);
+}
+
+/// <summary>A live session-setting change; see <see cref="AgentSettingKeys"/> for the vocabulary.</summary>
+public sealed record AgentSetting(string Key, string Value);
+
+/// <summary>Setting keys a coding-agent session understands at runtime.</summary>
+public static class AgentSettingKeys
+{
+    /// <summary>Switches how permission requests are handled; values from <see cref="AgentPermissionModes"/>.</summary>
+    public const string PermissionMode = "permission-mode";
+
+    /// <summary>Switches the agent's model mid-session (agent-specific model names).</summary>
+    public const string Model = "model";
 }
 
 /// <summary>

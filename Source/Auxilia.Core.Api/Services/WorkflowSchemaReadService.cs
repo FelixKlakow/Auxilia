@@ -74,7 +74,8 @@ public sealed class WorkflowSchemaReadService(IDataAccess<CoreWorkflowTypeRecord
                 s.AllowMultiple,
                 s.ProviderTypes)).ToList(),
             schema.Inputs.Select(i => new WorkflowInputDto(
-                i.Name, i.Label, i.Required, i.Description, i.Kind, i.DefaultValue, i.Choices)).ToList(),
+                i.Name, i.Label, i.Required, i.Description, i.Kind, i.DefaultValue, i.Choices,
+                i.ChoiceLabels)).ToList(),
             schema.Views.Select(v => new WorkflowViewDto(
                 v.Name, v.Rendering.ToString(), v.Lifecycle.ToString(), v.RendererKey, v.ItemSchemaJson)).ToList(),
             schema.Triggers.Select(t => new WorkflowTriggerDto(t.Kind, t.Description)).ToList(),

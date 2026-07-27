@@ -37,7 +37,10 @@ public sealed class ClaudeCodeCliAgent(
         using var process = _processFactory.Start(BuildStartInfo(request));
         using var stdinGate = new SemaphoreSlim(1, 1);
         using var sessionScope = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        // Mutable per-session state: the operator can retune it live over the setting channel.
+        var permissionMode = new SessionSettings(request.PermissionMode);
         Task? guidanceTask = null;
+        Task? settingsTask = null;
         try
         {
             // Drain stderr concurrently so a chatty CLI can't dead-lock on a full pipe.
@@ -49,6 +52,8 @@ public sealed class ClaudeCodeCliAgent(
                 // responses and operator guidance until the session finishes.
                 await WriteUserMessageAsync(process, stdinGate, request.Instruction, cancellationToken);
                 guidanceTask = PumpGuidanceAsync(process, stdinGate, interaction, sessionScope.Token);
+                settingsTask = PumpSettingsAsync(
+                    process, stdinGate, interaction, permissionMode, onChatEntry, sessionScope.Token);
             }
 
             var parser = new ClaudeStreamJsonParser();
@@ -57,7 +62,7 @@ public sealed class ClaudeCodeCliAgent(
                 if (request.Interaction is { } steering && TryParseControlRequest(line) is { } control)
                 {
                     await AnswerControlRequestAsync(
-                        process, stdinGate, steering, control, request.PermissionMode,
+                        process, stdinGate, steering, control, permissionMode.PermissionMode,
                         onChatEntry, cancellationToken);
                     continue;
                 }
@@ -105,9 +110,58 @@ public sealed class ClaudeCodeCliAgent(
         finally
         {
             await sessionScope.CancelAsync();
-            if (guidanceTask is not null)
-                try { await guidanceTask; }
-                catch (OperationCanceledException) { /* stopped with the session */ }
+            foreach (var pump in new[] { guidanceTask, settingsTask })
+                if (pump is not null)
+                    try { await pump; }
+                    catch (OperationCanceledException) { /* stopped with the session */ }
+        }
+    }
+
+    /// <summary>Mutable session state shared between the output loop and the setting pump.</summary>
+    private sealed class SessionSettings(string permissionMode)
+    {
+        public volatile string PermissionMode = permissionMode;
+    }
+
+    /// <summary>
+    /// Applies live operator setting changes: permission mode switches take effect for the NEXT
+    /// permission request; a model change is forwarded to the CLI as a set_model control request.
+    /// </summary>
+    private async Task PumpSettingsAsync(
+        IClaudeCliProcess process, SemaphoreSlim stdinGate, IAgentInteraction interaction,
+        SessionSettings settings, Func<AgentChatEntry, CancellationToken, Task> onChatEntry,
+        CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            var setting = await interaction.WaitForSettingAsync(ct);
+            switch (setting.Key.ToLowerInvariant())
+            {
+                case AgentSettingKeys.PermissionMode:
+                    settings.PermissionMode = setting.Value;
+                    await onChatEntry(new AgentChatEntry(
+                        AgentChatRole.System, $"Permission mode changed to '{setting.Value}' by the operator.",
+                        _time.GetUtcNow(), Label: "Session settings"), ct);
+                    break;
+
+                case AgentSettingKeys.Model:
+                    await WriteLineAsync(process, stdinGate, JsonSerializer.Serialize(new
+                    {
+                        type = "control_request",
+                        request_id = $"set-model-{Guid.NewGuid():N}",
+                        request = new { subtype = "set_model", model = setting.Value }
+                    }), ct);
+                    await onChatEntry(new AgentChatEntry(
+                        AgentChatRole.System, $"Model switched to '{setting.Value}' by the operator.",
+                        _time.GetUtcNow(), Label: "Session settings"), ct);
+                    break;
+
+                default:
+                    await onChatEntry(new AgentChatEntry(
+                        AgentChatRole.System, $"Ignored unknown session setting '{setting.Key}'.",
+                        _time.GetUtcNow(), Label: "Session settings"), ct);
+                    break;
+            }
         }
     }
 
@@ -219,6 +273,16 @@ public sealed class ClaudeCodeCliAgent(
         ControlRequest control, string permissionMode,
         Func<AgentChatEntry, CancellationToken, Task> onChatEntry, CancellationToken ct)
     {
+        // AskUserQuestion is a QUESTION, not a permission: its answers must ride back inside
+        // updatedInput.answers (a bare allow runs the tool answerless — "the user did not
+        // answer"). It therefore always surfaces to the operator, in EVERY permission mode.
+        if (string.Equals(control.ToolName, "AskUserQuestion", StringComparison.OrdinalIgnoreCase)
+            && control.InputJson is { Length: > 0 })
+        {
+            await AnswerUserQuestionsAsync(process, stdinGate, interaction, control, onChatEntry, ct);
+            return;
+        }
+
         // Auto mode: the session stays steerable (guidance, halt), but permission requests are
         // approved without an operator round-trip — the container is still the sandbox.
         if (string.Equals(permissionMode, AgentPermissionModes.AutoAllow, StringComparison.OrdinalIgnoreCase))
@@ -277,6 +341,79 @@ public sealed class ClaudeCodeCliAgent(
             $"Tool '{control.ToolName}' was {(allowed ? "allowed" : "denied")} by the operator"
             + (suggestion is not null ? $" ({DescribeSuggestion(suggestion)})" : "") + ".",
             _time.GetUtcNow(), Label: "Permission"), ct);
+    }
+
+    /// <summary>
+    /// Surfaces the CLI's AskUserQuestion to the operator (one form per question, options from
+    /// the tool input, free text always possible) and returns the answers the documented way:
+    /// allow + updatedInput carrying the ORIGINAL questions plus an answers map keyed by the
+    /// question text, valued with the selected label(s) or the typed text.
+    /// </summary>
+    private async Task AnswerUserQuestionsAsync(
+        IClaudeCliProcess process, SemaphoreSlim stdinGate, IAgentInteraction interaction,
+        ControlRequest control, Func<AgentChatEntry, CancellationToken, Task> onChatEntry,
+        CancellationToken ct)
+    {
+        System.Text.Json.Nodes.JsonArray questions;
+        try
+        {
+            questions = System.Text.Json.Nodes.JsonNode.Parse(control.InputJson!)?["questions"]
+                ?.AsArray() ?? [];
+        }
+        catch (JsonException)
+        {
+            questions = [];
+        }
+
+        var answers = new System.Text.Json.Nodes.JsonObject();
+        foreach (var node in questions)
+        {
+            if (node?["question"]?.GetValue<string>() is not { Length: > 0 } text)
+                continue;
+            var multiSelect = node["multiSelect"]?.GetValue<bool>() ?? false;
+            // The answers map is keyed by question text and valued by option LABEL — so the
+            // label doubles as the option id.
+            var options = new List<AgentQuestionOption>();
+            foreach (var optionNode in node["options"]?.AsArray() ?? [])
+                if (optionNode?["label"]?.GetValue<string>() is { Length: > 0 } label)
+                    options.Add(new AgentQuestionOption(
+                        label, label, optionNode["description"]?.GetValue<string>()));
+
+            var answer = await interaction.AskAsync(
+                new AgentQuestion(text, options, multiSelect, AllowFreeText: true), ct);
+            if (answer.SelectedIds.Count > 0)
+                answers[text] = multiSelect
+                    ? new System.Text.Json.Nodes.JsonArray(
+                        answer.SelectedIds.Select(s => (System.Text.Json.Nodes.JsonNode)s).ToArray())
+                    : answer.SelectedIds[0];
+            else if (answer.FreeText is { Length: > 0 } freeText)
+                answers[text] = freeText;
+        }
+
+        var response = new System.Text.Json.Nodes.JsonObject
+        {
+            ["type"] = "control_response",
+            ["response"] = new System.Text.Json.Nodes.JsonObject
+            {
+                ["subtype"] = "success",
+                ["request_id"] = control.RequestId,
+                ["response"] = new System.Text.Json.Nodes.JsonObject
+                {
+                    ["behavior"] = "allow",
+                    ["updatedInput"] = new System.Text.Json.Nodes.JsonObject
+                    {
+                        // The tool re-reads its questions from the (updated) input — pass them through.
+                        ["questions"] = questions.DeepClone(),
+                        ["answers"] = answers,
+                    },
+                },
+            },
+        };
+        await WriteLineAsync(process, stdinGate, response.ToJsonString(), ct);
+        await onChatEntry(new AgentChatEntry(
+            AgentChatRole.System,
+            $"The operator answered {answers.Count} of {questions.Count} question(s).",
+            _time.GetUtcNow(), Label: "Question"), ct);
     }
 
     /// <summary>A human label for one CLI permission suggestion; falls back to compact JSON.</summary>

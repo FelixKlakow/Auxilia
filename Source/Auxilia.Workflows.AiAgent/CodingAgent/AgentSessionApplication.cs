@@ -133,5 +133,11 @@ public sealed class AgentSessionApplication(
                 cancellationToken);
             return guidance;
         }
+
+        public async Task<AgentSetting> WaitForSettingAsync(CancellationToken cancellationToken)
+        {
+            var setting = await channel.WaitForSettingAsync(cancellationToken);
+            return new AgentSetting(setting.Key, setting.Value);
+        }
     }
 }

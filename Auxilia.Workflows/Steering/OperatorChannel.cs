@@ -25,6 +25,12 @@ public sealed record OperatorOption(string Id, string Label, string? Description
 public sealed record OperatorAnswer(string QuestionId, IReadOnlyList<string> SelectedIds, string? FreeText);
 
 /// <summary>
+/// A live session-setting change from the operator (e.g. permission mode, model). Keys are the
+/// consuming workflow's vocabulary — the channel carries them verbatim.
+/// </summary>
+public sealed record OperatorSetting(string Key, string Value);
+
+/// <summary>
 /// The workflow side of the operator steering loop, speaking the steering wire protocol over the
 /// run's <c>steering</c> view (out) and the Core's deliver-input channel (in):
 /// <list type="bullet">
@@ -44,6 +50,7 @@ public sealed class OperatorChannel : IAsyncDisposable
     private readonly IAsyncDisposable _pump;
     private readonly CancellationTokenSource _halt = new();
     private readonly Channel<string> _guidance = Channel.CreateUnbounded<string>();
+    private readonly Channel<OperatorSetting> _settings = Channel.CreateUnbounded<OperatorSetting>();
     private readonly Dictionary<string, TaskCompletionSource<IReadOnlyList<OperatorAnswer>>> _pendingForms = [];
     private readonly Lock _gate = new();
 
@@ -61,7 +68,7 @@ public sealed class OperatorChannel : IAsyncDisposable
     {
         var channel = new OperatorChannel(views, inputs, lifetime);
         await views.PublishAsync(ViewName,
-            new CapabilitiesWire("capabilities", ["guidance", "form-answer", "halt"]), lifetime);
+            new CapabilitiesWire("capabilities", ["guidance", "form-answer", "halt", "setting"]), lifetime);
         return channel;
     }
 
@@ -102,6 +109,10 @@ public sealed class OperatorChannel : IAsyncDisposable
     /// <summary>Waits for the next guidance text from the operator.</summary>
     public ValueTask<string> WaitForGuidanceAsync(CancellationToken cancellationToken)
         => _guidance.Reader.ReadAsync(cancellationToken);
+
+    /// <summary>Waits for the next live session-setting change from the operator.</summary>
+    public ValueTask<OperatorSetting> WaitForSettingAsync(CancellationToken cancellationToken)
+        => _settings.Reader.ReadAsync(cancellationToken);
 
     /// <summary>Announces the end of the session — observers drop every pending decision card.</summary>
     public Task EndSessionAsync(bool success, string? error, CancellationToken cancellationToken)
@@ -147,6 +158,12 @@ public sealed class OperatorChannel : IAsyncDisposable
 
             case "halt":
                 _halt.Cancel();
+                break;
+
+            case "setting":
+                if (root.TryGetProperty("key", out var key) && key.GetString() is { Length: > 0 } settingKey
+                    && root.TryGetProperty("value", out var v) && v.GetString() is { } settingValue)
+                    _settings.Writer.TryWrite(new OperatorSetting(settingKey, settingValue));
                 break;
 
             case "form-answer":
