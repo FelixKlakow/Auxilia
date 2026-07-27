@@ -38,6 +38,30 @@ public sealed class ConnectorService(
         return ToDto(record);
     }
 
+    /// <summary>
+    /// Updates a connector in place: rename and/or upsert settings key-by-key (each provided value
+    /// is protected on write; untouched keys keep their stored value). This is how a rotated
+    /// credential is refreshed without re-creating the connector or breaking its bindings.
+    /// </summary>
+    public async Task<Connector?> UpdateAsync(Guid id, UpdateConnector request, CancellationToken ct)
+    {
+        if (await store.ReadAsync(id, ct) is not { } record)
+            return null;
+        var protectedSettings =
+            JsonSerializer.Deserialize<Dictionary<string, string>>(record.ProtectedSettingsJson)
+            ?? new Dictionary<string, string>();
+        foreach (var (key, value) in request.Settings ?? new Dictionary<string, string>())
+            protectedSettings[key] = protector.Protect(value);
+        var updated = record with
+        {
+            Name = string.IsNullOrWhiteSpace(request.Name) ? record.Name : request.Name,
+            ProtectedSettingsJson = JsonSerializer.Serialize(protectedSettings),
+            UpdatedUtc = clock.GetUtcNow()
+        };
+        await store.SaveAsync(updated, ct);
+        return ToDto(updated);
+    }
+
     /// <summary>Replaces a connector's access grants. Returns false when the connector is unknown.</summary>
     public async Task<bool> SetGrantsAsync(Guid id, IReadOnlyList<ConnectorGrant> grants, CancellationToken ct)
     {

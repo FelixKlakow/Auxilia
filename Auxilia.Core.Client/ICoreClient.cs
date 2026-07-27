@@ -13,6 +13,8 @@ public interface ICoreClient
 {
     // --- Run configurations ---
     Task<RunConfiguration> CreateConfigurationAsync(CreateRunConfiguration request, CancellationToken ct = default);
+    /// <summary>Updates a stored configuration in place; null request fields stay unchanged.</summary>
+    Task<RunConfiguration> UpdateConfigurationAsync(Guid id, UpdateRunConfiguration request, CancellationToken ct = default);
     Task<RunConfiguration?> GetConfigurationAsync(Guid id, CancellationToken ct = default);
     Task<PagedResult<RunConfiguration>> QueryConfigurationsAsync(ConfigurationQuery query, CancellationToken ct = default);
     /// <summary>Deletes a stored configuration permanently.</summary>
@@ -53,6 +55,8 @@ public interface ICoreClient
 
     // --- Connectors ---
     Task<Connector> CreateConnectorAsync(CreateConnector request, CancellationToken ct = default);
+    /// <summary>Renames a connector and/or upserts settings key-by-key — the credential-refresh path.</summary>
+    Task<Connector> UpdateConnectorAsync(Guid id, UpdateConnector request, CancellationToken ct = default);
     Task<Connector?> GetConnectorAsync(Guid id, CancellationToken ct = default);
     Task<PagedResult<Connector>> QueryConnectorsAsync(ConnectorQuery query, CancellationToken ct = default);
     Task SetConnectorGrantsAsync(Guid id, SetConnectorGrants request, CancellationToken ct = default);

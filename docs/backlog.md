@@ -3,7 +3,7 @@
 > Live tracker of known follow-ups. Captured 2026-07-26 at the close of the BackendService retirement + the steering client first-client rework. Delivered programs live in `docs/delivered/`; this is what's *left*.
 
 ## Core.Api — client-surface follow-ups (surfaced during the retirement)
-- **Config *update* endpoint** — `ICoreClient` is create-only (`CreateConfigurationAsync`); the AdminConsole editor "saves as new". Add update.
+- ~~**Config *update* endpoint**~~ — **DONE 2026-07-27**: `PUT /api/configurations/{id}` + `PUT /api/connectors/{id}` (rename + key-wise settings upsert — the credential-refresh path), `ICoreClient.UpdateConfigurationAsync`/`UpdateConnectorAsync`; the steering client edits configurations (prefilled wizard) and connections (edit-in-place form; empty = keep stored value). AdminConsole editor still "saves as new".
 - ~~**`PackageUri` per workflow type**~~ — **DONE 2026-07-26** with the workflow-type registry (ARCHITECTURE §7): types register permanently with their signed package; runs/configs are type-only, the Core resolves the coordinate, and `WorkflowTypeDto`/`WorkflowSchemaDto` carry `PackageUri` + `Status`. Follow-ups: Studio's authoring catalog should *register* its types into the Core instead of keeping its own `PackageUri`; AdminConsole has no registry-administration UI yet (register/approve/deny run via REST/MCP); the AI safety-check approval handler (static workflow over the submitted package) is a designed-but-unbuilt pipeline handler.
 - **Trigger-CRUD API** — triggers live in Studio (headless); the AdminConsole editor links out. Decide console↔Studio vs Core-proxied, then build trigger create/edit/enable/disable.
 - ~~**Persisted view-read**~~ — **DONE 2026-07-26**: `RunViewTrackingService` mirrors `ViewDataMessage` into Core-owned `CoreRunViewRecord` (capped per run), `GET /api/runs/{id}/views` + `ICoreClient.GetRunViewsAsync` read it back; the steering client backfills finished runs' outputs from it. AdminConsole RunDetail could now use the same read path (not yet wired there).
@@ -34,6 +34,7 @@
 - **AdminConsole/Studio editors on the generic model** — the steering client renders bindings from catalog descriptors; the Blazor editors still assume connector-only bindings.
 - **Copilot interactivity** — the Copilot CLI's headless mode has no control channel; revisit with the Copilot SDK's server mode (JSON-RPC) for questions/guidance parity with Claude.
 - **Real-CLI interactive verification** — the steered permission loop is stub-verified; run once against the real `claude` CLI (`--permission-prompt-tool stdio`) with a real account.
+- **OAuth refresh-token capture** — the `anthropic-claude` connect flow snapshots the local CLI's *access* token, which the CLI rotates (the stored copy 401s as "revoked" within hours — bit Felix 2026-07-27). Capture the refresh token too and refresh Core-side at JIT delivery (or push users to API keys for connectors). Interim: Edit → Connect… refreshes the snapshot in place.
 
 ## CI validation — Docker system tests (Phase-4 assumptions, not runnable locally)
 - Email slot **plugin-dependency loading** (highest risk — MailKit/MimeKit/BouncyCastle copied alongside the provider DLL).

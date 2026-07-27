@@ -469,6 +469,21 @@ app.MapGet("/api/configurations/{id:guid}", async (
         await svc.GetAsync(id, ct) is { } config ? Results.Ok(config) : Results.NotFound())
     .RequireAuthorization();
 
+// Update a stored configuration (config editors' permission). Null fields stay unchanged. Audited.
+app.MapPut("/api/configurations/{id:guid}", async (
+        Guid id, UpdateRunConfiguration request, HttpContext http, IPolicyEngine policy,
+        RunConfigurationService svc, AuditLog audit, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.WorkflowConfigurationManage, ct) is { } fail)
+        return fail;
+    if (await svc.UpdateAsync(id, request, ct) is not { } updated)
+        return Results.NotFound();
+    await audit.AppendAsync(
+        CoreClaims.PrincipalIdOf(http.User)!.Value.ToString("D"),
+        "workflow-configuration.updated", id.ToString(), updated.Name, ct: ct);
+    return Results.Ok(updated);
+}).RequireAuthorization();
+
 // Delete a stored configuration permanently (config editors' permission). Audited.
 app.MapDelete("/api/configurations/{id:guid}", async (
         Guid id, HttpContext http, IPolicyEngine policy, RunConfigurationService svc, AuditLog audit,
@@ -763,6 +778,27 @@ app.MapGet("/api/connectors", async (
 app.MapGet("/api/connectors/{id:guid}", async (Guid id, ConnectorService svc, CancellationToken ct) =>
         await svc.GetAsync(id, ct) is { } connector ? Results.Ok(connector) : Results.NotFound())
     .RequireAuthorization();
+
+// Update a connector in place (owner, or a connector manager): rename and/or refresh settings —
+// provided values are upserted key-by-key, so a rotated credential is fixed without re-creating
+// the connector. Audited; values are never echoed back.
+app.MapPut("/api/connectors/{id:guid}", async (
+        Guid id, UpdateConnector request, HttpContext http, IPolicyEngine policy,
+        ConnectorService svc, AuditLog audit, CancellationToken ct) =>
+{
+    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+        return Results.Unauthorized();
+    if (await svc.GetAsync(id, ct) is not { } connector)
+        return Results.NotFound();
+    if (connector.OwnerPrincipalId != principalId
+        && await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.SlotConfigWrite, ct) is { } fail)
+        return fail;
+    var updated = await svc.UpdateAsync(id, request, ct);
+    await audit.AppendAsync(
+        principalId.ToString(), "connector.updated", id.ToString(),
+        string.Join(", ", (request.Settings ?? new Dictionary<string, string>()).Keys), ct: ct);
+    return Results.Ok(updated);
+}).RequireAuthorization();
 
 // Delete a connector permanently (owner, or a connector manager). Audited — configurations that
 // bind it will fail to dispatch afterwards, which the caller is warned about client-side.

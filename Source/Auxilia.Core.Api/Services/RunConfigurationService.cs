@@ -29,6 +29,29 @@ public sealed class RunConfigurationService(
         return ToDto(record);
     }
 
+    /// <summary>
+    /// Updates a stored configuration: null request fields stay unchanged, provided ones replace
+    /// the stored value wholesale. The workflow type is immutable.
+    /// </summary>
+    public async Task<RunConfiguration?> UpdateAsync(Guid id, UpdateRunConfiguration request, CancellationToken ct)
+    {
+        if (await store.ReadAsync(id, ct) is not { } record)
+            return null;
+        var updated = record with
+        {
+            Name = string.IsNullOrWhiteSpace(request.Name) ? record.Name : request.Name,
+            ContextJson = request.Context is null ? record.ContextJson : JsonSerializer.Serialize(request.Context),
+            SlotBindingsJson = request.SlotBindings is null
+                ? record.SlotBindingsJson
+                : JsonSerializer.Serialize(request.SlotBindings),
+            Enabled = request.Enabled ?? record.Enabled,
+            TagsJson = request.Tags is null ? record.TagsJson : JsonSerializer.Serialize(request.Tags),
+            UpdatedUtc = clock.GetUtcNow()
+        };
+        await store.SaveAsync(updated, ct);
+        return ToDto(updated);
+    }
+
     /// <summary>Deletes a stored configuration permanently.</summary>
     public Task<bool> DeleteAsync(Guid id, CancellationToken ct)
         => store.RemoveAsync(id, ct);

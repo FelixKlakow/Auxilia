@@ -15,6 +15,10 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
     public Task<RunConfiguration> CreateConfigurationAsync(CreateRunConfiguration request, CancellationToken ct = default)
         => PostAsync<CreateRunConfiguration, RunConfiguration>("/api/configurations", request, ct);
 
+    public Task<RunConfiguration> UpdateConfigurationAsync(
+        Guid id, UpdateRunConfiguration request, CancellationToken ct = default)
+        => PutAsync<UpdateRunConfiguration, RunConfiguration>($"/api/configurations/{id}", request, ct);
+
     public Task<RunConfiguration?> GetConfigurationAsync(Guid id, CancellationToken ct = default)
         => GetOrNullAsync<RunConfiguration>($"/api/configurations/{id}", ct);
 
@@ -109,6 +113,9 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
 
     public Task<Connector> CreateConnectorAsync(CreateConnector request, CancellationToken ct = default)
         => PostAsync<CreateConnector, Connector>("/api/connectors", request, ct);
+
+    public Task<Connector> UpdateConnectorAsync(Guid id, UpdateConnector request, CancellationToken ct = default)
+        => PutAsync<UpdateConnector, Connector>($"/api/connectors/{id}", request, ct);
 
     public Task<Connector?> GetConnectorAsync(Guid id, CancellationToken ct = default)
         => GetOrNullAsync<Connector>($"/api/connectors/{id}", ct);
@@ -279,6 +286,13 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
     private async Task<TResult> PostAsync<TRequest, TResult>(string url, TRequest body, CancellationToken ct)
     {
         using var response = await http.PostAsJsonAsync(url, body, ct);
+        await EnsureSuccessAsync(response, ct);
+        return (await response.Content.ReadFromJsonAsync<TResult>(ct))!;
+    }
+
+    private async Task<TResult> PutAsync<TRequest, TResult>(string url, TRequest body, CancellationToken ct)
+    {
+        using var response = await http.PutAsJsonAsync(url, body, ct);
         await EnsureSuccessAsync(response, ct);
         return (await response.Content.ReadFromJsonAsync<TResult>(ct))!;
     }

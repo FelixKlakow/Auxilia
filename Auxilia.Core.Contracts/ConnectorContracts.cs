@@ -35,6 +35,15 @@ public sealed record CreateConnector(
     IReadOnlyDictionary<string, string> Settings,
     string Scope = ConnectorScope.Company);
 
+/// <summary>
+/// Update a connector in place: a null field stays unchanged; provided <see cref="Settings"/>
+/// are upserted key-by-key (existing keys keep their stored value) — the way to refresh a
+/// rotated credential without re-creating the connector or touching its bindings.
+/// </summary>
+public sealed record UpdateConnector(
+    string? Name = null,
+    IReadOnlyDictionary<string, string>? Settings = null);
+
 /// <summary>Replace a connector's access grants (personal connectors only).</summary>
 public sealed record SetConnectorGrants(IReadOnlyList<ConnectorGrant> Grants);
 

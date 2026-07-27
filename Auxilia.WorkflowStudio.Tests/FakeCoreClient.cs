@@ -52,6 +52,11 @@ public sealed class FakeCoreClient : ICoreClient
     }
 
     // Unused by the Studio — minimal stubs.
+    public Task<RunConfiguration> UpdateConfigurationAsync(
+        Guid id, UpdateRunConfiguration request, CancellationToken ct = default)
+        => throw new NotSupportedException("not used by the Studio");
+    public Task<Connector> UpdateConnectorAsync(Guid id, UpdateConnector request, CancellationToken ct = default)
+        => throw new NotSupportedException("not used by the Studio");
     public Task<RunConfiguration?> GetConfigurationAsync(Guid id, CancellationToken ct = default)
         => Task.FromResult<RunConfiguration?>(null);
     public Task<PagedResult<RunConfiguration>> QueryConfigurationsAsync(ConfigurationQuery query, CancellationToken ct = default)

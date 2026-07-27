@@ -245,6 +245,22 @@ internal sealed class FakeCoreClient : ICoreClient
         return Task.FromResult(created);
     }
 
+    public Task<RunConfiguration> UpdateConfigurationAsync(
+        Guid id, UpdateRunConfiguration request, CancellationToken ct = default)
+    {
+        var existing = Configurations.First(c => c.Id == id);
+        var updated = existing with
+        {
+            Name = request.Name ?? existing.Name,
+            Context = request.Context ?? existing.Context,
+            SlotBindings = request.SlotBindings ?? existing.SlotBindings,
+            Enabled = request.Enabled ?? existing.Enabled,
+            Tags = request.Tags ?? existing.Tags,
+        };
+        Configurations[Configurations.IndexOf(existing)] = updated;
+        return Task.FromResult(updated);
+    }
+
     public Task<RunAccepted> RunConfigurationAsync(Guid id, Guid? onBehalfOf = null, IReadOnlyDictionary<string, string>? context = null, CancellationToken ct = default)
     {
         RunConfigurationCalls.Add((id, onBehalfOf));
@@ -306,6 +322,15 @@ internal sealed class FakeCoreClient : ICoreClient
             DateTimeOffset.UtcNow, request.Scope);
         Connectors.Add(created);
         return Task.FromResult(created);
+    }
+
+    public Task<Connector> UpdateConnectorAsync(Guid id, UpdateConnector request, CancellationToken ct = default)
+    {
+        var existing = Connectors.First(c => c.Id == id);
+        var keys = existing.SettingKeys.Union(request.Settings?.Keys ?? []).ToList();
+        var updated = existing with { Name = request.Name ?? existing.Name, SettingKeys = keys };
+        Connectors[Connectors.IndexOf(existing)] = updated;
+        return Task.FromResult(updated);
     }
 
     public Task SetConnectorGrantsAsync(Guid id, SetConnectorGrants request, CancellationToken ct = default)
