@@ -50,6 +50,22 @@ public sealed class DockerWorkflowLauncher(
             "Workflow container created. ContainerId={ContainerId}",
             created.ID[..Math.Min(12, created.ID.Length)]);
 
+        // Pre-flight linker check (baked images): every member a plugin references on a shared
+        // assembly must exist in the image's copy — build skew fails HERE with a clear message,
+        // not mid-session with a MissingMethodException.
+        if (request is { DockerImageUri: not null, SlotPluginFiles.Count: > 0 })
+        {
+            try
+            {
+                await VerifyPluginCompatibilityAsync(client, created.ID, request.SlotPluginFiles, ct);
+            }
+            catch
+            {
+                await TryRemoveContainerAsync(client, created.ID);
+                throw;
+            }
+        }
+
         if (request.SlotPluginFiles.Count > 0)
         {
             if (request.DockerImageUri is not null)
@@ -163,6 +179,94 @@ public sealed class DockerWorkflowLauncher(
         catch (Exception ex)
         {
             logger.LogError(ex, "Container exit watcher failed for {ContainerId}.", containerId);
+        }
+    }
+
+    /// <summary>
+    /// Verifies each injected plugin's referenced member surface against the shared assemblies
+    /// the image actually ships (read via the container archive API before start).
+    /// </summary>
+    private async Task VerifyPluginCompatibilityAsync(
+        IDockerClient client, string containerId, IReadOnlyList<SlotPluginFile> plugins, CancellationToken ct)
+    {
+        var imageAssemblies = new Dictionary<string, byte[]?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var plugin in plugins)
+        {
+            var pluginBytes = await File.ReadAllBytesAsync(plugin.DllPath, ct);
+            var targets = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+            foreach (var name in PluginCompatibilityChecker.ReferencedAssemblyNames(pluginBytes)
+                         .Where(n => n.StartsWith("Auxilia", StringComparison.OrdinalIgnoreCase)))
+            {
+                if (!imageAssemblies.TryGetValue(name, out var bytes))
+                    imageAssemblies[name] = bytes =
+                        await TryReadContainerFileAsync(client, containerId, $"/app/{name}.dll", ct);
+                if (bytes is not null)
+                    targets[name] = bytes;
+            }
+
+            if (targets.Count == 0)
+                continue;
+            var missing = PluginCompatibilityChecker.FindMissingReferences(pluginBytes, targets);
+            if (missing.Count > 0)
+                throw new InvalidOperationException(
+                    $"slot plugin '{Path.GetFileName(plugin.DllPath)}' is incompatible with the workflow "
+                    + $"image (missing: {string.Join("; ", missing.Take(3))}"
+                    + $"{(missing.Count > 3 ? $" — and {missing.Count - 3} more" : "")}) — "
+                    + "rebuild the workflow image, or the plugin, so both ship the same contract build.");
+        }
+    }
+
+    /// <summary>One file's bytes from the created (not yet started) container; null when absent.</summary>
+    private static async Task<byte[]?> TryReadContainerFileAsync(
+        IDockerClient client, string containerId, string path, CancellationToken ct)
+    {
+        try
+        {
+            var archive = await client.Containers.GetArchiveFromContainerAsync(
+                containerId, new GetArchiveFromContainerParameters { Path = path }, false, ct);
+            // Docker's chunked response stream signals its end by THROWING on the final read —
+            // buffer it fully first so the tar reader sees a well-behaved stream.
+            using var buffered = new MemoryStream();
+            await using (var stream = archive.Stream)
+            {
+                try
+                {
+                    await stream.CopyToAsync(buffered, ct);
+                }
+                catch (EndOfStreamException)
+                {
+                    // expected: the chunked transfer ended
+                }
+            }
+            buffered.Position = 0;
+            await using var reader = new TarReader(buffered);
+            while (await reader.GetNextEntryAsync(cancellationToken: ct) is { } entry)
+            {
+                if (entry.EntryType is not (TarEntryType.RegularFile or TarEntryType.V7RegularFile)
+                    || entry.DataStream is null)
+                    continue;
+                using var buffer = new MemoryStream();
+                await entry.DataStream.CopyToAsync(buffer, ct);
+                return buffer.ToArray();
+            }
+            return null;
+        }
+        catch (DockerApiException)
+        {
+            return null; // the image does not ship this assembly — nothing to compare
+        }
+    }
+
+    private async Task TryRemoveContainerAsync(IDockerClient client, string containerId)
+    {
+        try
+        {
+            await client.Containers.RemoveContainerAsync(
+                containerId, new ContainerRemoveParameters { Force = true }, CancellationToken.None);
+        }
+        catch (DockerApiException ex)
+        {
+            logger.LogWarning(ex, "Could not remove container {ContainerId} after a failed pre-flight.", containerId);
         }
     }
 

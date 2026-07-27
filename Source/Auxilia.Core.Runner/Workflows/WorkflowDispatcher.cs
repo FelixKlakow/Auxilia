@@ -332,19 +332,34 @@ public sealed class WorkflowDispatcher(
         if (packageUri.StartsWith("docker://", StringComparison.OrdinalIgnoreCase))
         {
             var imageName = packageUri.Substring("docker://".Length);
-            var launched = await launcher.LaunchAsync(
-                new WorkflowLaunchRequest(string.Empty, env, pluginFiles)
-                {
-                    DockerImageUri = imageName,
-                    EnvironmentLayers = environmentLayers.Count > 0 ? environmentLayers : null,
-                    OutputDirectoryBind = outputDirectoryBind,
-                    NetworkPolicy = networkPolicy,
-                    WorkspaceDirectoryBind = workspaceRoot,
-                    PublishTerminalPort = terminalPort,
-                    TerminalContainerName = terminalContainerName,
-                    OnExited = onContainerExited
-                },
-                ct);
+            WorkflowLaunchResult launched;
+            try
+            {
+                launched = await launcher.LaunchAsync(
+                    new WorkflowLaunchRequest(string.Empty, env, pluginFiles)
+                    {
+                        DockerImageUri = imageName,
+                        EnvironmentLayers = environmentLayers.Count > 0 ? environmentLayers : null,
+                        OutputDirectoryBind = outputDirectoryBind,
+                        NetworkPolicy = networkPolicy,
+                        WorkspaceDirectoryBind = workspaceRoot,
+                        PublishTerminalPort = terminalPort,
+                        TerminalContainerName = terminalContainerName,
+                        OnExited = onContainerExited
+                    },
+                    ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // A launch that never started a container (plugin/image incompatibility, a
+                // failed environment-image build, Docker down) must FAIL the run visibly —
+                // never leave it stranded in Received.
+                logger.LogError(ex,
+                    "Workflow launch failed pre-start. CommandId={CommandId} WorkflowType={WorkflowType}",
+                    command.CommandId, workflowType);
+                await FailPreFlightAsync(instanceId, workflowType, $"launch failed: {ex.Message}", ct);
+                return;
+            }
             await MarkQueuedAsync(instanceId, workflowType, packageUri, ct);
             await StampTerminalEndpointAsync(instanceId, launched, ct);
             return;
