@@ -39,6 +39,14 @@ public sealed class SlotCredentialResolver(
             CreatedUtc = clock.GetUtcNow()
         }, ct);
 
+    /// <summary>The stash of a past dispatch (bindings + triggering principal) — for rerun.</summary>
+    internal async Task<(IReadOnlyList<SlotBinding> Bindings, Guid? TriggeredBy)?> GetStashAsync(
+        Guid runId, CancellationToken ct)
+        => await store.ReadAsync(runId, ct) is { } record
+            ? (JsonSerializer.Deserialize<List<SlotBinding>>(record.SlotBindingsJson) ?? [],
+               record.TriggeredByPrincipalId)
+            : null;
+
     /// <summary>
     /// Validates the run-scoped token, resolves the slot's connector settings, and encrypts them
     /// for <paramref name="publicKeyBase64"/>. Returns a 403-style failure for a token mismatch

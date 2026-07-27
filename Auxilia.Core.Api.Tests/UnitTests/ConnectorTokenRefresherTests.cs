@@ -33,7 +33,7 @@ public sealed class ConnectorTokenRefresherTests
         _time = new ManualTimeProvider();
         _refreshCalls = 0;
         _connectors = new ConnectorService(
-            new InMemoryDataAccess<CoreConnectorRecord>(),
+            new InMemoryDataAccess<Auxilia.Core.Api.Data.CoreConnectorRecord>(),
             new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32)), _time);
         _catalog = new ProviderCatalogService(
             new InMemoryDataAccess<SlotProviderRecord>(),

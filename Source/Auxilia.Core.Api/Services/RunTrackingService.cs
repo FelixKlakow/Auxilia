@@ -47,6 +47,10 @@ public sealed class RunTrackingService(
             ErrorMessage = statusEvent.ErrorMessage,
             CreatedUtc = existing?.CreatedUtc ?? statusEvent.TimestampUtc,
             UpdatedUtc = statusEvent.TimestampUtc,
+            // Stamped on the FIRST terminal transition and preserved — a late duplicate event
+            // must not shift the completion time.
+            CompletedUtc = existing?.CompletedUtc
+                           ?? (CoreRunStates.IsTerminal(statusEvent.State) ? statusEvent.TimestampUtc : null),
             ConfigurationId = existing?.ConfigurationId,
             ConfigurationName = existing?.ConfigurationName,
             OwnerServiceId = ownerServiceId,

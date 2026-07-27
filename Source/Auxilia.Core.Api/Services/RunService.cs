@@ -54,6 +54,50 @@ public sealed class RunService(
             config.WorkflowType, merged, config.SlotBindings, triggeredBy, ct);
     }
 
+    /// <summary>
+    /// Re-dispatches a past run from its stored dispatch command: a FRESH command id and
+    /// resolution token, the original bindings re-stashed under them (so JIT credential
+    /// resolution works — reusing the old token against a new command id could not resolve),
+    /// and the package coordinate re-resolved from the registry. The caller's eligibility for
+    /// every bound connector is re-checked — a rerun is a new run, not a replay of old trust.
+    /// </summary>
+    public async Task<RunAccepted> RerunAsync(
+        Data.CoreRunRecord run, Guid? triggeredBy, CancellationToken ct)
+    {
+        if (run.DispatchCommandJson is not { Length: > 0 } commandJson
+            || System.Text.Json.JsonSerializer.Deserialize<RunWorkflowCommand>(commandJson) is not { } original
+            || run.CommandId is not { } originalCommandId)
+            throw new InvalidOperationException("this run carries no stored dispatch command to rerun from");
+        var stash = await credentialResolver.GetStashAsync(originalCommandId, ct)
+                    ?? throw new InvalidOperationException("this run's resolution context is no longer stored");
+
+        foreach (var connectorId in stash.Bindings
+                     .Where(b => b.ConnectorId is not null)
+                     .Select(b => b.ConnectorId!.Value)
+                     .Distinct())
+            if (!await connectorAccess.CanUseAsync(connectorId, triggeredBy, ct))
+                throw new ConnectorAccessDeniedException(connectorId);
+
+        var commandId = Guid.NewGuid();
+        var resolutionToken = Guid.NewGuid().ToString("N");
+        var packageUri = await workflowTypes.ResolvePackageUriForDispatchAsync(
+            original.WorkflowType ?? run.WorkflowType, commandId, resolutionToken, ct);
+        var command = original with
+        {
+            CommandId = commandId,
+            ResolutionToken = resolutionToken,
+            WorkflowPackageUri = packageUri,
+        };
+        await credentialResolver.StashAsync(
+            commandId, resolutionToken, stash.Bindings, triggeredBy ?? stash.TriggeredBy,
+            System.Text.Json.JsonSerializer.Serialize(command), ct);
+        await bus.PublishAsync(settings.Value.RunCommandQueue, command, ct);
+        logger.LogInformation(
+            "Re-dispatched run. OriginalRunId={OriginalRunId} NewCommandId={CommandId} WorkflowType={WorkflowType}",
+            run.Id, commandId, command.WorkflowType);
+        return new RunAccepted(commandId, commandId);
+    }
+
     /// <summary>Requests cancellation of a run; the runner consumes the command and stops the container.</summary>
     public async Task CancelAsync(Guid runId, CancellationToken ct)
     {

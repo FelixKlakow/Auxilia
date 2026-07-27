@@ -14,6 +14,10 @@ public sealed record CoreRunRecord : IEntity
     public string? ErrorMessage { get; init; }
     public DateTimeOffset CreatedUtc { get; init; }
     public DateTimeOffset UpdatedUtc { get; init; }
+
+    /// <summary>When the run reached its terminal state; null while it is still in flight.</summary>
+    public DateTimeOffset? CompletedUtc { get; init; }
+
     public Guid? ConfigurationId { get; init; }
     public string? ConfigurationName { get; init; }
 

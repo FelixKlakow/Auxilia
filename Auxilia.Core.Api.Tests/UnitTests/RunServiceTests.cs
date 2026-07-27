@@ -183,6 +183,36 @@ public sealed class RunServiceTests
     }
 
     [Test]
+    public async Task Rerun_RedispatchesWithFreshIdAndToken_AndRestashesTheBindings()
+    {
+        var (service, bus, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await service.RunInlineAsync(
+            new RunRequest("wt", new Dictionary<string, string> { ["K"] = "V" }),
+            triggeredBy: null, CancellationToken.None);
+        var original = bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>().Single();
+
+        var accepted = await service.RerunAsync(new Auxilia.Core.Api.Data.CoreRunRecord
+        {
+            Id = Guid.NewGuid(),
+            WorkflowType = "wt",
+            State = "Failed",
+            CommandId = original.CommandId,
+            DispatchCommandJson = System.Text.Json.JsonSerializer.Serialize(original),
+        }, triggeredBy: null, CancellationToken.None);
+
+        var rerun = bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>()
+            .Single(c => c.CommandId == accepted.RunId);
+        Assert.Multiple(() =>
+        {
+            Assert.That(rerun.CommandId, Is.Not.EqualTo(original.CommandId));
+            Assert.That(rerun.ResolutionToken, Is.Not.EqualTo(original.ResolutionToken),
+                "reusing the old token against a new command id could never resolve credentials");
+            Assert.That(rerun.Context["K"], Is.EqualTo("V"), "the original context is preserved");
+        });
+    }
+
+    [Test]
     public async Task RunConfiguration_ResolvesTypePackageAndContext()
     {
         var (service, bus, configs, registry, _) = New();

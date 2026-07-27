@@ -31,6 +31,12 @@ public sealed class RunReadService(IDataAccess<CoreRunRecord> runs)
         return new PagedResult<RunStatus>(page, ordered.Count, query.Skip, query.Take);
     }
 
+    /// <summary>The raw record behind a run id (instance or dispatch alias) — for rerun.</summary>
+    internal async Task<CoreRunRecord?> GetRecordAsync(Guid id, CancellationToken ct)
+        => await runs.ReadAsync(id, ct)
+           ?? (await runs.ReadAsync(ct)).FirstOrDefault(r => r.CommandId == id);
+
     private static RunStatus ToDto(CoreRunRecord r) => new(
-        r.Id, r.WorkflowType, r.State, r.ErrorMessage, r.CreatedUtc, r.ConfigurationId, r.ConfigurationName);
+        r.Id, r.WorkflowType, r.State, r.ErrorMessage, r.CreatedUtc, r.ConfigurationId, r.ConfigurationName,
+        r.CompletedUtc);
 }

@@ -28,7 +28,13 @@ public sealed record RunStatus(
     string? Error,
     DateTimeOffset CreatedUtc,
     Guid? ConfigurationId,
-    string? ConfigurationName);
+    string? ConfigurationName,
+    /// <summary>When the run reached its terminal state; null while it is still in flight.</summary>
+    DateTimeOffset? CompletedUtc = null)
+{
+    /// <summary>Wall-clock duration; null until the run completes.</summary>
+    public TimeSpan? Duration => CompletedUtc - CreatedUtc;
+}
 
 /// <summary>Filter for querying runs. Unset fields are ignored; paging is always applied.</summary>
 public sealed record RunQuery(

@@ -205,6 +205,12 @@ internal sealed class FakeCoreClient : ICoreClient
         return Task.FromResult(new PagedResult<RunStatus>(page, filtered.Count, query.Skip, query.Take));
     }
 
+    public Task<RunAccepted> RerunAsync(Guid id, CancellationToken ct = default)
+    {
+        var commandId = Guid.NewGuid();
+        return Task.FromResult(new RunAccepted(commandId, commandId));
+    }
+
     public Task CancelRunAsync(Guid id, CancellationToken ct = default)
     {
         CancelledRuns.Add(id);

@@ -28,6 +28,8 @@ public interface ICoreClient
     Task<RunStatus?> GetRunAsync(Guid id, CancellationToken ct = default);
     Task<PagedResult<RunStatus>> QueryRunsAsync(RunQuery query, CancellationToken ct = default);
     Task CancelRunAsync(Guid id, CancellationToken ct = default);
+    /// <summary>Re-dispatches a past run from its stored dispatch command as a NEW run.</summary>
+    Task<RunAccepted> RerunAsync(Guid id, CancellationToken ct = default);
 
     /// <summary>
     /// Live-view stream for a run: status transitions and view items as discriminated

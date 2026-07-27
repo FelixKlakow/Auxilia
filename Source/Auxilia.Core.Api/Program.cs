@@ -309,6 +309,38 @@ app.MapPost("/api/runs/{id:guid}/cancel", async (
     return Results.Accepted($"/api/runs/{id}");
 }).RequireAuthorization();
 
+// Rerun: re-dispatch a past run from its stored dispatch command (fresh id + token, bindings
+// re-stashed, connector eligibility re-checked). Authorized like any trigger. Audited.
+app.MapPost("/api/runs/{id:guid}/rerun", async (
+        Guid id, HttpContext http, IPolicyEngine policy, RunService runs, RunReadService runView,
+        AuditLog audit, CancellationToken ct) =>
+{
+    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+        return Results.Unauthorized();
+    if (await runView.GetRecordAsync(id, ct) is not { } record)
+        return Results.NotFound();
+    var decision = await policy.EvaluateAsync(
+        new PolicyContext(principalId, PermissionActions.WorkflowTrigger, id.ToString())
+        { WorkflowType = record.WorkflowType }, ct);
+    if (!decision.Allowed)
+        return Results.Json(new { error = decision.Reason }, statusCode: StatusCodes.Status403Forbidden);
+    try
+    {
+        var accepted = await runs.RerunAsync(record, principalId, ct);
+        await audit.AppendAsync(principalId.ToString(), "workflow.rerun",
+            record.Id.ToString(), accepted.RunId.ToString(), ct: ct);
+        return Results.Ok(accepted);
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+    catch (ConnectorAccessDeniedException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status403Forbidden);
+    }
+}).RequireAuthorization();
+
 // Live-view stream (SSE): status transitions + view items for a run, fanned from the bus via the
 // RunStreamBroker, until the run reaches a terminal state or the client disconnects. Replaces the
 // BackendService SignalR /hubs/views live push.

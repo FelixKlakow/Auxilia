@@ -58,6 +58,9 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
     public Task CancelRunAsync(Guid id, CancellationToken ct = default)
         => PostAsync($"/api/runs/{id}/cancel", ct);
 
+    public Task<RunAccepted> RerunAsync(Guid id, CancellationToken ct = default)
+        => PostAsync<RunAccepted>($"/api/runs/{id}/rerun", ct);
+
     public async IAsyncEnumerable<RunStreamEvent> StreamRunAsync(
         Guid runId, [EnumeratorCancellation] CancellationToken ct = default)
     {
