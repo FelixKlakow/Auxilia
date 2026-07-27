@@ -291,6 +291,57 @@ public sealed class ClaudeCodeCliAgentTests
             "A live model change rides to the CLI as a set_model control request.");
     }
 
+    [Test]
+    public async Task InteractiveSession_TodoWrite_IsAutoApproved_AndPublishesThePlan()
+    {
+        var stdout = """
+            {"type":"control_request","request_id":"ctrl-t","request":{"subtype":"can_use_tool","tool_name":"TodoWrite","input":{"todos":[{"content":"Fix the build","status":"in_progress"},{"content":"Run the tests","status":"pending"}]}}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var interaction = new FakeInteraction();
+        var plans = new List<IReadOnlyList<AgentPlanItem>>();
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        await agent.RunAsync(
+            Request with
+            {
+                Interaction = interaction,
+                OnPlanUpdate = (items, _) => { plans.Add(items); return Task.CompletedTask; },
+            },
+            (_, _) => Task.CompletedTask);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(interaction.LastQuestion, Is.Null,
+                "TodoWrite is bookkeeping — never a decision card, in any permission mode.");
+            Assert.That(factory.LastProcess!.Input.ToString(),
+                Does.Contain("ctrl-t").And.Contain("\"behavior\":\"allow\""));
+            Assert.That(plans.Single().Select(p => (p.Content, p.Status)), Is.EqualTo(new[]
+            {
+                ("Fix the build", "in_progress"), ("Run the tests", "pending"),
+            }));
+        });
+    }
+
+    [Test]
+    public async Task Session_StreamedTodoWriteToolUse_PublishesThePlan()
+    {
+        var stdout = """
+            {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"TodoWrite","input":{"todos":[{"content":"Step one","status":"completed"}]}}]}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var plans = new List<IReadOnlyList<AgentPlanItem>>();
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        await agent.RunAsync(
+            Request with { OnPlanUpdate = (items, _) => { plans.Add(items); return Task.CompletedTask; } },
+            (_, _) => Task.CompletedTask);
+
+        Assert.That(plans.Single().Single(), Is.EqualTo(new AgentPlanItem("Step one", "completed")));
+    }
+
     [TestCase("cd /workspace/repos/r && git add -A && git push origin main", true)]
     [TestCase("git status && git log --oneline", false)]
     [TestCase("git push", true)]

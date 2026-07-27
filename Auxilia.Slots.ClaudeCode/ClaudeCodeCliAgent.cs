@@ -61,11 +61,28 @@ public sealed class ClaudeCodeCliAgent(
             {
                 if (request.Interaction is { } steering && TryParseControlRequest(line) is { } control)
                 {
+                    // TodoWrite is bookkeeping, not a permission: auto-approved in every mode
+                    // (never a decision card), and its todos become the published plan.
+                    if (string.Equals(control.ToolName, "TodoWrite", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (request.OnPlanUpdate is { } publishPlan
+                            && TryParseTodos(control.InputJson) is { Count: > 0 } todos)
+                            await publishPlan(todos, cancellationToken);
+                        await WriteLineAsync(process, stdinGate, AllowResponse(control.RequestId), cancellationToken);
+                        continue;
+                    }
+
                     await AnswerControlRequestAsync(
                         process, stdinGate, steering, control, permissionMode,
                         onChatEntry, cancellationToken);
                     continue;
                 }
+
+                // Plan revisions also stream as assistant TodoWrite tool calls (the only path
+                // in non-interactive runs).
+                if (request.OnPlanUpdate is { } onPlan
+                    && TryParseStreamedTodoWrite(line) is { Count: > 0 } streamedTodos)
+                    await onPlan(streamedTodos, cancellationToken);
 
                 foreach (var entry in parser.ParseLine(line, _time.GetUtcNow()))
                     await onChatEntry(entry, cancellationToken);
@@ -433,6 +450,60 @@ public sealed class ClaudeCodeCliAgent(
             AgentChatRole.System,
             $"The operator answered {answers.Count} of {questions.Count} question(s).",
             _time.GetUtcNow(), Label: "Question"), ct);
+    }
+
+    /// <summary>The todos of a TodoWrite input: <c>{"todos":[{"content":…,"status":…}]}</c>.</summary>
+    internal static IReadOnlyList<AgentPlanItem>? TryParseTodos(string? inputJson)
+    {
+        if (inputJson is not { Length: > 0 })
+            return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(inputJson);
+            if (!doc.RootElement.TryGetProperty("todos", out var todos)
+                || todos.ValueKind != JsonValueKind.Array)
+                return null;
+            return todos.EnumerateArray()
+                .Select(t => new AgentPlanItem(
+                    t.TryGetProperty("content", out var content) ? content.GetString() ?? "" : "",
+                    t.TryGetProperty("status", out var status)
+                        ? status.GetString() ?? AgentPlanStatuses.Pending
+                        : AgentPlanStatuses.Pending))
+                .Where(item => item.Content.Length > 0)
+                .ToList();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Todos of an assistant-message TodoWrite tool_use block, when the line is one.</summary>
+    internal static IReadOnlyList<AgentPlanItem>? TryParseStreamedTodoWrite(string line)
+    {
+        if (!line.Contains("TodoWrite", StringComparison.Ordinal))
+            return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(line);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || (root.TryGetProperty("type", out var t) ? t.GetString() : null) != "assistant"
+                || !root.TryGetProperty("message", out var message)
+                || !message.TryGetProperty("content", out var content)
+                || content.ValueKind != JsonValueKind.Array)
+                return null;
+            foreach (var block in content.EnumerateArray())
+                if ((block.TryGetProperty("type", out var bt) ? bt.GetString() : null) == "tool_use"
+                    && (block.TryGetProperty("name", out var name) ? name.GetString() : null) == "TodoWrite"
+                    && block.TryGetProperty("input", out var input))
+                    return TryParseTodos(input.GetRawText());
+            return null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>A Bash tool call whose command runs <c>git … push</c> — the PUSH action kind.</summary>

@@ -35,6 +35,9 @@ public static class ClaudeCodeWorkflow
                 ViewRendering.Custom, ViewLifecycle.LiveAndPersisted, AgentChatEntry.RendererKey)
             .DeclaresView<SessionProgressEntry>(AgentSessionApplication.ProgressViewName,
                 ViewRendering.Log, ViewLifecycle.LiveAndPersisted)
+            // The agent's current plan (full snapshots) — rendered as a live checklist.
+            .DeclaresView<AgentPlanUpdate>(AgentPlanUpdate.ViewName,
+                ViewRendering.Custom, ViewLifecycle.LiveAndPersisted)
             // The operator loop: questions, guidance, halt — the steering client reads/answers this view.
             .DeclaresView<SteeringWireItem>(Auxilia.Workflows.Steering.OperatorChannel.ViewName,
                 ViewRendering.Custom, ViewLifecycle.LiveAndPersisted)

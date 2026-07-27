@@ -35,12 +35,33 @@ public sealed class CopilotCliAgent(
 
             string? lastLine = null;
             var lineCount = 0;
+            // Copilot has no structured plan channel — consecutive markdown-checklist lines
+            // in its output ARE its plan; every extension republishes the full snapshot.
+            var plan = new List<AgentPlanItem>();
+            var inChecklist = false;
             while (await process.StandardOutput.ReadLineAsync(cancellationToken) is { } line)
             {
                 if (string.IsNullOrWhiteSpace(line))
                     continue;
                 lastLine = line.Trim();
                 lineCount++;
+
+                if (TryParseChecklistLine(lastLine) is { } item)
+                {
+                    if (!inChecklist)
+                    {
+                        plan.Clear();
+                        inChecklist = true;
+                    }
+                    plan.Add(item);
+                    if (request.OnPlanUpdate is { } publishPlan)
+                        await publishPlan(plan.ToList(), cancellationToken);
+                }
+                else
+                {
+                    inChecklist = false;
+                }
+
                 await onChatEntry(
                     new AgentChatEntry(AgentChatRole.Assistant, lastLine, _time.GetUtcNow()),
                     cancellationToken);
@@ -102,6 +123,22 @@ public sealed class CopilotCliAgent(
         if (options.Token is { Length: > 0 } token)
             startInfo.Environment["GH_TOKEN"] = token;
         return startInfo;
+    }
+
+    /// <summary>A markdown checklist line: <c>- [ ] x</c> pending, <c>- [~]</c> running, <c>- [x]</c> done.</summary>
+    internal static AgentPlanItem? TryParseChecklistLine(string line)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(
+            line, @"^\s*[-*]\s*\[(?<state> |x|X|~)\]\s*(?<content>.+)$");
+        if (!match.Success)
+            return null;
+        var status = match.Groups["state"].Value switch
+        {
+            "x" or "X" => AgentPlanStatuses.Completed,
+            "~" => AgentPlanStatuses.InProgress,
+            _ => AgentPlanStatuses.Pending,
+        };
+        return new AgentPlanItem(match.Groups["content"].Value.Trim(), status);
     }
 
     private static string StderrSuffix(string stderr)

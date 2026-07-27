@@ -52,6 +52,11 @@ public sealed class AgentSessionApplication(
                         context.PermissionMode)
                     {
                         PushPolicy = context.PushPolicy,
+                        // The agent's plan revisions land on the "plan" view as full snapshots.
+                        OnPlanUpdate = views is null
+                            ? null
+                            : (items, token) => views.PublishAsync(
+                                AgentPlanUpdate.ViewName, new AgentPlanUpdate(items), token),
                     },
                     PublishChatAsync,
                     session.Token);

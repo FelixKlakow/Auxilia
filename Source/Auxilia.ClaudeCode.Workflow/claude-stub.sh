@@ -25,6 +25,8 @@ fi
 sleep 0.2
 echo '{"type":"system","subtype":"init","session_id":"stub-session","model":"claude-stub","tools":["Bash","Read","Write"]}'
 sleep 0.2
+echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_stub_plan1","name":"TodoWrite","input":{"todos":[{"content":"Inspect the workspace","status":"in_progress"},{"content":"Write the note file","status":"pending"}]}}]}}'
+sleep 0.1
 echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Let me take a look at the workspace before I start."}]}}'
 sleep 0.2
 echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_stub_1","name":"Bash","input":{"command":"ls"}}]}}'
@@ -71,6 +73,8 @@ case "$INSTRUCTION" in
     ;;
 esac
 
+echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_stub_plan2","name":"TodoWrite","input":{"todos":[{"content":"Inspect the workspace","status":"completed"},{"content":"Write the note file","status":"completed"}]}}]}}'
+sleep 0.1
 echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done - I noted my findings in STUB_NOTES.md."}]}}'
 sleep 0.2
 echo '{"type":"result","subtype":"success","is_error":false,"duration_ms":1800,"num_turns":3,"result":"Stub session completed: findings written to STUB_NOTES.md.","total_cost_usd":0.0042}'

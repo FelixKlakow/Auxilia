@@ -24,6 +24,12 @@ public sealed record CodingAgentRequest(
     /// future per-action policies (deploys, mail, ticket writes).
     /// </summary>
     public string PushPolicy { get; init; } = AgentPermissionModes.AskOperator;
+
+    /// <summary>
+    /// Invoked with the agent's FULL current plan whenever it revises it (Claude: TodoWrite;
+    /// Copilot: checklist lines). Null = the session doesn't surface plans.
+    /// </summary>
+    public Func<IReadOnlyList<AgentPlanItem>, CancellationToken, Task>? OnPlanUpdate { get; init; }
 }
 
 /// <summary>

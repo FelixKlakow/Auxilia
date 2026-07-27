@@ -67,4 +67,21 @@ public sealed class CopilotCliAgentTests
             new SlotConfiguration("github-copilot-cli",
                 new Dictionary<string, string>())));
     }
+
+    [TestCase("- [ ] Write tests", "Write tests", "pending")]
+    [TestCase("- [x] Fix build", "Fix build", "completed")]
+    [TestCase("* [~] Refactor parser", "Refactor parser", "in_progress")]
+    public void TryParseChecklistLine_ParsesMarkdownCheckboxes(string line, string content, string status)
+    {
+        var item = CopilotCliAgent.TryParseChecklistLine(line);
+
+        Assert.That(item, Is.EqualTo(new AgentPlanItem(content, status)));
+    }
+
+    [TestCase("Running: ls")]
+    [TestCase("Done - the task is complete.")]
+    public void TryParseChecklistLine_IgnoresOrdinaryLines(string line)
+    {
+        Assert.That(CopilotCliAgent.TryParseChecklistLine(line), Is.Null);
+    }
 }
