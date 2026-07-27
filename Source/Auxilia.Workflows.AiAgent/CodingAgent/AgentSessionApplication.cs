@@ -74,18 +74,12 @@ public sealed class AgentSessionApplication(
                                 models.Select(m =>
                                     (m.Id, m.Label, m.ReasoningEfforts, m.DefaultReasoningEffort)).ToList(),
                                 token),
-                        // Each finished turn is announced on the steering view (the steering client's
-                        // notification cue) and mirrored into the conversation.
+                        // Each finished turn is announced on the steering view only (the
+                        // steering client's notification cue) — never as a chat entry; turn boundaries
+                        // are visible from the conversation itself.
                         OnTurnEnded = channel is null
                             ? null
-                            : async (turn, summary, token) =>
-                            {
-                                await channel.PublishTurnEndedAsync(turn, summary, token);
-                                await PublishChatAsync(new AgentChatEntry(
-                                    AgentChatRole.System,
-                                    $"Turn finished ({turn} so far) — the session is waiting for your next instruction.",
-                                    time.GetUtcNow(), Label: "Session"), token);
-                            },
+                            : (turn, summary, token) => channel.PublishTurnEndedAsync(turn, summary, token),
                     },
                     PublishChatAsync,
                     session.Token);
