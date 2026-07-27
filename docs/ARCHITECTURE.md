@@ -139,7 +139,8 @@ graph TB
 ### Core.Runner — Execution Plane
 - The renamed, dissolved *Steering Instance*. Consumes run requests from Core.Api (competing consumers), **launches and configures the workload container correctly** — credentials, network policy, mounts, capability clamps, resource limits — and owns the full run lifecycle (see section 6). This is the single audited "configure the container correctly" chokepoint.
 - Performs the **authenticated registration handshake**: injects a one-time instance token at launch, pre-creates the instance's exclusive response queue, and delivers each slot's configuration **just-in-time per slot activation**, encrypted for that instance — never an upfront bundle, never before the slot is used.
-- Hosts the execution-side platform capabilities: the **Workspace Manager** (warm cache + per-run CoW snapshots), the **Network Egress Layer**, the **Resource Proxy**, artifact persistence, live view-data fan-out, and the drain coordinator for long-living workflows.
+- Hosts the execution-side platform capabilities: the **Workspace Manager** (warm cache + per-run CoW snapshots), **environment-image composition** (capability layers onto the workflow image, content-addressed cache — §9), the **Network Egress Layer**, the **Resource Proxy**, artifact persistence, live view-data fan-out, and the drain coordinator for long-living workflows.
+- Runs a **pre-flight plugin/image compatibility check** on baked-image launches: every member an injected slot plugin references on a shared assembly must exist in the image's copy — build skew fails the run as `PreFlightFailed` with a rebuild hint instead of a mid-session `MissingMethodException`; any pre-start launch failure is failed visibly, never stranded.
 - Holds the **workflow schema registry** (`WorkflowSchemaStore`): at registration it stores each workflow type's embedded schema. The Core keeps the schema because it **validates every client-submitted configuration against it** — the client cannot self-certify — and so clients can fetch a schema to build a valid configuration.
 - Emits ownership **heartbeats** for failover detection and publishes **status events** back to Core.Api (and to the dashboard).
 - Scales via competing consumers on the run queue. Owns its own database.
@@ -432,7 +433,7 @@ graph TB
 ```
 
 **Resource Proxy (structured calls):**
-- Used for all calls where the platform mediates credentials: task sources, source control push, databases, CI triggers
+- Used for all calls where the platform mediates credentials: task sources, databases, CI triggers. (Source-control PUSH was decided differently on 2026-07-27 — Model B, see §9 write-back control: the scoped credential stays on the per-run clone and each push is gated by the agent's per-action permission policy.)
 - Workflow declares named dependencies in its manifest; at runtime the platform resolves the correct Account Bundle
 - Supports synchronous and async long-running patterns (trigger + poll/callback via message bus)
 - The workflow holds no credentials **prior to slot activation**. Because every workflow is signature-verified before launch, it is trusted to receive scoped credentials — but only just-in-time, per slot, encrypted for that workflow instance, and only for the slots it actually activates during the run
@@ -456,7 +457,7 @@ graph TB
 
 Workflows operate on local filesystem copies of repositories rather than streaming content through the message bus. The **Workspace Manager** manages this entirely on behalf of the workflow.
 
-**Workspace mounts are generic slot bindings.** A repository is not a special contract shape: it is a `SlotBinding` of a catalog provider that declares `MountsIntoWorkspace` (e.g. `git-repository`), with inline non-secret settings and an optional credential connector (linked through the provider's `RequiredCredentialContract`, e.g. `git-credential` implemented by `github-account`/`tfs-account`). At dispatch the Core re-keys the binding's settings by the provider's declared setting **roles** — a pure data transform; the Core never interprets the role vocabulary — and ships `WorkspaceMountDispatch` items. Only the execution plane defines what the roles mean (`WorkspaceMountRoles`: clone source, branch, working directory, cache policy); the mount's credential is stashed under a synthetic `mount-auth:` slot and resolved just-in-time. A slot declaring `AllowMultiple` binds several repositories in one run; each mount's effective root is announced to the container as `Workflow__WorkspaceMount__<ID>`. Editors render mount forms entirely from the catalog descriptors (`Role`, `Browse`, `BrowseDependsOn` drive live repository/branch pickers over the generic connector-browse endpoint).
+**Workspace mounts are generic slot bindings.** A repository is not a special contract shape: it is a `SlotBinding` of a catalog provider that declares `MountsIntoWorkspace` (e.g. `git-repository`), with inline non-secret settings and an optional credential connector (linked through the provider's `RequiredCredentialContract`, e.g. `git-credential` implemented by `github-account`/`tfs-account`). At dispatch the Core re-keys the binding's settings by the provider's declared setting **roles** — a pure data transform; the Core never interprets the role vocabulary — and ships `WorkspaceMountDispatch` items. Only the execution plane defines what the roles mean (`WorkspaceMountRoles`: clone source, branch, working directory, cache policy, push opt-in, commit identity); the mount's credential is stashed under a synthetic `mount-auth:` slot and resolved just-in-time. Every clone gets a provisioned commit identity (binding settings or the platform default) — agents never guess an authorship. A slot declaring `AllowMultiple` binds several repositories in one run; each mount's effective root is announced to the container as `Workflow__WorkspaceMount__<ID>`. Editors render mount forms entirely from the catalog descriptors (`Role`, `Browse`, `BrowseDependsOn` drive live repository/branch pickers over the generic connector-browse endpoint).
 
 ```mermaid
 graph TB
@@ -516,7 +517,17 @@ graph TB
 | Cross-run filesystem | Linux mount namespaces — a container can only see its own mounted snapshots |
 | UID isolation | Each container runs as a distinct unprivileged UID; snapshot ownership prevents cross-run reads even if namespace fails |
 | Warm cache protection | Cache directory is host-only, owned by the Workspace Manager, never bind-mounted into any container |
-| Write-back control | Workflow pushes directly via its source-control slot mid-run; permitted operations are limited by the slot's declared capabilities (read/write) clamped by operator configuration (branch patterns, PR-only, no force-push) |
+| Write-back control | **Model B (decided 2026-07-27):** a binding with `AllowPush` keeps its scoped credential on the per-run clone (always a fresh clone — a tokened clone never enters the warm cache); each `git push` is intercepted through the agent's permission loop and governed by the per-action `push-policy` (ask/auto, independent of the general mode, live-changeable) |
+
+**Environment capabilities (2026-07-27).** A run's container environment is COMPOSED from
+capability selections, bound like everything else: catalog entries declaring
+`ComposesEnvironment` (category `environment`, runtime-extensible — no compiled enums) are
+offered on an optional multi-binding `environment` slot; the Core routes the selections
+generically (`EnvironmentCapabilities` on the run command, opaque ids); the RUNNER owns the
+vocabulary — capability → Dockerfile fragment (`WorkflowLauncher__EnvironmentLayers`) — and
+layers the fragments onto the workflow image, content-addressed (`auxilia-env:<hash>`) so each
+distinct combination builds once and later runs cache-hit. An unknown capability fails
+pre-flight. A "template" is simply a capability whose fragment installs a whole stack.
 
 **Warm cache behaviour:**
 - Cache entries are populated on first fetch and kept current by background `git fetch` / equivalent per source system

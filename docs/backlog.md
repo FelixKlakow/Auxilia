@@ -26,7 +26,7 @@
 - **Connector browse beyond GitHub** — `POST /api/connectors/{id}/browse` (live repo/branch lists, credential stays Core-side) implements GitHub only; TFS/Azure DevOps fall back to manual entry.
 - **Zombie-run sweep** — a run whose terminal/failure event is lost (Core.Api or Core.Runner down at the wrong moment) lingers as Running: container-exit watchers do not survive a runner restart, and the FailoverMonitor only fails over runners it has SEEN heartbeat (in-memory). Needs: runner re-adopting (or reaping) its containers on start + a Core-side staleness transition (Running w/o owner heartbeat → Failed). Interim: `DELETE /api/runs?includeStale=true&staleMinutes=N`.
 - ~~**§4 credential-model decision**~~ — **DECIDED + BUILT 2026-07-27: Model B + interception**. `AllowPush` on the repository binding keeps the scoped credential on the (always-fresh) per-run clone; `git push` is classified as the PUSH action kind and governed by `push-policy` (ask/auto, independent of the general mode, live-changeable); clones get a provisioned commit identity (`CommitName`/`CommitEmail` binding settings, platform default otherwise). Open slivers: a token *scoped to push* (today it's the connector's token as-is — GitHub fine-grained PATs recommended); real-CLI live push verification (unit/component-verified so far); per-action policies for future kinds (deploy, mail) when they appear.
-- **the steering client cross-repo dependency → NuGet** — replace the side-by-side-clone `ProjectReference`s to `Auxilia.Core.Client`/`Contracts` (+ a standalone steering-codec package) with published packages.
+- **the steering client cross-repo dependency → NuGet** — replace the side-by-side-clone `ProjectReference`s to `Auxilia.Core.Client`/`Contracts` (+ a standalone steering-codec package) with published packages. Packaging note (2026-07-27): the steering client now requires the **WebView2 runtime** (BlazorAgentView conversation renderer) and targets `net10.0-windows10.0.19041.0` (Windows SDK projections).
 - **the steering client desktop per-user sign-in** — replace the API-key principal with interactive (device-code/OIDC) sign-in that mints a per-user bearer (per-user audit/SoD). Needs a Core non-browser token-issue path.
 
 ## Environment capabilities (decided + BUILT 2026-07-27)
@@ -43,10 +43,20 @@ capability descriptions more richly in the steering client gallery.
 
 ## Generic binding pipeline — follow-ups (2026-07-27)
 - ~~**Docker system-test pass on the mount pipeline**~~ — **PASSED 2026-07-27**: `RepositoryWorkspaceSystemTests` (generic `git-repository` binding, roles + `git-credential`, authenticated git server) green on real Docker. Still open: OS-sensitive `DockerSocketPath` default (Docker Desktop 29.4.2 broke the unix-socket default on Windows hosts — local runners need `WorkflowLauncher__DockerSocketPath=npipe://./pipe/docker_engine`).
-- **AdminConsole/Studio editors on the generic model** — the steering client renders bindings from catalog descriptors; the Blazor editors still assume connector-only bindings.
-- **Copilot interactivity** — the Copilot CLI's headless mode has no control channel; revisit with the Copilot SDK's server mode (JSON-RPC) for questions/guidance parity with Claude.
-- **Real-CLI interactive verification** — the steered permission loop is stub-verified; run once against the real `claude` CLI (`--permission-prompt-tool stdio`) with a real account.
+- **AdminConsole/Studio editors on the generic model** — the steering client renders bindings from catalog descriptors; the Blazor editors still assume connector-only bindings and know nothing of provider-type narrowing, choice labels, environment slots, or the plan view (the AdminConsole's BlazorAgentView renderer predates plan/steering).
+- **Copilot interactivity** — the Copilot CLI's headless mode has no control channel; revisit with the Copilot SDK's server mode (JSON-RPC) for questions/guidance/permission parity with Claude. Its PLAN today is a heuristic (markdown-checklist lines in stdout) — server mode should replace it with structured events.
+- **Real-CLI interactive verification (grown 2026-07-27)** — everything on the interactive control channel is STUB-verified only: the permission loop, permission suggestions → `updatedPermissions`, AskUserQuestion → `updatedInput.answers`, `set_model`/permission-mode live switches, TodoWrite plan capture, and push interception. Run ONE real `claude` session (`--permission-prompt-tool stdio`, real account) exercising each, before trusting the surfaces beyond demos.
 - **OAuth refresh-token capture** — the `anthropic-claude` connect flow snapshots the local CLI's *access* token, which the CLI rotates (the stored copy 401s as "revoked" within hours — bit Felix 2026-07-27). Capture the refresh token too and refresh Core-side at JIT delivery (or push users to API keys for connectors). Interim: Edit → Connect… refreshes the snapshot in place.
+
+## Shipped 2026-07-27 without a prior backlog entry (for the record)
+Slot **provider-type narrowing** (`Requires<T>(providerTypes:)`, Core-enforced at dispatch);
+connector/configuration **update endpoints** + steering client edit-in-place (credential refresh);
+**permission modes** + per-action **push policy** (live-changeable session settings incl. model
+switch); **first-class permission decisions** (detail block, permission suggestions →
+`updatedPermissions`); **AskUserQuestion** answers via `updatedInput`; **plan view**
+(TodoWrite / checklist → live checklist); **BlazorAgentView** conversation in the steering client;
+runner **plugin/image compatibility pre-flight**; pre-start launch failures now fail runs
+visibly instead of stranding them at Received.
 
 ## CI validation — Docker system tests (Phase-4 assumptions, not runnable locally)
 - Email slot **plugin-dependency loading** (highest risk — MailKit/MimeKit/BouncyCastle copied alongside the provider DLL).
