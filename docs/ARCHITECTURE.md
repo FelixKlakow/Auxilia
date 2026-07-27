@@ -388,6 +388,8 @@ graph TD
 - Every action (human or AI) is written to an immutable audit log
 - TFVC / TFS is explicitly supported as a source control target for enterprises that have not yet migrated
 
+**Environment layers share the workflow trust bar** (delivered 2026-07-27): a session environment is an admin-managed Core record — base environment (`linux`/`windows`) plus an **initialization script** (+ optional pinned version) — managed via `/api/environment-layers` (gated by `provider-catalog.manage`; the upsert also maintains the available provider-catalog entry, category `environment`). Because the script executes at image-build time, the Core generates the build fragment and **signs it with the platform signing key**; the runner fetches it at dispatch (resolution-token authorized, mirroring the package download) and verifies it against `WorkflowDispatcher:TrustedEnvironmentSigningKeys` before composing the content-addressed `auxilia-env:<hash>` image (hash includes the base image digest, so a rebuilt workflow image never reuses a stale composition). An empty trust-key list is the dev-host posture, exactly like disabled package signing; a statically configured local layer of the same name is the host's override.
+
 ---
 
 ## 8. Resource Access Model

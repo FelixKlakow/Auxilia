@@ -29,17 +29,21 @@
 - **the steering client cross-repo dependency → NuGet** — replace the side-by-side-clone `ProjectReference`s to `Auxilia.Core.Client`/`Contracts` (+ a standalone steering-codec package) with published packages. Packaging note (2026-07-27): the steering client now requires the **WebView2 runtime** (BlazorAgentView conversation renderer) and targets `net10.0-windows10.0.19041.0` (Windows SDK projections).
 - **the steering client desktop per-user sign-in** — replace the API-key principal with interactive (device-code/OIDC) sign-in that mints a per-user bearer (per-user audit/SoD). Needs a Core non-browser token-issue path.
 
-## Environment capabilities (decided + BUILT 2026-07-27)
-Felix's model, delivered: capabilities are catalog entries (`ComposesEnvironment`, category
-`environment`, runtime-extensible); agent workflows declare an optional multi-binding
-`environment` slot; the Core routes selections generically (`EnvironmentCapabilities` on the
-command); the RUNNER maps capability → Dockerfile fragment (`WorkflowLauncher__EnvironmentLayers`)
-and composes fragments onto the workflow image, content-addressed (`auxilia-env:<hash>`) — each
-combination builds once, then cache-hits. `dotnet-10` and `node-22` fragments ship under
-`Source/Auxilia.Core.Runner/environment-layers/`; a "template" is a capability whose fragment
-installs a whole stack. Verified live (dotnet-10 → 10.0.302 in the composed image). Still open:
-Windows-container runners (separate Docker engine mode), composed-image GC, and surfacing
-capability descriptions more richly in the steering client gallery.
+## Environment capabilities (decided + BUILT 2026-07-27; reworked to ADMIN-MANAGED SCRIPTS the same evening)
+Felix's model, delivered and then centralized: an environment is a Core-stored record — base
+environment (`linux`/`windows`, open vocab) + **initialization script** (+ optional pinned
+Version, the seam for later pre-built versioned containers). Admin endpoints
+`/api/environment-layers` (gated `provider-catalog.manage`) upsert the record AND its available
+catalog entry; the Core generates a base64-wrapped RUN fragment from the script and **signs it
+with the platform signing key** (build-time code = workflow-package trust bar); runners fetch it
+at dispatch (resolution-token authorized), verify against
+`WorkflowDispatcher__TrustedEnvironmentSigningKeys` (empty = permissive dev), and compose
+content-addressed (`auxilia-env:<hash>`, hash now includes the BASE IMAGE DIGEST — stale-
+composition bug fixed). `dotnet-10`/`node-22` migrated to Core-managed scripts; the static
+`WorkflowLauncher__EnvironmentLayers` config remains the host-level override (system tests).
+the steering client has the admin editor (Environments tab, Administrator role). Still open:
+Windows-container runners (windows-base layers are stored but never served to Linux
+composition), composed-image GC, trust keys in any real deployment.
 
 ## Generic binding pipeline — follow-ups (2026-07-27)
 - ~~**Docker system-test pass on the mount pipeline**~~ — **PASSED 2026-07-27**: `RepositoryWorkspaceSystemTests` (generic `git-repository` binding, roles + `git-credential`, authenticated git server) green on real Docker. Still open: OS-sensitive `DockerSocketPath` default (Docker Desktop 29.4.2 broke the unix-socket default on Windows hosts — local runners need `WorkflowLauncher__DockerSocketPath=npipe://./pipe/docker_engine`).
@@ -57,6 +61,25 @@ switch); **first-class permission decisions** (detail block, permission suggesti
 (TodoWrite / checklist → live checklist); **BlazorAgentView** conversation in the steering client;
 runner **plugin/image compatibility pre-flight**; pre-start launch failures now fail runs
 visibly instead of stranding them at Received.
+
+## Shipped 2026-07-27 evening (multi-turn + steering client wave)
+**Multi-turn agent sessions** (`multi-turn` Boolean input on `claude-code` AND `github-copilot`;
+instruction optional; steering gained `turn-ended` out + `end` in via capability "end"; Claude
+keeps stdin open across result events, Copilot loops `SendAndWaitAsync` with
+guidance-as-next-prompt; headless Copilot CLI refuses multi-turn — needs `UseSdkSession`).
+Verified live by Felix. Chat noise removed (init/result events publish no entries — failures
+only). **Data-driven provider model catalogs** (`ProviderModelCatalog` on the registration —
+endpoint/credential-mapping/response shape; browse kind `models`; Anthropic spec registered as
+data; NOTE: the Claude *account* OAuth token got 401 from `/v1/models` — API-key connectors list
+fine; fix by re-POSTing the spec's header combo). **Session vocabulary** (`session-vocabulary`
+steering wire: models + per-model reasoning efforts; Copilot fills it from `ListModelsAsync`
+and applies the new `reasoning-effort` setting via `SetModelAsync` — OPEN: untested against the
+real Copilot service, same token caveat as the SDK session itself). the steering client (local, not in this
+repo): live-agents multi-view (full-view tiles incl. plan/decisions/steering, agent picker,
+layout presets, multi-window), decision routing to the OWNING monitor, dashboard favorites +
+folders + persisted UI state, transcript export/copy, dark-themed chat, Environments admin tab.
+CLAUDE.md gained the standing rule: **the Core has NO custom/vendor logic** — provider
+knowledge only in dynamically registered data/plugins.
 
 ## CI validation — Docker system tests (Phase-4 assumptions, not runnable locally)
 - Email slot **plugin-dependency loading** (highest risk — MailKit/MimeKit/BouncyCastle copied alongside the provider DLL).
