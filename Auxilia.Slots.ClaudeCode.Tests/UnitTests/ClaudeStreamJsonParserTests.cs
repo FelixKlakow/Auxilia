@@ -9,7 +9,7 @@ public sealed class ClaudeStreamJsonParserTests
     private static readonly DateTimeOffset Timestamp = new(2026, 7, 1, 12, 0, 0, TimeSpan.Zero);
 
     [Test]
-    public void SystemInit_BecomesSystemEntryWithModel()
+    public void SystemInit_IsBookkeeping_NoChatEntry()
     {
         var parser = new ClaudeStreamJsonParser();
 
@@ -17,14 +17,8 @@ public sealed class ClaudeStreamJsonParserTests
             """{"type":"system","subtype":"init","session_id":"s1","model":"claude-sonnet-4-6","tools":["Bash"]}""",
             Timestamp);
 
-        Assert.That(entries, Has.Count.EqualTo(1));
-        Assert.Multiple(() =>
-        {
-            Assert.That(entries[0].Role, Is.EqualTo(AgentChatRole.System));
-            Assert.That(entries[0].Content, Does.Contain("claude-sonnet-4-6"));
-            Assert.That(entries[0].Label, Is.EqualTo("Claude Code"));
-            Assert.That(entries[0].TimestampUtc, Is.EqualTo(Timestamp));
-        });
+        Assert.That(entries, Is.Empty,
+            "no session 'starts' per init event — the model belongs in session settings, not the chat");
     }
 
     [Test]
@@ -153,7 +147,7 @@ public sealed class ClaudeStreamJsonParserTests
     }
 
     [Test]
-    public void SuccessResult_CapturesResultAndEmitsSummaryEntry()
+    public void SuccessResult_CapturesResultSilently()
     {
         var parser = new ClaudeStreamJsonParser();
 
@@ -169,8 +163,8 @@ public sealed class ClaudeStreamJsonParserTests
             Assert.That(parser.Result.NumTurns, Is.EqualTo(3));
             Assert.That(parser.Result.TotalCostUsd, Is.EqualTo(0.0042m));
             Assert.That(parser.Result.DurationMs, Is.EqualTo(1800L));
-            Assert.That(entries, Has.Count.EqualTo(1));
-            Assert.That(entries[0].Role, Is.EqualTo(AgentChatRole.System));
+            Assert.That(entries, Is.Empty,
+                "no chat entry for a successful result — cost summaries in the chat are noise");
         });
     }
 

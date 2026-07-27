@@ -124,7 +124,8 @@ public sealed class ClaudeCodeCliAgentTests
             Assert.That(result.TotalCostUsd, Is.EqualTo(0.01m));
             Assert.That(entries.Select(e => e.Role), Is.EqualTo(new[]
             {
-                AgentChatRole.System, AgentChatRole.Assistant, AgentChatRole.System
+                // Neither init nor result events surface in the chat — pure bookkeeping.
+                AgentChatRole.Assistant
             }));
         });
     }

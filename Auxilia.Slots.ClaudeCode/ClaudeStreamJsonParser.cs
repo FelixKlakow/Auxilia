@@ -42,27 +42,15 @@ public sealed class ClaudeStreamJsonParser
 
             return typeProperty.GetString() switch
             {
-                "system" => ParseSystem(root, timestampUtc),
+                // The init event is bookkeeping, not conversation — no session "starts" per
+                // turn, and the model is visible in the session settings. No chat entry.
+                "system" => [],
                 "assistant" => ParseMessageContent(root, timestampUtc, isAssistant: true),
                 "user" => ParseMessageContent(root, timestampUtc, isAssistant: false),
                 "result" => ParseResult(root, timestampUtc),
                 _ => []
             };
         }
-    }
-
-    private static IReadOnlyList<AgentChatEntry> ParseSystem(JsonElement root, DateTimeOffset timestampUtc)
-    {
-        if (root.TryGetProperty("subtype", out var subtype) && subtype.GetString() != "init")
-            return [];
-
-        var model = root.TryGetProperty("model", out var modelProperty)
-            ? modelProperty.GetString()
-            : null;
-        var text = model is { Length: > 0 }
-            ? $"Claude Code session started (model {model})."
-            : "Claude Code session started.";
-        return [new AgentChatEntry(AgentChatRole.System, text, timestampUtc, Label: "Claude Code")];
     }
 
     private IReadOnlyList<AgentChatEntry> ParseMessageContent(
@@ -155,11 +143,11 @@ public sealed class ClaudeStreamJsonParser
 
         Result = new ClaudeSessionResult(isError, resultText, numTurns, cost, duration, subtype);
 
-        var summary = isError
-            ? $"Session failed ({subtype})."
-            : $"Session finished: {numTurns} turn(s)" +
-              (cost is { } c ? $", ${c:0.####}" : "") + ".";
-        return [new AgentChatEntry(AgentChatRole.System, summary, timestampUtc, Label: "Claude Code")];
+        // No chat entry for the result event: turn boundaries are announced by the session
+        // (turn-ended), and totals live in the session report — cost lines in the chat are noise.
+        return isError
+            ? [new AgentChatEntry(AgentChatRole.System, $"Session failed ({subtype}).", timestampUtc, Label: "Claude Code")]
+            : [];
     }
 
     /// <summary>

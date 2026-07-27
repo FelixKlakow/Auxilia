@@ -41,6 +41,7 @@ Work items from external task sources trigger **signed, stateful workflow progra
 
 ## Rules
 
+- **The Core has NO custom/vendor logic.** Core.Api and Core.Runner are semantics-blind brokers: no provider-, vendor-, or workflow-specific code (no Anthropic/GitHub/etc. API calls, no special-cased provider types). Anything provider-specific lives in dynamically registered pieces — slot-handler plugins, provider-catalog descriptors, connect flows, data-driven specs like `ProviderOAuthRefresh` — or in the workflow itself. If a feature seems to need Core code that knows a vendor, invent a registration mechanism instead.
 - All RabbitMQ interaction goes through `IMessageBusClient` (`Source/Auxilia.Messaging`) so tests can inject `FakeMessageBusClient`.
 - Retry/resilience logic belongs inside the service implementation — never in a decorator or caller-side retry loop.
 - AI: never instruct the model to emit structured text ("Respond with JSON"). Collect structured output via typed tool calls on a result-sink `ICapabilityMcpTools` in `AiSessionOptions.CapabilityTools`.
