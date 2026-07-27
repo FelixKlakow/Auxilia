@@ -62,7 +62,8 @@ public sealed class RunService(
     /// every bound connector is re-checked — a rerun is a new run, not a replay of old trust.
     /// </summary>
     public async Task<RunAccepted> RerunAsync(
-        Data.CoreRunRecord run, Guid? triggeredBy, CancellationToken ct)
+        Data.CoreRunRecord run, Guid? triggeredBy, CancellationToken ct,
+        IReadOnlyDictionary<string, string>? contextOverlay = null)
     {
         if (run.DispatchCommandJson is not { Length: > 0 } commandJson
             || System.Text.Json.JsonSerializer.Deserialize<RunWorkflowCommand>(commandJson) is not { } original
@@ -82,11 +83,20 @@ public sealed class RunService(
         var resolutionToken = Guid.NewGuid().ToString("N");
         var packageUri = await workflowTypes.ResolvePackageUriForDispatchAsync(
             original.WorkflowType ?? run.WorkflowType, commandId, resolutionToken, ct);
+        var context = original.Context;
+        if (contextOverlay is { Count: > 0 })
+        {
+            var merged = new Dictionary<string, string>(original.Context);
+            foreach (var (key, value) in contextOverlay)
+                merged[key] = value;
+            context = merged;
+        }
         var command = original with
         {
             CommandId = commandId,
             ResolutionToken = resolutionToken,
             WorkflowPackageUri = packageUri,
+            Context = context,
         };
         await credentialResolver.StashAsync(
             commandId, resolutionToken, stash.Bindings, triggeredBy ?? stash.TriggeredBy,

@@ -35,6 +35,8 @@ public sealed class FailoverMonitorTests
     private IDataAccess<CoreRunRecord> _runs = null!;
     private IDataAccess<AuditRecord> _audit = null!;
     private CoreApiSettings _settings = null!;
+    private SlotCredentialResolver _resolver = null!;
+    private WorkflowTypeRegistryService _registry = null!;
     private FailoverMonitor _sut = null!;
 
     [SetUp]
@@ -46,8 +48,46 @@ public sealed class FailoverMonitorTests
         _runs = new InMemoryDataAccess<CoreRunRecord>();
         _audit = new InMemoryDataAccess<AuditRecord>();
         _settings = new CoreApiSettings { HeartbeatTimeoutSeconds = 30, FailoverScanIntervalSeconds = 3600 };
+
+        // The re-dispatch path IS RunService.RerunAsync — wire a real one over in-memory stores.
+        var protector = new Auxilia.PlatformData.Protection.AesGcmSettingsProtector(
+            System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        var connectorStore = new InMemoryDataAccess<CoreConnectorRecord>();
+        var connectors = new ConnectorService(connectorStore, protector, _time);
+        _resolver = new SlotCredentialResolver(
+            new InMemoryDataAccess<CoreRunResolutionRecord>(), connectors,
+            new ConnectorTokenRefresher(
+                connectors,
+                new ProviderCatalogService(
+                    new InMemoryDataAccess<Auxilia.PlatformData.Entities.SlotProviderRecord>(),
+                    new InMemoryDataAccess<Auxilia.PlatformData.Entities.ProviderCatalogRecord>(),
+                    new AuditLog(_audit, _time)),
+                new StubHttpClientFactory(new StubHttpMessageHandler(
+                    _ => new HttpResponseMessage(System.Net.HttpStatusCode.NotFound))),
+                _time, NullLogger<ConnectorTokenRefresher>.Instance),
+            new DelegatedTokenStore(new InMemoryDataAccess<Auxilia.Core.Api.Data.DelegatedUserTokenRecord>(), protector, _time),
+            new NullDelegatedTokenExchange(), new AuditLog(_audit, _time), _time, Options.Create(_settings));
+        var typeStore = new InMemoryDataAccess<CoreWorkflowTypeRecord>();
+        _registry = new WorkflowTypeRegistryService(
+            typeStore,
+            new StubHttpClientFactory(new StubHttpMessageHandler(
+                _ => new HttpResponseMessage(System.Net.HttpStatusCode.NotFound))),
+            Options.Create(_settings), new AuditLog(_audit, _time), _time,
+            NullLogger<WorkflowTypeRegistryService>.Instance);
+        var providerCatalog = new ProviderCatalogService(
+            new InMemoryDataAccess<Auxilia.PlatformData.Entities.SlotProviderRecord>(),
+            new InMemoryDataAccess<Auxilia.PlatformData.Entities.ProviderCatalogRecord>(),
+            new AuditLog(_audit, _time));
+        var runService = new RunService(
+            _bus,
+            new RunConfigurationService(new InMemoryDataAccess<CoreRunConfigurationRecord>(), _time),
+            _registry, new WorkflowSchemaReadService(typeStore), providerCatalog, _resolver,
+            new ConnectorAccessPolicy(connectorStore, new InMemoryDataAccess<Auxilia.PlatformData.Entities.PrincipalRecord>()),
+            connectors, new RunnerLivenessTracker(), _time,
+            Options.Create(_settings), NullLogger<RunService>.Instance);
+
         _sut = new FailoverMonitor(
-            _bus, _liveness, _runs,
+            _bus, _liveness, _runs, runService,
             new WorkflowStatusPublisher(_bus, _time),
             new AuditLog(_audit, _time),
             _time, Options.Create(_settings),
@@ -69,9 +109,16 @@ public sealed class FailoverMonitorTests
         _liveness.Record(serviceId, _time.Now - TimeSpan.FromSeconds(60));
 
         var runId = Guid.NewGuid();
+        var commandId = Guid.NewGuid();
         var command = new RunWorkflowCommand(
-            Guid.NewGuid(), "wf-type", "docker://wf:test",
-            commandContext ?? new Dictionary<string, string>());
+            commandId, "wf-type", "docker://wf:test",
+            commandContext ?? new Dictionary<string, string>(), ResolutionToken: "token-1");
+        // A redispatch goes through RerunAsync: the type must be registered Active and the
+        // original resolution context stashed — exactly like a real dispatch leaves behind.
+        await _registry.EnsureSeededAsync(
+            new StaticWorkflowType { WorkflowType = "wf-type", PackageUri = "docker://wf:test" },
+            CancellationToken.None);
+        await _resolver.StashAsync(commandId, "token-1", [], triggeredBy: null);
         var run = new CoreRunRecord
         {
             Id = runId,
@@ -80,6 +127,7 @@ public sealed class FailoverMonitorTests
             CreatedUtc = _time.Now - TimeSpan.FromMinutes(5),
             UpdatedUtc = _time.Now - TimeSpan.FromMinutes(5),
             OwnerServiceId = serviceId,
+            CommandId = commandId,
             DispatchCommandJson = JsonSerializer.Serialize(command)
         };
         await _runs.SaveAsync(run);

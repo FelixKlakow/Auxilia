@@ -22,6 +22,7 @@ public sealed class FailoverMonitor(
     IMessageBusClient bus,
     RunnerLivenessTracker liveness,
     IDataAccess<CoreRunRecord> runs,
+    RunService runService,
     WorkflowStatusPublisher statusPublisher,
     AuditLog auditLog,
     TimeProvider clock,
@@ -170,19 +171,28 @@ public sealed class FailoverMonitor(
             return;
         }
 
-        var context = new Dictionary<string, string>(original.Context)
+        // The re-dispatch goes through the SAME machinery as an operator rerun: a fresh command
+        // id + resolution token with the bindings re-stashed under them — re-publishing the old
+        // token under a new id could never resolve credentialed slots.
+        try
         {
-            [FailoverContextKey] = orphan.Id.ToString("D")
-        };
-        var redispatch = original with { CommandId = Guid.NewGuid(), Context = context };
-
-        await bus.PublishAsync(settings.Value.RunCommandQueue, redispatch, ct);
-        await auditLog.AppendAsync("core-api", "workflow.redispatched",
-            orphan.Id.ToString(), redispatch.CommandId.ToString(), ct: ct);
-
-        logger.LogInformation(
-            "Re-dispatched workflow {WorkflowType} after failover of run {RunId} (new command {CommandId}).",
-            orphan.WorkflowType, orphan.Id, redispatch.CommandId);
+            var accepted = await runService.RerunAsync(
+                orphan, triggeredBy: null, ct,
+                contextOverlay: new Dictionary<string, string>
+                {
+                    [FailoverContextKey] = orphan.Id.ToString("D")
+                });
+            await auditLog.AppendAsync("core-api", "workflow.redispatched",
+                orphan.Id.ToString(), accepted.RunId.ToString(), ct: ct);
+            logger.LogInformation(
+                "Re-dispatched workflow {WorkflowType} after failover of run {RunId} (new command {CommandId}).",
+                orphan.WorkflowType, orphan.Id, accepted.RunId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex,
+                "Failover re-dispatch of run {RunId} failed — the run stays Failed.", orphan.Id);
+        }
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
