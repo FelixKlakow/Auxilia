@@ -33,7 +33,18 @@ public sealed class RunServiceTests
         var delegatedTokens = new DelegatedTokenStore(
             new InMemoryDataAccess<DelegatedUserTokenRecord>(), protector, TimeProvider.System);
         var resolver = new SlotCredentialResolver(
-            new InMemoryDataAccess<CoreRunResolutionRecord>(), connectors, delegatedTokens,
+            new InMemoryDataAccess<CoreRunResolutionRecord>(), connectors,
+            new ConnectorTokenRefresher(
+                connectors,
+                new ProviderCatalogService(
+                    new InMemoryDataAccess<SlotProviderRecord>(),
+                    new InMemoryDataAccess<ProviderCatalogRecord>(),
+                    new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System)),
+                new StubHttpClientFactory(new StubHttpMessageHandler(
+                    _ => new HttpResponseMessage(HttpStatusCode.NotFound))),
+                TimeProvider.System,
+                NullLogger<ConnectorTokenRefresher>.Instance),
+            delegatedTokens,
             new NullDelegatedTokenExchange(),
             new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System),
             TimeProvider.System, Options.Create(new CoreApiSettings()));

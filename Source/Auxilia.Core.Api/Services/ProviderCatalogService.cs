@@ -77,7 +77,10 @@ public sealed class ProviderCatalogService(
             Description = request.Description,
             RequiredCredentialContract = request.RequiredCredentialContract,
             MountsIntoWorkspace = request.MountsIntoWorkspace,
-            ComposesEnvironment = request.ComposesEnvironment
+            ComposesEnvironment = request.ComposesEnvironment,
+            OAuthRefreshJson = request.OAuthRefresh is null
+                ? null
+                : JsonSerializer.Serialize(request.OAuthRefresh)
         };
         await providers.SaveAsync(record, ct);
         await auditLog.AppendAsync(actor, "provider-catalog.registered", request.ProviderType, "registered", ct: ct);
@@ -197,7 +200,10 @@ public sealed class ProviderCatalogService(
             provider.ProviderType, curation.Available, category,
             descriptors, ParseContracts(provider.ContractsJson), provider.Description,
             provider.RequiredCredentialContract, provider.MountsIntoWorkspace,
-            provider.ComposesEnvironment);
+            provider.ComposesEnvironment,
+            provider.OAuthRefreshJson is { Length: > 0 } refreshJson
+                ? JsonSerializer.Deserialize<ProviderOAuthRefresh>(refreshJson)
+                : null);
     }
 
     private static IReadOnlyList<string> ParseContracts(string? json)

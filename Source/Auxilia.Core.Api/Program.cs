@@ -88,6 +88,7 @@ builder.Services.AddSingleton<WorkflowTypeApprovalPipeline>();
 builder.Services.AddSingleton<IWorkflowTypeApprovalHandler, EmailApprovalNotificationHandler>();
 builder.Services.AddSingleton<ConnectorService>();
 builder.Services.AddSingleton<ConnectorBrowseService>();
+builder.Services.AddSingleton<ConnectorTokenRefresher>();
 builder.Services.AddSingleton<ConnectorAccessPolicy>();
 builder.Services.AddSingleton<DelegatedTokenStore>();
 builder.Services.AddSingleton<RunConfigurationService>();

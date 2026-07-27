@@ -18,6 +18,7 @@ namespace Auxilia.Core.Api.Services;
 public sealed class SlotCredentialResolver(
     IDataAccess<CoreRunResolutionRecord> store,
     ConnectorService connectors,
+    ConnectorTokenRefresher tokenRefresher,
     DelegatedTokenStore delegatedTokens,
     IDelegatedTokenExchange delegatedExchange,
     AuditLog audit,
@@ -79,7 +80,8 @@ public sealed class SlotCredentialResolver(
         }
         else if (binding.ConnectorId is { } connectorId)
         {
-            if (await connectors.ResolveSettingsAsync(connectorId, ct) is not { } settingsMap)
+            // Refreshed-on-delivery: an OAuth-backed connector never hands out a stale token.
+            if (await tokenRefresher.ResolveFreshSettingsAsync(connectorId, ct) is not { } settingsMap)
                 return await RejectAsync(runId, "connector-not-found", $"connector '{connectorId}' not found", ct);
             resolvedSettings = settingsMap;
             providerType = binding.ProviderType

@@ -325,6 +325,34 @@ public sealed class ClaudeCodeCliAgentTests
     }
 
     [Test]
+    public async Task Session_TaskCreateAndUpdate_FoldIntoPlanSnapshots()
+    {
+        // The current CLI's vocabulary: incremental TaskCreate/TaskUpdate instead of TodoWrite.
+        var stdout = """
+            {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"TaskCreate","input":{"subject":"Ask for the language","description":"d"}}]}}
+            {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t2","name":"TaskCreate","input":{"subject":"Write NOTES.md","description":"d"}}]}}
+            {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t3","name":"TaskUpdate","input":{"taskId":"1","status":"completed"}}]}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var plans = new List<IReadOnlyList<AgentPlanItem>>();
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        await agent.RunAsync(
+            Request with { OnPlanUpdate = (items, _) => { plans.Add(items); return Task.CompletedTask; } },
+            (_, _) => Task.CompletedTask);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(plans, Has.Count.EqualTo(3), "every create/update publishes a fresh snapshot");
+            Assert.That(plans[^1].Select(p => (p.Content, p.Status)), Is.EqualTo(new[]
+            {
+                ("Ask for the language", "completed"), ("Write NOTES.md", "pending"),
+            }));
+        });
+    }
+
+    [Test]
     public async Task Session_StreamedTodoWriteToolUse_PublishesThePlan()
     {
         var stdout = """

@@ -31,7 +31,8 @@ public sealed class SlotCredentialResolverTests
         var tokens = new DelegatedTokenStore(
             new InMemoryDataAccess<DelegatedUserTokenRecord>(), protector, TimeProvider.System);
         var resolver = new SlotCredentialResolver(
-            new InMemoryDataAccess<CoreRunResolutionRecord>(), connectors, tokens,
+            new InMemoryDataAccess<CoreRunResolutionRecord>(), connectors,
+            NewPassthroughRefresher(connectors), tokens,
             exchange ?? new NullDelegatedTokenExchange(),
             new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System),
             TimeProvider.System, Options.Create(new CoreApiSettings()));
@@ -138,7 +139,8 @@ public sealed class SlotCredentialResolverTests
         var tokens = new DelegatedTokenStore(
             new InMemoryDataAccess<DelegatedUserTokenRecord>(), protector, TimeProvider.System);
         var resolver = new SlotCredentialResolver(
-            new InMemoryDataAccess<CoreRunResolutionRecord>(), connectors, tokens, new NullDelegatedTokenExchange(),
+            new InMemoryDataAccess<CoreRunResolutionRecord>(), connectors,
+            NewPassthroughRefresher(connectors), tokens, new NullDelegatedTokenExchange(),
             new AuditLog(auditStore, TimeProvider.System), TimeProvider.System,
             Options.Create(new CoreApiSettings()));
 
@@ -223,4 +225,16 @@ public sealed class SlotCredentialResolverTests
             Assert.That(error, Is.EqualTo("delegated access requires a recent interactive sign-in"));
         }
     }
+
+    private static ConnectorTokenRefresher NewPassthroughRefresher(ConnectorService connectors)
+        => new(
+            connectors,
+            new ProviderCatalogService(
+                new InMemoryDataAccess<SlotProviderRecord>(),
+                new InMemoryDataAccess<ProviderCatalogRecord>(),
+                new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System)),
+            new StubHttpClientFactory(new StubHttpMessageHandler(
+                _ => throw new InvalidOperationException("no refresh expected"))),
+            TimeProvider.System,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ConnectorTokenRefresher>.Instance);
 }

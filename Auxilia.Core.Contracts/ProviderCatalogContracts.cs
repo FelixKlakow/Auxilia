@@ -39,7 +39,21 @@ public sealed record ProviderCatalogEntry(
     string? Description,
     string? RequiredCredentialContract = null,
     bool MountsIntoWorkspace = false,
-    bool ComposesEnvironment = false);
+    bool ComposesEnvironment = false,
+    ProviderOAuthRefresh? OAuthRefresh = null);
+
+/// <summary>
+/// Declares, as pure data, how a provider's stored OAuth credential is refreshed: the Core
+/// exchanges the refresh token at the endpoint whenever the access token is (or may be) stale,
+/// persists the rotated values, and delivers only fresh tokens. The KEYS name the provider's own
+/// settings — the Core stays provider-agnostic.
+/// </summary>
+public sealed record ProviderOAuthRefresh(
+    string TokenEndpoint,
+    string ClientId,
+    string AccessTokenKey,
+    string RefreshTokenKey,
+    string ExpiresAtKey);
 
 /// <summary>
 /// Registers (or updates) a slot provider's descriptor in the Core catalog — normally mirrored
@@ -54,7 +68,8 @@ public sealed record RegisterSlotProvider(
     IReadOnlyList<RegisterProviderSetting> Settings,
     string? RequiredCredentialContract = null,
     bool MountsIntoWorkspace = false,
-    bool ComposesEnvironment = false);
+    bool ComposesEnvironment = false,
+    ProviderOAuthRefresh? OAuthRefresh = null);
 
 /// <summary>One manifest setting of a provider being registered.</summary>
 public sealed record RegisterProviderSetting(

@@ -39,6 +39,7 @@ public sealed class ClaudeCodeCliAgent(
         using var sessionScope = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         // Mutable per-session state: the operator can retune it live over the setting channel.
         var permissionMode = new SessionSettings(request.PermissionMode, request.PushPolicy);
+        var planTracker = new PlanTracker();
         Task? guidanceTask = null;
         Task? settingsTask = null;
         try
@@ -78,11 +79,12 @@ public sealed class ClaudeCodeCliAgent(
                     continue;
                 }
 
-                // Plan revisions also stream as assistant TodoWrite tool calls (the only path
-                // in non-interactive runs).
+                // Plan revisions stream as assistant tool calls: TodoWrite (full snapshots) on
+                // older CLIs, TaskCreate/TaskUpdate (incremental) on current ones — the tracker
+                // folds both into full snapshots.
                 if (request.OnPlanUpdate is { } onPlan
-                    && TryParseStreamedTodoWrite(line) is { Count: > 0 } streamedTodos)
-                    await onPlan(streamedTodos, cancellationToken);
+                    && planTracker.ApplyLine(line) is { Count: > 0 } snapshot)
+                    await onPlan(snapshot, cancellationToken);
 
                 foreach (var entry in parser.ParseLine(line, _time.GetUtcNow()))
                     await onChatEntry(entry, cancellationToken);
@@ -450,6 +452,84 @@ public sealed class ClaudeCodeCliAgent(
             AgentChatRole.System,
             $"The operator answered {answers.Count} of {questions.Count} question(s).",
             _time.GetUtcNow(), Label: "Question"), ct);
+    }
+
+    /// <summary>
+    /// Folds the CLI's plan-shaped tool calls into full snapshots. Two vocabularies: TodoWrite
+    /// (a full snapshot per call — older CLIs/SDK) and TaskCreate/TaskUpdate (incremental —
+    /// current CLIs; ids are assigned 1-based in creation order, matching the CLI's numbering).
+    /// </summary>
+    internal sealed class PlanTracker
+    {
+        private readonly List<AgentPlanItem> _items = [];
+
+        /// <summary>The updated full snapshot when the line changed the plan; null otherwise.</summary>
+        public IReadOnlyList<AgentPlanItem>? ApplyLine(string line)
+        {
+            if (TryParseStreamedTodoWrite(line) is { Count: > 0 } todos)
+            {
+                _items.Clear();
+                _items.AddRange(todos);
+                return _items.ToList();
+            }
+
+            foreach (var (name, input) in EnumerateToolUses(line, "TaskCreate", "TaskUpdate"))
+            {
+                if (name == "TaskCreate")
+                {
+                    var subject = input.TryGetProperty("subject", out var s) ? s.GetString() : null;
+                    if (subject is { Length: > 0 })
+                        _items.Add(new AgentPlanItem(subject, AgentPlanStatuses.Pending));
+                }
+                else if (input.TryGetProperty("taskId", out var idProperty)
+                         && int.TryParse(idProperty.ToString(), out var taskId)
+                         && taskId >= 1 && taskId <= _items.Count
+                         && input.TryGetProperty("status", out var statusProperty)
+                         && statusProperty.GetString() is { Length: > 0 } status)
+                {
+                    _items[taskId - 1] = _items[taskId - 1] with { Status = status };
+                }
+                else
+                {
+                    continue;
+                }
+                return _items.ToList();
+            }
+            return null;
+        }
+
+        /// <summary>Matching assistant-message tool_use blocks as (name, input) pairs.</summary>
+        private static IEnumerable<(string Name, JsonElement Input)> EnumerateToolUses(
+            string line, params string[] names)
+        {
+            if (!names.Any(n => line.Contains(n, StringComparison.Ordinal)))
+                yield break;
+            JsonDocument doc;
+            try
+            {
+                doc = JsonDocument.Parse(line);
+            }
+            catch (JsonException)
+            {
+                yield break;
+            }
+            using (doc)
+            {
+                var root = doc.RootElement;
+                if (root.ValueKind != JsonValueKind.Object
+                    || (root.TryGetProperty("type", out var t) ? t.GetString() : null) != "assistant"
+                    || !root.TryGetProperty("message", out var message)
+                    || !message.TryGetProperty("content", out var content)
+                    || content.ValueKind != JsonValueKind.Array)
+                    yield break;
+                foreach (var block in content.EnumerateArray())
+                    if ((block.TryGetProperty("type", out var bt) ? bt.GetString() : null) == "tool_use"
+                        && (block.TryGetProperty("name", out var n) ? n.GetString() : null) is { } name
+                        && names.Contains(name, StringComparer.Ordinal)
+                        && block.TryGetProperty("input", out var input))
+                        yield return (name, input.Clone());
+            }
+        }
     }
 
     /// <summary>The todos of a TodoWrite input: <c>{"todos":[{"content":…,"status":…}]}</c>.</summary>

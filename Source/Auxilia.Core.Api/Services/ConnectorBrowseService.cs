@@ -12,7 +12,7 @@ namespace Auxilia.Core.Api.Services;
 /// fall back to manual entry.
 /// </summary>
 public sealed class ConnectorBrowseService(
-    ConnectorService connectors,
+    ConnectorTokenRefresher tokenRefresher,
     IHttpClientFactory httpClientFactory,
     ILogger<ConnectorBrowseService> logger)
 {
@@ -20,7 +20,8 @@ public sealed class ConnectorBrowseService(
 
     public async Task<ConnectorBrowseResult> BrowseAsync(Guid connectorId, BrowseConnector request, CancellationToken ct)
     {
-        var settings = await connectors.ResolveSettingsAsync(connectorId, ct)
+        // Refreshed-on-use: browsing with a rotated OAuth token would 401 pointlessly.
+        var settings = await tokenRefresher.ResolveFreshSettingsAsync(connectorId, ct)
                        ?? throw new KeyNotFoundException();
         var token = TokenKeys.Select(key => settings.GetValueOrDefault(key))
             .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
