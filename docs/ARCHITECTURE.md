@@ -456,6 +456,8 @@ graph TB
 
 Workflows operate on local filesystem copies of repositories rather than streaming content through the message bus. The **Workspace Manager** manages this entirely on behalf of the workflow.
 
+**Workspace mounts are generic slot bindings.** A repository is not a special contract shape: it is a `SlotBinding` of a catalog provider that declares `MountsIntoWorkspace` (e.g. `git-repository`), with inline non-secret settings and an optional credential connector (linked through the provider's `RequiredCredentialContract`, e.g. `git-credential` implemented by `github-account`/`tfs-account`). At dispatch the Core re-keys the binding's settings by the provider's declared setting **roles** — a pure data transform; the Core never interprets the role vocabulary — and ships `WorkspaceMountDispatch` items. Only the execution plane defines what the roles mean (`WorkspaceMountRoles`: clone source, branch, working directory, cache policy); the mount's credential is stashed under a synthetic `mount-auth:` slot and resolved just-in-time. A slot declaring `AllowMultiple` binds several repositories in one run; each mount's effective root is announced to the container as `Workflow__WorkspaceMount__<ID>`. Editors render mount forms entirely from the catalog descriptors (`Role`, `Browse`, `BrowseDependsOn` drive live repository/branch pickers over the generic connector-browse endpoint).
+
 ```mermaid
 graph TB
     subgraph WorkspaceManager["Workspace Manager (privileged host process)"]

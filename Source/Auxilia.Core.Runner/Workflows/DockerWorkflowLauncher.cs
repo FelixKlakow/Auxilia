@@ -36,6 +36,9 @@ public sealed class DockerWorkflowLauncher(
             settings.RuntimeImage, request.ExtractedContentDirectory, SelectNetworkName(request, settings) ?? "<default>");
 
         var created = await client.Containers.CreateContainerAsync(createParams, ct);
+        logger.LogInformation(
+            "Workflow container created. ContainerId={ContainerId}",
+            created.ID[..Math.Min(12, created.ID.Length)]);
 
         if (request.SlotPluginFiles.Count > 0)
         {

@@ -14,7 +14,8 @@ public sealed record AgentSessionContext(
     public static AgentSessionContext FromEnvironment()
         => FromValues(
             System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__TITLE"),
-            System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__BODY"),
+            System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__BODY")
+                ?? System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__INSTRUCTION"),
             System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.WorkspaceDirectory),
             System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.OutputDirectory));
 

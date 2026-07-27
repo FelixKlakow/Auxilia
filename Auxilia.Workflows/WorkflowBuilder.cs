@@ -282,10 +282,12 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                     cancelQueueName, (_, _) => { cts.Cancel(); return Task.CompletedTask; });
 
                 // Steer-back inputs: the Core's deliver-input endpoint publishes opaque payloads to
-                // this instance's response queue; the application awaits them via IWorkflowInputs.
+                // this instance's INPUT queue; the application awaits them via IWorkflowInputs.
+                var inputQueue = WorkflowQueues.InputQueueFor(instanceId);
+                await context.MessageBus.DeclareQueueAsync(inputQueue);
                 var workflowInputs = new ChannelWorkflowInputs();
                 var inputSub = await context.MessageBus.SubscribeAsync<Messaging.Messages.WorkflowInputMessage>(
-                    responseTopic, (msg, _) => { workflowInputs.Push(msg.PayloadJson); return Task.CompletedTask; });
+                    inputQueue, (msg, _) => { workflowInputs.Push(msg.PayloadJson); return Task.CompletedTask; });
 
                 using var drainSignal = new WorkflowDrainSignal();
                 IAsyncDisposable? drainSub = null;

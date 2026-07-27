@@ -450,3 +450,28 @@ Some workflows may require sidecar services in their execution environment (e.g.
 - **Runner abstraction** – the current implicit single-container runner model would need to be replaced with a pluggable `IRunnerOrchestrator` (Docker Compose, Kubernetes Job, etc.).
 
 This is a significant scope increase and is explicitly deferred beyond v1.
+
+
+## Operator steering channel (2026-07-27)
+
+`Auxilia.Workflows.Steering.OperatorChannel` is the SDK's standard steer-back surface — any
+workflow gets the full operator loop without touching the wire protocol:
+
+- `StartAsync(views, inputs)` announces the run's capabilities (`guidance`, `form-answer`,
+  `halt`) on the `steering` view and pumps the instance's dedicated input queue
+  (`workflow-response-{id}-inputs`; NEVER the main response queue — a standing subscriber
+  there would compete for slot-activation/configuration responses).
+- `AskAsync(questions)` raises a steering client form (radio/checkbox/free-text per question) and
+  blocks until answered; consumed forms are resolved so no stale card survives a replay.
+- `WaitForGuidanceAsync` yields operator guidance; `HaltToken` cancels on a steering client halt;
+  `EndSessionAsync` closes the steering surface.
+
+The coding-agent session engine (`Auxilia.Workflows.AiAgent.CodingAgent.AgentSessionApplication`,
+shared by `claude-code` and `github-copilot`) bridges `IAgentInteraction` questions from the
+agent provider onto this channel — e.g. the Claude CLI's `can_use_tool` control requests become
+operator permission forms.
+
+Schema declarations also grew generically: `Requires<T>(..., allowMultiple: true)` lets one slot
+carry several bindings (multi-repository runs), and `RequiresInput(WorkflowInputDescriptor)`
+declares typed inputs (`Kind` = Text/Multiline/Boolean/Choice/Number, `DefaultValue`,
+`Choices`) that editors render without knowing the workflow.

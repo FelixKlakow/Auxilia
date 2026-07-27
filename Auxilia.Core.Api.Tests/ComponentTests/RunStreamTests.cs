@@ -128,10 +128,12 @@ public sealed class RunStreamTests : CoreApiComponentTestBase
     }
 
     [Test]
-    public async Task ProvideInput_DeliversTheOpaquePayload_ToTheInstanceResponseQueue()
+    public async Task ProvideInput_DeliversTheOpaquePayload_ToTheInstanceInputQueue()
     {
         // The steer-back half of the loop: an authorized caller posts an opaque payload by the
-        // DISPATCH id; the Core resolves the instance and publishes to its response queue verbatim.
+        // DISPATCH id; the Core resolves the instance and publishes to its dedicated INPUT queue
+        // verbatim (its own queue — a standing subscriber must never compete with the response
+        // queue's slot-activation/configuration messages).
         var client = CreateClient();
         var commandId = Guid.NewGuid();
         var instanceId = Guid.NewGuid();
@@ -144,7 +146,7 @@ public sealed class RunStreamTests : CoreApiComponentTestBase
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
         var delivered = MessageBus.PublishedMessages
-            .Where(m => m.Topic == $"workflow-response-{instanceId}")
+            .Where(m => m.Topic == $"workflow-response-{instanceId}-inputs")
             .Select(m => m.Message).OfType<WorkflowInputMessage>().Single();
         Assert.Multiple(() =>
         {

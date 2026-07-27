@@ -346,7 +346,7 @@ app.MapGet("/api/runs/{id:guid}/stream", async (
 
 // Deliver-input (the steer-back half of the loop): an authorized caller posts an OPAQUE payload
 // into a running workflow. The Core authorizes + audits and publishes it to the instance's
-// pre-created response queue — it never interprets the payload (no decision semantics here).
+// dedicated INPUT queue — it never interprets the payload (no decision semantics here).
 app.MapPost("/api/runs/{id:guid}/inputs", async (
         Guid id, ProvideRunInput request, HttpContext http, IPolicyEngine policy,
         Auxilia.UniversalDataAccess.IDataAccess<CoreRunRecord> runStore,
@@ -368,7 +368,7 @@ app.MapPost("/api/runs/{id:guid}/inputs", async (
         return Results.BadRequest(new { error = $"the run has ended ({run.State}) — it accepts no input" });
 
     await bus.PublishAsync(
-        Auxilia.Workflows.Messaging.WorkflowQueues.ResponseQueueFor(run.Id),
+        Auxilia.Workflows.Messaging.WorkflowQueues.InputQueueFor(run.Id),
         new Auxilia.Workflows.Messaging.Messages.WorkflowInputMessage(
             run.Id, request.PayloadJson, DateTimeOffset.UtcNow), ct);
     await audit.AppendAsync(
@@ -411,11 +411,18 @@ app.MapDelete("/api/runs", async (
 app.MapGet("/api/runs/{id:guid}/views", async (
         Guid id, string? view, HttpContext http, IPolicyEngine policy,
         Auxilia.UniversalDataAccess.IDataAccess<CoreRunViewRecord> views,
+        Auxilia.UniversalDataAccess.IDataAccess<CoreRunRecord> runStore,
         CancellationToken ct, int skip = 0, int take = 200) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.RunObserve, ct) is { } fail)
         return fail;
-    var all = (await views.ReadAsync(ct)).Where(v => v.RunId == id);
+    // Callers may hold the DISPATCH id (RunAccepted.RunId) — resolve to the instance id like
+    // every other run read (the runner records views under its own instance id).
+    var runId = id;
+    if (await runStore.ReadAsync(id, ct) is null
+        && (await runStore.ReadAsync(ct)).FirstOrDefault(r => r.CommandId == id) is { } aliased)
+        runId = aliased.Id;
+    var all = (await views.ReadAsync(ct)).Where(v => v.RunId == runId);
     if (!string.IsNullOrWhiteSpace(view))
         all = all.Where(v => string.Equals(v.ViewName, view, StringComparison.Ordinal));
     var ordered = all.OrderBy(v => v.TimestampUtc).ThenBy(v => v.Sequence).ToList();
