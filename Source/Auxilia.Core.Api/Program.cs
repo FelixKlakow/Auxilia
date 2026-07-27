@@ -302,7 +302,9 @@ app.MapPost("/api/runs/{id:guid}/cancel", async (
         { WorkflowType = run?.WorkflowType }, ct);
     if (!decision.Allowed)
         return Results.Json(new { error = decision.Reason }, statusCode: StatusCodes.Status403Forbidden);
-    await runs.CancelAsync(id, ct);
+    // Callers may hold the DISPATCH id; the runner stops containers by INSTANCE id — cancel
+    // with the resolved run's id (the read service already de-aliased it).
+    await runs.CancelAsync(run?.RunId ?? id, ct);
     return Results.Accepted($"/api/runs/{id}");
 }).RequireAuthorization();
 
