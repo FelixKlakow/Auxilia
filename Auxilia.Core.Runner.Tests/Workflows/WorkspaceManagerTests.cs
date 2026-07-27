@@ -110,6 +110,56 @@ public class WorkspaceManagerTests
             "NoCache repositories must never enter the warm cache.");
     }
 
+    // ------------------------------------------------------------------ identity + push
+
+    [Test]
+    public async Task Prepare_ConfiguresTheCommitIdentity_BindingValuesWinOverTheDefault()
+    {
+        var runRoot = await _sut.PrepareAsync(
+            Guid.NewGuid(),
+            [
+                new RepositoryDeclaration("named", _originRepo)
+                    { CommitName = "Felix Klakow", CommitEmail = "felix@example.com" },
+            ],
+            CancellationToken.None);
+
+        var repoDir = Path.Combine(runRoot!, "repos", "named");
+        Assert.Multiple(() =>
+        {
+            Assert.That(GitOutput(repoDir, "config", "user.name"), Is.EqualTo("Felix Klakow"));
+            Assert.That(GitOutput(repoDir, "config", "user.email"), Is.EqualTo("felix@example.com"));
+        });
+    }
+
+    [Test]
+    public async Task Prepare_WithoutIdentitySettings_FallsBackToThePlatformIdentity()
+    {
+        var runRoot = await _sut.PrepareAsync(
+            Guid.NewGuid(), [new RepositoryDeclaration("main", _originRepo)], CancellationToken.None);
+
+        Assert.That(GitOutput(Path.Combine(runRoot!, "repos", "main"), "config", "user.name"),
+            Is.EqualTo("Auxilia Agent"),
+            "Agents must never stall on a missing commit identity.");
+    }
+
+    [Test]
+    public async Task Prepare_AllowPush_ClonesFresh_AndKeepsTheOriginUrlIntact()
+    {
+        var runRoot = await _sut.PrepareAsync(
+            Guid.NewGuid(),
+            [new RepositoryDeclaration("push", _originRepo) { AllowPush = true }],
+            CancellationToken.None);
+
+        var repoDir = Path.Combine(runRoot!, "repos", "push");
+        Assert.Multiple(() =>
+        {
+            Assert.That(Directory.Exists(_settings.WarmCacheDirectory), Is.False,
+                "A push-enabled clone (its credential stays configured) must never enter the warm cache.");
+            Assert.That(GitOutput(repoDir, "remote", "get-url", "origin"), Is.EqualTo(_originRepo),
+                "The origin remote stays usable for the push.");
+        });
+    }
+
     // ------------------------------------------------------------------ failure
 
     [Test]
@@ -153,6 +203,25 @@ public class WorkspaceManagerTests
         File.WriteAllText(Path.Combine(path, "test.txt"), "hello from the workspace manager test");
         RunGit(path, "add", "test.txt");
         RunGit(path, "commit", "-m", "test: add test.txt");
+    }
+
+    /// <summary>Runs git in the given directory and returns its trimmed stdout.</summary>
+    private static string GitOutput(string workingDirectory, params string[] gitArgs)
+    {
+        var psi = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        foreach (var a in gitArgs)
+            psi.ArgumentList.Add(a);
+        using var process = Process.Start(psi)
+                            ?? throw new InvalidOperationException("Failed to start git process.");
+        var stdout = process.StandardOutput.ReadToEnd();
+        process.WaitForExit();
+        return stdout.Trim();
     }
 
     private static void RunGit(string workingDirectory, params string[] gitArgs)

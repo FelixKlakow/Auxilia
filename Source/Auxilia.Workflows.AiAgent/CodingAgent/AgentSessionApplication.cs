@@ -49,7 +49,10 @@ public sealed class AgentSessionApplication(
                     new CodingAgentRequest(
                         context.Instruction, context.WorkspaceDirectory,
                         channel is null ? null : new SteeredInteraction(channel, PublishChatAsync, time),
-                        context.PermissionMode),
+                        context.PermissionMode)
+                    {
+                        PushPolicy = context.PushPolicy,
+                    },
                     PublishChatAsync,
                     session.Token);
             }

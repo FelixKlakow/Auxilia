@@ -291,6 +291,63 @@ public sealed class ClaudeCodeCliAgentTests
             "A live model change rides to the CLI as a set_model control request.");
     }
 
+    [TestCase("cd /workspace/repos/r && git add -A && git push origin main", true)]
+    [TestCase("git status && git log --oneline", false)]
+    [TestCase("git push", true)]
+    [TestCase("dotnet build && dotnet test", false)]
+    public void IsGitPush_ClassifiesBashCommands(string command, bool expected)
+    {
+        var input = System.Text.Json.JsonSerializer.Serialize(new { command });
+        Assert.That(ClaudeCodeCliAgent.IsGitPush("Bash", input), Is.EqualTo(expected));
+    }
+
+    [Test]
+    public async Task InteractiveSession_PushIsAsked_EvenWhenTheGlobalModeIsAutoAllow()
+    {
+        var stdout = """
+            {"type":"control_request","request_id":"ctrl-p","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"git push origin main"}}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var interaction = new FakeInteraction(new AgentAnswer(["allow"]));
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        await agent.RunAsync(
+            Request with
+            {
+                Interaction = interaction,
+                PermissionMode = AgentPermissionModes.AutoAllow,
+                PushPolicy = AgentPermissionModes.AskOperator,
+            },
+            (_, _) => Task.CompletedTask);
+
+        Assert.That(interaction.LastQuestion?.Prompt, Does.Contain("PUSH"),
+            "The push policy governs pushes independently of the global auto-allow mode.");
+    }
+
+    [Test]
+    public async Task InteractiveSession_AutoPushPolicy_ApprovesThePushWithoutAsking()
+    {
+        var stdout = """
+            {"type":"control_request","request_id":"ctrl-p2","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"git push origin main"}}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var interaction = new FakeInteraction();
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        await agent.RunAsync(
+            Request with { Interaction = interaction, PushPolicy = AgentPermissionModes.AutoAllow },
+            (_, _) => Task.CompletedTask);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(interaction.LastQuestion, Is.Null);
+            Assert.That(factory.LastProcess!.Input.ToString(),
+                Does.Contain("ctrl-p2").And.Contain("\"behavior\":\"allow\""));
+        });
+    }
+
     [Test]
     public async Task InteractiveSession_AutoAllowMode_ApprovesWithoutAskingTheOperator()
     {

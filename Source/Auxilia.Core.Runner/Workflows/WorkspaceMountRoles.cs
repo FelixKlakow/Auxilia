@@ -19,4 +19,17 @@ internal static class WorkspaceMountRoles
 
     /// <summary>"true" clones fresh per run and never touches the warm cache (sensitive repos).</summary>
     public const string NoCache = "no-cache";
+
+    /// <summary>
+    /// "true" keeps the (scoped) credential configured on the per-run clone so the workflow can
+    /// push — Model B of the credential decision; the agent's per-action permission policy
+    /// governs each push. Push mounts always clone fresh, never via the warm cache.
+    /// </summary>
+    public const string AllowPush = "allow-push";
+
+    /// <summary>Commit author name configured on the clone (local git config).</summary>
+    public const string CommitName = "commit-name";
+
+    /// <summary>Commit author e-mail configured on the clone (local git config).</summary>
+    public const string CommitEmail = "commit-email";
 }

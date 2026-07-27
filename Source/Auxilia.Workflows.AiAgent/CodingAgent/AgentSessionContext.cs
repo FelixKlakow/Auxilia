@@ -14,6 +14,9 @@ public sealed record AgentSessionContext(
     /// <summary>How permission requests are handled; see <see cref="AgentPermissionModes"/>.</summary>
     public string PermissionMode { get; init; } = AgentPermissionModes.AskOperator;
 
+    /// <summary>The push-action policy, independent of <see cref="PermissionMode"/>.</summary>
+    public string PushPolicy { get; init; } = AgentPermissionModes.AskOperator;
+
     public static AgentSessionContext FromEnvironment()
         => FromValues(
             System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__TITLE"),
@@ -21,7 +24,8 @@ public sealed record AgentSessionContext(
                 ?? System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__INSTRUCTION"),
             System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.WorkspaceDirectory),
             System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.OutputDirectory),
-            System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__PERMISSION-MODE"));
+            System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__PERMISSION-MODE"),
+            System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__PUSH-POLICY"));
 
     /// <summary>
     /// The instruction is Title + Body of the dispatch context — the mail subject/body for
@@ -29,7 +33,7 @@ public sealed record AgentSessionContext(
     /// </summary>
     public static AgentSessionContext FromValues(
         string? title, string? body, string? workspaceDirectory, string? outputDirectory,
-        string? permissionMode = null)
+        string? permissionMode = null, string? pushPolicy = null)
     {
         var instruction = string.Join(
             "\n\n",
@@ -46,6 +50,9 @@ public sealed record AgentSessionContext(
             PermissionMode = string.IsNullOrWhiteSpace(permissionMode)
                 ? AgentPermissionModes.AskOperator
                 : permissionMode.Trim(),
+            PushPolicy = string.IsNullOrWhiteSpace(pushPolicy)
+                ? AgentPermissionModes.AskOperator
+                : pushPolicy.Trim(),
         };
 
         static string Fallback(string? configured, string tempName)

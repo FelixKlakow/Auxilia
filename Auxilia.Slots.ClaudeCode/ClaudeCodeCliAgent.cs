@@ -38,7 +38,7 @@ public sealed class ClaudeCodeCliAgent(
         using var stdinGate = new SemaphoreSlim(1, 1);
         using var sessionScope = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         // Mutable per-session state: the operator can retune it live over the setting channel.
-        var permissionMode = new SessionSettings(request.PermissionMode);
+        var permissionMode = new SessionSettings(request.PermissionMode, request.PushPolicy);
         Task? guidanceTask = null;
         Task? settingsTask = null;
         try
@@ -62,7 +62,7 @@ public sealed class ClaudeCodeCliAgent(
                 if (request.Interaction is { } steering && TryParseControlRequest(line) is { } control)
                 {
                     await AnswerControlRequestAsync(
-                        process, stdinGate, steering, control, permissionMode.PermissionMode,
+                        process, stdinGate, steering, control, permissionMode,
                         onChatEntry, cancellationToken);
                     continue;
                 }
@@ -118,9 +118,12 @@ public sealed class ClaudeCodeCliAgent(
     }
 
     /// <summary>Mutable session state shared between the output loop and the setting pump.</summary>
-    private sealed class SessionSettings(string permissionMode)
+    private sealed class SessionSettings(string permissionMode, string pushPolicy)
     {
         public volatile string PermissionMode = permissionMode;
+
+        /// <summary>The PUSH action kind has its own policy, independent of the global mode.</summary>
+        public volatile string PushPolicy = pushPolicy;
     }
 
     /// <summary>
@@ -141,6 +144,13 @@ public sealed class ClaudeCodeCliAgent(
                     settings.PermissionMode = setting.Value;
                     await onChatEntry(new AgentChatEntry(
                         AgentChatRole.System, $"Permission mode changed to '{setting.Value}' by the operator.",
+                        _time.GetUtcNow(), Label: "Session settings"), ct);
+                    break;
+
+                case AgentSettingKeys.PushPolicy:
+                    settings.PushPolicy = setting.Value;
+                    await onChatEntry(new AgentChatEntry(
+                        AgentChatRole.System, $"Push policy changed to '{setting.Value}' by the operator.",
                         _time.GetUtcNow(), Label: "Session settings"), ct);
                     break;
 
@@ -270,7 +280,7 @@ public sealed class ClaudeCodeCliAgent(
 
     private async Task AnswerControlRequestAsync(
         IClaudeCliProcess process, SemaphoreSlim stdinGate, IAgentInteraction interaction,
-        ControlRequest control, string permissionMode,
+        ControlRequest control, SessionSettings settings,
         Func<AgentChatEntry, CancellationToken, Task> onChatEntry, CancellationToken ct)
     {
         // AskUserQuestion is a QUESTION, not a permission: its answers must ride back inside
@@ -283,14 +293,21 @@ public sealed class ClaudeCodeCliAgent(
             return;
         }
 
+        // Per-action policy: a git push is governed by ITS policy, everything else by the
+        // global mode — "auto-approve edits but ask before each push" and the inverse both work.
+        var isPush = IsGitPush(control.ToolName, control.InputJson);
+        var effectivePolicy = isPush ? settings.PushPolicy : settings.PermissionMode;
+
         // Auto mode: the session stays steerable (guidance, halt), but permission requests are
         // approved without an operator round-trip — the container is still the sandbox.
-        if (string.Equals(permissionMode, AgentPermissionModes.AutoAllow, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(effectivePolicy, AgentPermissionModes.AutoAllow, StringComparison.OrdinalIgnoreCase))
         {
             await WriteLineAsync(process, stdinGate, AllowResponse(control.RequestId), ct);
             await onChatEntry(new AgentChatEntry(
                 AgentChatRole.System,
-                $"Tool '{control.ToolName}' was allowed automatically (permission mode: auto-allow).",
+                isPush
+                    ? "A git push was allowed automatically (push policy: auto-allow)."
+                    : $"Tool '{control.ToolName}' was allowed automatically (permission mode: auto-allow).",
                 _time.GetUtcNow(), Label: "Permission"), ct);
             return;
         }
@@ -307,7 +324,9 @@ public sealed class ClaudeCodeCliAgent(
         options.Add(new AgentQuestionOption("deny", "Deny"));
 
         var answer = await interaction.AskAsync(new AgentQuestion(
-            $"The agent asks to use the tool '{control.ToolName}'. Allow it?",
+            isPush
+                ? "The agent wants to PUSH to the remote repository. Allow it?"
+                : $"The agent asks to use the tool '{control.ToolName}'. Allow it?",
             options, MultiSelect: false, AllowFreeText: false,
             Detail: PrettyJson(control.InputJson)), ct);
 
@@ -414,6 +433,26 @@ public sealed class ClaudeCodeCliAgent(
             AgentChatRole.System,
             $"The operator answered {answers.Count} of {questions.Count} question(s).",
             _time.GetUtcNow(), Label: "Question"), ct);
+    }
+
+    /// <summary>A Bash tool call whose command runs <c>git … push</c> — the PUSH action kind.</summary>
+    internal static bool IsGitPush(string toolName, string? inputJson)
+    {
+        if (!string.Equals(toolName, "Bash", StringComparison.OrdinalIgnoreCase)
+            || inputJson is not { Length: > 0 })
+            return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(inputJson);
+            var command = doc.RootElement.TryGetProperty("command", out var c) ? c.GetString() : null;
+            return command is { Length: > 0 }
+                   && System.Text.RegularExpressions.Regex.IsMatch(
+                       command, @"\bgit\b[^|;&]*\bpush\b", System.Text.RegularExpressions.RegexOptions.Singleline);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     /// <summary>A human label for one CLI permission suggestion; falls back to compact JSON.</summary>

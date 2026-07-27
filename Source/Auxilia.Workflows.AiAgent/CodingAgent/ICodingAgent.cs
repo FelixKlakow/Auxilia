@@ -16,7 +16,15 @@ public interface ICodingAgent
 
 public sealed record CodingAgentRequest(
     string Instruction, string WorkspaceDirectory, IAgentInteraction? Interaction = null,
-    string PermissionMode = AgentPermissionModes.AskOperator);
+    string PermissionMode = AgentPermissionModes.AskOperator)
+{
+    /// <summary>
+    /// The policy for the PUSH action kind, independent of the global mode — "auto-approve
+    /// edits but ask before each push" and its inverse are both expressible. The template for
+    /// future per-action policies (deploys, mail, ticket writes).
+    /// </summary>
+    public string PushPolicy { get; init; } = AgentPermissionModes.AskOperator;
+}
 
 /// <summary>
 /// How a steerable agent session handles the agent's permission requests. The vocabulary of the
@@ -59,6 +67,9 @@ public static class AgentSettingKeys
 
     /// <summary>Switches the agent's model mid-session (agent-specific model names).</summary>
     public const string Model = "model";
+
+    /// <summary>Switches the push-action policy; values from <see cref="AgentPermissionModes"/>.</summary>
+    public const string PushPolicy = "push-policy";
 }
 
 /// <summary>
