@@ -30,7 +30,7 @@
 - **the steering client desktop per-user sign-in** — replace the API-key principal with interactive (device-code/OIDC) sign-in that mints a per-user bearer (per-user audit/SoD). Needs a Core non-browser token-issue path.
 
 ## Generic binding pipeline — follow-ups (2026-07-27)
-- **Docker system-test pass on the mount pipeline** — `RepositoryWorkspaceSystemTests` was rewritten to the generic `git-repository` binding (registered in-test with roles + `git-credential`); the suite needs a full Docker run to confirm (local Docker Desktop 29.4.2 broke the runner's default unix-socket path — local runners now need `WorkflowLauncher__DockerSocketPath=npipe://./pipe/docker_engine`; consider OS-sensitive default).
+- ~~**Docker system-test pass on the mount pipeline**~~ — **PASSED 2026-07-27**: `RepositoryWorkspaceSystemTests` (generic `git-repository` binding, roles + `git-credential`, authenticated git server) green on real Docker. Still open: OS-sensitive `DockerSocketPath` default (Docker Desktop 29.4.2 broke the unix-socket default on Windows hosts — local runners need `WorkflowLauncher__DockerSocketPath=npipe://./pipe/docker_engine`).
 - **AdminConsole/Studio editors on the generic model** — the steering client renders bindings from catalog descriptors; the Blazor editors still assume connector-only bindings.
 - **Copilot interactivity** — the Copilot CLI's headless mode has no control channel; revisit with the Copilot SDK's server mode (JSON-RPC) for questions/guidance parity with Claude.
 - **Real-CLI interactive verification** — the steered permission loop is stub-verified; run once against the real `claude` CLI (`--permission-prompt-tool stdio`) with a real account.
