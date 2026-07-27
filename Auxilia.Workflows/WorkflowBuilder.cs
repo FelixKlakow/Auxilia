@@ -53,7 +53,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
 
     public IWorkflowBuilder Requires<TService>(
         string name, ICapability capabilities, string? description = null, bool optional = false,
-        bool allowMultiple = false)
+        bool allowMultiple = false, IReadOnlyList<string>? providerTypes = null)
     {
         if (_slots.Any(s => s.SlotName == name))
             throw new InvalidOperationException($"A slot with name '{name}' has already been declared.");
@@ -62,7 +62,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             ServiceType = typeof(TService),
             Contract = typeof(TService).FullName,
             Optional = optional,
-            AllowMultiple = allowMultiple
+            AllowMultiple = allowMultiple,
+            ProviderTypes = providerTypes is { Count: > 0 } ? providerTypes : null
         });
         return this;
     }

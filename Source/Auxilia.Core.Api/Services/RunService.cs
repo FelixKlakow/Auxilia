@@ -16,6 +16,7 @@ public sealed class RunService(
     IMessageBusClient bus,
     RunConfigurationService configurations,
     WorkflowTypeRegistryService workflowTypes,
+    WorkflowSchemaReadService schemaReader,
     ProviderCatalogService providerCatalog,
     SlotCredentialResolver credentialResolver,
     ConnectorAccessPolicy connectorAccess,
@@ -73,6 +74,11 @@ public sealed class RunService(
             throw new InvalidOperationException(
                 "no live Core.Runner is connected — the run cannot execute. Start a runner "
                 + "(or set CoreApi:AllowDispatchWithoutRunner to queue deliberately).");
+
+        // A slot that narrows its admissible provider types is enforced here: the narrowing is the
+        // workflow's own schema declaration (e.g. its image bundles exactly one agent CLI), so an
+        // out-of-set binding could never execute and must fail the dispatch, not the run.
+        await ValidateSlotProviderTypesAsync(workflowType, slotBindings, ct);
 
         // Bindings of providers that mount into the workspace become generic workspace mounts:
         // the binding's settings are re-keyed by the provider's declared setting ROLES (a pure
@@ -167,6 +173,31 @@ public sealed class RunService(
             "Dispatched run. CommandId={CommandId} WorkflowType={WorkflowType} WorkspaceMounts={MountCount}",
             commandId, workflowType, mounts.Count);
         return new RunAccepted(commandId, commandId);
+    }
+
+    /// <summary>Rejects bindings whose provider type falls outside the slot's declared narrowing.</summary>
+    private async Task ValidateSlotProviderTypesAsync(
+        string workflowType, IReadOnlyList<SlotBinding> slotBindings, CancellationToken ct)
+    {
+        var schema = await schemaReader.GetSchemaAsync(workflowType, ct);
+        var narrowedSlots = schema?.Slots
+            .Where(s => s.ProviderTypes is { Count: > 0 })
+            .ToDictionary(s => s.SlotName, s => s.ProviderTypes!, StringComparer.Ordinal);
+        if (narrowedSlots is not { Count: > 0 })
+            return;
+        foreach (var binding in slotBindings)
+        {
+            if (!narrowedSlots.TryGetValue(binding.SlotName, out var admitted))
+                continue;
+            var providerType = binding.ProviderType;
+            if (string.IsNullOrEmpty(providerType) && binding.ConnectorId is not null)
+                providerType = (await connectors.GetAsync(binding.ConnectorId.Value, ct))?.ProviderType;
+            if (providerType is { Length: > 0 }
+                && !admitted.Contains(providerType, StringComparer.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"slot '{binding.SlotName}' of '{workflowType}' does not admit provider "
+                    + $"'{providerType}' — the workflow declares: {string.Join(", ", admitted)}");
+        }
     }
 
     /// <summary>The catalog entry behind a binding — inline provider type or the connector's.</summary>

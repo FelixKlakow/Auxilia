@@ -66,7 +66,9 @@ public sealed record WorkflowTypeRegistrationDto(
 /// <summary>
 /// One declared slot of a workflow: the config editor binds it to a connector. <see cref="Contract"/>
 /// is the capability contract the slot expects (offer only matching connectors); <see cref="CapabilitiesJson"/>
-/// carries the schema-declared capability requirement object as raw JSON.
+/// carries the schema-declared capability requirement object as raw JSON. <see cref="ProviderTypes"/>
+/// is the workflow's declared narrowing — when present, editors offer (and the Core admits) only
+/// bindings of these provider types.
 /// </summary>
 public sealed record WorkflowSlotDto(
     string SlotName,
@@ -74,7 +76,8 @@ public sealed record WorkflowSlotDto(
     string? Description,
     bool Optional,
     string? CapabilitiesJson,
-    bool AllowMultiple = false);
+    bool AllowMultiple = false,
+    IReadOnlyList<string>? ProviderTypes = null);
 
 /// <summary>One run input a workflow declares; the dispatch/config UI renders these generically.</summary>
 public sealed record WorkflowInputDto(

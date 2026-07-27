@@ -37,8 +37,9 @@ public sealed class RunServiceTests
             TimeProvider.System, Options.Create(new CoreApiSettings()));
         var accessPolicy = new ConnectorAccessPolicy(connectorStore, new InMemoryDataAccess<PrincipalRecord>());
         var liveness = new RunnerLivenessTracker();
+        var typeStore = new InMemoryDataAccess<CoreWorkflowTypeRecord>();
         var registry = new WorkflowTypeRegistryService(
-            new InMemoryDataAccess<CoreWorkflowTypeRecord>(),
+            typeStore,
             new StubHttpClientFactory(new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound))),
             Options.Create(new CoreApiSettings()),
             new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System),
@@ -48,16 +49,27 @@ public sealed class RunServiceTests
             new InMemoryDataAccess<ProviderCatalogRecord>(),
             new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System));
         var service = new RunService(
-            bus, configs, registry, providerCatalog, resolver, accessPolicy, connectors, liveness,
+            bus, configs, registry, new WorkflowSchemaReadService(typeStore),
+            providerCatalog, resolver, accessPolicy, connectors, liveness,
             TimeProvider.System,
             Options.Create(new CoreApiSettings { AllowDispatchWithoutRunner = allowDispatchWithoutRunner }),
             NullLogger<RunService>.Instance);
         return (service, bus, configs, registry, liveness);
     }
 
-    private static Task SeedActiveTypeAsync(WorkflowTypeRegistryService registry, string type, string packageUri)
+    private static Task SeedActiveTypeAsync(
+        WorkflowTypeRegistryService registry, string type, string packageUri, string? schemaJson = null)
         => registry.EnsureSeededAsync(
-            new StaticWorkflowType { WorkflowType = type, PackageUri = packageUri }, CancellationToken.None);
+            new StaticWorkflowType { WorkflowType = type, PackageUri = packageUri, SchemaJson = schemaJson },
+            CancellationToken.None);
+
+    /// <summary>A schema whose coding-agent slot narrows the admissible provider types.</summary>
+    private static string NarrowedSchemaJson() => System.Text.Json.JsonSerializer.Serialize(
+        new Auxilia.Workflows.WorkflowSchema(
+            "wt",
+            [new Auxilia.Workflows.SlotDefinition("coding-agent", null)
+                { Contract = "ICodingAgent", ProviderTypes = ["claude-code-cli"] }],
+            []));
 
     [Test]
     public async Task RunInline_PublishesCommand_WithRegistryPackage_WithoutRequestedBy()
@@ -99,6 +111,35 @@ public sealed class RunServiceTests
 
         Assert.ThrowsAsync<InvalidOperationException>(() => service.RunInlineAsync(
             new RunRequest("wt"), triggeredBy: null, CancellationToken.None));
+    }
+
+    [Test]
+    public async Task RunInline_BindingOutsideTheSlotsProviderTypeNarrowing_Throws()
+    {
+        var (service, _, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img", NarrowedSchemaJson());
+
+        var ex = Assert.ThrowsAsync<InvalidOperationException>(() => service.RunInlineAsync(
+            new RunRequest("wt",
+                SlotBindings: [new SlotBinding("coding-agent", ProviderType: "github-copilot-cli")]),
+            triggeredBy: null, CancellationToken.None));
+        Assert.That(ex!.Message, Does.Contain("does not admit provider 'github-copilot-cli'"));
+    }
+
+    [Test]
+    public async Task RunInline_BindingWithinTheSlotsProviderTypeNarrowing_Dispatches()
+    {
+        var (service, bus, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img", NarrowedSchemaJson());
+
+        await service.RunInlineAsync(
+            new RunRequest("wt",
+                SlotBindings: [new SlotBinding("coding-agent", ProviderType: "claude-code-cli")]),
+            triggeredBy: null, CancellationToken.None);
+
+        Assert.That(
+            bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>().Count(),
+            Is.EqualTo(1));
     }
 
     [Test]

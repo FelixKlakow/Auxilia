@@ -22,7 +22,9 @@ public static class CopilotWorkflow
         WorkflowBuilder.Create(WorkflowType)
             .Requires<ICodingAgent>("coding-agent",
                 new AiCapabilities { MinContextWindow = 128_000, SupportedModalities = [Modality.Text] },
-                "The autonomous coding agent executing the instruction (the GitHub Copilot CLI)")
+                "The autonomous coding agent executing the instruction (the GitHub Copilot CLI)",
+                // This package's image bundles the Copilot CLI only — narrow the ICodingAgent match.
+                providerTypes: ["github-copilot-cli"])
             .Requires<ISourceControlAccess>("repository",
                 new SourceControlCapabilities { RequiredPermissions = [Permission.Read] },
                 "The repositories the agent works on — prepared into the run's workspace before launch",

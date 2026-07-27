@@ -71,7 +71,8 @@ public sealed class WorkflowSchemaReadService(IDataAccess<CoreWorkflowTypeRecord
                 s.Description,
                 s.Optional,
                 s.Capabilities is null ? null : JsonSerializer.Serialize(s.Capabilities, JsonOptions),
-                s.AllowMultiple)).ToList(),
+                s.AllowMultiple,
+                s.ProviderTypes)).ToList(),
             schema.Inputs.Select(i => new WorkflowInputDto(
                 i.Name, i.Label, i.Required, i.Description, i.Kind, i.DefaultValue, i.Choices)).ToList(),
             schema.Views.Select(v => new WorkflowViewDto(

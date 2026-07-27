@@ -9,10 +9,13 @@ public interface IWorkflowBuilder
     /// Declares a capability slot. The contract type name of <typeparamref name="TService"/> is
     /// published in the schema so configuration tooling offers only matching providers; an
     /// <paramref name="optional"/> slot may stay unbound in a workflow configuration.
+    /// <paramref name="providerTypes"/> narrows the contract match to the providers the workflow's
+    /// package can actually execute (e.g. the one CLI bundled in its image); null admits any
+    /// provider implementing the contract.
     /// </summary>
     IWorkflowBuilder Requires<TService>(
         string name, ICapability capabilities, string? description = null, bool optional = false,
-        bool allowMultiple = false);
+        bool allowMultiple = false, IReadOnlyList<string>? providerTypes = null);
 
     IWorkflowBuilder RequiresEnvironment(Action<IEnvironmentBuilder> configure);
 

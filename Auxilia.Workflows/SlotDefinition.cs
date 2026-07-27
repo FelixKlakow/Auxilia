@@ -25,4 +25,10 @@ public sealed record SlotDefinition(
 
     /// <summary>The slot accepts several bindings in one configuration or run (e.g. many repositories).</summary>
     public bool AllowMultiple { get; init; }
+
+    /// <summary>
+    /// Provider types this slot admits, narrowing the contract match — a workflow whose package
+    /// only bundles one CLI declares it here. Null/empty = any provider implementing the contract.
+    /// </summary>
+    public IReadOnlyList<string>? ProviderTypes { get; init; }
 }
