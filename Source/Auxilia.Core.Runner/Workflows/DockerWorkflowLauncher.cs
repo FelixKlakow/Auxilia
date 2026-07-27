@@ -542,6 +542,15 @@ public sealed class DockerWorkflowLauncher(
                 var manifestEntry = new PaxTarEntry(TarEntryType.RegularFile, Path.GetFileName(file.ManifestPath));
                 manifestEntry.DataStream = new MemoryStream(File.ReadAllBytes(file.ManifestPath));
                 writer.WriteEntry(manifestEntry);
+
+                // Bundled dependency closure (BundleDependencies plugins): lands beside the
+                // plugin in the app base dir, where the default load context resolves it.
+                foreach (var dependency in file.DependencyPaths ?? [])
+                {
+                    var entry = new PaxTarEntry(TarEntryType.RegularFile, Path.GetFileName(dependency));
+                    entry.DataStream = new MemoryStream(File.ReadAllBytes(dependency));
+                    writer.WriteEntry(entry);
+                }
             }
         }
         stream.Seek(0, SeekOrigin.Begin);

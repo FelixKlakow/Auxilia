@@ -16,12 +16,20 @@ public sealed record CopilotCliOptions
     /// <summary>Optional model override; the CLI's default model is used when unset.</summary>
     public string? Model { get; init; }
 
+    /// <summary>
+    /// Run through the Copilot SDK's session protocol (interactive parity: permissions,
+    /// questions, guidance, model switch). False = the plain headless line mode (stubs, tests).
+    /// </summary>
+    public bool UseSdkSession { get; init; }
+
     public bool HasCredential => !string.IsNullOrWhiteSpace(Token);
 
     public static CopilotCliOptions FromSettings(IReadOnlyDictionary<string, string> settings) => new()
     {
         Token = settings.GetValueOrDefault("token") is { Length: > 0 } token ? token : null,
         CliPath = settings.GetValueOrDefault("CliPath") is { Length: > 0 } path ? path : DefaultCliPath,
-        Model = settings.GetValueOrDefault("Model") is { Length: > 0 } model ? model : null
+        Model = settings.GetValueOrDefault("Model") is { Length: > 0 } model ? model : null,
+        UseSdkSession = string.Equals(
+            settings.GetValueOrDefault("UseSdkSession"), "true", StringComparison.OrdinalIgnoreCase)
     };
 }

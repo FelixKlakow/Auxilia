@@ -188,7 +188,26 @@ public sealed class WorkflowDispatcher(
             }
 
             var manifestPath = Path.ChangeExtension(dllPath, null) + ".manifest.json";
-            pluginFiles.Add(new SlotPluginFile(dllPath, manifestPath));
+            // A manifest opting into BundleDependencies ships its whole NuGet closure (every
+            // sibling non-Auxilia DLL) — shared Auxilia contracts always come from the image.
+            IReadOnlyList<string>? dependencies = null;
+            try
+            {
+                var manifest = File.Exists(manifestPath)
+                    ? JsonSerializer.Deserialize<Auxilia.Workflows.PluginManifest>(
+                        await File.ReadAllTextAsync(manifestPath, ct))
+                    : null;
+                if (manifest is { BundleDependencies: true })
+                    dependencies = Directory.GetFiles(Path.GetDirectoryName(dllPath)!, "*.dll")
+                        .Where(f => !string.Equals(f, dllPath, StringComparison.OrdinalIgnoreCase)
+                                    && !Path.GetFileName(f).StartsWith("Auxilia", StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+            }
+            catch (JsonException)
+            {
+                // Malformed sidecar — ship the plugin alone; loading will surface the real error.
+            }
+            pluginFiles.Add(new SlotPluginFile(dllPath, manifestPath, dependencies));
         }
 
         if (pluginFiles.Count > 0)

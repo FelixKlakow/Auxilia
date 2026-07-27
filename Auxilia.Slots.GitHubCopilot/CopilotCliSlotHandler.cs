@@ -20,7 +20,9 @@ public sealed class CopilotCliSlotHandler : ISlotHandler
                 if (!options.HasCredential)
                     throw new InvalidOperationException(
                         "The github-copilot-cli provider requires a GitHub token with Copilot access.");
-                services.AddScoped<ICodingAgent>(_ => new CopilotCliAgent(options));
+                services.AddScoped<ICodingAgent>(_ => options.UseSdkSession
+                    ? new CopilotSdkAgent(options)
+                    : new CopilotCliAgent(options));
                 break;
 
             default:

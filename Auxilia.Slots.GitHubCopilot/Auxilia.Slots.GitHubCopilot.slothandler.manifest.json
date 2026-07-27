@@ -3,7 +3,9 @@
   "ContentHashBase64": "",
   "SignatureBase64": "",
   "PublicKeyBase64": "",
-  "Contracts": ["Auxilia.Workflows.AiAgent.CodingAgent.ICodingAgent"],
+  "Contracts": [
+    "Auxilia.Workflows.AiAgent.CodingAgent.ICodingAgent"
+  ],
   "Category": "coding-agent",
   "Description": "Runs the GitHub Copilot CLI as the coding agent of a workflow; the token reaches the agent container just-in-time.",
   "Settings": [
@@ -13,7 +15,7 @@
       "Kind": "Secret",
       "Required": true,
       "ConnectFlow": "github",
-      "HelpText": "A GitHub token with Copilot access. Connect… signs you in through the browser; a pasted token works too. Stored encrypted and never displayed back."
+      "HelpText": "A GitHub token with Copilot access. Connect\u2026 signs you in through the browser; a pasted token works too. Stored encrypted and never displayed back."
     },
     {
       "Key": "Model",
@@ -30,5 +32,14 @@
       "HelpText": "Path of the Copilot CLI executable inside the workflow image; only changed for testing.",
       "DefaultValue": "copilot"
     }
-  ]
+  ],
+  "settings": [
+    {
+      "key": "UseSdkSession",
+      "label": "Interactive session (SDK)",
+      "kind": "Boolean",
+      "helpText": "Run through the Copilot SDK for full interactivity: permission cards, questions, guidance, live model switch. Off = plain headless mode."
+    }
+  ],
+  "BundleDependencies": true
 }
