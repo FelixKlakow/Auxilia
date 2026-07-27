@@ -354,6 +354,27 @@ public sealed class ClaudeCodeCliAgentTests
     }
 
     [Test]
+    public async Task Session_ExitPlanMode_PublishesThePlanFromItsMarkdownBullets()
+    {
+        var stdout = """
+            {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"p1","name":"ExitPlanMode","input":{"plan":"# Plan: Notes CLI\n\n## Plan Points\n- Add a `notes.py` CLI script.\n- Store notes as JSON records.\n\n## Verification\n- Run the tests.\n"}}]}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var plans = new List<IReadOnlyList<AgentPlanItem>>();
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        await agent.RunAsync(
+            Request with { OnPlanUpdate = (items, _) => { plans.Add(items); return Task.CompletedTask; } },
+            (_, _) => Task.CompletedTask);
+
+        Assert.That(plans.Single().Select(p => p.Content), Is.EqualTo(new[]
+        {
+            "Add a `notes.py` CLI script.", "Store notes as JSON records.", "Run the tests.",
+        }), "plan-mode's approved plan IS the plan until task bookkeeping takes over");
+    }
+
+    [Test]
     public async Task Session_StreamedTodoWriteToolUse_PublishesThePlan()
     {
         var stdout = """

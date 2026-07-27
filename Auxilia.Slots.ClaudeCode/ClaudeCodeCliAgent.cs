@@ -528,8 +528,23 @@ public sealed class ClaudeCodeCliAgent(
                 return _items.ToList();
             }
 
-            foreach (var (name, input) in EnumerateToolUses(line, "TaskCreate", "TaskUpdate"))
+            foreach (var (name, input) in EnumerateToolUses(line, "TaskCreate", "TaskUpdate", "ExitPlanMode"))
             {
+                // Plan-mode: ExitPlanMode carries the whole approved plan as markdown — its
+                // bullet lines ARE the plan snapshot until task bookkeeping takes over.
+                if (name == "ExitPlanMode")
+                {
+                    if (input.TryGetProperty("plan", out var planProperty)
+                        && planProperty.GetString() is { Length: > 0 } markdown
+                        && ParsePlanMarkdown(markdown) is { Count: > 0 } planned)
+                    {
+                        _items.Clear();
+                        _items.AddRange(planned);
+                        return _items.ToList();
+                    }
+                    continue;
+                }
+
                 if (name == "TaskCreate")
                 {
                     var subject = input.TryGetProperty("subject", out var s) ? s.GetString() : null;
@@ -551,6 +566,33 @@ public sealed class ClaudeCodeCliAgent(
                 return _items.ToList();
             }
             return null;
+        }
+
+        /// <summary>The markdown plan's bullet lines as pending plan items ("- [x]" = completed).</summary>
+        internal static List<AgentPlanItem> ParsePlanMarkdown(string markdown)
+        {
+            var items = new List<AgentPlanItem>();
+            foreach (var raw in markdown.Split('\n'))
+            {
+                var line = raw.Trim();
+                if (!line.StartsWith("- ", StringComparison.Ordinal)
+                    && !line.StartsWith("* ", StringComparison.Ordinal))
+                    continue;
+                var content = line[2..].Trim();
+                var status = AgentPlanStatuses.Pending;
+                if (content.StartsWith("[x]", StringComparison.OrdinalIgnoreCase))
+                {
+                    status = "completed";
+                    content = content[3..].Trim();
+                }
+                else if (content.StartsWith("[ ]", StringComparison.Ordinal))
+                {
+                    content = content[3..].Trim();
+                }
+                if (content.Length > 0)
+                    items.Add(new AgentPlanItem(content, status));
+            }
+            return items;
         }
 
         /// <summary>Matching assistant-message tool_use blocks as (name, input) pairs.</summary>
