@@ -6,6 +6,13 @@
 @* Reference custom view renderer (key "agent-chat"): renders AgentChatEntry items as a
    live left/right chat conversation via the BlazorAgentView package. *@
 
+@if (_hiddenCount > 0 || _showDetails)
+{
+    <label class="agent-chat-filter">
+        <input type="checkbox" checked="@_showDetails" @onchange="ToggleDetails"/>
+        Show permission &amp; bookkeeping entries (@_hiddenCount hidden)
+    </label>
+}
 <div class="agent-chat-host" style="height: 480px;">
     <AgentChatView Messages="_messages" Options="ChatOptions"/>
 </div>
@@ -20,7 +27,12 @@
         ToolCallDisplay = ToolCallDisplayMode.Collapsible
     };
 
+    // Plan bookkeeping tools already surface on the plan view; their raw calls are noise here.
+    private static readonly string[] BookkeepingTools = ["TaskCreate", "TaskUpdate", "TodoWrite"];
+
     private List<ChatMessage> _messages = [];
+    private int _hiddenCount;
+    private bool _showDetails;
 
     [Parameter, EditorRequired]
     public required IReadOnlyList<ViewDataRecord> Items { get; set; }
@@ -28,17 +40,32 @@
     [Parameter]
     public bool IsLive { get; set; }
 
-    protected override void OnParametersSet()
+    protected override void OnParametersSet() => Rebuild();
+
+    private void ToggleDetails(ChangeEventArgs args)
+    {
+        _showDetails = args.Value is true;
+        Rebuild();
+    }
+
+    private void Rebuild()
     {
         // A tool's start (input) and result (output) arrive as two correlated entries; the
         // conversation shows them as ONE card — input and output in their own sections.
         var messages = new List<ChatMessage>();
         var openToolCards = new Dictionary<string, ToolCall>(StringComparer.Ordinal);
+        _hiddenCount = 0;
         foreach (var item in Items)
         {
             var entry = Deserialize(item);
             if (entry is null)
                 continue;
+
+            if (!_showDetails && IsDetailEntry(entry))
+            {
+                _hiddenCount++;
+                continue;
+            }
 
             if (entry.Role == AgentChatRole.Tool
                 && entry.ToolUseId is { Length: > 0 } useId
@@ -93,13 +120,41 @@
                 Id = item.Sequence.ToString(),
                 ToolName = entry.ToolName ?? "tool",
                 Subtitle = entry.Label ?? "",
-                Input = running ? entry.Content : "",
+                Input = running ? ToolInputOf(entry) : "",
                 Output = running ? "" : entry.Content,
                 State = ToolStateOf(entry.ToolState)
             });
         }
 
         return message;
+    }
+
+    /// <summary>Hidden by default: permission narration and plan-bookkeeping tool calls.</summary>
+    private static bool IsDetailEntry(AgentChatEntry entry)
+        => (entry.Role == AgentChatRole.System
+            && string.Equals(entry.Label, "Permission", StringComparison.OrdinalIgnoreCase))
+           || (entry.Role == AgentChatRole.Tool
+               && BookkeepingTools.Contains(entry.ToolName, StringComparer.OrdinalIgnoreCase));
+
+    /// <summary>Bash runs constantly — its card shows the command itself, not the input JSON.</summary>
+    private static string ToolInputOf(AgentChatEntry entry)
+    {
+        if (!string.Equals(entry.ToolName, "Bash", StringComparison.OrdinalIgnoreCase))
+            return entry.Content;
+        try
+        {
+            var input = JsonSerializer.Deserialize<JsonElement>(entry.Content);
+            if (input.ValueKind == JsonValueKind.Object
+                && input.TryGetProperty("command", out var command)
+                && command.ValueKind == JsonValueKind.String
+                && command.GetString() is { Length: > 0 } text)
+                return text;
+        }
+        catch (JsonException)
+        {
+            // fall through to the raw content
+        }
+        return entry.Content;
     }
 
     private static MessageRole RoleOf(AgentChatRole role) => role switch

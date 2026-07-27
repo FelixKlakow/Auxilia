@@ -74,7 +74,9 @@ builder.Services.AddViewRenderer<AgentChatRenderer>(AgentChatEntry.RendererKey);
 
 var app = builder.Build();
 
-app.UseStaticFiles();
+// Fingerprinted static assets (resolved via @Assets[...]) — a changed stylesheet gets a new
+// URL, so browser caches can never serve a stale one.
+app.MapStaticAssets();
 app.UseAntiforgery();
 
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();

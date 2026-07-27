@@ -1390,3 +1390,14 @@ select { cursor: pointer; }
 .agent-chat-host .bav-message-tool .bav-bubble-plain {
     display: none;
 }
+
+.agent-chat-filter {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.82rem;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+}
