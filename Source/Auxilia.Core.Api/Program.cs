@@ -36,8 +36,9 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddPlatformEntity<CoreRunConfigurationRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreConnectorRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreRunRecord>(platformData);
+builder.Services.AddPlatformEntity<CoreRunViewRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreRunResolutionRecord>(platformData);
-builder.Services.AddPlatformEntity<CoreWorkflowSchemaRecord>(platformData);
+builder.Services.AddPlatformEntity<CoreWorkflowTypeRecord>(platformData);
 builder.Services.AddPlatformEntity<DelegatedUserTokenRecord>(platformData);
 builder.Services.AddPlatformEntity<AuditRecord>(platformData);
 // Provider catalog (Core-owned governance): the registered slot-handler plugins and their curation.
@@ -81,7 +82,12 @@ builder.Services.AddRateLimiter(options =>
 });
 
 // --- Core services ---
+builder.Services.AddHttpClient();
+builder.Services.AddSingleton<WorkflowTypeRegistryService>();
+builder.Services.AddSingleton<WorkflowTypeApprovalPipeline>();
+builder.Services.AddSingleton<IWorkflowTypeApprovalHandler, EmailApprovalNotificationHandler>();
 builder.Services.AddSingleton<ConnectorService>();
+builder.Services.AddSingleton<ConnectorBrowseService>();
 builder.Services.AddSingleton<ConnectorAccessPolicy>();
 builder.Services.AddSingleton<DelegatedTokenStore>();
 builder.Services.AddSingleton<RunConfigurationService>();
@@ -97,6 +103,7 @@ builder.Services.AddSingleton<Auxilia.Workflows.Messaging.WorkflowStatusPublishe
 builder.Services.AddSingleton<RunnerLivenessTracker>();
 builder.Services.AddSingleton<FailoverMonitor>();
 builder.Services.AddHostedService<RunTrackingService>();
+builder.Services.AddHostedService<RunViewTrackingService>();
 builder.Services.AddHostedService<WorkflowSchemaTrackingService>();
 builder.Services.AddHostedService<RunStreamPublisher>();
 // Resolve the same FailoverMonitor instance for the hosted lifecycle (so tests can drive ScanOnceAsync).
@@ -120,6 +127,12 @@ await app.Services.GetRequiredService<GovernanceSeeder>().SeedAsync(app.Lifetime
     var coreSettings = app.Services.GetRequiredService<IOptions<CoreApiSettings>>().Value;
     foreach (var seed in coreSettings.StaticConfigurations)
         await configurations.EnsureAsync(seed, app.Lifetime.ApplicationStopping);
+
+    // Statically configured workflow types register as Active: the host configuration IS the
+    // operator's trust decision (mirrors the static-configuration seeding above).
+    var workflowRegistry = app.Services.GetRequiredService<WorkflowTypeRegistryService>();
+    foreach (var seed in coreSettings.StaticWorkflowTypes)
+        await workflowRegistry.EnsureSeededAsync(seed, app.Lifetime.ApplicationStopping);
 }
 
 app.UseAuthentication();
@@ -256,6 +269,14 @@ app.MapPost("/api/runs", async (
     {
         return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status403Forbidden);
     }
+    catch (KeyNotFoundException ex)
+    {
+        return Results.NotFound(new { error = ex.Message });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
 }).RequireAuthorization();
 
 app.MapGet("/api/runs", async (
@@ -323,6 +344,95 @@ app.MapGet("/api/runs/{id:guid}/stream", async (
     }
 }).RequireAuthorization();
 
+// Deliver-input (the steer-back half of the loop): an authorized caller posts an OPAQUE payload
+// into a running workflow. The Core authorizes + audits and publishes it to the instance's
+// dedicated INPUT queue — it never interprets the payload (no decision semantics here).
+app.MapPost("/api/runs/{id:guid}/inputs", async (
+        Guid id, ProvideRunInput request, HttpContext http, IPolicyEngine policy,
+        Auxilia.UniversalDataAccess.IDataAccess<CoreRunRecord> runStore,
+        IMessageBusClient bus, AuditLog audit, CancellationToken ct) =>
+{
+    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+        return Results.Unauthorized();
+    var decision = await policy.EvaluateAsync(
+        new PolicyContext(principalId, PermissionActions.RunProvideInput, id.ToString()), ct);
+    if (!decision.Allowed)
+        return Results.Json(new { error = decision.Reason }, statusCode: StatusCodes.Status403Forbidden);
+
+    // The caller may hold the dispatch CommandId (what run-accept returned) or the instance id.
+    var run = await runStore.ReadAsync(id, ct)
+              ?? (await runStore.ReadAsync(ct)).FirstOrDefault(r => r.CommandId == id);
+    if (run is null)
+        return Results.NotFound(new { error = "run not found" });
+    if (CoreRunStates.IsTerminal(run.State))
+        return Results.BadRequest(new { error = $"the run has ended ({run.State}) — it accepts no input" });
+
+    await bus.PublishAsync(
+        Auxilia.Workflows.Messaging.WorkflowQueues.InputQueueFor(run.Id),
+        new Auxilia.Workflows.Messaging.Messages.WorkflowInputMessage(
+            run.Id, request.PayloadJson, DateTimeOffset.UtcNow), ct);
+    await audit.AppendAsync(
+        principalId.ToString(), PermissionActions.RunProvideInput, run.Id.ToString(), "delivered", ct: ct);
+    return Results.Accepted($"/api/runs/{run.Id}");
+}).RequireAuthorization();
+
+// Clear run history: deletes TERMINAL run records and their persisted view items. With
+// includeStale=true it also removes non-terminal ZOMBIES — records whose terminal event was
+// missed (e.g. Core downtime) and that have not updated for staleMinutes; genuinely live runs
+// keep receiving status events and therefore never look stale.
+app.MapDelete("/api/runs", async (
+        HttpContext http, IPolicyEngine policy,
+        Auxilia.UniversalDataAccess.IDataAccess<CoreRunRecord> runStore,
+        Auxilia.UniversalDataAccess.IDataAccess<CoreRunViewRecord> viewStore,
+        AuditLog audit, TimeProvider clock, CancellationToken ct,
+        bool includeStale = false, int staleMinutes = 30) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.WorkflowConfigurationManage, ct) is { } fail)
+        return fail;
+    var staleCutoff = clock.GetUtcNow() - TimeSpan.FromMinutes(Math.Max(1, staleMinutes));
+    var doomed = (await runStore.ReadAsync(ct))
+        .Where(r => CoreRunStates.IsTerminal(r.State)
+                    || (includeStale && r.UpdatedUtc < staleCutoff))
+        .ToList();
+    foreach (var run in doomed)
+    {
+        foreach (var view in (await viewStore.ReadAsync(ct)).Where(v => v.RunId == run.Id).ToList())
+            await viewStore.RemoveAsync(view.Id, ct);
+        await runStore.RemoveAsync(run.Id, ct);
+    }
+    await audit.AppendAsync(
+        CoreClaims.PrincipalIdOf(http.User)!.Value.ToString("D"), "run.clear-history",
+        "runs", "cleared", $"{{\"deleted\":{doomed.Count},\"includeStale\":{includeStale.ToString().ToLowerInvariant()}}}", ct);
+    return Results.Ok(new { deleted = doomed.Count });
+}).RequireAuthorization();
+
+// The read-later counterpart of the live stream: a run's persisted view items (outputs), so a
+// client can inspect results after the run finished. Gated like observing the live stream.
+app.MapGet("/api/runs/{id:guid}/views", async (
+        Guid id, string? view, HttpContext http, IPolicyEngine policy,
+        Auxilia.UniversalDataAccess.IDataAccess<CoreRunViewRecord> views,
+        Auxilia.UniversalDataAccess.IDataAccess<CoreRunRecord> runStore,
+        CancellationToken ct, int skip = 0, int take = 200) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.RunObserve, ct) is { } fail)
+        return fail;
+    // Callers may hold the DISPATCH id (RunAccepted.RunId) — resolve to the instance id like
+    // every other run read (the runner records views under its own instance id).
+    var runId = id;
+    if (await runStore.ReadAsync(id, ct) is null
+        && (await runStore.ReadAsync(ct)).FirstOrDefault(r => r.CommandId == id) is { } aliased)
+        runId = aliased.Id;
+    var all = (await views.ReadAsync(ct)).Where(v => v.RunId == runId);
+    if (!string.IsNullOrWhiteSpace(view))
+        all = all.Where(v => string.Equals(v.ViewName, view, StringComparison.Ordinal));
+    var ordered = all.OrderBy(v => v.TimestampUtc).ThenBy(v => v.Sequence).ToList();
+    var effectiveTake = take <= 0 ? 200 : take;
+    var page = ordered.Skip(skip).Take(effectiveTake)
+        .Select(v => new RunViewItem(v.ViewName, v.Sequence, v.PayloadJson, v.TimestampUtc))
+        .ToList();
+    return Results.Ok(new PagedResult<RunViewItem>(page, ordered.Count, skip, effectiveTake));
+}).RequireAuthorization();
+
 // --- Internal: runner <-> Core just-in-time slot-credential resolution ---
 // Authorized by the run-scoped resolution token (header), NOT a principal API key — the runner
 // can resolve only slots of runs the Core dispatched to it. Secrets are resolved and encrypted
@@ -358,6 +468,37 @@ app.MapGet("/api/configurations/{id:guid}", async (
         Guid id, RunConfigurationService svc, CancellationToken ct) =>
         await svc.GetAsync(id, ct) is { } config ? Results.Ok(config) : Results.NotFound())
     .RequireAuthorization();
+
+// Update a stored configuration (config editors' permission). Null fields stay unchanged. Audited.
+app.MapPut("/api/configurations/{id:guid}", async (
+        Guid id, UpdateRunConfiguration request, HttpContext http, IPolicyEngine policy,
+        RunConfigurationService svc, AuditLog audit, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.WorkflowConfigurationManage, ct) is { } fail)
+        return fail;
+    if (await svc.UpdateAsync(id, request, ct) is not { } updated)
+        return Results.NotFound();
+    await audit.AppendAsync(
+        CoreClaims.PrincipalIdOf(http.User)!.Value.ToString("D"),
+        "workflow-configuration.updated", id.ToString(), updated.Name, ct: ct);
+    return Results.Ok(updated);
+}).RequireAuthorization();
+
+// Delete a stored configuration permanently (config editors' permission). Audited.
+app.MapDelete("/api/configurations/{id:guid}", async (
+        Guid id, HttpContext http, IPolicyEngine policy, RunConfigurationService svc, AuditLog audit,
+        CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.WorkflowConfigurationManage, ct) is { } fail)
+        return fail;
+    if (await svc.GetAsync(id, ct) is not { } config)
+        return Results.NotFound();
+    await svc.DeleteAsync(id, ct);
+    await audit.AppendAsync(
+        CoreClaims.PrincipalIdOf(http.User)!.Value.ToString("D"),
+        "workflow-configuration.deleted", id.ToString(), config.Name, ct: ct);
+    return Results.NoContent();
+}).RequireAuthorization();
 
 app.MapPost("/api/configurations/{id:guid}/run", async (
         Guid id, Guid? onBehalfOf, [FromBody] IReadOnlyDictionary<string, string>? context,
@@ -407,6 +548,10 @@ app.MapPost("/api/configurations/{id:guid}/run", async (
     {
         return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status403Forbidden);
     }
+    catch (KeyNotFoundException ex)
+    {
+        return Results.NotFound(new { error = ex.Message });
+    }
     catch (InvalidOperationException ex)
     {
         return Results.BadRequest(new { error = ex.Message });
@@ -438,6 +583,35 @@ app.MapGet("/api/provider-catalog", async (
         return fail;
     return Results.Ok(await svc.QueryAsync(
         new ProviderCatalogQuery(available, skip, take == 0 ? 50 : take), ct));
+}).RequireAuthorization();
+
+app.MapPost("/api/provider-catalog", async (
+        RegisterSlotProvider request, HttpContext http, IPolicyEngine policy,
+        ProviderCatalogService svc, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ProviderCatalogManage, ct) is { } fail)
+        return fail;
+    try
+    {
+        return Results.Ok(await svc.RegisterAsync(
+            CoreClaims.PrincipalIdOf(http.User)!.Value.ToString("D"), request, ct));
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+}).RequireAuthorization();
+
+app.MapDelete("/api/provider-catalog/{providerType}", async (
+        string providerType, HttpContext http, IPolicyEngine policy,
+        ProviderCatalogService svc, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ProviderCatalogManage, ct) is { } fail)
+        return fail;
+    return await svc.DeleteAsync(
+        CoreClaims.PrincipalIdOf(http.User)!.Value.ToString("D"), providerType, ct)
+        ? Results.NoContent()
+        : Results.NotFound();
 }).RequireAuthorization();
 
 app.MapPost("/api/provider-catalog/{providerType}/availability", async (
@@ -479,16 +653,17 @@ app.MapPost("/api/provider-catalog/{providerType}/settings", async (
     }
 }).RequireAuthorization();
 
-// --- Workflow types + schemas (Core-owned schema registry, mirrored from the runner over the bus) ---
-// The config editor reads these to drive "pick a workflow → bind its slots to connectors". Gated by
-// workflow-configuration.manage — the permission held by operators/admins who build configurations.
+// --- Workflow-type registry (ARCHITECTURE §7: the deploy-time trust gate) ---
+// Types are registered permanently with their signed package coordinate; only Active types run.
+// Reading is gated by workflow-configuration.manage (the config editor's permission); registering
+// by workflow-type.manage; approving/denying by workflow-type.sign (the signing authority).
 app.MapGet("/api/workflow-types", async (
-        HttpContext http, IPolicyEngine policy, WorkflowSchemaReadService svc,
+        string? status, HttpContext http, IPolicyEngine policy, WorkflowSchemaReadService svc,
         CancellationToken ct, int skip = 0, int take = 50) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.WorkflowConfigurationManage, ct) is { } fail)
         return fail;
-    return Results.Ok(await svc.QueryTypesAsync(new WorkflowTypeQuery(skip, take == 0 ? 50 : take), ct));
+    return Results.Ok(await svc.QueryTypesAsync(new WorkflowTypeQuery(skip, take == 0 ? 50 : take, status), ct));
 }).RequireAuthorization();
 
 app.MapGet("/api/workflow-types/{type}/schema", async (
@@ -498,6 +673,88 @@ app.MapGet("/api/workflow-types/{type}/schema", async (
         return fail;
     return await svc.GetSchemaAsync(type, ct) is { } schema ? Results.Ok(schema) : Results.NotFound();
 }).RequireAuthorization();
+
+app.MapPost("/api/workflow-types", async (
+        RegisterWorkflowTypeRequest request, HttpContext http, IPolicyEngine policy,
+        WorkflowTypeRegistryService registry, WorkflowTypeApprovalPipeline approvalPipeline,
+        CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.WorkflowTypeManage, ct) is { } fail)
+        return fail;
+    var outcome = await registry.RegisterAsync(request, CoreClaims.PrincipalIdOf(http.User), ct);
+    if (outcome.Registration is not { } registration)
+        return Results.BadRequest(new { error = outcome.Error });
+    // A pending registration enters the async approval pipeline (notify / auto-check); the
+    // response is immediate — the decision lands later, from a handler or a human signer.
+    if (registration.Status == WorkflowTypeStatus.Pending)
+        approvalPipeline.KickOff(registration.WorkflowType);
+    return Results.Ok(registration);
+}).RequireAuthorization();
+
+app.MapGet("/api/workflow-types/{type}/registration", async (
+        string type, HttpContext http, IPolicyEngine policy, WorkflowTypeRegistryService registry,
+        CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.WorkflowTypeManage, ct) is { } fail)
+        return fail;
+    return await registry.GetRegistrationAsync(type, ct) is { } registration
+        ? Results.Ok(registration)
+        : Results.NotFound();
+}).RequireAuthorization();
+
+app.MapDelete("/api/workflow-types/{type}", async (
+        string type, HttpContext http, IPolicyEngine policy, WorkflowTypeRegistryService registry,
+        CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.WorkflowTypeManage, ct) is { } fail)
+        return fail;
+    return await registry.UnregisterAsync(type, CoreClaims.PrincipalIdOf(http.User), ct)
+        ? Results.NoContent()
+        : Results.NotFound();
+}).RequireAuthorization();
+
+app.MapPost("/api/workflow-types/{type}/approve", async (
+        string type, HttpContext http, IPolicyEngine policy, WorkflowTypeRegistryService registry,
+        CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.WorkflowTypeSign, ct) is { } fail)
+        return fail;
+    var outcome = await registry.ApproveAsync(
+        type, CoreClaims.PrincipalIdOf(http.User)!.Value.ToString("D"), ct);
+    return outcome.Registration is { } registration
+        ? Results.Ok(registration)
+        : Results.NotFound(new { error = outcome.Error });
+}).RequireAuthorization();
+
+app.MapPost("/api/workflow-types/{type}/deny", async (
+        string type, DenyWorkflowTypeRequest request, HttpContext http, IPolicyEngine policy,
+        WorkflowTypeRegistryService registry, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.WorkflowTypeSign, ct) is { } fail)
+        return fail;
+    var outcome = await registry.DenyAsync(
+        type, request.Reason, CoreClaims.PrincipalIdOf(http.User)!.Value.ToString("D"), ct);
+    return outcome.Registration is { } registration
+        ? Results.Ok(registration)
+        : Results.NotFound(new { error = outcome.Error });
+}).RequireAuthorization();
+
+// Core-stored package download for the runner. Authorized by the run-scoped resolution token
+// (same trust as resolve-slot), NOT a principal — the runner can fetch only packages of runs the
+// Core dispatched to it, and the URL is minted per dispatch by the registry.
+app.MapGet("/api/workflow-types/{type}/package", async (
+        string type, Guid runId, string token, WorkflowTypeRegistryService registry,
+        Auxilia.UniversalDataAccess.IDataAccess<CoreRunResolutionRecord> resolutions,
+        CancellationToken ct) =>
+{
+    var resolution = await resolutions.ReadAsync(runId, ct);
+    if (resolution is null || resolution.ResolutionToken != token)
+        return Results.Json(new { error = "invalid resolution token" }, statusCode: StatusCodes.Status403Forbidden);
+    var package = await registry.ReadStoredPackageAsync(type, ct);
+    return package is null
+        ? Results.NotFound()
+        : Results.File(package, "application/zip", $"{type}.workflow.zip");
+});
 
 // --- Connectors ---
 app.MapPost("/api/connectors", async (
@@ -521,6 +778,70 @@ app.MapGet("/api/connectors", async (
 app.MapGet("/api/connectors/{id:guid}", async (Guid id, ConnectorService svc, CancellationToken ct) =>
         await svc.GetAsync(id, ct) is { } connector ? Results.Ok(connector) : Results.NotFound())
     .RequireAuthorization();
+
+// Update a connector in place (owner, or a connector manager): rename and/or refresh settings —
+// provided values are upserted key-by-key, so a rotated credential is fixed without re-creating
+// the connector. Audited; values are never echoed back.
+app.MapPut("/api/connectors/{id:guid}", async (
+        Guid id, UpdateConnector request, HttpContext http, IPolicyEngine policy,
+        ConnectorService svc, AuditLog audit, CancellationToken ct) =>
+{
+    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+        return Results.Unauthorized();
+    if (await svc.GetAsync(id, ct) is not { } connector)
+        return Results.NotFound();
+    if (connector.OwnerPrincipalId != principalId
+        && await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.SlotConfigWrite, ct) is { } fail)
+        return fail;
+    var updated = await svc.UpdateAsync(id, request, ct);
+    await audit.AppendAsync(
+        principalId.ToString(), "connector.updated", id.ToString(),
+        string.Join(", ", (request.Settings ?? new Dictionary<string, string>()).Keys), ct: ct);
+    return Results.Ok(updated);
+}).RequireAuthorization();
+
+// Delete a connector permanently (owner, or a connector manager). Audited — configurations that
+// bind it will fail to dispatch afterwards, which the caller is warned about client-side.
+app.MapDelete("/api/connectors/{id:guid}", async (
+        Guid id, HttpContext http, IPolicyEngine policy, ConnectorService svc, AuditLog audit,
+        CancellationToken ct) =>
+{
+    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+        return Results.Unauthorized();
+    if (await svc.GetAsync(id, ct) is not { } connector)
+        return Results.NotFound();
+    if (connector.OwnerPrincipalId != principalId
+        && await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.SlotConfigWrite, ct) is { } fail)
+        return fail;
+    await svc.DeleteAsync(id, ct);
+    await audit.AppendAsync(principalId.ToString(), "connector.deleted", id.ToString(), connector.Name, ct: ct);
+    return Results.NoContent();
+}).RequireAuthorization();
+
+// Browse live data with a connector's credential — the secret stays Core-side; the caller only
+// gets names. Gated by the SAME eligibility check as binding the connector into a run.
+app.MapPost("/api/connectors/{id:guid}/browse", async (
+        Guid id, BrowseConnector request, HttpContext http, ConnectorAccessPolicy access,
+        ConnectorBrowseService browse, CancellationToken ct) =>
+{
+    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+        return Results.Unauthorized();
+    if (!await access.CanUseAsync(id, principalId, ct))
+        return Results.Json(new { error = "you are not eligible to use this connector" },
+            statusCode: StatusCodes.Status403Forbidden);
+    try
+    {
+        return Results.Ok(await browse.BrowseAsync(id, request, ct));
+    }
+    catch (NotSupportedException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+    catch (KeyNotFoundException)
+    {
+        return Results.NotFound();
+    }
+}).RequireAuthorization();
 
 // Grant a personal connector to principals / directory groups (owner, or a connector manager).
 app.MapPost("/api/connectors/{id:guid}/grants", async (

@@ -16,13 +16,17 @@ public sealed class CoreClientTests : CoreApiComponentTestBase
     private const string DummyType = "simple-git-commit-workflow";
     private const string DummyImage = "docker://auxilia-dummy-workflows:system-test";
 
+    [SetUp]
+    public Task RegisterDummyTypeAsync() => RegisterActiveTypeAsync(CreateClient(), DummyType, DummyImage);
+
+
     [Test]
     public async Task Client_CreateConfigurationAndRun_DispatchesThroughCore()
     {
         ICoreClient core = new CoreClient(CreateClient());
 
         var config = await core.CreateConfigurationAsync(new CreateRunConfiguration(
-            "client-" + Guid.NewGuid().ToString("N"), DummyType, DummyImage,
+            "client-" + Guid.NewGuid().ToString("N"), DummyType,
             new Dictionary<string, string> { ["WORKFLOW_NAME"] = DummyType }));
 
         var accepted = await core.RunConfigurationAsync(config.Id);

@@ -41,7 +41,6 @@ public sealed class ClaudeCodeWorkflowSystemTests
             "/api/runs",
             new RunRequest(
                 EndToEndEnvironment.ClaudeWorkflowType,
-                EndToEndEnvironment.ClaudeWorkflowPackageUri,
                 new Dictionary<string, string>
                 {
                     ["Title"] = "Leave a note in the workspace",

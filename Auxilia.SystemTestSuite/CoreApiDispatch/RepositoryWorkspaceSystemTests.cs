@@ -6,12 +6,14 @@ using Auxilia.Workflows.Messaging.Messages;
 namespace Auxilia.SystemTestSuite.CoreApiDispatch;
 
 /// <summary>
-/// The per-run repository path end to end on real Docker: a connector holds ONLY the git credential
-/// (not the repo); a run supplies the repo URL and references that connector. The Core resolves the
-/// credential just-in-time to the runner, which clones the AUTHENTICATED repo — a wrong or missing
-/// credential would get a 401 — and bind-mounts it. The no-slot verifier workflow reaches
-/// <see cref="WorkflowState.Success"/> only if the repo's README.md is present in the workspace, so
-/// Success proves the whole chain: connector-auth resolution, credential injection, and clone+mount.
+/// The generic workspace-mount path end to end on real Docker: a connector holds ONLY the git
+/// credential (not the repo); the run binds a slot to a MOUNT provider (registered in the catalog
+/// with role-tagged settings) that references that connector. The Core translates the binding to a
+/// workspace mount as pure data — key→role — and the runner resolves the credential just-in-time,
+/// clones the AUTHENTICATED repo (a wrong or missing credential would get a 401), and bind-mounts
+/// it. The no-slot verifier workflow reaches <see cref="WorkflowState.Success"/> only if the repo's
+/// README.md is present in the workspace, so Success proves the whole chain: catalog role mapping,
+/// connector-auth resolution, credential injection, and clone+mount.
 /// </summary>
 [TestFixture]
 [Category("System")]
@@ -24,7 +26,25 @@ public sealed class RepositoryWorkspaceSystemTests
     [CancelAfter(180_000)]
     public async Task AuthenticatedRepository_ResolvedAndClonedThroughCore_ToSuccess(CancellationToken cancellationToken)
     {
-        // 1. Configure git auth: a connector holding ONLY the credential.
+        // 1. Register the mount provider: its settings carry the ROLES the runner's git
+        //    materializer understands — the Core only maps keys to roles, it interprets nothing.
+        var registerProvider = new RegisterSlotProvider(
+            ProviderType: "git-repository",
+            Category: "workspace",
+            Description: "A git repository materialized into the run's workspace.",
+            Contracts: ["Auxilia.Workflows.SourceControl.ISourceControlAccess"],
+            Settings:
+            [
+                new RegisterProviderSetting("CloneUrl", "Repository", "Text", Required: true, Role: "clone-url"),
+                new RegisterProviderSetting("Branch", "Branch", "Text", Role: "branch"),
+                new RegisterProviderSetting("NoCache", "Fresh clone per run", "Boolean", Role: "no-cache"),
+            ],
+            RequiredCredentialContract: "git-credential",
+            MountsIntoWorkspace: true);
+        var providerResp = await Client.PostAsJsonAsync("/api/provider-catalog", registerProvider, cancellationToken);
+        providerResp.EnsureSuccessStatusCode();
+
+        // 2. Configure git auth: a connector holding ONLY the credential.
         var createConnector = new CreateConnector(
             Name: "git-auth-" + Guid.NewGuid().ToString("N"),
             ProviderType: "azure-devops",
@@ -40,28 +60,32 @@ public sealed class RepositoryWorkspaceSystemTests
 
         await using var success = await SubscribeSuccessAsync(cancellationToken);
 
-        // 2. Start a run against exactly that repo, referencing the auth connector for its credential.
+        // 3. Start a run binding the slot to that repo through the mount provider — inline
+        //    non-secret settings plus the credential connector, the ONE generic binding shape.
+        //    (NoCache: clone straight into the run workspace. The warm-cache copy trips over
+        //    git's read-only pack .idx on Docker Desktop's bind mount — a host-FS quirk, not a
+        //    product issue: WorkspaceManagerTests proves the copy path on a normal filesystem.)
         var run = new RunRequest(
             WorkflowType: CoreApiDispatchEnvironment.RepositoryWorkflowType,
-            PackageUri: CoreApiDispatchEnvironment.DummyPackageUri,
             Context: new Dictionary<string, string>
             {
                 ["WORKFLOW_NAME"] = CoreApiDispatchEnvironment.RepositoryWorkflowType,
                 ["EXPECTED_REPO_FILE"] = "repos/main/README.md",
                 ["EXPECTED_REPO_CONTENT"] = "auxilia system test repo"
             },
-            Repositories:
+            SlotBindings:
             [
-                // NoCache: clone straight into the run workspace. (The warm-cache copy trips over
-                // git's read-only pack .idx on Docker Desktop's bind mount — a host-FS quirk, not a
-                // product issue: WorkspaceManagerTests proves the copy path on a normal filesystem.)
-                new RepositorySpec("main", CoreApiDispatchEnvironment.RepositoryCloneUrl,
-                    AuthConnectorId: connector!.Id, NoCache: true)
+                new SlotBinding("main", ProviderType: "git-repository", ConnectorId: connector!.Id,
+                    Settings: new Dictionary<string, string>
+                    {
+                        ["CloneUrl"] = CoreApiDispatchEnvironment.RepositoryCloneUrl,
+                        ["NoCache"] = "true"
+                    })
             ]);
         var runResp = await Client.PostAsJsonAsync("/api/runs", run, cancellationToken);
         runResp.EnsureSuccessStatusCode();
 
-        // 3. Success requires the authenticated clone to have landed in the mounted workspace.
+        // 4. Success requires the authenticated clone to have landed in the mounted workspace.
         var state = await success.Task.WaitAsync(TimeSpan.FromSeconds(150), cancellationToken);
         Assert.That(state.State, Is.EqualTo(WorkflowState.Success),
             $"Repository run ended {state.State}. Error: {state.ErrorMessage}");

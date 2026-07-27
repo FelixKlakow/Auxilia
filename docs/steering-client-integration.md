@@ -177,6 +177,15 @@ Matches what's shipped and needs no new proxy connectors. **Cost:** the LLM-driv
 
 **My lean:** Model A for the *AI-agent* steering workflow specifically — the whole point of the gate is that we don't fully trust the agent, so keeping the credential Core-side and executing the approved action through the proxy is the coherent choice. Building one real `IResourceConnector` (git push) is the price. **Your call — this is the key security decision.**
 
+> **DECIDED 2026-07-27 (Felix): Model B — scoped JIT push token — plus interception.** The
+> token is injected like every other slot credential, but a `git push` is INTERCEPTED through
+> the agent's permission loop (the same `can_use_tool` gate that covers every tool): the
+> operator approves or denies it as a decision card. Per-action permission modes govern how
+> often the operator is asked — like the edit modes, a session can run "ask me for pushes,
+> auto-approve edits" or fully auto. This per-action-policy model is the template for future
+> consequential actions (deploys, mail, ticket writes). Prerequisite either way: the workspace
+> clone preconfigures the git commit identity so agents stop stalling on it.
+
 ---
 
 ## 5. What must actually be built
@@ -184,9 +193,9 @@ Matches what's shipped and needs no new proxy connectors. **Cost:** the LLM-driv
 **Core (generic, semantics-blind):**
 | # | Addition | Where |
 |---|---|---|
-| 1 | Deliver-input: `POST /api/runs/{id}/inputs` — authorize `run.provide-input` (+ optional SoD), audit, publish `WorkflowSignalMessage`. `ICoreClient.ProvideInputAsync`. Contract in `RunContracts`. | Core.Api + Client + Contracts |
+| 1 | ✅ **Delivered 2026-07-26.** Deliver-input: `POST /api/runs/{id}/inputs` — authorizes `run.provide-input`, audits, publishes `WorkflowInputMessage` to the instance's response queue. `ICoreClient.ProvideInputAsync`; contract `ProvideRunInput` in `RunContracts`. (SoD still open.) | Core.Api + Client + Contracts |
 | 2 | Output-stream: `GET /api/runs/{id}/stream` (SSE) relaying view/status events. `ICoreClient.StreamRunAsync` → `IAsyncEnumerable`. | Core.Api + Client |
-| 3 | P2 receive in the SDK — a workflow-author API to *await an input signal* into the running instance (nothing consumes routed signals into a live run today). | `Auxilia.Workflows` + Core.Runner |
+| 3 | ✅ **Delivered 2026-07-26.** `IWorkflowInputs.ReceiveAsync` — channel-fed from the instance's response-queue subscription, DI-registered by the WorkflowBuilder. Demo: `echo-decision-workflow` (propose → hold → decide → echo) speaking the raw wire protocol. | `Auxilia.Workflows` |
 | 4 | *(Model A only)* one real `IResourceConnector` for git push. | Core.Runner + a connector |
 
 **No** decision store/endpoint/mandate in the Core.

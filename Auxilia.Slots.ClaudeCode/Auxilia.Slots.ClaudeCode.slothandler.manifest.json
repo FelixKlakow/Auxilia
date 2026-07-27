@@ -3,7 +3,7 @@
   "ContentHashBase64": "",
   "SignatureBase64": "",
   "PublicKeyBase64": "",
-  "Contracts": ["Auxilia.ClaudeCode.Workflow.ICodingAgent"],
+  "Contracts": ["Auxilia.Workflows.AiAgent.CodingAgent.ICodingAgent"],
   "Category": "coding-agent",
   "Description": "Runs the Claude Code CLI as the coding agent of a workflow; credentials reach the agent container just-in-time.",
   "Settings": [

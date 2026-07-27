@@ -23,6 +23,10 @@ public sealed class RunConfigurationOnBehalfOfTests : CoreApiComponentTestBase
     private const string DummyType = "simple-git-commit-workflow";
     private const string DummyImage = "docker://auxilia-dummy-workflows:system-test";
 
+    [SetUp]
+    public Task RegisterDummyTypeAsync() => RegisterActiveTypeAsync(CreateClient(), DummyType, DummyImage);
+
+
     private async Task<(HttpClient Client, Guid PrincipalId)> PrincipalWithRolesAsync(params string[] roles)
     {
         var directory = Factory.Services.GetRequiredService<PrincipalDirectory>();
@@ -41,7 +45,7 @@ public sealed class RunConfigurationOnBehalfOfTests : CoreApiComponentTestBase
     {
         var configurations = Factory.Services.GetRequiredService<RunConfigurationService>();
         var config = await configurations.CreateAsync(new CreateRunConfiguration(
-            "cfg-" + Guid.NewGuid().ToString("N"), DummyType, DummyImage,
+            "cfg-" + Guid.NewGuid().ToString("N"), DummyType,
             new Dictionary<string, string> { ["WORKFLOW_NAME"] = DummyType }), CancellationToken.None);
         return config.Id;
     }

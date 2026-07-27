@@ -21,6 +21,9 @@ public static class BuiltInRoles
                 PermissionActions.PolicyAdminister,
                 PermissionActions.ProviderCatalogManage,
                 PermissionActions.AuditRead,
+                // Signing authority: approving/denying workflow-type registrations is deliberately
+                // NOT an Operator permission — operators register, administrators sign.
+                PermissionActions.WorkflowTypeSign,
                 // Administrators can also do everything operators and users can.
                 PermissionActions.WorkflowTypeManage,
                 PermissionActions.SlotConfigWrite,

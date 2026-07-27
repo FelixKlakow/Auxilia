@@ -19,6 +19,9 @@ public sealed class RunnerLivenessTracker
     public IReadOnlyList<Guid> DeadSince(DateTimeOffset cutoff) =>
         _lastSeen.Where(kv => kv.Value < cutoff).Select(kv => kv.Key).ToList();
 
+    /// <summary>True when at least one runner's last beat is at or after <paramref name="cutoff"/>.</summary>
+    public bool AnyAliveSince(DateTimeOffset cutoff) => _lastSeen.Any(kv => kv.Value >= cutoff);
+
     /// <summary>Drops a runner from tracking so its death triggers failover at most once.</summary>
     public void Forget(Guid serviceId) => _lastSeen.TryRemove(serviceId, out _);
 }

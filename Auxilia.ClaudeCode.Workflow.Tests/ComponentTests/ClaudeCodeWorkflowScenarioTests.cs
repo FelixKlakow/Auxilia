@@ -1,5 +1,5 @@
 using System.Text.Json;
-using Auxilia.ClaudeCode.Workflow;
+using Auxilia.Workflows.AiAgent.CodingAgent;
 using Auxilia.Workflows;
 using Auxilia.Workflows.Messaging.Messages;
 using Auxilia.Workflows.Testing;

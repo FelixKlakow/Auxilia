@@ -113,7 +113,7 @@ public class EmailTaskSourceAdapterTests
         _settings = new MailboxTriggerAdapterSettings { CommandQueueName = "workflow.run-commands" };
         _sut = new EmailTaskSourceAdapter(
             _triggers, _instances, _health, _protector, _factory,
-            new BusRunDispatcher(_bus, Options.Create(_settings)),
+            new TestBusRunDispatcher(_bus, _settings),
             new AuditLog(_audit, _time), _time,
             Options.Create(_settings), NullLogger<EmailTaskSourceAdapter>.Instance);
     }
@@ -410,5 +410,24 @@ public class EmailTaskSourceAdapterTests
             $"publish:{_settings.CommandQueueName}",
             $"seen:{mail.Uid}"
         }), "The \\Seen flag may only be set after the dispatch is on the bus.");
+    }
+
+    /// <summary>
+    /// Test dispatcher: publishes a RunWorkflowCommand to the bus (the retired BusRunDispatcher
+    /// shape) so assertions can inspect the dispatched command without a Core in the loop.
+    /// </summary>
+    private sealed class TestBusRunDispatcher(
+        Auxilia.Messaging.IMessageBusClient bus, MailboxTriggerAdapterSettings settings) : ITaskSourceRunDispatcher
+    {
+        public async Task<Guid> DispatchAsync(
+            Guid? configurationId, string? workflowType,
+            IReadOnlyDictionary<string, string> context, Guid? runAsPrincipalId,
+            CancellationToken ct = default)
+        {
+            var command = new RunWorkflowCommand(
+                Guid.NewGuid(), workflowType, null, context, runAsPrincipalId, configurationId);
+            await bus.PublishAsync(settings.CommandQueueName, command, ct);
+            return command.CommandId;
+        }
     }
 }

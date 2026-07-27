@@ -24,6 +24,12 @@ public sealed record CoreRunRecord : IEntity
     public Guid? OwnerServiceId { get; init; }
 
     /// <summary>
+    /// The dispatch <c>CommandId</c> this run was launched from (stamped from the claim status
+    /// event). A dispatch caller only knows this id — endpoints addressing a run accept either.
+    /// </summary>
+    public Guid? CommandId { get; init; }
+
+    /// <summary>
     /// The serialized <see cref="Auxilia.Workflows.Messaging.Messages.RunWorkflowCommand"/> this run was
     /// dispatched from, recovered (via the dispatch <c>CommandId</c>) so an orphaned run can be
     /// re-dispatched once on failover. Present only once the run's claim event has been correlated.

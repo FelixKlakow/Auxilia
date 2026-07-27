@@ -21,6 +21,9 @@ namespace Auxilia.Core.Api.Tests.ComponentTests;
 [Category("Component")]
 public sealed class ProviderCatalogAdminTests : CoreApiComponentTestBase
 {
+    [SetUp]
+    public Task RegisterRunTypeAsync() => RegisterActiveTypeAsync(CreateClient(), "wt", "docker://img");
+
     private static readonly SettingDescriptor[] EmailDescriptors =
     [
         new("ImapHost", "IMAP host", SettingKind.Text, Required: true),
@@ -118,6 +121,33 @@ public sealed class ProviderCatalogAdminTests : CoreApiComponentTestBase
         var client = await ClientForRolesAsync(role);
         var response = await client.GetAsync("/api/provider-catalog");
         Assert.That(response.StatusCode, Is.EqualTo(expected));
+    }
+
+    [Test]
+    public async Task RegisterProvider_ViaApi_SurfacesDescriptorsWithConnectFlow()
+    {
+        var client = CreateClient();
+        var register = await client.PostAsJsonAsync("/api/provider-catalog", new RegisterSlotProvider(
+            "claude-code-cli", "coding-agent", "Runs the Claude Code CLI.",
+            ["Auxilia.Workflows.AiAgent.CodingAgent.ICodingAgent"],
+            [
+                new RegisterProviderSetting("OAuthToken", "Claude account", "Secret",
+                    Required: false, HelpText: "Connected Claude account.", ConnectFlow: "anthropic-claude"),
+                new RegisterProviderSetting("ApiKey", "Anthropic API key (fallback)", "Secret"),
+            ]));
+        Assert.That(register.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        var page = await client.GetFromJsonAsync<PagedResult<ProviderCatalogEntry>>("/api/provider-catalog");
+        var entry = page!.Items.Single(e => e.ProviderType == "claude-code-cli");
+        Assert.Multiple(() =>
+        {
+            Assert.That(entry.Available, Is.False, "registration never grants availability (deny-by-default)");
+            Assert.That(entry.Category, Is.EqualTo("coding-agent"));
+            var oauth = entry.Descriptors.Single(d => d.Key == "OAuthToken");
+            Assert.That(oauth.Kind, Is.EqualTo("Secret"));
+            Assert.That(oauth.ConnectFlow, Is.EqualTo("anthropic-claude"),
+                "the one-click connect flow must survive into the catalog DTO");
+        });
     }
 
     [Test]

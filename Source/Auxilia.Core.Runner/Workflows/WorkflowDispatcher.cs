@@ -197,6 +197,32 @@ public sealed class WorkflowDispatcher(
                 pluginFiles.Count, workflowType,
                 string.Join(", ", pluginFiles.Select(f => f.DllPath)));
 
+        // Resolve environment-capability layers (the runner-owned side of the environment
+        // catalog: capability id → Dockerfile fragment). A capability this runner has no layer
+        // recipe for fails pre-flight — never launch with a silently wrong environment.
+        var environmentLayers = new List<string>();
+        foreach (var capability in (command.EnvironmentCapabilities ?? []).Distinct())
+        {
+            if (!launcherSettings.Value.EnvironmentLayers.TryGetValue(capability, out var fragmentPath)
+                || !File.Exists(fragmentPath))
+            {
+                var reason = $"run selects environment capability '{capability}' this runner has no layer for";
+                logger.LogWarning(
+                    "Dispatch rejected: {Reason}. CommandId={CommandId}", reason, command.CommandId);
+                await auditLog.AppendAsync(
+                    "steering-instance", "workflow.dispatch.rejected",
+                    instanceId.ToString(), reason, ct: ct);
+                await FailPreFlightAsync(instanceId, workflowType, reason, ct);
+                return;
+            }
+            environmentLayers.Add(await File.ReadAllTextAsync(fragmentPath, ct));
+        }
+        if (environmentLayers.Count > 0)
+            logger.LogInformation(
+                "Resolved {Count} environment layer(s) for {WorkflowType}: {Capabilities}",
+                environmentLayers.Count, workflowType,
+                string.Join(", ", command.EnvironmentCapabilities!.Distinct()));
+
         // Effective network policy (ARCHITECTURE §10): manifest baseline (last stored schema)
         // merged with run-configuration extras, clamped by platform policy, audited per run.
         var schema = await schemaStore.GetSchemaAsync(workflowType, ct);
@@ -211,22 +237,29 @@ public sealed class WorkflowDispatcher(
                 note = networkPolicy.Note
             }), ct);
 
-        // Per-run repository workspace (ARCHITECTURE §9): repos declared in the stored schema plus
-        // per-run ones supplied on the command are prepared by the Workspace Manager and bind-mounted
-        // at /workspace. A per-run repo's auth (when present) is resolved from the Core just-in-time
-        // here — the credential is injected into the clone URL, used to clone, and never enters the
-        // container (the Workspace Manager strips it from the mounted copy).
+        // Workspace mounts (ARCHITECTURE §9): repos declared in the stored schema plus the run's
+        // generic workspace-mount bindings are prepared by the Workspace Manager and bind-mounted
+        // at /workspace. Mount settings arrive keyed by the provider's declared roles — THIS is the
+        // plane that interprets them (WorkspaceMountRoles). A mount's auth (when present) is
+        // resolved from the Core just-in-time here — the credential is injected into the clone URL,
+        // used to clone, and never enters the container (the Workspace Manager strips it).
         string? workspaceRoot = null;
         var repositories = (schema?.Repositories ?? []).ToList();
-        foreach (var repo in command.Repositories ?? [])
+        foreach (var mount in command.WorkspaceMounts ?? [])
         {
-            var cloneUrl = repo.CloneUrl;
-            if (repo.AuthSlotName is { } authSlotName)
+            if (!mount.SettingsByRole.TryGetValue(WorkspaceMountRoles.CloneUrl, out var cloneUrl)
+                || string.IsNullOrWhiteSpace(cloneUrl))
+            {
+                await FailPreFlightAsync(instanceId, workflowType,
+                    $"workspace mount '{mount.MountId}' ({mount.ProviderType}) declares no clone source", ct);
+                return;
+            }
+            if (mount.AuthSlotName is { } authSlotName)
             {
                 if (string.IsNullOrEmpty(command.ResolutionToken))
                 {
                     await FailPreFlightAsync(instanceId, workflowType,
-                        $"repository '{repo.Id}' requires authentication but the run carries no resolution token", ct);
+                        $"workspace mount '{mount.MountId}' requires authentication but the run carries no resolution token", ct);
                     return;
                 }
                 var auth = await repositoryAuthResolver.ResolveAsync(
@@ -234,12 +267,34 @@ public sealed class WorkflowDispatcher(
                 if (auth is null)
                 {
                     await FailPreFlightAsync(instanceId, workflowType,
-                        $"could not resolve the credential for repository '{repo.Id}'", ct);
+                        $"could not resolve the credential for workspace mount '{mount.MountId}'", ct);
                     return;
                 }
-                cloneUrl = RepositoryCloneUrl.WithCredentials(repo.CloneUrl, auth.Username, auth.Token);
+                cloneUrl = RepositoryCloneUrl.WithCredentials(cloneUrl, auth.Username, auth.Token);
             }
-            repositories.Add(new RepositoryDeclaration(repo.Id, cloneUrl, repo.Branch, repo.NoCache));
+            var branch = mount.SettingsByRole.GetValueOrDefault(WorkspaceMountRoles.Branch);
+            var noCache = string.Equals(
+                mount.SettingsByRole.GetValueOrDefault(WorkspaceMountRoles.NoCache),
+                "true", StringComparison.OrdinalIgnoreCase);
+            var allowPush = string.Equals(
+                mount.SettingsByRole.GetValueOrDefault(WorkspaceMountRoles.AllowPush),
+                "true", StringComparison.OrdinalIgnoreCase);
+            repositories.Add(new RepositoryDeclaration(
+                mount.MountId, cloneUrl,
+                string.IsNullOrWhiteSpace(branch) ? null : branch, noCache)
+            {
+                AllowPush = allowPush,
+                CommitName = mount.SettingsByRole.GetValueOrDefault(WorkspaceMountRoles.CommitName),
+                CommitEmail = mount.SettingsByRole.GetValueOrDefault(WorkspaceMountRoles.CommitEmail),
+            });
+
+            // Each mount's effective root (clone + optional working directory) is announced to the
+            // container generically; workflows resolve their mounts from these variables.
+            var workingDirectory = mount.SettingsByRole.GetValueOrDefault(WorkspaceMountRoles.WorkingDirectory);
+            var mountRoot = $"/workspace/repos/{mount.MountId}";
+            if (!string.IsNullOrWhiteSpace(workingDirectory))
+                mountRoot = $"{mountRoot}/{workingDirectory.Trim('/', '\\')}";
+            env[$"{WorkflowEnvironmentVariables.WorkspaceMountPrefix}{mount.MountId.ToUpperInvariant()}"] = mountRoot;
         }
         if (repositories.Count > 0)
         {
@@ -269,21 +324,42 @@ public sealed class WorkflowDispatcher(
         var terminalPort = (await schemaStore.GetSchemaAsync(workflowType, ct))?.InteractiveTerminalPort;
         var terminalContainerName = terminalPort is null ? null : $"auxilia-session-{instanceId:N}";
 
+        // A crashed container must fail its run visibly — never leave it stuck in Queued/Running.
+        Func<ContainerExit, Task> onContainerExited =
+            exit => HandleContainerExitAsync(instanceId, workflowType, exit);
+
         // docker:// URI — skip download/verify/extract; use baked image
         if (packageUri.StartsWith("docker://", StringComparison.OrdinalIgnoreCase))
         {
             var imageName = packageUri.Substring("docker://".Length);
-            var launched = await launcher.LaunchAsync(
-                new WorkflowLaunchRequest(string.Empty, env, pluginFiles)
-                {
-                    DockerImageUri = imageName,
-                    OutputDirectoryBind = outputDirectoryBind,
-                    NetworkPolicy = networkPolicy,
-                    WorkspaceDirectoryBind = workspaceRoot,
-                    PublishTerminalPort = terminalPort,
-                    TerminalContainerName = terminalContainerName
-                },
-                ct);
+            WorkflowLaunchResult launched;
+            try
+            {
+                launched = await launcher.LaunchAsync(
+                    new WorkflowLaunchRequest(string.Empty, env, pluginFiles)
+                    {
+                        DockerImageUri = imageName,
+                        EnvironmentLayers = environmentLayers.Count > 0 ? environmentLayers : null,
+                        OutputDirectoryBind = outputDirectoryBind,
+                        NetworkPolicy = networkPolicy,
+                        WorkspaceDirectoryBind = workspaceRoot,
+                        PublishTerminalPort = terminalPort,
+                        TerminalContainerName = terminalContainerName,
+                        OnExited = onContainerExited
+                    },
+                    ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // A launch that never started a container (plugin/image incompatibility, a
+                // failed environment-image build, Docker down) must FAIL the run visibly —
+                // never leave it stranded in Received.
+                logger.LogError(ex,
+                    "Workflow launch failed pre-start. CommandId={CommandId} WorkflowType={WorkflowType}",
+                    command.CommandId, workflowType);
+                await FailPreFlightAsync(instanceId, workflowType, $"launch failed: {ex.Message}", ct);
+                return;
+            }
             await MarkQueuedAsync(instanceId, workflowType, packageUri, ct);
             await StampTerminalEndpointAsync(instanceId, launched, ct);
             return;
@@ -336,7 +412,8 @@ public sealed class WorkflowDispatcher(
             NetworkPolicy = networkPolicy,
             WorkspaceDirectoryBind = workspaceRoot,
             PublishTerminalPort = terminalPort,
-            TerminalContainerName = terminalContainerName
+            TerminalContainerName = terminalContainerName,
+            OnExited = onContainerExited
         }, ct);
         await MarkQueuedAsync(instanceId, workflowType, packageUri, ct);
         await StampTerminalEndpointAsync(instanceId, launchResult, ct);
@@ -379,6 +456,45 @@ public sealed class WorkflowDispatcher(
         var separator = root.Contains('\\') ? '\\' : '/';
         return $"{root}{separator}{instanceId:N}";
     }
+
+    /// <summary>
+    /// The container exit watcher's report: after a short grace (in-flight completion events may
+    /// still land), a run whose state is not terminal is failed with the exit code and log tail.
+    /// A normal exit (the workflow reported Success/Failed/Cancelled over the bus, or a
+    /// long-living drain) changes nothing.
+    /// </summary>
+    internal async Task HandleContainerExitAsync(Guid instanceId, string workflowType, ContainerExit exit)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(dispatcherSettings.Value.ContainerExitGraceSeconds));
+
+            var record = await instanceRegistry.GetAsync(instanceId);
+            if (record?.State is null or "Success" or "Failed" or "Cancelled" or "PreFlightFailed" or "Draining")
+                return;
+
+            var reason = $"workflow container exited (code {exit.ExitCode}) before completing"
+                + (string.IsNullOrWhiteSpace(exit.LogTail)
+                    ? " — the container produced no output"
+                    : $" — last output: {Truncate(exit.LogTail, 2000)}");
+            logger.LogError(
+                "Workflow {InstanceId} container died without a terminal state. ExitCode={ExitCode} LastState={State}",
+                instanceId, exit.ExitCode, record.State);
+
+            await instanceRegistry.SetStateAsync(instanceId, "Failed", reason);
+            await statusPublisher.PublishAsync(instanceId, workflowType, "Failed", reason);
+            tokenRegistry.Consume(instanceId);
+            await auditLog.AppendAsync(
+                "core-runner", "workflow.container-exit", instanceId.ToString(), "failed", reason);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Handling the container exit of {InstanceId} failed.", instanceId);
+        }
+    }
+
+    private static string Truncate(string text, int maxLength)
+        => text.Length <= maxLength ? text : text[..maxLength] + "…";
 
     private async Task FailPreFlightAsync(Guid instanceId, string workflowType, string reason, CancellationToken ct)
     {

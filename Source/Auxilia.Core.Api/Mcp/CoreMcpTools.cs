@@ -28,6 +28,8 @@ public sealed class CoreMcpTools(
     ConnectorService connectors,
     ProviderCatalogService providerCatalog,
     WorkflowSchemaReadService workflowSchemas,
+    WorkflowTypeRegistryService workflowRegistry,
+    WorkflowTypeApprovalPipeline approvalPipeline,
     GroupDirectory groups,
     GroupMappingDirectory groupMappings,
     IdentityImportService identityImport,
@@ -37,11 +39,11 @@ public sealed class CoreMcpTools(
     private static readonly JsonSerializerOptions JsonOptions = JsonSerializerOptions.Web;
 
     [McpServerTool(Name = "run_workflow")]
-    [Description("Dispatches a run of the given workflow type from its package URI, on the fly.")]
+    [Description("Dispatches a run of a registered (Active) workflow type, on the fly. The Core resolves " +
+                 "the signed package from its workflow-type registry.")]
     public async Task<CallToolResult> RunWorkflowAsync(
         RequestContext<CallToolRequestParams> context,
-        [Description("Workflow type name.")] string workflowType,
-        [Description("Package URI, e.g. docker://image:tag or an https .workflow.zip URL.")] string packageUri,
+        [Description("Registered workflow type name.")] string workflowType,
         [Description("Optional JSON object of run context key/values.")] string? contextJson = null,
         CancellationToken cancellationToken = default)
     {
@@ -50,9 +52,91 @@ public sealed class CoreMcpTools(
         if (await DenyAsync(principalId, PermissionActions.WorkflowTrigger, workflowType, cancellationToken) is { } denial)
             return denial;
 
-        var accepted = await runs.RunInlineAsync(
-            new RunRequest(workflowType, packageUri, ParseObject(contextJson)), principalId, cancellationToken);
-        return JsonResult(new { runId = accepted.RunId, commandId = accepted.CommandId });
+        try
+        {
+            var accepted = await runs.RunInlineAsync(
+                new RunRequest(workflowType, ParseObject(contextJson)), principalId, cancellationToken);
+            return JsonResult(new { runId = accepted.RunId, commandId = accepted.CommandId });
+        }
+        catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException)
+        {
+            return Error(ex.Message);
+        }
+    }
+
+    [McpServerTool(Name = "register_workflow_type")]
+    [Description("Registers a workflow type into the Core registry (permanent until unregistered). A package " +
+                 "signed by a trusted publisher activates immediately; anything else (or a docker:// image) " +
+                 "enters Pending until the signing authority approves or denies it.")]
+    public async Task<CallToolResult> RegisterWorkflowTypeAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Workflow type name (must match the packaged schema's workflow name).")] string workflowType,
+        [Description("Package coordinate: docker://image:tag or an https .workflow.zip URL.")] string? packageUri = null,
+        [Description("Alternatively, the package ZIP transferred as base64 (stored and served by the Core).")]
+        string? packageBase64 = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (await DenyAsync(principalId, PermissionActions.WorkflowTypeManage, null, cancellationToken) is { } denial)
+            return denial;
+        var outcome = await workflowRegistry.RegisterAsync(
+            new RegisterWorkflowTypeRequest(workflowType, packageUri, packageBase64), principalId, cancellationToken);
+        if (outcome.Registration is not { } registration)
+            return Error(outcome.Error!);
+        if (registration.Status == WorkflowTypeStatus.Pending)
+            approvalPipeline.KickOff(registration.WorkflowType);
+        return JsonResult(registration);
+    }
+
+    [McpServerTool(Name = "approve_workflow_type")]
+    [Description("Signing authority: approves a pending workflow-type registration (a Core-stored package is " +
+                 "re-signed with the platform key when configured). The type becomes Active and runnable.")]
+    public async Task<CallToolResult> ApproveWorkflowTypeAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Workflow type name.")] string workflowType,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (await DenyAsync(principalId, PermissionActions.WorkflowTypeSign, null, cancellationToken) is { } denial)
+            return denial;
+        var outcome = await workflowRegistry.ApproveAsync(workflowType, principalId.ToString("D"), cancellationToken);
+        return outcome.Registration is { } registration ? JsonResult(registration) : Error(outcome.Error!);
+    }
+
+    [McpServerTool(Name = "deny_workflow_type")]
+    [Description("Signing authority: denies a workflow-type registration with a recorded reason; the type is " +
+                 "not runnable.")]
+    public async Task<CallToolResult> DenyWorkflowTypeAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Workflow type name.")] string workflowType,
+        [Description("Why the registration is refused.")] string reason,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (await DenyAsync(principalId, PermissionActions.WorkflowTypeSign, null, cancellationToken) is { } denial)
+            return denial;
+        var outcome = await workflowRegistry.DenyAsync(
+            workflowType, reason, principalId.ToString("D"), cancellationToken);
+        return outcome.Registration is { } registration ? JsonResult(registration) : Error(outcome.Error!);
+    }
+
+    [McpServerTool(Name = "unregister_workflow_type")]
+    [Description("Removes a workflow type from the registry (and its Core-stored package). It can no longer run.")]
+    public async Task<CallToolResult> UnregisterWorkflowTypeAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Workflow type name.")] string workflowType,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (await DenyAsync(principalId, PermissionActions.WorkflowTypeManage, null, cancellationToken) is { } denial)
+            return denial;
+        return await workflowRegistry.UnregisterAsync(workflowType, principalId, cancellationToken)
+            ? JsonResult(new { workflowType, unregistered = true })
+            : Error("workflow type is not registered.");
     }
 
     [McpServerTool(Name = "run_configuration")]

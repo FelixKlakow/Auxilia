@@ -189,7 +189,13 @@ public class EndToEndEnvironment
             .WithEnvironment("PlatformData__Backend", "InMemory")
             .WithEnvironment("PlatformData__ProtectionKeyBase64", Convert.ToBase64String(new byte[32]))
             .WithEnvironment("CoreSecurity__BootstrapApiKey", BootstrapApiKey)
+            .WithEnvironment("CoreApi__AllowDispatchWithoutRunner", "true")
             .WithEnvironment("CoreApi__RunCommandQueue", CommandQueue)
+            // Statically registered workflow types (Active) for every workflow the e2e suite runs.
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__0__WorkflowType", WorkflowType)
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__0__PackageUri", WorkflowPackageUri)
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__1__WorkflowType", ClaudeWorkflowType)
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__1__PackageUri", ClaudeWorkflowPackageUri)
             .WithPortBinding(8080, true)
             .WithWaitStrategy(
                 Wait.ForUnixContainer().UntilHttpRequestIsSucceeded(r => r.ForPort(8080).ForPath("/health")))
@@ -361,7 +367,7 @@ public class EndToEndEnvironment
         };
         var resp = await CoreApiClient.PostAsJsonAsync("/api/configurations",
             new CreateRunConfiguration(
-                MailReviewConfigurationName, WorkflowType, WorkflowPackageUri,
+                MailReviewConfigurationName, WorkflowType,
                 Context: new Dictionary<string, string>(), SlotBindings: bindings));
         resp.EnsureSuccessStatusCode();
         var config = (await resp.Content.ReadFromJsonAsync<RunConfiguration>())!;

@@ -12,7 +12,6 @@ public sealed record ArtifactTriggerRecord : IEntity
     public Guid Id { get; init; }
     public required string ArtifactType { get; init; }
     public required string WorkflowType { get; init; }
-    public required string WorkflowPackageUri { get; init; }
     public bool Enabled { get; init; } = true;
     /// <summary>Principal on whose behalf the chained dispatch runs (policy-checked).</summary>
     public Guid? RunAsPrincipalId { get; init; }

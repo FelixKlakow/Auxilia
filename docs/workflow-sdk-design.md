@@ -450,3 +450,47 @@ Some workflows may require sidecar services in their execution environment (e.g.
 - **Runner abstraction** – the current implicit single-container runner model would need to be replaced with a pluggable `IRunnerOrchestrator` (Docker Compose, Kubernetes Job, etc.).
 
 This is a significant scope increase and is explicitly deferred beyond v1.
+
+
+## Operator steering channel (2026-07-27)
+
+`Auxilia.Workflows.Steering.OperatorChannel` is the SDK's standard steer-back surface — any
+workflow gets the full operator loop without touching the wire protocol:
+
+- `StartAsync(views, inputs)` announces the run's capabilities (`guidance`, `form-answer`,
+  `halt`, `setting`) on the `steering` view and pumps the instance's dedicated input queue
+  (`workflow-response-{id}-inputs`; NEVER the main response queue — a standing subscriber
+  there would compete for slot-activation/configuration responses).
+- `AskAsync(questions)` raises a steering client form (radio/checkbox/free-text per question, plus an
+  optional preformatted `Detail` block — e.g. a permission request's tool input) and blocks
+  until answered; consumed forms are resolved so no stale card survives a replay.
+- `WaitForGuidanceAsync` yields operator guidance; `WaitForSettingAsync` yields live
+  session-setting changes (`OperatorSetting` key/value — opaque to the channel);
+  `HaltToken` cancels on a steering client halt; `EndSessionAsync` closes the steering surface.
+
+The coding-agent session engine (`Auxilia.Workflows.AiAgent.CodingAgent.AgentSessionApplication`,
+shared by `claude-code` and `github-copilot`) bridges `IAgentInteraction` questions from the
+agent provider onto this channel — e.g. the Claude CLI's `can_use_tool` control requests become
+operator permission forms. Session semantics on top of the channel (2026-07-27):
+
+- **Permission modes** — `permission-mode` (ask-operator / auto-allow) governs tool-permission
+  requests; **per-action policies** override it per action kind: `push-policy` governs
+  `git push` independently ("auto-approve edits, confirm each push"). Both are declared
+  Choice inputs AND live-changeable via the `setting` channel (`AgentSettingKeys`).
+- **Permission decisions are first-class**: the tool input renders as the question's `Detail`,
+  and the CLI's `permission_suggestions` become selectable outcomes answered back as
+  `updatedPermissions` ("Always allow Write(x)", mode switches).
+- **AskUserQuestion is a question, not a permission**: it surfaces in EVERY mode and its
+  answers return as `updatedInput{questions, answers}` per the documented contract — a bare
+  allow runs the tool answerless.
+- **Plan view** — agents publish full snapshots of their current plan (`AgentPlanUpdate` on the
+  `plan` view, via `CodingAgentRequest.OnPlanUpdate`): Claude from TodoWrite (auto-approved
+  bookkeeping, never a decision card), Copilot from markdown-checklist output lines.
+
+Schema declarations also grew generically: `Requires<T>(..., allowMultiple: true)` lets one slot
+carry several bindings (multi-repository runs); `Requires<T>(..., providerTypes: [...])` narrows
+the contract match to the providers the workflow's package can actually execute (enforced at
+dispatch by the Core); an optional multi-binding `environment` slot selects environment
+capabilities (see ARCHITECTURE §9); and `RequiresInput(WorkflowInputDescriptor)` declares typed
+inputs (`Kind` = Text/Multiline/Boolean/Choice/Number, `DefaultValue`, `Choices`,
+`ChoiceLabels`) that editors render without knowing the workflow.

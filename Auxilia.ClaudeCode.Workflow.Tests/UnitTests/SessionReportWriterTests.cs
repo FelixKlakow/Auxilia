@@ -1,5 +1,5 @@
 using System.Text.Json;
-using Auxilia.ClaudeCode.Workflow;
+using Auxilia.Workflows.AiAgent.CodingAgent;
 
 namespace Auxilia.ClaudeCode.Workflow.Tests.UnitTests;
 

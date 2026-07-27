@@ -1,0 +1,34 @@
+{
+  "ProviderType": "github-copilot-cli",
+  "ContentHashBase64": "",
+  "SignatureBase64": "",
+  "PublicKeyBase64": "",
+  "Contracts": ["Auxilia.Workflows.AiAgent.CodingAgent.ICodingAgent"],
+  "Category": "coding-agent",
+  "Description": "Runs the GitHub Copilot CLI as the coding agent of a workflow; the token reaches the agent container just-in-time.",
+  "Settings": [
+    {
+      "Key": "token",
+      "Label": "GitHub account",
+      "Kind": "Secret",
+      "Required": true,
+      "ConnectFlow": "github",
+      "HelpText": "A GitHub token with Copilot access. Connect… signs you in through the browser; a pasted token works too. Stored encrypted and never displayed back."
+    },
+    {
+      "Key": "Model",
+      "Label": "Model",
+      "Kind": "Text",
+      "Required": false,
+      "HelpText": "Optional model override; the CLI's default model is used when empty."
+    },
+    {
+      "Key": "CliPath",
+      "Label": "CLI path",
+      "Kind": "Text",
+      "Required": false,
+      "HelpText": "Path of the Copilot CLI executable inside the workflow image; only changed for testing.",
+      "DefaultValue": "copilot"
+    }
+  ]
+}

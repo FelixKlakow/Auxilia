@@ -8,7 +8,14 @@ namespace Auxilia.Core.Api.Services;
 public sealed class RunReadService(IDataAccess<CoreRunRecord> runs)
 {
     public async Task<RunStatus?> GetAsync(Guid id, CancellationToken ct)
-        => await runs.ReadAsync(id, ct) is { } r ? ToDto(r) : null;
+    {
+        if (await runs.ReadAsync(id, ct) is { } byInstance)
+            return ToDto(byInstance);
+        // Callers hold the DISPATCH id (RunAccepted.RunId = the command id) while the runner
+        // records under its own instance id — resolve through the stored alias, like the stream.
+        var byCommand = (await runs.ReadAsync(ct)).FirstOrDefault(r => r.CommandId == id);
+        return byCommand is null ? null : ToDto(byCommand);
+    }
 
     public async Task<PagedResult<RunStatus>> QueryAsync(RunQuery query, CancellationToken ct)
     {

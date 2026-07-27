@@ -48,8 +48,15 @@ public sealed record RunWorkflowCommand(
     /// </summary>
     IReadOnlyList<string>? SlotProviderTypes = null,
     /// <summary>
-    /// Per-run repositories to clone into the workspace before launch. Non-secret: each carries the
-    /// clone URL and, when auth is needed, the name of a synthetic slot the runner resolves at
-    /// dispatch to obtain the credential — the credential itself never rides the command.
+    /// Workspace mounts to materialize before launch, built generically from slot bindings of
+    /// providers that declare <c>MountsIntoWorkspace</c>. Non-secret: settings ride keyed by the
+    /// provider's declared roles; a mount needing auth names a synthetic slot the runner resolves
+    /// just-in-time — the credential itself never rides the command.
     /// </summary>
-    IReadOnlyList<RepositoryDispatch>? Repositories = null);
+    IReadOnlyList<WorkspaceMountDispatch>? WorkspaceMounts = null,
+    /// <summary>
+    /// Environment capabilities the run's container must provide, built generically from slot
+    /// bindings of providers that declare <c>ComposesEnvironment</c>. Opaque provider-type ids —
+    /// only the runner knows how each maps onto an image layer.
+    /// </summary>
+    IReadOnlyList<string>? EnvironmentCapabilities = null);

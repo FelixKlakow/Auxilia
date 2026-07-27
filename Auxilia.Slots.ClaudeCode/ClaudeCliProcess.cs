@@ -12,7 +12,11 @@ public interface IClaudeCliProcess : IDisposable
 {
     TextReader Output { get; }
     TextReader Error { get; }
+    /// <summary>Stdin of the CLI - only valid for interactive (stream-json input) sessions.</summary>
+    TextWriter Input { get; }
     Task<int> WaitForExitAsync(CancellationToken cancellationToken);
+    /// <summary>Closes stdin so an interactive CLI ends its session and exits.</summary>
+    void CloseInput();
     void Kill();
 }
 
@@ -30,6 +34,19 @@ public sealed class ClaudeCliProcessFactory : IClaudeCliProcessFactory
     {
         public TextReader Output => process.StandardOutput;
         public TextReader Error => process.StandardError;
+        public TextWriter Input => process.StandardInput;
+
+        public void CloseInput()
+        {
+            try
+            {
+                process.StandardInput.Close();
+            }
+            catch (InvalidOperationException)
+            {
+                // Stdin was not redirected (autonomous session) or the process is gone.
+            }
+        }
 
         public async Task<int> WaitForExitAsync(CancellationToken cancellationToken)
         {

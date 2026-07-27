@@ -45,6 +45,55 @@ public sealed class ProviderCatalogService(
         return new PagedResult<ProviderCatalogEntry>(page, ordered.Count, query.Skip, take);
     }
 
+    /// <summary>
+    /// Registers (or updates) a provider descriptor in the catalog — the API-driven counterpart
+    /// of a runner's plugin scan. Availability stays deny-by-default until curated. Audited.
+    /// </summary>
+    public async Task<ProviderCatalogEntry> RegisterAsync(
+        string actor, RegisterSlotProvider request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.ProviderType))
+            throw new ArgumentException("providerType is required");
+        var descriptors = request.Settings.Select(setting => new SettingDescriptor(
+            setting.Key, setting.Label,
+            Enum.TryParse<SettingKind>(setting.Kind, ignoreCase: true, out var kind) ? kind : SettingKind.Text,
+            setting.Required, setting.HelpText, setting.DefaultValue, setting.Choices)
+        {
+            ConnectFlow = setting.ConnectFlow,
+            Role = setting.Role,
+            Browse = setting.Browse,
+            BrowseDependsOn = setting.BrowseDependsOn
+        }).ToList();
+
+        var record = new SlotProviderRecord
+        {
+            Id = SlotProviderRecord.IdFor(request.ProviderType),
+            ProviderType = request.ProviderType,
+            // The catalog identifies handlers by this suffix; the Core stores no plugin binary.
+            DllPath = $"{request.ProviderType}.slothandler.dll",
+            SettingDescriptorsJson = JsonSerializer.Serialize(descriptors),
+            ContractsJson = JsonSerializer.Serialize(request.Contracts),
+            Category = request.Category,
+            Description = request.Description,
+            RequiredCredentialContract = request.RequiredCredentialContract,
+            MountsIntoWorkspace = request.MountsIntoWorkspace,
+            ComposesEnvironment = request.ComposesEnvironment
+        };
+        await providers.SaveAsync(record, ct);
+        await auditLog.AppendAsync(actor, "provider-catalog.registered", request.ProviderType, "registered", ct: ct);
+        return ToEntry(record, await catalog.ReadAsync(ProviderCatalogRecord.IdFor(request.ProviderType), ct));
+    }
+
+    /// <summary>Removes a provider (and its curation) from the catalog entirely. Audited.</summary>
+    public async Task<bool> DeleteAsync(string actor, string providerType, CancellationToken ct)
+    {
+        var removed = await providers.RemoveAsync(SlotProviderRecord.IdFor(providerType), ct);
+        await catalog.RemoveAsync(ProviderCatalogRecord.IdFor(providerType), ct);
+        if (removed)
+            await auditLog.AppendAsync(actor, "provider-catalog.deleted", providerType, "deleted", ct: ct);
+        return removed;
+    }
+
     /// <summary>Enables or disables a provider (deny-by-default): only available providers are offered in configuration editors. Audited.</summary>
     public async Task<ProviderCatalogEntry> SetAvailabilityAsync(
         string actor, string providerType, bool available, CancellationToken ct)
@@ -101,6 +150,15 @@ public sealed class ProviderCatalogService(
             .ToList();
     }
 
+    /// <summary>The catalog entry of one provider, or null when it is not registered.</summary>
+    public async Task<ProviderCatalogEntry?> FindAsync(string providerType, CancellationToken ct)
+    {
+        var provider = await providers.ReadAsync(SlotProviderRecord.IdFor(providerType), ct);
+        if (provider is null || !IsHandler(provider))
+            return null;
+        return ToEntry(provider, await catalog.ReadAsync(ProviderCatalogRecord.IdFor(providerType), ct));
+    }
+
     private async Task<(SlotProviderRecord Provider, ProviderCatalogRecord Curation)> RequireProviderAsync(
         string providerType, CancellationToken ct)
     {
@@ -133,11 +191,13 @@ public sealed class ProviderCatalogService(
         var descriptors = Merge(ParseDescriptors(provider.SettingDescriptorsJson), overrides)
             .Select(d => new ProviderSettingDescriptor(
                 d.Key, d.Label, d.Kind.ToString(), d.Required, d.HelpText, d.DefaultValue, d.Choices,
-                disabledKeys.Contains(d.Key)))
+                disabledKeys.Contains(d.Key), d.ConnectFlow, d.Role, d.Browse, d.BrowseDependsOn))
             .ToList();
         return new ProviderCatalogEntry(
             provider.ProviderType, curation.Available, category,
-            descriptors, ParseContracts(provider.ContractsJson), provider.Description);
+            descriptors, ParseContracts(provider.ContractsJson), provider.Description,
+            provider.RequiredCredentialContract, provider.MountsIntoWorkspace,
+            provider.ComposesEnvironment);
     }
 
     private static IReadOnlyList<string> ParseContracts(string? json)

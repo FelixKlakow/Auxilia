@@ -9,9 +9,13 @@ public interface IWorkflowBuilder
     /// Declares a capability slot. The contract type name of <typeparamref name="TService"/> is
     /// published in the schema so configuration tooling offers only matching providers; an
     /// <paramref name="optional"/> slot may stay unbound in a workflow configuration.
+    /// <paramref name="providerTypes"/> narrows the contract match to the providers the workflow's
+    /// package can actually execute (e.g. the one CLI bundled in its image); null admits any
+    /// provider implementing the contract.
     /// </summary>
     IWorkflowBuilder Requires<TService>(
-        string name, ICapability capabilities, string? description = null, bool optional = false);
+        string name, ICapability capabilities, string? description = null, bool optional = false,
+        bool allowMultiple = false, IReadOnlyList<string>? providerTypes = null);
 
     IWorkflowBuilder RequiresEnvironment(Action<IEnvironmentBuilder> configure);
 
@@ -40,6 +44,12 @@ public interface IWorkflowBuilder
     /// </summary>
     IWorkflowBuilder RequiresInput(
         string name, string label, bool required = false, string? description = null);
+
+    /// <summary>
+    /// Declares a run input with its full descriptor — rendering kind, default value, and
+    /// choices included (see <see cref="WorkflowInputDescriptor"/>).
+    /// </summary>
+    IWorkflowBuilder RequiresInput(WorkflowInputDescriptor input);
 
     /// <summary>
     /// Declares an artifact type this workflow can process as input — the criteria used when

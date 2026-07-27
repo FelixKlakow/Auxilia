@@ -1,21 +1,21 @@
-using Auxilia.ClaudeCode.Workflow;
+using Auxilia.Workflows.AiAgent.CodingAgent;
 using Auxilia.Workflows.Views;
 using Moq;
 
 namespace Auxilia.ClaudeCode.Workflow.Tests.UnitTests;
 
 [TestFixture, Category("Unit")]
-public sealed class ClaudeCodeApplicationTests
+public sealed class AgentSessionApplicationTests
 {
     private string _outputDir = "";
-    private ClaudeCodeRunContext _context = null!;
+    private AgentSessionContext _context = null!;
     private readonly TimeProvider _time = TimeProvider.System;
 
     [SetUp]
     public void SetUp()
     {
         _outputDir = Path.Combine(Path.GetTempPath(), $"cc-app-{Guid.NewGuid():N}");
-        _context = new ClaudeCodeRunContext("Fix the bug", "/workspace", _outputDir);
+        _context = new AgentSessionContext("Fix the bug", "/workspace", _outputDir);
     }
 
     [TearDown]
@@ -46,15 +46,15 @@ public sealed class ClaudeCodeApplicationTests
         var progressEntries = new List<SessionProgressEntry>();
         var views = new Mock<IViewPublisher>(MockBehavior.Strict);
         views.Setup(v => v.PublishAsync(
-                ClaudeCodeApplication.ChatViewName, It.IsAny<AgentChatEntry>(), It.IsAny<CancellationToken>()))
+                AgentSessionApplication.ChatViewName, It.IsAny<AgentChatEntry>(), It.IsAny<CancellationToken>()))
             .Callback((string _, AgentChatEntry entry, CancellationToken _) => chatEntries.Add(entry))
             .Returns(Task.CompletedTask);
         views.Setup(v => v.PublishAsync(
-                ClaudeCodeApplication.ProgressViewName, It.IsAny<SessionProgressEntry>(), It.IsAny<CancellationToken>()))
+                AgentSessionApplication.ProgressViewName, It.IsAny<SessionProgressEntry>(), It.IsAny<CancellationToken>()))
             .Callback((string _, SessionProgressEntry entry, CancellationToken _) => progressEntries.Add(entry))
             .Returns(Task.CompletedTask);
 
-        await new ClaudeCodeApplication(agent.Object, views.Object, _context, _time)
+        await new AgentSessionApplication(agent.Object, views.Object, _context, _time)
             .RunAsync(CancellationToken.None);
 
         Assert.Multiple(() =>
@@ -83,7 +83,7 @@ public sealed class ClaudeCodeApplicationTests
             .ReturnsAsync(new CodingAgentResult(false, null, ErrorMessage: "max turns exceeded"));
 
         var exception = Assert.ThrowsAsync<InvalidOperationException>(() =>
-            new ClaudeCodeApplication(agent.Object, views: null, _context, _time)
+            new AgentSessionApplication(agent.Object, views: null, _context, _time)
                 .RunAsync(CancellationToken.None));
 
         Assert.Multiple(() =>
@@ -104,7 +104,7 @@ public sealed class ClaudeCodeApplicationTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new CodingAgentResult(true, "Done."));
 
-        await new ClaudeCodeApplication(agent.Object, views: null, _context, _time)
+        await new AgentSessionApplication(agent.Object, views: null, _context, _time)
             .RunAsync(CancellationToken.None);
 
         Assert.That(File.Exists(Path.Combine(_outputDir, SessionReportWriter.FileName)), Is.True);

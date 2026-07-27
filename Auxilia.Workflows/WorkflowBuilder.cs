@@ -52,7 +52,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     }
 
     public IWorkflowBuilder Requires<TService>(
-        string name, ICapability capabilities, string? description = null, bool optional = false)
+        string name, ICapability capabilities, string? description = null, bool optional = false,
+        bool allowMultiple = false, IReadOnlyList<string>? providerTypes = null)
     {
         if (_slots.Any(s => s.SlotName == name))
             throw new InvalidOperationException($"A slot with name '{name}' has already been declared.");
@@ -60,7 +61,9 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
         {
             ServiceType = typeof(TService),
             Contract = typeof(TService).FullName,
-            Optional = optional
+            Optional = optional,
+            AllowMultiple = allowMultiple,
+            ProviderTypes = providerTypes is { Count: > 0 } ? providerTypes : null
         });
         return this;
     }
@@ -102,12 +105,16 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
 
     public IWorkflowBuilder RequiresInput(
         string name, string label, bool required = false, string? description = null)
+        => RequiresInput(new WorkflowInputDescriptor(name, label, required, description));
+
+    public IWorkflowBuilder RequiresInput(WorkflowInputDescriptor input)
     {
-        ArgumentException.ThrowIfNullOrEmpty(name);
-        ArgumentException.ThrowIfNullOrEmpty(label);
-        if (_inputs.Any(i => i.Name == name))
-            throw new InvalidOperationException($"An input with name '{name}' has already been declared.");
-        _inputs.Add(new WorkflowInputDescriptor(name, label, required, description));
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentException.ThrowIfNullOrEmpty(input.Name);
+        ArgumentException.ThrowIfNullOrEmpty(input.Label);
+        if (_inputs.Any(i => i.Name == input.Name))
+            throw new InvalidOperationException($"An input with name '{input.Name}' has already been declared.");
+        _inputs.Add(input);
         return this;
     }
 
@@ -275,6 +282,14 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 var cancelSub = await context.MessageBus.SubscribeAsync<CancelWorkflowCommand>(
                     cancelQueueName, (_, _) => { cts.Cancel(); return Task.CompletedTask; });
 
+                // Steer-back inputs: the Core's deliver-input endpoint publishes opaque payloads to
+                // this instance's INPUT queue; the application awaits them via IWorkflowInputs.
+                var inputQueue = WorkflowQueues.InputQueueFor(instanceId);
+                await context.MessageBus.DeclareQueueAsync(inputQueue);
+                var workflowInputs = new ChannelWorkflowInputs();
+                var inputSub = await context.MessageBus.SubscribeAsync<Messaging.Messages.WorkflowInputMessage>(
+                    inputQueue, (msg, _) => { workflowInputs.Push(msg.PayloadJson); return Task.CompletedTask; });
+
                 using var drainSignal = new WorkflowDrainSignal();
                 IAsyncDisposable? drainSub = null;
                 if (_lifetime == WorkflowLifetime.LongLiving)
@@ -312,6 +327,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
 
                     var services = new ServiceCollection();
                     services.AddSingleton(context.MessageBus);
+                    services.AddSingleton<IWorkflowInputs>(workflowInputs);
                     services.AddSingleton(drainSignal);
                     services.AddSingleton(resourceProxyClient);
                     services.AddSingleton(new Views.DeclaredViews(_views.AsReadOnly()));
@@ -382,6 +398,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 finally
                 {
                     await cancelSub.DisposeAsync();
+                    await inputSub.DisposeAsync();
                     if (drainSub is not null)
                         await drainSub.DisposeAsync();
                     if (slotActivator is not null)

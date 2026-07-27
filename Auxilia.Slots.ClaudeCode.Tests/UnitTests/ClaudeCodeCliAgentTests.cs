@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using Auxilia.ClaudeCode.Workflow;
+using Auxilia.Workflows.AiAgent.CodingAgent;
 using Auxilia.Slots.ClaudeCode;
 using Auxilia.Workflows.Views;
 
@@ -174,6 +174,315 @@ public sealed class ClaudeCodeCliAgentTests
         Assert.That(factory.LastProcess!.Killed, Is.True);
     }
 
+    [Test]
+    public void BuildStartInfo_InteractiveSession_UsesStreamJsonInput_AndStdioPermissions()
+    {
+        var agent = new ClaudeCodeCliAgent(Options());
+        var interactive = Request with { Interaction = new FakeInteraction() };
+
+        var startInfo = agent.BuildStartInfo(interactive);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(startInfo.RedirectStandardInput, Is.True);
+            Assert.That(startInfo.ArgumentList, Does.Contain("--input-format"));
+            Assert.That(startInfo.ArgumentList, Does.Contain("--permission-prompt-tool"));
+            Assert.That(startInfo.ArgumentList, Does.Not.Contain("--dangerously-skip-permissions"),
+                "Interactive sessions route permissions to the operator instead of skipping them.");
+            Assert.That(startInfo.ArgumentList, Does.Not.Contain(Request.Instruction),
+                "The instruction travels as the first stream-json user message, not as an argument.");
+        });
+    }
+
+    [Test]
+    public async Task InteractiveSession_ControlRequest_IsAnsweredByTheOperator_OverStdin()
+    {
+        var stdout = """
+            {"type":"system","subtype":"init","session_id":"s","model":"m","tools":[]}
+            {"type":"control_request","request_id":"ctrl-1","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"a.md"}}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var interaction = new FakeInteraction(new AgentAnswer(["allow"]));
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        var result = await agent.RunAsync(
+            Request with { Interaction = interaction }, (_, _) => Task.CompletedTask);
+
+        var stdin = factory.LastProcess!.Input.ToString()!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Success, Is.True);
+            Assert.That(interaction.LastQuestion?.Prompt, Does.Contain("Write"));
+            Assert.That(stdin, Does.Contain(Request.Instruction),
+                "The instruction is the first stream-json user message on stdin.");
+            Assert.That(stdin, Does.Contain("control_response").And.Contain("\"behavior\":\"allow\""));
+            Assert.That(stdin, Does.Contain("ctrl-1"));
+            Assert.That(factory.LastProcess.InputClosed, Is.True,
+                "The result event closes stdin so the CLI can exit.");
+        });
+    }
+
+    [Test]
+    public async Task InteractiveSession_DeniedControlRequest_SendsDenyWithTheOperatorsReason()
+    {
+        var stdout = """
+            {"type":"control_request","request_id":"ctrl-2","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"rm -rf /"}}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var interaction = new FakeInteraction(new AgentAnswer(["deny"], "too dangerous"));
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        await agent.RunAsync(Request with { Interaction = interaction }, (_, _) => Task.CompletedTask);
+
+        var stdin = factory.LastProcess!.Input.ToString()!;
+        Assert.That(stdin, Does.Contain("\"behavior\":\"deny\"").And.Contain("too dangerous"));
+    }
+
+    [Test]
+    public async Task InteractiveSession_AskUserQuestion_SurfacesAndReturnsAnswersInUpdatedInput()
+    {
+        var stdout = """
+            {"type":"control_request","request_id":"ctrl-q","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"Which identity should I commit with?","header":"Git identity","options":[{"label":"FelixKlakow","description":"Matches the repo history"},{"label":"Agent identity","description":"Generic co-author"}],"multiSelect":false}]}}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var interaction = new FakeInteraction(new AgentAnswer(["FelixKlakow"]));
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        // Even in auto-allow: a question is a question, not a permission.
+        await agent.RunAsync(
+            Request with { Interaction = interaction, PermissionMode = AgentPermissionModes.AutoAllow },
+            (_, _) => Task.CompletedTask);
+
+        var stdin = factory.LastProcess!.Input.ToString()!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(interaction.LastQuestion!.Prompt, Is.EqualTo("Which identity should I commit with?"));
+            Assert.That(interaction.LastQuestion.Options.Select(o => o.Id),
+                Is.EqualTo(new[] { "FelixKlakow", "Agent identity" }));
+            Assert.That(interaction.LastQuestion.AllowFreeText, Is.True,
+                "Free text is the host-side 'Other' affordance the tool contract expects.");
+            Assert.That(stdin, Does.Contain("updatedInput").And.Contain("answers"));
+            Assert.That(stdin, Does.Contain("\"Which identity should I commit with?\":\"FelixKlakow\""),
+                "Answers are keyed by question text and valued by the selected label.");
+        });
+    }
+
+    [Test]
+    public async Task InteractiveSession_OperatorModelChange_IsForwardedAsSetModelControlRequest()
+    {
+        var stdout = """
+            {"type":"control_request","request_id":"ctrl-5","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"}}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var interaction = new FakeInteraction(new AgentAnswer(["allow"]))
+        {
+            PendingSetting = new AgentSetting(AgentSettingKeys.Model, "claude-opus-4-8"),
+        };
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        await agent.RunAsync(Request with { Interaction = interaction }, (_, _) => Task.CompletedTask);
+
+        var stdin = factory.LastProcess!.Input.ToString()!;
+        Assert.That(stdin, Does.Contain("set_model").And.Contain("claude-opus-4-8"),
+            "A live model change rides to the CLI as a set_model control request.");
+    }
+
+    [Test]
+    public async Task InteractiveSession_TodoWrite_IsAutoApproved_AndPublishesThePlan()
+    {
+        var stdout = """
+            {"type":"control_request","request_id":"ctrl-t","request":{"subtype":"can_use_tool","tool_name":"TodoWrite","input":{"todos":[{"content":"Fix the build","status":"in_progress"},{"content":"Run the tests","status":"pending"}]}}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var interaction = new FakeInteraction();
+        var plans = new List<IReadOnlyList<AgentPlanItem>>();
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        await agent.RunAsync(
+            Request with
+            {
+                Interaction = interaction,
+                OnPlanUpdate = (items, _) => { plans.Add(items); return Task.CompletedTask; },
+            },
+            (_, _) => Task.CompletedTask);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(interaction.LastQuestion, Is.Null,
+                "TodoWrite is bookkeeping — never a decision card, in any permission mode.");
+            Assert.That(factory.LastProcess!.Input.ToString(),
+                Does.Contain("ctrl-t").And.Contain("\"behavior\":\"allow\""));
+            Assert.That(plans.Single().Select(p => (p.Content, p.Status)), Is.EqualTo(new[]
+            {
+                ("Fix the build", "in_progress"), ("Run the tests", "pending"),
+            }));
+        });
+    }
+
+    [Test]
+    public async Task Session_StreamedTodoWriteToolUse_PublishesThePlan()
+    {
+        var stdout = """
+            {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"TodoWrite","input":{"todos":[{"content":"Step one","status":"completed"}]}}]}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var plans = new List<IReadOnlyList<AgentPlanItem>>();
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        await agent.RunAsync(
+            Request with { OnPlanUpdate = (items, _) => { plans.Add(items); return Task.CompletedTask; } },
+            (_, _) => Task.CompletedTask);
+
+        Assert.That(plans.Single().Single(), Is.EqualTo(new AgentPlanItem("Step one", "completed")));
+    }
+
+    [TestCase("cd /workspace/repos/r && git add -A && git push origin main", true)]
+    [TestCase("git status && git log --oneline", false)]
+    [TestCase("git push", true)]
+    [TestCase("dotnet build && dotnet test", false)]
+    public void IsGitPush_ClassifiesBashCommands(string command, bool expected)
+    {
+        var input = System.Text.Json.JsonSerializer.Serialize(new { command });
+        Assert.That(ClaudeCodeCliAgent.IsGitPush("Bash", input), Is.EqualTo(expected));
+    }
+
+    [Test]
+    public async Task InteractiveSession_PushIsAsked_EvenWhenTheGlobalModeIsAutoAllow()
+    {
+        var stdout = """
+            {"type":"control_request","request_id":"ctrl-p","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"git push origin main"}}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var interaction = new FakeInteraction(new AgentAnswer(["allow"]));
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        await agent.RunAsync(
+            Request with
+            {
+                Interaction = interaction,
+                PermissionMode = AgentPermissionModes.AutoAllow,
+                PushPolicy = AgentPermissionModes.AskOperator,
+            },
+            (_, _) => Task.CompletedTask);
+
+        Assert.That(interaction.LastQuestion?.Prompt, Does.Contain("PUSH"),
+            "The push policy governs pushes independently of the global auto-allow mode.");
+    }
+
+    [Test]
+    public async Task InteractiveSession_AutoPushPolicy_ApprovesThePushWithoutAsking()
+    {
+        var stdout = """
+            {"type":"control_request","request_id":"ctrl-p2","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"git push origin main"}}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var interaction = new FakeInteraction();
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        await agent.RunAsync(
+            Request with { Interaction = interaction, PushPolicy = AgentPermissionModes.AutoAllow },
+            (_, _) => Task.CompletedTask);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(interaction.LastQuestion, Is.Null);
+            Assert.That(factory.LastProcess!.Input.ToString(),
+                Does.Contain("ctrl-p2").And.Contain("\"behavior\":\"allow\""));
+        });
+    }
+
+    [Test]
+    public async Task InteractiveSession_AutoAllowMode_ApprovesWithoutAskingTheOperator()
+    {
+        var stdout = """
+            {"type":"control_request","request_id":"ctrl-3","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"}}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var interaction = new FakeInteraction();
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        await agent.RunAsync(
+            Request with { Interaction = interaction, PermissionMode = AgentPermissionModes.AutoAllow },
+            (_, _) => Task.CompletedTask);
+
+        var stdin = factory.LastProcess!.Input.ToString()!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(interaction.LastQuestion, Is.Null,
+                "Auto-allow answers the control request without an operator round-trip.");
+            Assert.That(stdin, Does.Contain("ctrl-3").And.Contain("\"behavior\":\"allow\""));
+        });
+    }
+
+    [Test]
+    public async Task InteractiveSession_PickedPermissionSuggestion_RidesBackAsUpdatedPermissions()
+    {
+        var stdout = """
+            {"type":"control_request","request_id":"ctrl-4","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"a.md"},"permission_suggestions":[{"type":"addRules","rules":[{"toolName":"Write","ruleContent":"a.md"}],"behavior":"allow"}]}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var interaction = new FakeInteraction(new AgentAnswer(["suggestion:0"]));
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        await agent.RunAsync(Request with { Interaction = interaction }, (_, _) => Task.CompletedTask);
+
+        var stdin = factory.LastProcess!.Input.ToString()!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(interaction.LastQuestion!.Options.Select(o => o.Id),
+                Is.EqualTo(new[] { "allow", "suggestion:0", "deny" }),
+                "The CLI's permission suggestions become selectable outcomes beside allow/deny.");
+            Assert.That(interaction.LastQuestion.Detail, Does.Contain("a.md"),
+                "The tool input rides as the question's detail block, not inside the prompt.");
+            Assert.That(stdin, Does.Contain("\"behavior\":\"allow\"").And.Contain("updatedPermissions")
+                .And.Contain("addRules"));
+        });
+    }
+
+    private sealed class FakeInteraction(AgentAnswer? answer = null) : IAgentInteraction
+    {
+        public AgentQuestion? LastQuestion { get; private set; }
+
+        public async Task<AgentAnswer> AskAsync(AgentQuestion question, CancellationToken cancellationToken)
+        {
+            // Deterministic ordering: a queued setting is consumed by the pump before any answer.
+            while (PendingSetting is not null)
+                await Task.Yield();
+            LastQuestion = question;
+            return answer ?? new AgentAnswer(["allow"]);
+        }
+
+        public async Task<string> WaitForGuidanceAsync(CancellationToken cancellationToken)
+        {
+            // No guidance in these tests - wait until the session tears the pump down.
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new OperationCanceledException(cancellationToken);
+        }
+
+        public async Task<AgentSetting> WaitForSettingAsync(CancellationToken cancellationToken)
+        {
+            if (PendingSetting is { } setting)
+            {
+                PendingSetting = null;
+                return setting;
+            }
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new OperationCanceledException(cancellationToken);
+        }
+
+        public AgentSetting? PendingSetting { get; set; }
+    }
+
     private sealed class FakeProcessFactory(
         string stdout, int exitCode, string stderr = "", bool blockOutput = false) : IClaudeCliProcessFactory
     {
@@ -194,7 +503,16 @@ public sealed class ClaudeCodeCliAgentTests
 
         public TextReader Error { get; } = new StringReader(stderr);
 
+        /// <summary>Captures everything the agent writes to the CLI's stdin.</summary>
+        public StringWriter Input { get; } = new();
+
+        TextWriter IClaudeCliProcess.Input => Input;
+
+        public bool InputClosed { get; private set; }
+
         public Task<int> WaitForExitAsync(CancellationToken cancellationToken) => Task.FromResult(exitCode);
+
+        public void CloseInput() => InputClosed = true;
 
         public void Kill() => Killed = true;
 

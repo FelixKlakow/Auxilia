@@ -36,7 +36,6 @@ public sealed class WorkflowAuthoringServiceTests
         Assert.That(result.WorkflowTypeName, Is.EqualTo("codereview"));
         var created = core.CreatedConfigurations.Single();
         Assert.That(created.WorkflowType, Is.EqualTo("codereview"));
-        Assert.That(created.PackageUri, Is.EqualTo("docker://cr"));
         Assert.That(created.SlotBindings!.Single().ConnectorId, Is.EqualTo(connector.Id));
         Assert.That(created.Context!["K"], Is.EqualTo("V"));
     }

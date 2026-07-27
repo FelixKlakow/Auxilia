@@ -116,6 +116,13 @@ public sealed class WorkflowDispatcherSettings
     public int HeartbeatIntervalSeconds { get; set; } = 5;
 
     /// <summary>
+    /// Grace after a workflow container exits before its run state is checked: in-flight bus
+    /// completion events get this long to land. A run still non-terminal after it is Failed with
+    /// the container's exit code and log tail.
+    /// </summary>
+    public int ContainerExitGraceSeconds { get; set; } = 10;
+
+    /// <summary>
     /// Workflow types the operator has approved for long-living deployment. One-shot is the
     /// security default; registrations declaring a long-living lifetime are rejected unless
     /// their type is listed here (ARCHITECTURE §6).

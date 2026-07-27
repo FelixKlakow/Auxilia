@@ -34,7 +34,7 @@ public sealed class RunsPageTests
         var core = new FakeCoreClient();
         core.Runs.Add(Run("code-review", "Running", configId));
         core.Configurations.Add(new RunConfiguration(
-            configId, "Nightly review", "code-review", "pkg://x",
+            configId, "Nightly review", "code-review",
             new Dictionary<string, string>(), [], true, DateTimeOffset.UtcNow));
         using var ctx = NewContext(core);
 

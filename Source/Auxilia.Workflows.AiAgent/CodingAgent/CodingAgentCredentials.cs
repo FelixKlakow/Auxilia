@@ -1,4 +1,4 @@
-namespace Auxilia.ClaudeCode.Workflow;
+namespace Auxilia.Workflows.AiAgent.CodingAgent;
 
 /// <summary>
 /// The credentials and CLI coordinates a "coding-agent" slot provider delivers, for

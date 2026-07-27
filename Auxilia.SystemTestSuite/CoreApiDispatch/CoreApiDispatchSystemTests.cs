@@ -30,7 +30,6 @@ public class CoreApiDispatchSystemTests
         var create = new CreateRunConfiguration(
             Name: "dyn-" + Guid.NewGuid().ToString("N"),
             WorkflowType: CoreApiDispatchEnvironment.DummyWorkflowType,
-            PackageUri: CoreApiDispatchEnvironment.DummyPackageUri,
             Context: new Dictionary<string, string>
             {
                 ["WORKFLOW_NAME"] = CoreApiDispatchEnvironment.DummyWorkflowType

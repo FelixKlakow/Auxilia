@@ -16,6 +16,10 @@ public sealed class CoreApiRunTests : CoreApiComponentTestBase
     private const string DummyType = "simple-git-commit-workflow";
     private const string DummyImage = "docker://auxilia-dummy-workflows:system-test";
 
+    [SetUp]
+    public Task RegisterDummyTypeAsync() => RegisterActiveTypeAsync(CreateClient(), DummyType, DummyImage);
+
+
     [Test]
     public async Task CreateConfiguration_ThenRun_PublishesResolvedRunCommand()
     {
@@ -24,7 +28,6 @@ public sealed class CoreApiRunTests : CoreApiComponentTestBase
         var create = new CreateRunConfiguration(
             Name: "dyn-" + Guid.NewGuid().ToString("N"),
             WorkflowType: DummyType,
-            PackageUri: DummyImage,
             Context: new Dictionary<string, string> { ["WORKFLOW_NAME"] = DummyType });
         var createResp = await client.PostAsJsonAsync("/api/configurations", create);
         Assert.That(createResp.StatusCode, Is.EqualTo(HttpStatusCode.OK));
@@ -48,7 +51,7 @@ public sealed class CoreApiRunTests : CoreApiComponentTestBase
     {
         var client = CreateClient();
 
-        var request = new RunRequest(DummyType, DummyImage,
+        var request = new RunRequest(DummyType,
             new Dictionary<string, string> { ["WORKFLOW_NAME"] = DummyType });
         var response = await client.PostAsJsonAsync("/api/runs", request);
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));

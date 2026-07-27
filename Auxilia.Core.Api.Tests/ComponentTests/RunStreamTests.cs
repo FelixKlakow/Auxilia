@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 using Auxilia.Core.Client;
 using Auxilia.Core.Contracts;
@@ -63,6 +64,198 @@ public sealed class RunStreamTests : CoreApiComponentTestBase
         });
 
         Assert.That(frames[2].Kind, Is.EqualTo(RunStreamEvent.StatusKind));
+    }
+
+    [Test]
+    public async Task Stream_DeliversAFailure_ToTheWaitingClient_AndCloses()
+    {
+        // The container-crash path end to end from a client's perspective: a subscriber waiting on
+        // the run's stream receives the Failed status WITH the failure reason, and the stream ends
+        // (terminal) instead of leaving the client hanging.
+        var client = CreateClient();
+        var runId = Guid.NewGuid();
+
+        using var response = await client.GetAsync(
+            $"/api/runs/{runId}/stream", HttpCompletionOption.ResponseHeadersRead);
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        await MessageBus.SimulateReceivedAsync(WorkflowStatusEvent.ExchangeName,
+            new WorkflowStatusEvent(runId, DummyType, "Queued", null, DateTimeOffset.UtcNow));
+        await MessageBus.SimulateReceivedAsync(WorkflowStatusEvent.ExchangeName,
+            new WorkflowStatusEvent(runId, DummyType, "Failed",
+                "workflow container exited (code 139) before completing — last output: boom",
+                DateTimeOffset.UtcNow));
+
+        // ReadAsStringAsync completes only because the Failed status terminated the stream.
+        var frames = ParseFrames(await response.Content.ReadAsStringAsync());
+
+        Assert.That(frames, Has.Count.EqualTo(2));
+        var failed = JsonSerializer.Deserialize<WorkflowStatusEvent>(
+            frames[1].PayloadJson, JsonSerializerOptions.Web)!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(failed.State, Is.EqualTo("Failed"));
+            Assert.That(failed.ErrorMessage, Does.Contain("exited (code 139)").And.Contain("boom"),
+                "the client must see WHY the run failed, not just that it did");
+        });
+    }
+
+    [Test]
+    public async Task PersistedViews_AreReadableAfterTheRunFinished()
+    {
+        // The read-later counterpart of the stream: view items are mirrored into the Core store
+        // and queryable after the fact — no live subscription required.
+        var client = CreateClient();
+        var runId = Guid.NewGuid();
+
+        await MessageBus.SimulateReceivedAsync(ViewDataMessage.ExchangeName,
+            new ViewDataMessage(runId, "output", 1, """{"line":"first"}"""));
+        await MessageBus.SimulateReceivedAsync(ViewDataMessage.ExchangeName,
+            new ViewDataMessage(runId, "output", 2, """{"line":"second"}"""));
+        await MessageBus.SimulateReceivedAsync(ViewDataMessage.ExchangeName,
+            new ViewDataMessage(Guid.NewGuid(), "output", 1, """{"line":"other run"}"""));
+
+        var page = await client.GetFromJsonAsync<PagedResult<RunViewItem>>($"/api/runs/{runId}/views");
+
+        Assert.That(page!.Items, Has.Count.EqualTo(2), "only this run's items");
+        Assert.Multiple(() =>
+        {
+            Assert.That(page.Items[0].Sequence, Is.EqualTo(1));
+            Assert.That(page.Items[0].PayloadJson, Does.Contain("first"));
+            Assert.That(page.Items[1].PayloadJson, Does.Contain("second"));
+            Assert.That(page.Items.All(i => i.ViewName == "output"), Is.True);
+        });
+    }
+
+    [Test]
+    public async Task ProvideInput_DeliversTheOpaquePayload_ToTheInstanceInputQueue()
+    {
+        // The steer-back half of the loop: an authorized caller posts an opaque payload by the
+        // DISPATCH id; the Core resolves the instance and publishes to its dedicated INPUT queue
+        // verbatim (its own queue — a standing subscriber must never compete with the response
+        // queue's slot-activation/configuration messages).
+        var client = CreateClient();
+        var commandId = Guid.NewGuid();
+        var instanceId = Guid.NewGuid();
+        await MessageBus.SimulateReceivedAsync(WorkflowStatusEvent.ExchangeName,
+            new WorkflowStatusEvent(instanceId, DummyType, "Running", null, DateTimeOffset.UtcNow,
+                OwnerServiceId: Guid.NewGuid(), CommandId: commandId));
+
+        var response = await client.PostAsJsonAsync($"/api/runs/{commandId}/inputs",
+            new ProvideRunInput("""{"$type":"action-decision","actionId":"a1","outcome":0}"""));
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
+        var delivered = MessageBus.PublishedMessages
+            .Where(m => m.Topic == $"workflow-response-{instanceId}-inputs")
+            .Select(m => m.Message).OfType<WorkflowInputMessage>().Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(delivered.WorkflowInstanceId, Is.EqualTo(instanceId));
+            Assert.That(delivered.PayloadJson, Does.Contain("action-decision"),
+                "the payload rides verbatim — the Core never interprets it");
+        });
+    }
+
+    [Test]
+    public async Task ProvideInput_IntoAFinishedRun_IsRejected()
+    {
+        var client = CreateClient();
+        var instanceId = Guid.NewGuid();
+        await MessageBus.SimulateReceivedAsync(WorkflowStatusEvent.ExchangeName,
+            new WorkflowStatusEvent(instanceId, DummyType, "Success", null, DateTimeOffset.UtcNow));
+
+        var response = await client.PostAsJsonAsync($"/api/runs/{instanceId}/inputs",
+            new ProvideRunInput("{}"));
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+    }
+
+    [Test]
+    public async Task ProvideInput_UnknownRun_Is404()
+    {
+        var response = await CreateClient().PostAsJsonAsync($"/api/runs/{Guid.NewGuid()}/inputs",
+            new ProvideRunInput("{}"));
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+    }
+
+    [Test]
+    public async Task ClearRuns_DeletesFinishedRunsAndTheirViews_KeepsLiveOnes()
+    {
+        var client = CreateClient();
+        var finished = Guid.NewGuid();
+        var live = Guid.NewGuid();
+        await MessageBus.SimulateReceivedAsync(WorkflowStatusEvent.ExchangeName,
+            new WorkflowStatusEvent(finished, DummyType, "Success", null, DateTimeOffset.UtcNow));
+        await MessageBus.SimulateReceivedAsync(ViewDataMessage.ExchangeName,
+            new ViewDataMessage(finished, "output", 1, "{}"));
+        await MessageBus.SimulateReceivedAsync(WorkflowStatusEvent.ExchangeName,
+            new WorkflowStatusEvent(live, DummyType, "Running", null, DateTimeOffset.UtcNow));
+
+        var clear = await client.DeleteAsync("/api/runs");
+        Assert.That(clear.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        var runs = await client.GetFromJsonAsync<PagedResult<RunStatus>>("/api/runs");
+        Assert.That(runs!.Items.Select(r => r.RunId), Is.EquivalentTo(new[] { live }),
+            "finished runs go, live ones stay");
+        var views = await client.GetFromJsonAsync<PagedResult<RunViewItem>>($"/api/runs/{finished}/views");
+        Assert.That(views!.Items, Is.Empty, "the cleared run's persisted views go with it");
+    }
+
+    [Test]
+    public async Task ClearRuns_IncludeStale_RemovesZombies_KeepsFreshLiveRuns()
+    {
+        // A zombie: still "Running" but its terminal event was missed (Core downtime) — it has
+        // not updated for ages. A genuinely live run keeps updating and must survive.
+        var client = CreateClient();
+        var zombie = Guid.NewGuid();
+        var live = Guid.NewGuid();
+        await MessageBus.SimulateReceivedAsync(WorkflowStatusEvent.ExchangeName,
+            new WorkflowStatusEvent(zombie, DummyType, "Running", null, DateTimeOffset.UtcNow.AddHours(-2)));
+        await MessageBus.SimulateReceivedAsync(WorkflowStatusEvent.ExchangeName,
+            new WorkflowStatusEvent(live, DummyType, "Running", null, DateTimeOffset.UtcNow));
+
+        var clear = await client.DeleteAsync("/api/runs?includeStale=true&staleMinutes=30");
+        Assert.That(clear.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        var runs = await client.GetFromJsonAsync<PagedResult<RunStatus>>("/api/runs");
+        Assert.That(runs!.Items.Select(r => r.RunId), Is.EquivalentTo(new[] { live }),
+            "the zombie goes, the live run stays");
+    }
+
+    [Test]
+    public async Task Stream_ByDispatchCommandId_ReceivesTheRunnersEvents()
+    {
+        // A dispatch is acknowledged with its CommandId; the runner emits events under its own
+        // instance id and stamps the CommandId on the claim transition. Observing by the dispatch
+        // id must therefore work — this is exactly what a steering client that just called run does.
+        var client = CreateClient();
+        var commandId = Guid.NewGuid();
+        var instanceId = Guid.NewGuid();
+
+        using var response = await client.GetAsync(
+            $"/api/runs/{commandId}/stream", HttpCompletionOption.ResponseHeadersRead);
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        await MessageBus.SimulateReceivedAsync(WorkflowStatusEvent.ExchangeName,
+            new WorkflowStatusEvent(instanceId, DummyType, "Received", null, DateTimeOffset.UtcNow,
+                OwnerServiceId: Guid.NewGuid(), CommandId: commandId));
+        await MessageBus.SimulateReceivedAsync(ViewDataMessage.ExchangeName,
+            new ViewDataMessage(instanceId, "log", 1, """{"line":"from the instance"}"""));
+        await MessageBus.SimulateReceivedAsync(WorkflowStatusEvent.ExchangeName,
+            new WorkflowStatusEvent(instanceId, DummyType, "Success", null, DateTimeOffset.UtcNow));
+
+        var frames = ParseFrames(await response.Content.ReadAsStringAsync());
+
+        Assert.That(frames, Has.Count.EqualTo(3),
+            "claim status + view + terminal status must all reach the dispatch-id subscriber");
+        Assert.Multiple(() =>
+        {
+            Assert.That(frames.All(f => f.RunId == commandId), Is.True);
+            Assert.That(frames[0].Kind, Is.EqualTo(RunStreamEvent.StatusKind));
+            Assert.That(frames[1].Kind, Is.EqualTo(RunStreamEvent.ViewKind));
+            Assert.That(frames[1].PayloadJson, Does.Contain("from the instance"));
+            Assert.That(frames[2].Kind, Is.EqualTo(RunStreamEvent.StatusKind));
+        });
     }
 
     [Test]

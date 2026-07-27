@@ -17,4 +17,9 @@ public static class WorkflowEnvironmentVariables
     public const string OutputDirectory = "Workflow__OutputDirectory";
     /// <summary>Directory containing the per-run repository workspace (ARCHITECTURE §9).</summary>
     public const string WorkspaceDirectory = "Workflow__WorkspaceDirectory";
+    /// <summary>
+    /// Prefix of one variable per workspace mount (suffixed with the upper-cased mount id) whose
+    /// value is the mount's effective root inside the container, working directory included.
+    /// </summary>
+    public const string WorkspaceMountPrefix = "Workflow__WorkspaceMount__";
 }

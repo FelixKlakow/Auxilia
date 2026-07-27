@@ -19,6 +19,11 @@ public sealed class SlotResolutionTests : CoreApiComponentTestBase
 {
     private const string Secret = "super-secret-value";
 
+    [SetUp]
+    public Task RegisterCredentialedTypeAsync()
+        => RegisterActiveTypeAsync(CreateClient(), "credentialed-wf", "docker://img");
+
+
     /// <summary>Creates a connector + a config bound to it, dispatches, and returns (runId, token).</summary>
     private async Task<(Guid RunId, string Token)> DispatchCredentialedRunAsync(HttpClient authed)
     {
@@ -29,7 +34,6 @@ public sealed class SlotResolutionTests : CoreApiComponentTestBase
         var cfgResp = await authed.PostAsJsonAsync("/api/configurations", new CreateRunConfiguration(
             Name: "cfg-" + Guid.NewGuid().ToString("N"),
             WorkflowType: "credentialed-wf",
-            PackageUri: "docker://img",
             SlotBindings: new List<SlotBinding> { new("sc", "github", connector!.Id) }));
         var config = await cfgResp.Content.ReadFromJsonAsync<RunConfiguration>();
 

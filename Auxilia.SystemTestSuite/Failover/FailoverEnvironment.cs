@@ -89,11 +89,15 @@ public class FailoverEnvironment
             .WithEnvironment("PlatformData__Backend", "InMemory")
             .WithEnvironment("PlatformData__ProtectionKeyBase64", Convert.ToBase64String(new byte[32]))
             .WithEnvironment("CoreSecurity__BootstrapApiKey", BootstrapApiKey)
+            .WithEnvironment("CoreApi__AllowDispatchWithoutRunner", "true")
             // The Core dispatches (and re-dispatches on failover) onto the queue the runner pool consumes.
             .WithEnvironment("CoreApi__RunCommandQueue", CommandQueue)
             // Tightened so a failover completes within seconds (mirrors the old PlatformHost settings).
             .WithEnvironment("CoreApi__HeartbeatTimeoutSeconds",      "8")
             .WithEnvironment("CoreApi__FailoverScanIntervalSeconds",  "2")
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__0__WorkflowType", "sleeping-workflow")
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__0__PackageUri",
+                $"docker://{WorkflowDispatch.WorkflowDispatchEnvironment.DummyWorkflowsImageName}")
             .WithPortBinding(8080, true)
             .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("FailoverMonitor started"))
             .Build();

@@ -233,12 +233,17 @@ public class WorkflowDispatcherWorkspaceTests
             Guid.NewGuid(), WorkflowType, "docker://workspace-workflow:test",
             new Dictionary<string, string>(),
             ResolutionToken: "run-token",
-            Repositories: [new RepositoryDispatch("main", _originRepo, AuthSlotName: "repo-auth:main")]);
+            WorkspaceMounts:
+            [
+                new WorkspaceMountDispatch("main", "git-repository",
+                    new Dictionary<string, string> { ["clone-url"] = _originRepo },
+                    AuthSlotName: "mount-auth:main")
+            ]);
 
         await _capturedHandler!(command, CancellationToken.None);
 
         _mockRepoAuth.Verify(r => r.ResolveAsync(
-            command.CommandId, "run-token", "repo-auth:main", It.IsAny<CancellationToken>()), Times.Once,
+            command.CommandId, "run-token", "mount-auth:main", It.IsAny<CancellationToken>()), Times.Once,
             "The repo credential must be resolved JIT via the run's resolution token.");
         Assert.That(captured, Is.Not.Null);
         Assert.That(File.Exists(Path.Combine(captured!.WorkspaceDirectoryBind!, "repos", "main", "test.txt")),
@@ -257,7 +262,12 @@ public class WorkflowDispatcherWorkspaceTests
             Guid.NewGuid(), WorkflowType, "docker://workspace-workflow:test",
             new Dictionary<string, string>(),
             ResolutionToken: "run-token",
-            Repositories: [new RepositoryDispatch("main", _originRepo, AuthSlotName: "repo-auth:main")]);
+            WorkspaceMounts:
+            [
+                new WorkspaceMountDispatch("main", "git-repository",
+                    new Dictionary<string, string> { ["clone-url"] = _originRepo },
+                    AuthSlotName: "mount-auth:main")
+            ]);
 
         await _capturedHandler!(command, CancellationToken.None);
 

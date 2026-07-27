@@ -218,4 +218,32 @@ public class DockerWorkflowLauncherBakedImageTests
 
         Assert.That(p.ExposedPorts, Is.Null);
     }
+
+    [Test]
+    public void ComposedImageTag_IsDeterministic_AndContentAddressed()
+    {
+        var same1 = DockerWorkflowLauncher.ComposedImageTag("img:1", ["RUN a", "RUN b"]);
+        var same2 = DockerWorkflowLauncher.ComposedImageTag("img:1", ["RUN a", "RUN b"]);
+        var otherLayers = DockerWorkflowLauncher.ComposedImageTag("img:1", ["RUN a"]);
+        var otherBase = DockerWorkflowLauncher.ComposedImageTag("img:2", ["RUN a", "RUN b"]);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(same1, Is.EqualTo(same2), "same base + layers must reuse the cached image");
+            Assert.That(same1, Does.StartWith("auxilia-env:"));
+            Assert.That(same1, Is.Not.EqualTo(otherLayers).And.Not.EqualTo(otherBase),
+                "any change to the base or a fragment must produce a fresh image");
+        });
+    }
+
+    [Test]
+    public void ComposeDockerfile_LayersFragmentsOnTopOfTheWorkflowImage()
+    {
+        var dockerfile = DockerWorkflowLauncher.ComposeDockerfile(
+            "auxilia-claude-code-workflow:system-test",
+            ["# dotnet\nRUN install-dotnet", "RUN install-node"]);
+
+        Assert.That(dockerfile, Is.EqualTo(
+            "FROM auxilia-claude-code-workflow:system-test\n# dotnet\nRUN install-dotnet\nRUN install-node\n"));
+    }
 }

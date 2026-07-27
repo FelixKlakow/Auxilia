@@ -52,13 +52,13 @@ public sealed class ArtifactTriggerHandler(
             };
 
             // Configuration-wired triggers (#20) dispatch the stored configuration by id, on behalf of
-            // the run-as principal; inline triggers dispatch the workflow type/package directly. The Core
+            // the run-as principal; inline triggers dispatch the registered workflow type directly. The Core
             // is the authorization authority and evaluates the run-as principal.
             var accepted = trigger.WorkflowConfigurationId is { } configId
                 ? await core.RunConfigurationAsync(
                     configId, onBehalfOf: trigger.RunAsPrincipalId, context: context, ct)
                 : await core.RunAsync(
-                    new RunRequest(trigger.WorkflowType, trigger.WorkflowPackageUri, context,
+                    new RunRequest(trigger.WorkflowType, context,
                         RequestedBy: trigger.RunAsPrincipalId), ct);
 
             await auditLog.AppendAsync("workflow-studio", "trigger.artifact-dispatch",

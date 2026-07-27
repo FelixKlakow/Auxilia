@@ -21,8 +21,10 @@ public sealed class StaticConfigurationTests : CoreApiComponentTestBase
     {
         builder.UseSetting("CoreApi:StaticConfigurations:0:Name", "static-dummy");
         builder.UseSetting("CoreApi:StaticConfigurations:0:WorkflowType", DummyType);
-        builder.UseSetting("CoreApi:StaticConfigurations:0:PackageUri", DummyImage);
         builder.UseSetting("CoreApi:StaticConfigurations:0:Context:WORKFLOW_NAME", DummyType);
+        // The type itself is statically registered too — config IS the operator's trust decision.
+        builder.UseSetting("CoreApi:StaticWorkflowTypes:0:WorkflowType", DummyType);
+        builder.UseSetting("CoreApi:StaticWorkflowTypes:0:PackageUri", DummyImage);
     }
 
     [Test]
@@ -41,6 +43,8 @@ public sealed class StaticConfigurationTests : CoreApiComponentTestBase
         var command = MessageBus.PublishedMessages
             .Select(m => m.Message).OfType<RunWorkflowCommand>().Single();
         Assert.That(command.WorkflowType, Is.EqualTo(DummyType));
+        Assert.That(command.WorkflowPackageUri, Is.EqualTo(DummyImage),
+            "The statically registered type supplies the package coordinate.");
         Assert.That(command.Context["WORKFLOW_NAME"], Is.EqualTo(DummyType));
     }
 }

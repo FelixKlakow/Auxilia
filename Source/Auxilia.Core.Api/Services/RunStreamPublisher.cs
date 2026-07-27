@@ -20,6 +20,11 @@ public sealed class RunStreamPublisher(
     private IAsyncDisposable? _statusSubscription;
     private IAsyncDisposable? _viewSubscription;
 
+    // A dispatch is acknowledged with its CommandId, but the runner emits events under its own
+    // WorkflowInstanceId. Status events carry the originating CommandId (the claim transition), so
+    // every event is re-published under BOTH ids — a client may observe the id the dispatch gave it.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, Guid> _commandIdByInstance = new();
+
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         await bus.DeclareExchangeAsync(WorkflowStatusEvent.ExchangeName, cancellationToken);
@@ -37,24 +42,38 @@ public sealed class RunStreamPublisher(
 
     private Task HandleStatusAsync(WorkflowStatusEvent statusEvent, CancellationToken ct)
     {
-        broker.Publish(new RunStreamEvent(
+        if (statusEvent.CommandId is { } commandId && commandId != statusEvent.WorkflowInstanceId)
+            _commandIdByInstance[statusEvent.WorkflowInstanceId] = commandId;
+
+        PublishAliased(statusEvent.WorkflowInstanceId, runId => new RunStreamEvent(
             RunStreamEvent.StatusKind,
-            statusEvent.WorkflowInstanceId,
+            runId,
             Sequence: 0,
             PayloadJson: JsonSerializer.Serialize(statusEvent, JsonSerializerOptions.Web),
             TimestampUtc: statusEvent.TimestampUtc));
+
+        if (CoreRunStates.IsTerminal(statusEvent.State))
+            _commandIdByInstance.TryRemove(statusEvent.WorkflowInstanceId, out _);
         return Task.CompletedTask;
     }
 
     private Task HandleViewAsync(ViewDataMessage message, CancellationToken ct)
     {
-        broker.Publish(new RunStreamEvent(
+        PublishAliased(message.WorkflowInstanceId, runId => new RunStreamEvent(
             RunStreamEvent.ViewKind,
-            message.WorkflowInstanceId,
+            runId,
             message.Sequence,
             PayloadJson: JsonSerializer.Serialize(message, JsonSerializerOptions.Web),
             TimestampUtc: DateTimeOffset.UtcNow));
         return Task.CompletedTask;
+    }
+
+    /// <summary>Publishes under the instance id and, when known, the originating command id too.</summary>
+    private void PublishAliased(Guid instanceId, Func<Guid, RunStreamEvent> eventFor)
+    {
+        broker.Publish(eventFor(instanceId));
+        if (_commandIdByInstance.TryGetValue(instanceId, out var commandId))
+            broker.Publish(eventFor(commandId));
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)

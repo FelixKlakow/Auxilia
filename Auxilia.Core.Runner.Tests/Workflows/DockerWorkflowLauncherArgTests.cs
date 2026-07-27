@@ -241,11 +241,13 @@ public class DockerWorkflowLauncherParamTests
     // ------------------------------------------------------------------ host config
 
     [Test]
-    public void AutoRemoveIsAlwaysTrue()
+    public void AutoRemoveIsOff_TheExitWatcherOwnsCleanup()
     {
+        // The exit watcher must collect the exit code + log tail BEFORE removal — with
+        // AutoRemove a crashed container (and its evidence) would vanish silently.
         var settings = new DockerWorkflowLauncherSettings();
         var p = DockerWorkflowLauncher.BuildCreateContainerParameters(SimpleRequest(), settings);
 
-        Assert.That(p.HostConfig.AutoRemove, Is.True);
+        Assert.That(p.HostConfig.AutoRemove, Is.False);
     }
 }

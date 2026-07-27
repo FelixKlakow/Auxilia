@@ -10,7 +10,9 @@ namespace Auxilia.Core.Runner.Workflows;
 /// <summary>
 /// Launches workflow containers via the Docker API over the local (or configured) Docker socket.
 /// No Docker CLI is required inside the Core.Runner container — only socket access.
-/// The container is started with <c>AutoRemove = true</c> so it is cleaned up on exit.
+/// A background watcher waits for each container's exit, captures its exit code and log tail
+/// (so a crash is never silent), removes the container, and reports the exit to the dispatcher
+/// via <see cref="WorkflowLaunchRequest.OnExited"/>.
 /// The extracted workflow package is bind-mounted read-only into the container at <c>/workflow</c>.
 /// </summary>
 public sealed class DockerWorkflowLauncher(
@@ -25,6 +27,16 @@ public sealed class DockerWorkflowLauncher(
 
         using var client = clientFactory.CreateClient(settings.DockerSocketPath);
 
+        // Environment capabilities layer ON TOP of the workflow image: the composed image is
+        // content-addressed (base + fragments), so every distinct combination builds once and
+        // every later run with the same selection starts instantly from the cache.
+        if (request is { DockerImageUri: { } baseImage, EnvironmentLayers.Count: > 0 })
+        {
+            var composed = await EnsureComposedImageAsync(
+                client, baseImage, request.EnvironmentLayers, ct);
+            request = request with { DockerImageUri = composed };
+        }
+
         var createParams = request.DockerImageUri is not null
             ? BuildBakedImageContainerParameters(request, settings)
             : BuildCreateContainerParameters(request, settings);
@@ -34,6 +46,25 @@ public sealed class DockerWorkflowLauncher(
             settings.RuntimeImage, request.ExtractedContentDirectory, SelectNetworkName(request, settings) ?? "<default>");
 
         var created = await client.Containers.CreateContainerAsync(createParams, ct);
+        logger.LogInformation(
+            "Workflow container created. ContainerId={ContainerId}",
+            created.ID[..Math.Min(12, created.ID.Length)]);
+
+        // Pre-flight linker check (baked images): every member a plugin references on a shared
+        // assembly must exist in the image's copy — build skew fails HERE with a clear message,
+        // not mid-session with a MissingMethodException.
+        if (request is { DockerImageUri: not null, SlotPluginFiles.Count: > 0 })
+        {
+            try
+            {
+                await VerifyPluginCompatibilityAsync(client, created.ID, request.SlotPluginFiles, ct);
+            }
+            catch
+            {
+                await TryRemoveContainerAsync(client, created.ID);
+                throw;
+            }
+        }
 
         if (request.SlotPluginFiles.Count > 0)
         {
@@ -79,6 +110,11 @@ public sealed class DockerWorkflowLauncher(
             "Workflow container started. RuntimeImage={RuntimeImage} ContainerId={ContainerId}",
             settings.RuntimeImage, created.ID[..Math.Min(12, created.ID.Length)]);
 
+        // Watch the container to its end on a background task: capture the exit code + log tail,
+        // remove the container (we own cleanup — no AutoRemove, or the evidence would vanish),
+        // and hand the exit to the dispatcher so a crashed workflow fails its run.
+        _ = Task.Run(() => WatchContainerAsync(settings, created.ID, request.OnExited));
+
         // Terminal reachability is container-to-container on the shared network: the backend
         // proxies to "<name>:<port>". No host port is published — the browser only ever talks
         // to the backend, never to the workflow container directly.
@@ -90,6 +126,219 @@ public sealed class DockerWorkflowLauncher(
         }
 
         return new WorkflowLaunchResult();
+    }
+
+    /// <summary>
+    /// Waits for the container to exit, captures its exit code and log tail, removes the
+    /// container, and reports the exit. Long-running by design (as long as the workflow itself);
+    /// every failure here is logged, never thrown — the watcher must not take the runner down.
+    /// </summary>
+    private async Task WatchContainerAsync(
+        DockerWorkflowLauncherSettings settings, string containerId, Func<ContainerExit, Task>? onExited)
+    {
+        try
+        {
+            using var client = clientFactory.CreateClient(settings.DockerSocketPath);
+            var wait = await client.Containers.WaitContainerAsync(containerId, CancellationToken.None);
+
+            string? logTail = null;
+            try
+            {
+                using var logs = await client.Containers.GetContainerLogsAsync(
+                    containerId, tty: false,
+                    new ContainerLogsParameters { ShowStdout = true, ShowStderr = true, Tail = "40" },
+                    CancellationToken.None);
+                using var stdout = new MemoryStream();
+                using var stderr = new MemoryStream();
+                await logs.CopyOutputToAsync(Stream.Null, stdout, stderr, CancellationToken.None);
+                logTail = (System.Text.Encoding.UTF8.GetString(stdout.ToArray()) + "\n"
+                           + System.Text.Encoding.UTF8.GetString(stderr.ToArray())).Trim();
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Could not read logs of exited container {ContainerId}.", containerId);
+            }
+
+            try
+            {
+                await client.Containers.RemoveContainerAsync(
+                    containerId, new ContainerRemoveParameters { Force = true }, CancellationToken.None);
+            }
+            catch (DockerContainerNotFoundException)
+            {
+                // Already gone — fine.
+            }
+
+            logger.LogInformation(
+                "Workflow container exited. ContainerId={ContainerId} ExitCode={ExitCode}",
+                containerId[..Math.Min(12, containerId.Length)], wait.StatusCode);
+
+            if (onExited is not null)
+                await onExited(new ContainerExit(wait.StatusCode, logTail));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Container exit watcher failed for {ContainerId}.", containerId);
+        }
+    }
+
+    /// <summary>
+    /// Verifies each injected plugin's referenced member surface against the shared assemblies
+    /// the image actually ships (read via the container archive API before start).
+    /// </summary>
+    private async Task VerifyPluginCompatibilityAsync(
+        IDockerClient client, string containerId, IReadOnlyList<SlotPluginFile> plugins, CancellationToken ct)
+    {
+        var imageAssemblies = new Dictionary<string, byte[]?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var plugin in plugins)
+        {
+            var pluginBytes = await File.ReadAllBytesAsync(plugin.DllPath, ct);
+            var targets = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+            foreach (var name in PluginCompatibilityChecker.ReferencedAssemblyNames(pluginBytes)
+                         .Where(n => n.StartsWith("Auxilia", StringComparison.OrdinalIgnoreCase)))
+            {
+                if (!imageAssemblies.TryGetValue(name, out var bytes))
+                    imageAssemblies[name] = bytes =
+                        await TryReadContainerFileAsync(client, containerId, $"/app/{name}.dll", ct);
+                if (bytes is not null)
+                    targets[name] = bytes;
+            }
+
+            if (targets.Count == 0)
+                continue;
+            var missing = PluginCompatibilityChecker.FindMissingReferences(pluginBytes, targets);
+            if (missing.Count > 0)
+                throw new InvalidOperationException(
+                    $"slot plugin '{Path.GetFileName(plugin.DllPath)}' is incompatible with the workflow "
+                    + $"image (missing: {string.Join("; ", missing.Take(3))}"
+                    + $"{(missing.Count > 3 ? $" — and {missing.Count - 3} more" : "")}) — "
+                    + "rebuild the workflow image, or the plugin, so both ship the same contract build.");
+        }
+    }
+
+    /// <summary>One file's bytes from the created (not yet started) container; null when absent.</summary>
+    private static async Task<byte[]?> TryReadContainerFileAsync(
+        IDockerClient client, string containerId, string path, CancellationToken ct)
+    {
+        try
+        {
+            var archive = await client.Containers.GetArchiveFromContainerAsync(
+                containerId, new GetArchiveFromContainerParameters { Path = path }, false, ct);
+            // Docker's chunked response stream signals its end by THROWING on the final read —
+            // buffer it fully first so the tar reader sees a well-behaved stream.
+            using var buffered = new MemoryStream();
+            await using (var stream = archive.Stream)
+            {
+                try
+                {
+                    await stream.CopyToAsync(buffered, ct);
+                }
+                catch (EndOfStreamException)
+                {
+                    // expected: the chunked transfer ended
+                }
+            }
+            buffered.Position = 0;
+            await using var reader = new TarReader(buffered);
+            while (await reader.GetNextEntryAsync(cancellationToken: ct) is { } entry)
+            {
+                if (entry.EntryType is not (TarEntryType.RegularFile or TarEntryType.V7RegularFile)
+                    || entry.DataStream is null)
+                    continue;
+                using var buffer = new MemoryStream();
+                await entry.DataStream.CopyToAsync(buffer, ct);
+                return buffer.ToArray();
+            }
+            return null;
+        }
+        catch (DockerApiException)
+        {
+            return null; // the image does not ship this assembly — nothing to compare
+        }
+    }
+
+    private async Task TryRemoveContainerAsync(IDockerClient client, string containerId)
+    {
+        try
+        {
+            await client.Containers.RemoveContainerAsync(
+                containerId, new ContainerRemoveParameters { Force = true }, CancellationToken.None);
+        }
+        catch (DockerApiException ex)
+        {
+            logger.LogWarning(ex, "Could not remove container {ContainerId} after a failed pre-flight.", containerId);
+        }
+    }
+
+    /// <summary>
+    /// Builds (or reuses) the composed environment image: the workflow image plus one Dockerfile
+    /// fragment per selected capability, tagged by the content hash of base + fragments.
+    /// </summary>
+    private async Task<string> EnsureComposedImageAsync(
+        IDockerClient client, string baseImage, IReadOnlyList<string> layers, CancellationToken ct)
+    {
+        var tag = ComposedImageTag(baseImage, layers);
+        try
+        {
+            await client.Images.InspectImageAsync(tag, ct);
+            logger.LogInformation("Composed environment image cached. Tag={Tag}", tag);
+            return tag;
+        }
+        catch (DockerImageNotFoundException)
+        {
+            // fall through to build
+        }
+
+        var dockerfile = ComposeDockerfile(baseImage, layers);
+        logger.LogInformation(
+            "Composing environment image. Base={Base} Layers={LayerCount} Tag={Tag}",
+            baseImage, layers.Count, tag);
+
+        using var context = BuildDockerfileTar(dockerfile);
+        string? buildError = null;
+        var progress = new Progress<JSONMessage>(m =>
+        {
+            if (m.ErrorMessage is { Length: > 0 } error)
+                buildError = error;
+        });
+        await client.Images.BuildImageFromDockerfileAsync(
+            new ImageBuildParameters { Dockerfile = "Dockerfile", Tags = [tag] },
+            context, null, null, progress, ct);
+        if (buildError is not null)
+            throw new InvalidOperationException($"environment image build failed: {buildError}");
+
+        // The build API streams; make sure the tagged image actually exists before launch.
+        await client.Images.InspectImageAsync(tag, ct);
+        logger.LogInformation("Composed environment image built. Tag={Tag}", tag);
+        return tag;
+    }
+
+    /// <summary>Content-addressed tag: same base + same fragments = the same cached image.</summary>
+    internal static string ComposedImageTag(string baseImage, IReadOnlyList<string> layers)
+    {
+        var content = baseImage + "\n " + string.Join("\n ", layers);
+        var hash = Convert.ToHexStringLower(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(content)));
+        return $"auxilia-env:{hash[..16]}";
+    }
+
+    /// <summary>The generated Dockerfile: the workflow image as base, one fragment per capability.</summary>
+    internal static string ComposeDockerfile(string baseImage, IReadOnlyList<string> layers)
+        => $"FROM {baseImage}\n" + string.Join("\n", layers.Select(l => l.TrimEnd())) + "\n";
+
+    private static MemoryStream BuildDockerfileTar(string dockerfile)
+    {
+        var stream = new MemoryStream();
+        using (var writer = new TarWriter(stream, leaveOpen: true))
+        {
+            var entry = new PaxTarEntry(TarEntryType.RegularFile, "Dockerfile")
+            {
+                DataStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(dockerfile)),
+            };
+            writer.WriteEntry(entry);
+        }
+        stream.Position = 0;
+        return stream;
     }
 
     /// <summary>
@@ -138,7 +387,8 @@ public sealed class DockerWorkflowLauncher(
             Env = env,
             HostConfig = new HostConfig
             {
-                AutoRemove = true,
+                // No AutoRemove: the exit watcher collects the exit code + log tail first,
+                // then removes the container — a crash must leave evidence, not vanish.
                 Binds = binds
             }
         };
@@ -186,7 +436,8 @@ public sealed class DockerWorkflowLauncher(
             Env   = env,
             HostConfig = new HostConfig
             {
-                AutoRemove = true,
+                // No AutoRemove: the exit watcher collects the exit code + log tail first,
+                // then removes the container — a crash must leave evidence, not vanish.
                 Binds      = binds
             }
         };

@@ -151,10 +151,18 @@ public class CoreApiDispatchEnvironment
             .WithEnvironment("PlatformData__Backend", "InMemory")
             .WithEnvironment("PlatformData__ProtectionKeyBase64", Convert.ToBase64String(new byte[32]))
             .WithEnvironment("CoreSecurity__BootstrapApiKey", BootstrapApiKey)
+            .WithEnvironment("CoreApi__AllowDispatchWithoutRunner", "true")
             .WithEnvironment("CoreApi__StaticConfigurations__0__Name", StaticConfigurationName)
             .WithEnvironment("CoreApi__StaticConfigurations__0__WorkflowType", DummyWorkflowType)
-            .WithEnvironment("CoreApi__StaticConfigurations__0__PackageUri", DummyPackageUri)
             .WithEnvironment("CoreApi__StaticConfigurations__0__Context__WORKFLOW_NAME", DummyWorkflowType)
+            // Statically registered workflow types (Active) — the operator trust decision for the
+            // suite: every type the dispatch tests run, all backed by the dummy-workflows image.
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__0__WorkflowType", DummyWorkflowType)
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__0__PackageUri", DummyPackageUri)
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__1__WorkflowType", CredentialWorkflowType)
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__1__PackageUri", DummyPackageUri)
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__2__WorkflowType", RepositoryWorkflowType)
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__2__PackageUri", DummyPackageUri)
             .WithPortBinding(8080, true)
             .WithWaitStrategy(
                 Wait.ForUnixContainer().UntilHttpRequestIsSucceeded(r => r.ForPort(8080).ForPath("/health")))

@@ -35,9 +35,10 @@ public sealed class WorkspaceManager(
             var runRepoDir = Path.Combine(runRoot, "repos", repository.Id);
             Directory.CreateDirectory(runRepoDir);
 
-            if (repository.NoCache)
+            if (repository.NoCache || repository.AllowPush)
             {
-                // High-sensitivity path: fetched fresh per run, never enters the warm cache.
+                // Fresh clone per run: sensitive repos never enter the warm cache, and a
+                // push-enabled clone keeps its credential — which must never be cached either.
                 await CloneAsync(repository, runRepoDir, ct);
             }
             else
@@ -45,6 +46,18 @@ public sealed class WorkspaceManager(
                 var cacheDir = await EnsureWarmCacheAsync(repository, ct);
                 CopyDirectory(cacheDir, runRepoDir);
             }
+
+            // The commit identity is provisioned, never guessed by the agent: the binding's
+            // values win, the platform identity is the default.
+            await RunGitAsync(
+                ["-C", runRepoDir, "config", "user.name",
+                 string.IsNullOrWhiteSpace(repository.CommitName) ? "Auxilia Agent" : repository.CommitName],
+                repository.CloneUrl, ct);
+            await RunGitAsync(
+                ["-C", runRepoDir, "config", "user.email",
+                 string.IsNullOrWhiteSpace(repository.CommitEmail)
+                     ? "agent@auxilia.invalid" : repository.CommitEmail],
+                repository.CloneUrl, ct);
 
             logger.LogInformation(
                 "Workspace repository prepared. InstanceId={InstanceId} RepositoryId={RepositoryId} CloneUrl={CloneUrl} NoCache={NoCache}",
@@ -116,6 +129,11 @@ public sealed class WorkspaceManager(
 
         // A tokened clone URL would otherwise sit in the copy's .git/config and ride into the
         // workflow container — workflows never hold raw credentials (ARCHITECTURE §8).
+        // EXCEPTION (Model B, decided 2026-07-27): a push-enabled mount keeps its scoped
+        // credential on the per-run clone so the agent can push; each push is governed by the
+        // agent's per-action permission policy, and the clone never enters the warm cache.
+        if (repository.AllowPush)
+            return;
         var stripped = StripUserInfo(repository.CloneUrl);
         if (!string.Equals(stripped, repository.CloneUrl, StringComparison.Ordinal))
             await RunGitAsync(

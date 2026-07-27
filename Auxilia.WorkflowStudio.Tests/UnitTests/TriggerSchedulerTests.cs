@@ -39,7 +39,6 @@ public sealed class TriggerSchedulerTests
         {
             Id = Guid.NewGuid(),
             WorkflowType = "codereview",
-            WorkflowPackageUri = "docker://cr",
             IntervalSeconds = 60,
             RunAsPrincipalId = principal,
             WorkflowConfigurationId = configId,
@@ -63,7 +62,6 @@ public sealed class TriggerSchedulerTests
         {
             Id = Guid.NewGuid(),
             WorkflowType = "codereview",
-            WorkflowPackageUri = "docker://cr",
             IntervalSeconds = 60,
             RunAsPrincipalId = principal,
             WorkflowConfigurationId = null,
@@ -74,7 +72,6 @@ public sealed class TriggerSchedulerTests
 
         var request = core.RunRequests.Single();
         Assert.That(request.WorkflowType, Is.EqualTo("codereview"));
-        Assert.That(request.PackageUri, Is.EqualTo("docker://cr"));
         Assert.That(request.RequestedBy, Is.EqualTo(principal));
         Assert.That(request.Context!["K"], Is.EqualTo("V"));
         Assert.That(core.RunConfigurationIds, Is.Empty);
@@ -88,7 +85,6 @@ public sealed class TriggerSchedulerTests
         {
             Id = Guid.NewGuid(),
             WorkflowType = "wt",
-            WorkflowPackageUri = "docker://img",
             IntervalSeconds = 60,
             Enabled = false,
             WorkflowConfigurationId = Guid.NewGuid()
@@ -110,7 +106,6 @@ public sealed class TriggerSchedulerTests
         {
             Id = Guid.NewGuid(),
             WorkflowType = "wt",
-            WorkflowPackageUri = "docker://img",
             IntervalSeconds = 3600,
             WorkflowConfigurationId = Guid.NewGuid()
         }, CancellationToken.None);

@@ -11,13 +11,15 @@ public sealed record CoreRunConfigurationRecord : IEntity
     public Guid Id { get; init; }
     public required string Name { get; init; }
     public required string WorkflowType { get; init; }
-    public required string PackageUri { get; init; }
 
     /// <summary>Non-secret key/value run context, serialized as JSON.</summary>
     public string ContextJson { get; init; } = "{}";
 
     /// <summary>Slot bindings (connector references / inline provider settings), serialized as JSON.</summary>
     public string SlotBindingsJson { get; init; } = "[]";
+
+    /// <summary>Free-form tags for steering client filtering, serialized as JSON.</summary>
+    public string TagsJson { get; init; } = "[]";
 
     public bool Enabled { get; init; } = true;
     public DateTimeOffset UpdatedUtc { get; init; }

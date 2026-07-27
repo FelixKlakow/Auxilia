@@ -42,7 +42,6 @@ public sealed class ArtifactTriggerHandlerTests
             Id = Guid.NewGuid(),
             ArtifactType = "design-doc",
             WorkflowType = "impl",
-            WorkflowPackageUri = "docker://impl",
             RunAsPrincipalId = principal,
             WorkflowConfigurationId = configId
         }, CancellationToken.None);
@@ -70,7 +69,6 @@ public sealed class ArtifactTriggerHandlerTests
             Id = Guid.NewGuid(),
             ArtifactType = "design-doc",
             WorkflowType = "impl",
-            WorkflowPackageUri = "docker://impl",
             RunAsPrincipalId = principal,
             WorkflowConfigurationId = null
         }, CancellationToken.None);
@@ -95,7 +93,6 @@ public sealed class ArtifactTriggerHandlerTests
             Id = Guid.NewGuid(),
             ArtifactType = "design-doc",
             WorkflowType = "impl",
-            WorkflowPackageUri = "docker://impl",
             WorkflowConfigurationId = Guid.NewGuid()
         }, CancellationToken.None);
 

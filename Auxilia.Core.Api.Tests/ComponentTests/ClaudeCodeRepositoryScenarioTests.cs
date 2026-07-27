@@ -12,9 +12,11 @@ namespace Auxilia.Core.Api.Tests.ComponentTests;
 /// <summary>
 /// The supported scenario end to end through the typed client: an app dynamically configures TFS/git
 /// authentication (a connector holding only the PAT), then starts a Claude Code session against
-/// exactly the repositories from its own config, with a prompt — driving the hub over REST. The
-/// credential stays in the Core; the dispatched command carries only the repo URLs + the auth-slot
-/// references the runner resolves just-in-time.
+/// exactly the repositories from its own config — each repository is a GENERIC slot binding of a
+/// workspace-mount provider (inline non-secret settings + the credential connector). The Core maps
+/// the binding's settings to the provider's declared roles as pure data; the credential stays in the
+/// Core and the dispatched command carries only role-keyed settings + auth-slot references the
+/// runner resolves just-in-time.
 /// </summary>
 [TestFixture]
 [Category("Component")]
@@ -22,6 +24,28 @@ public sealed class ClaudeCodeRepositoryScenarioTests : CoreApiComponentTestBase
 {
     private const string ClaudeCode = "claude-code";
     private const string Package = "docker://auxilia-claude-code:latest";
+    private const string RepositorySlot = "repository";
+
+    [SetUp]
+    public async Task RegisterClaudeCodeTypeAsync()
+    {
+        await RegisterActiveTypeAsync(CreateClient(), ClaudeCode, Package);
+        // The mount provider is catalog DATA: role-tagged settings, a required credential
+        // contract, and the workspace-mount flag — nothing about it is compiled anywhere.
+        ICoreClient core = new CoreClient(CreateClient());
+        await core.RegisterProviderAsync(new RegisterSlotProvider(
+            "git-repository", "workspace", "A git repository mounted into the run's workspace.",
+            Contracts: ["Auxilia.Workflows.SourceControl.ISourceControlAccess"],
+            Settings:
+            [
+                new RegisterProviderSetting("CloneUrl", "Repository", "Text", Required: true,
+                    Role: "clone-url", Browse: "repositories"),
+                new RegisterProviderSetting("Branch", "Branch", "Text",
+                    Role: "branch", Browse: "branches", BrowseDependsOn: "CloneUrl"),
+            ],
+            RequiredCredentialContract: "git-credential",
+            MountsIntoWorkspace: true));
+    }
 
     [Test]
     public async Task Client_ConfiguresTfsAuth_ThenStartsClaudeCodeSessionAgainstMultipleRepos()
@@ -34,20 +58,29 @@ public sealed class ClaudeCodeRepositoryScenarioTests : CoreApiComponentTestBase
             new Dictionary<string, string> { ["username"] = "build", ["token"] = "the-pat" },
             ConnectorScope.Personal));
 
-        // 2. Start a Claude Code session against exactly two repos on that server, with a prompt from
-        //    the app's configuration.
+        // 2. Start a Claude Code session against exactly two repos on that server, with a prompt
+        //    from the app's configuration — one binding per repository on the SAME slot.
         const string prompt = "Add a CHANGELOG entry for the latest release.";
         await core.RunAsync(new RunRequest(
-            ClaudeCode, Package,
+            ClaudeCode,
             Context: new Dictionary<string, string> { ["Title"] = prompt },
-            Repositories:
+            SlotBindings:
             [
-                new RepositorySpec("app", "https://dev.azure.com/contoso/app/_git/app", "main", auth.Id),
-                new RepositorySpec("docs", "https://dev.azure.com/contoso/docs/_git/docs", AuthConnectorId: auth.Id)
+                new SlotBinding(RepositorySlot, "git-repository", auth.Id,
+                    new Dictionary<string, string>
+                    {
+                        ["CloneUrl"] = "https://dev.azure.com/contoso/app/_git/app",
+                        ["Branch"] = "main"
+                    }),
+                new SlotBinding(RepositorySlot, "git-repository", auth.Id,
+                    new Dictionary<string, string>
+                    {
+                        ["CloneUrl"] = "https://dev.azure.com/contoso/docs/_git/docs"
+                    })
             ]));
 
-        // 3. The dispatched command carries the prompt + both repos by URL and their auth-slot
-        //    references — and never the credential itself.
+        // 3. The dispatched command carries the prompt + both mounts with ROLE-keyed settings and
+        //    their auth-slot references — and never the credential itself.
         var command = MessageBus.PublishedMessages
             .Select(m => m.Message).OfType<RunWorkflowCommand>().Single();
 
@@ -55,14 +88,19 @@ public sealed class ClaudeCodeRepositoryScenarioTests : CoreApiComponentTestBase
         {
             Assert.That(command.WorkflowType, Is.EqualTo(ClaudeCode));
             Assert.That(command.Context["Title"], Is.EqualTo(prompt));
-            Assert.That(command.Repositories, Has.Count.EqualTo(2));
-            Assert.That(command.Repositories!.Select(r => r.CloneUrl), Is.EquivalentTo(new[]
+            Assert.That(command.WorkspaceMounts, Has.Count.EqualTo(2));
+            Assert.That(command.WorkspaceMounts!.Select(m => m.SettingsByRole["clone-url"]), Is.EquivalentTo(new[]
             {
                 "https://dev.azure.com/contoso/app/_git/app",
                 "https://dev.azure.com/contoso/docs/_git/docs"
             }));
-            Assert.That(command.Repositories.All(r => r.AuthSlotName is not null), Is.True,
-                "Each repo references its auth slot so the runner resolves the PAT JIT at dispatch.");
+            Assert.That(command.WorkspaceMounts.Select(m => m.MountId),
+                Is.EquivalentTo(new[] { RepositorySlot, RepositorySlot + "-2" }),
+                "Multiple bindings of one slot get distinct mount ids.");
+            Assert.That(command.WorkspaceMounts.All(m => m.AuthSlotName is not null), Is.True,
+                "Each mount references its auth slot so the runner resolves the PAT JIT at dispatch.");
+            Assert.That(command.SlotProviderTypes ?? [], Does.Not.Contain("git-repository"),
+                "Workspace-mount providers are consumed by the runner — no plugin ships into the container.");
             Assert.That(JsonSerializer.Serialize(command), Does.Not.Contain("the-pat"),
                 "The credential must never ride the dispatch command.");
         });
@@ -85,10 +123,17 @@ public sealed class ClaudeCodeRepositoryScenarioTests : CoreApiComponentTestBase
         ICoreClient core = new CoreClient(CreateClient());
 
         var ex = Assert.CatchAsync<CoreApiException>(() => core.RunAsync(new RunRequest(
-            ClaudeCode, Package,
-            Repositories: [new RepositorySpec("app", "https://dev.azure.com/contoso/app/_git/app", AuthConnectorId: connectorId)])));
+            ClaudeCode,
+            SlotBindings:
+            [
+                new SlotBinding(RepositorySlot, "git-repository", connectorId,
+                    new Dictionary<string, string>
+                    {
+                        ["CloneUrl"] = "https://dev.azure.com/contoso/app/_git/app"
+                    })
+            ])));
 
         Assert.That(ex!.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden),
-            "Repository auth is gated like any connector — you cannot use another principal's credential.");
+            "Mount auth is gated like any connector — you cannot use another principal's credential.");
     }
 }

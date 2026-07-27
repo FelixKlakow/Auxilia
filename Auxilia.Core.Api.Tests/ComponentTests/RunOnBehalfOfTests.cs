@@ -22,6 +22,10 @@ public sealed class RunOnBehalfOfTests : CoreApiComponentTestBase
     private const string DummyType = "simple-git-commit-workflow";
     private const string DummyImage = "docker://auxilia-dummy-workflows:system-test";
 
+    [SetUp]
+    public Task RegisterDummyTypeAsync() => RegisterActiveTypeAsync(CreateClient(), DummyType, DummyImage);
+
+
     private async Task<(HttpClient Client, Guid PrincipalId)> PrincipalWithRolesAsync(params string[] roles)
     {
         var directory = Factory.Services.GetRequiredService<PrincipalDirectory>();
@@ -51,7 +55,7 @@ public sealed class RunOnBehalfOfTests : CoreApiComponentTestBase
         var target = await NewPrincipalAsync(BuiltInRoles.User);
 
         var response = await caller.PostAsJsonAsync("/api/runs",
-            new RunRequest(DummyType, DummyImage, RequestedBy: target));
+            new RunRequest(DummyType, RequestedBy: target));
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
 
         var accepted = await response.Content.ReadFromJsonAsync<RunAccepted>();
@@ -68,7 +72,7 @@ public sealed class RunOnBehalfOfTests : CoreApiComponentTestBase
         var target = await NewPrincipalAsync(BuiltInRoles.User);
 
         var response = await caller.PostAsJsonAsync("/api/runs",
-            new RunRequest(DummyType, DummyImage, RequestedBy: target));
+            new RunRequest(DummyType, RequestedBy: target));
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
     }
 
@@ -80,7 +84,7 @@ public sealed class RunOnBehalfOfTests : CoreApiComponentTestBase
         var target = await NewPrincipalAsync(BuiltInRoles.Auditor);
 
         var response = await caller.PostAsJsonAsync("/api/runs",
-            new RunRequest(DummyType, DummyImage, RequestedBy: target));
+            new RunRequest(DummyType, RequestedBy: target));
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden),
             "Delegation grants no capability the target itself lacks.");
     }
@@ -91,7 +95,7 @@ public sealed class RunOnBehalfOfTests : CoreApiComponentTestBase
         var (caller, callerId) = await PrincipalWithRolesAsync(BuiltInRoles.User);
 
         var response = await caller.PostAsJsonAsync("/api/runs",
-            new RunRequest(DummyType, DummyImage, RequestedBy: callerId));
+            new RunRequest(DummyType, RequestedBy: callerId));
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
 
         var accepted = await response.Content.ReadFromJsonAsync<RunAccepted>();
@@ -104,7 +108,7 @@ public sealed class RunOnBehalfOfTests : CoreApiComponentTestBase
         var (caller, callerId) = await PrincipalWithRolesAsync(BuiltInRoles.User);
 
         var response = await caller.PostAsJsonAsync("/api/runs",
-            new RunRequest(DummyType, DummyImage));
+            new RunRequest(DummyType));
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
 
         var accepted = await response.Content.ReadFromJsonAsync<RunAccepted>();
