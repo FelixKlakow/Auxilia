@@ -40,8 +40,10 @@ public sealed class ClaudeCodeCliAgent(
         // Mutable per-session state: the operator can retune it live over the setting channel.
         var permissionMode = new SessionSettings(request.PermissionMode, request.PushPolicy);
         var planTracker = new PlanTracker();
+        var multiTurn = request.MultiTurn && request.Interaction is not null;
         Task? guidanceTask = null;
         Task? settingsTask = null;
+        Task? endTask = null;
         try
         {
             // Drain stderr concurrently so a chatty CLI can't dead-lock on a full pipe.
@@ -50,11 +52,15 @@ public sealed class ClaudeCodeCliAgent(
             if (request.Interaction is { } interaction)
             {
                 // The instruction is the first user turn; stdin stays open for control
-                // responses and operator guidance until the session finishes.
-                await WriteUserMessageAsync(process, stdinGate, request.Instruction, cancellationToken);
+                // responses and operator guidance until the session finishes. A multi-turn
+                // session may start without one — the operator sends the first turn live.
+                if (request.Instruction is { Length: > 0 })
+                    await WriteUserMessageAsync(process, stdinGate, request.Instruction, cancellationToken);
                 guidanceTask = PumpGuidanceAsync(process, stdinGate, interaction, sessionScope.Token);
                 settingsTask = PumpSettingsAsync(
                     process, stdinGate, interaction, permissionMode, onChatEntry, sessionScope.Token);
+                if (multiTurn)
+                    endTask = CloseInputOnEndAsync(process, stdinGate, request.EndToken, sessionScope.Token);
             }
 
             var parser = new ClaudeStreamJsonParser();
@@ -86,14 +92,26 @@ public sealed class ClaudeCodeCliAgent(
                     && planTracker.ApplyLine(line) is { Count: > 0 } snapshot)
                     await onPlan(snapshot, cancellationToken);
 
+                var resultBefore = parser.Result;
                 foreach (var entry in parser.ParseLine(line, _time.GetUtcNow()))
                     await onChatEntry(entry, cancellationToken);
 
-                // The result event ends the conversation — closing stdin lets the CLI exit.
-                if (parser.Result is not null && request.Interaction is not null)
+                if (parser.Result is { } turnResult && !ReferenceEquals(turnResult, resultBefore)
+                    && request.Interaction is not null)
                 {
-                    await sessionScope.CancelAsync();
-                    process.CloseInput();
+                    if (!multiTurn)
+                    {
+                        // The result event ends the conversation — closing stdin lets the CLI exit.
+                        await sessionScope.CancelAsync();
+                        process.CloseInput();
+                    }
+                    else if (!request.EndToken.IsCancellationRequested)
+                    {
+                        // Multi-turn: the session stays open for the operator's next instruction
+                        // (delivered as guidance); announce the turn boundary instead of exiting.
+                        if (request.OnTurnEnded is { } onTurnEnded)
+                            await onTurnEnded(turnResult.NumTurns, turnResult.ResultText, cancellationToken);
+                    }
                 }
             }
 
@@ -101,11 +119,15 @@ public sealed class ClaudeCodeCliAgent(
             var stderr = await stderrTask;
 
             if (parser.Result is not { } result)
-                return new CodingAgentResult(
-                    Success: false,
-                    Summary: null,
-                    ErrorMessage: $"The Claude Code CLI exited with code {exitCode} without a result event."
-                                  + StderrSuffix(stderr));
+                // A multi-turn session the operator ended before the first turn has no result
+                // event — that is a clean end, not a failure.
+                return multiTurn && request.EndToken.IsCancellationRequested && exitCode == 0
+                    ? new CodingAgentResult(Success: true, Summary: null)
+                    : new CodingAgentResult(
+                        Success: false,
+                        Summary: null,
+                        ErrorMessage: $"The Claude Code CLI exited with code {exitCode} without a result event."
+                                      + StderrSuffix(stderr));
 
             var success = !result.IsError && exitCode == 0;
             return new CodingAgentResult(
@@ -129,10 +151,43 @@ public sealed class ClaudeCodeCliAgent(
         finally
         {
             await sessionScope.CancelAsync();
-            foreach (var pump in new[] { guidanceTask, settingsTask })
+            foreach (var pump in new[] { guidanceTask, settingsTask, endTask })
                 if (pump is not null)
                     try { await pump; }
                     catch (OperationCanceledException) { /* stopped with the session */ }
+                    catch (Exception e) when (e is IOException or ObjectDisposedException or InvalidOperationException)
+                    {
+                        // A pump racing a just-closed stdin (session end) — nothing to salvage.
+                    }
+        }
+    }
+
+    /// <summary>
+    /// Multi-turn end-of-session: when the operator ends the session, stdin is closed under the
+    /// gate — the CLI finishes what it is doing, emits its final result, and exits.
+    /// </summary>
+    private static async Task CloseInputOnEndAsync(
+        IClaudeCliProcess process, SemaphoreSlim stdinGate, CancellationToken endToken, CancellationToken sessionToken)
+    {
+        using var either = CancellationTokenSource.CreateLinkedTokenSource(endToken, sessionToken);
+        try
+        {
+            await Task.Delay(Timeout.Infinite, either.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Fell through on end or session teardown — only the former closes stdin.
+        }
+        if (!endToken.IsCancellationRequested || sessionToken.IsCancellationRequested)
+            return;
+        await stdinGate.WaitAsync(CancellationToken.None);
+        try
+        {
+            process.CloseInput();
+        }
+        finally
+        {
+            stdinGate.Release();
         }
     }
 

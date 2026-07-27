@@ -28,13 +28,21 @@ public sealed class AgentSessionApplication(
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         await PublishProgressAsync("session", "started", cancellationToken);
-        await PublishChatAsync(
-            new AgentChatEntry(AgentChatRole.User, context.Instruction, time.GetUtcNow()),
-            cancellationToken);
+        if (context.Instruction.Length > 0)
+            await PublishChatAsync(
+                new AgentChatEntry(AgentChatRole.User, context.Instruction, time.GetUtcNow()),
+                cancellationToken);
 
         OperatorChannel? channel = null;
         if (views is not null && inputs is not null)
-            channel = await OperatorChannel.StartAsync(views, inputs, cancellationToken);
+            channel = await OperatorChannel.StartAsync(views, inputs, cancellationToken,
+                extraCapabilities: context.MultiTurn ? ["end"] : null);
+
+        // A multi-turn session lives from operator input — without the steering surface there is
+        // no way to ever send a next turn (or to end the session).
+        if (context.MultiTurn && channel is null)
+            throw new InvalidOperationException(
+                "A multi-turn session needs the platform connection (views + inputs) for operator steering.");
 
         try
         {
@@ -57,6 +65,20 @@ public sealed class AgentSessionApplication(
                             ? null
                             : (items, token) => views.PublishAsync(
                                 AgentPlanUpdate.ViewName, new AgentPlanUpdate(items), token),
+                        MultiTurn = context.MultiTurn,
+                        EndToken = channel?.EndToken ?? CancellationToken.None,
+                        // Each finished turn is announced on the steering view (the steering client's
+                        // notification cue) and mirrored into the conversation.
+                        OnTurnEnded = channel is null
+                            ? null
+                            : async (turn, summary, token) =>
+                            {
+                                await channel.PublishTurnEndedAsync(turn, summary, token);
+                                await PublishChatAsync(new AgentChatEntry(
+                                    AgentChatRole.System,
+                                    $"Turn finished ({turn} so far) — the session is waiting for your next instruction.",
+                                    time.GetUtcNow(), Label: "Session"), token);
+                            },
                     },
                     PublishChatAsync,
                     session.Token);

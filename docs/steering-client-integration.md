@@ -224,3 +224,15 @@ Matches what's shipped and needs no new proxy connectors. **Cost:** the LLM-driv
 - **Credential model (§4):** **Model A** (proxy, token Core-side, build one connector) or **Model B** (scoped token in-sandbox, no new connector)? *My lean: A for the AI agent.* ← the key decision.
 - **SoD:** should the Core optionally enforce *input-provider ≠ run-triggerer* on `run.provide-input`? Generic authorization, off by default. *My lean: yes.*
 - **Protocol-lib home:** shared across repos — standalone package both consume, or define-in-Auxilia + vendor a copy into the steering client?
+
+---
+
+## 8. Multi-turn sessions (delivered 2026-07-27)
+
+The `claude-code` **and `github-copilot`** workflows support **long-living multi-turn sessions** on top of the steer loop — no new Core surface; everything rides the existing opaque channels:
+
+- **Dispatch flag:** Boolean input `multi-turn` (context `WORKFLOW_CONTEXT__MULTI-TURN`). With it set, `instruction` is **optional** — the operator may send the first turn live as guidance. Single-turn runs still fail loudly without an instruction.
+- **Turn loop:** the CLI's per-turn `result` event no longer closes stdin in multi-turn; the next operator **guidance** becomes the next user turn. The last result event's summary/turn-count/cost feed the session report.
+- **Turn boundary (out):** new steering wire item `{"$type":"turn-ended","turn":n,"summary":…}` published on the `steering` view after each turn (plus a System chat entry) — the steering client's notification cue (the steering client raises a Windows notification).
+- **Copilot specifics:** the SDK session protocol is required (`UseSdkSession`; the headless CLI mode refuses multi-turn). Between turns the next guidance IS the next turn's prompt; guidance sent mid-turn queues for the following turn.
+- **Graceful end (in):** new hub command `{"$type":"end"}`; announced via the extra capability `"end"`. The workflow closes the agent's stdin, the CLI finishes and exits, the run completes **successfully** (unlike `halt`). the steering client shows an "End session" button when announced.

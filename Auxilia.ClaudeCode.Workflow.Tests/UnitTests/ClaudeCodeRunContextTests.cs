@@ -36,6 +36,32 @@ public sealed class AgentSessionContextTests
             () => AgentSessionContext.FromValues(title, body, "/w", "/o"));
     }
 
+    [TestCase("true")]
+    [TestCase("True")]
+    [TestCase("1")]
+    public void MultiTurn_MissingInstruction_IsAllowed(string multiTurn)
+    {
+        var context = AgentSessionContext.FromValues(
+            null, null, "/w", "/o", multiTurn: multiTurn);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(context.MultiTurn, Is.True);
+            Assert.That(context.Instruction, Is.Empty);
+        });
+    }
+
+    [TestCase(null)]
+    [TestCase("false")]
+    [TestCase("nonsense")]
+    public void NonTrueMultiTurnValues_KeepSingleTurnSemantics(string? multiTurn)
+    {
+        var context = AgentSessionContext.FromValues(
+            "Do something", null, "/w", "/o", multiTurn: multiTurn);
+
+        Assert.That(context.MultiTurn, Is.False);
+    }
+
     [Test]
     public void MissingDirectories_FallBackToCreatedTempDirectories()
     {

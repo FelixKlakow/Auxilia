@@ -49,10 +49,22 @@ public static class CopilotWorkflow
             .DeclaresTrigger(TriggerDeclaration.Manual,
                 "Run from the dashboard with an instruction — the agent's task.")
             .RequiresInput(new WorkflowInputDescriptor(
-                "instruction", "Instruction", Required: true,
-                Description: "The task the agent executes autonomously — a mail's subject/body for triggered runs.")
+                "instruction", "Instruction", Required: false,
+                Description: "The task the agent executes autonomously — a mail's subject/body for "
+                             + "triggered runs. Required unless the session is multi-turn (there "
+                             + "the first instruction may arrive live from the steering client).")
             {
                 Kind = "Multiline"
+            })
+            .RequiresInput(new WorkflowInputDescriptor(
+                "multi-turn", "Multi-turn session", Required: false,
+                Description: "Keep the session alive after each turn: the agent announces the "
+                             + "turn's end and waits for your next instruction from the steering client "
+                             + "until you end the session. Off: the run finishes when the agent "
+                             + "completes the instruction. Needs the provider's SDK session mode.")
+            {
+                Kind = "Boolean",
+                DefaultValue = "false"
             })
             .DeclaresTrigger(TriggerDeclaration.Mailbox,
                 "A filtered mail starts a run; subject and body become the instruction.")

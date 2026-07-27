@@ -68,6 +68,17 @@ public sealed class CopilotCliAgentTests
                 new Dictionary<string, string>())));
     }
 
+    [Test]
+    public void RunAsync_MultiTurnInHeadlessMode_FailsLoudly()
+    {
+        var agent = new CopilotCliAgent(new CopilotCliOptions { Token = "t" });
+
+        var ex = Assert.ThrowsAsync<InvalidOperationException>(() => agent.RunAsync(
+            Request with { MultiTurn = true }, (_, _) => Task.CompletedTask));
+        Assert.That(ex!.Message, Does.Contain("UseSdkSession"),
+            "The headless CLI is one-shot — multi-turn needs the SDK session protocol.");
+    }
+
     [TestCase("- [ ] Write tests", "Write tests", "pending")]
     [TestCase("- [x] Fix build", "Fix build", "completed")]
     [TestCase("* [~] Refactor parser", "Refactor parser", "in_progress")]

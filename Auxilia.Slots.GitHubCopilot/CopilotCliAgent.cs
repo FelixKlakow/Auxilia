@@ -24,6 +24,11 @@ public sealed class CopilotCliAgent(
         Func<AgentChatEntry, CancellationToken, Task> onChatEntry,
         CancellationToken cancellationToken = default)
     {
+        if (request.MultiTurn)
+            throw new InvalidOperationException(
+                "Multi-turn sessions need the Copilot SDK session protocol — enable the "
+                + "provider's UseSdkSession setting; the headless CLI mode is one-shot.");
+
         var stopwatch = Stopwatch.StartNew();
         using var process = Process.Start(BuildStartInfo(request))
                             ?? throw new InvalidOperationException(

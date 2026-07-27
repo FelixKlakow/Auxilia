@@ -477,6 +477,102 @@ public sealed class ClaudeCodeCliAgentTests
         });
     }
 
+    [Test]
+    public async Task MultiTurnSession_ResultEvent_KeepsStdinOpen_AndAnnouncesTheTurn()
+    {
+        var stdout = """
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"first"}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":2,"result":"second"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var turnEnds = new List<(int Turn, string? Summary)>();
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        var result = await agent.RunAsync(
+            Request with
+            {
+                Interaction = new FakeInteraction(),
+                MultiTurn = true,
+                OnTurnEnded = (turn, summary, _) => { turnEnds.Add((turn, summary)); return Task.CompletedTask; },
+            },
+            (_, _) => Task.CompletedTask);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(factory.LastProcess!.InputClosed, Is.False,
+                "A multi-turn session survives its result events — only the operator ends it.");
+            Assert.That(turnEnds, Is.EqualTo(new[] { (1, "first"), (2, "second") }));
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Summary, Is.EqualTo("second"));
+            Assert.That(result.TurnCount, Is.EqualTo(2));
+        });
+    }
+
+    [Test]
+    public async Task MultiTurnSession_OperatorEnd_ClosesStdin_WithoutAnnouncingTheFinalTurn()
+    {
+        var stdout = """{"type":"result","subtype":"success","is_error":false,"num_turns":3,"result":"wrap-up"}""";
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        using var end = new CancellationTokenSource();
+        await end.CancelAsync();
+        var turnEnds = new List<int>();
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        var result = await agent.RunAsync(
+            Request with
+            {
+                Interaction = new FakeInteraction(),
+                MultiTurn = true,
+                EndToken = end.Token,
+                OnTurnEnded = (turn, _, _) => { turnEnds.Add(turn); return Task.CompletedTask; },
+            },
+            (_, _) => Task.CompletedTask);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(factory.LastProcess!.InputClosed, Is.True,
+                "The operator's end closes stdin so the CLI can exit.");
+            Assert.That(turnEnds, Is.Empty,
+                "The result after an end is the session wrap-up, not another turn boundary.");
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.Summary, Is.EqualTo("wrap-up"));
+        });
+    }
+
+    [Test]
+    public async Task MultiTurnSession_EndedBeforeAnyTurn_IsACleanSuccess()
+    {
+        var factory = new FakeProcessFactory("", exitCode: 0);
+        using var end = new CancellationTokenSource();
+        await end.CancelAsync();
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        var result = await agent.RunAsync(
+            Request with { Interaction = new FakeInteraction(), MultiTurn = true, EndToken = end.Token },
+            (_, _) => Task.CompletedTask);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Success, Is.True);
+            Assert.That(result.ErrorMessage, Is.Null);
+        });
+    }
+
+    [Test]
+    public async Task MultiTurnSession_WithoutInstruction_SendsNoInitialUserMessage()
+    {
+        var stdout = """{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}""";
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        await agent.RunAsync(
+            new CodingAgentRequest("", "/workspace", new FakeInteraction()) { MultiTurn = true },
+            (_, _) => Task.CompletedTask);
+
+        Assert.That(factory.LastProcess!.Input.ToString(), Does.Not.Contain("\"type\":\"user\""),
+            "The operator sends the first turn live — there is no initial instruction turn.");
+    }
+
     private sealed class FakeInteraction(AgentAnswer? answer = null) : IAgentInteraction
     {
         public AgentQuestion? LastQuestion { get; private set; }

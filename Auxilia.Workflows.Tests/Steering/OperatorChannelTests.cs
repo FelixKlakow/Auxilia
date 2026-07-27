@@ -79,6 +79,47 @@ public sealed class OperatorChannelTests
     }
 
     [Test]
+    public async Task Start_WithExtraCapabilities_AnnouncesThemBesideTheBaseline()
+    {
+        var views = new RecordingViewPublisher();
+        await using var channel = await OperatorChannel.StartAsync(
+            views, new FakeInputs(), extraCapabilities: ["end"]);
+
+        var capabilities = views.Single("capabilities");
+        Assert.That(capabilities.GetProperty("accepts").EnumerateArray().Select(a => a.GetString()),
+            Is.EquivalentTo(new[] { "guidance", "form-answer", "halt", "setting", "end" }));
+    }
+
+    [Test]
+    public async Task End_CancelsTheEndToken_ButNotHalt()
+    {
+        var inputs = new FakeInputs();
+        await using var channel = await OperatorChannel.StartAsync(new RecordingViewPublisher(), inputs);
+
+        Assert.That(channel.EndToken.IsCancellationRequested, Is.False);
+        inputs.Push("""{"$type":"end"}""");
+        await WaitUntilAsync(() => channel.EndToken.IsCancellationRequested);
+        Assert.That(channel.HaltToken.IsCancellationRequested, Is.False,
+            "A graceful end is not a halt — the session finishes its current work.");
+    }
+
+    [Test]
+    public async Task PublishTurnEnded_EmitsTheTurnBoundaryWireItem()
+    {
+        var views = new RecordingViewPublisher();
+        await using var channel = await OperatorChannel.StartAsync(views, new FakeInputs());
+
+        await channel.PublishTurnEndedAsync(3, "Refactored the parser.", CancellationToken.None);
+
+        var turnEnded = views.Single("turn-ended");
+        Assert.Multiple(() =>
+        {
+            Assert.That(turnEnded.GetProperty("turn").GetInt32(), Is.EqualTo(3));
+            Assert.That(turnEnded.GetProperty("summary").GetString(), Is.EqualTo("Refactored the parser."));
+        });
+    }
+
+    [Test]
     public async Task SettingChange_ReachesTheWaiter()
     {
         var inputs = new FakeInputs();

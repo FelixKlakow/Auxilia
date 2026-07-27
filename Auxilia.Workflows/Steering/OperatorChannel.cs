@@ -49,6 +49,7 @@ public sealed class OperatorChannel : IAsyncDisposable
     private readonly IViewPublisher _views;
     private readonly IAsyncDisposable _pump;
     private readonly CancellationTokenSource _halt = new();
+    private readonly CancellationTokenSource _end = new();
     private readonly Channel<string> _guidance = Channel.CreateUnbounded<string>();
     private readonly Channel<OperatorSetting> _settings = Channel.CreateUnbounded<OperatorSetting>();
     private readonly Dictionary<string, TaskCompletionSource<IReadOnlyList<OperatorAnswer>>> _pendingForms = [];
@@ -62,18 +63,27 @@ public sealed class OperatorChannel : IAsyncDisposable
         _pump = new Pump(pumpCts, pumpTask);
     }
 
-    /// <summary>Opens the channel and announces the run's steering capabilities to observers.</summary>
+    /// <summary>
+    /// Opens the channel and announces the run's steering capabilities to observers.
+    /// <paramref name="extraCapabilities"/> extends the baseline set (e.g. "end" for sessions
+    /// the operator can finish gracefully).
+    /// </summary>
     public static async Task<OperatorChannel> StartAsync(
-        IViewPublisher views, IWorkflowInputs inputs, CancellationToken lifetime = default)
+        IViewPublisher views, IWorkflowInputs inputs, CancellationToken lifetime = default,
+        IReadOnlyList<string>? extraCapabilities = null)
     {
         var channel = new OperatorChannel(views, inputs, lifetime);
+        string[] baseline = ["guidance", "form-answer", "halt", "setting"];
         await views.PublishAsync(ViewName,
-            new CapabilitiesWire("capabilities", ["guidance", "form-answer", "halt", "setting"]), lifetime);
+            new CapabilitiesWire("capabilities", [.. baseline, .. extraCapabilities ?? []]), lifetime);
         return channel;
     }
 
     /// <summary>Cancelled when the operator halts the run from the steering client.</summary>
     public CancellationToken HaltToken => _halt.Token;
+
+    /// <summary>Cancelled when the operator gracefully ends the session (multi-turn runs).</summary>
+    public CancellationToken EndToken => _end.Token;
 
     /// <summary>Raises a question form in the steering client and blocks until the operator submits it.</summary>
     public async Task<IReadOnlyList<OperatorAnswer>> AskAsync(
@@ -118,6 +128,13 @@ public sealed class OperatorChannel : IAsyncDisposable
     public Task EndSessionAsync(bool success, string? error, CancellationToken cancellationToken)
         => _views.PublishAsync(ViewName, new SessionEndedWire("session-ended", success, error), cancellationToken);
 
+    /// <summary>
+    /// Announces that one agent turn finished and the session is idle awaiting operator input —
+    /// the steering client's cue to notify the user.
+    /// </summary>
+    public Task PublishTurnEndedAsync(int turn, string? summary, CancellationToken cancellationToken)
+        => _views.PublishAsync(ViewName, new TurnEndedWire("turn-ended", turn, summary), cancellationToken);
+
     public ValueTask DisposeAsync() => _pump.DisposeAsync();
 
     private async Task PumpAsync(IWorkflowInputs inputs, CancellationToken ct)
@@ -158,6 +175,10 @@ public sealed class OperatorChannel : IAsyncDisposable
 
             case "halt":
                 _halt.Cancel();
+                break;
+
+            case "end":
+                _end.Cancel();
                 break;
 
             case "setting":
@@ -247,4 +268,9 @@ public sealed class OperatorChannel : IAsyncDisposable
         [property: JsonPropertyName("$type")] string Type,
         [property: JsonPropertyName("success")] bool Success,
         [property: JsonPropertyName("error")] string? Error);
+
+    private sealed record TurnEndedWire(
+        [property: JsonPropertyName("$type")] string Type,
+        [property: JsonPropertyName("turn")] int Turn,
+        [property: JsonPropertyName("summary")] string? Summary);
 }

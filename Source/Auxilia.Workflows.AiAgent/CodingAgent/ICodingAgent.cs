@@ -30,6 +30,22 @@ public sealed record CodingAgentRequest(
     /// Copilot: checklist lines). Null = the session doesn't surface plans.
     /// </summary>
     public Func<IReadOnlyList<AgentPlanItem>, CancellationToken, Task>? OnPlanUpdate { get; init; }
+
+    /// <summary>
+    /// Multi-turn session: after each finished turn the agent stays alive awaiting the operator's
+    /// next instruction (via guidance) instead of completing the run. Requires
+    /// <see cref="Interaction"/>; the session ends when <see cref="EndToken"/> fires.
+    /// </summary>
+    public bool MultiTurn { get; init; }
+
+    /// <summary>Fires when the operator gracefully ends a multi-turn session.</summary>
+    public CancellationToken EndToken { get; init; }
+
+    /// <summary>
+    /// Invoked when one turn of a multi-turn session finishes (turn count so far, the turn's
+    /// closing summary) — the workflow's cue to notify the operator.
+    /// </summary>
+    public Func<int, string?, CancellationToken, Task>? OnTurnEnded { get; init; }
 }
 
 /// <summary>

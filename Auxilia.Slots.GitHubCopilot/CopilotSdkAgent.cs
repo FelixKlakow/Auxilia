@@ -13,6 +13,11 @@ namespace Auxilia.Slots.GitHubCopilot;
 /// operator forms, guidance arrives as follow-up messages, a live model switch maps to
 /// <c>SetModelAsync</c>, and assistant checklists publish plan snapshots. Without an interaction
 /// the session auto-approves — the container is the sandbox.
+/// <para>
+/// Multi-turn: after each completed turn the session announces the boundary
+/// (<see cref="CodingAgentRequest.OnTurnEnded"/>) and idles until the operator's next guidance,
+/// which becomes the next turn's prompt; the end token finishes the session successfully.
+/// </para>
 /// </summary>
 public sealed class CopilotSdkAgent(
     CopilotCliOptions options,
@@ -52,23 +57,51 @@ public sealed class CopilotSdkAgent(
         using var events = session.On<SessionEvent>(evt =>
             _ = OnSessionEventAsync(evt, request, plan, onChatEntry, sessionScope.Token));
 
+        var multiTurn = request.MultiTurn && request.Interaction is not null;
         Task? guidanceTask = null;
         Task? settingsTask = null;
         if (request.Interaction is { } interaction)
         {
-            guidanceTask = PumpGuidanceAsync(session, interaction, sessionScope.Token);
+            // Multi-turn consumes guidance AS the next turn (awaiting each turn's completion),
+            // so the fire-and-forget guidance pump runs only for single-turn sessions —
+            // guidance sent while a turn runs queues up and becomes the following turn.
+            if (!multiTurn)
+                guidanceTask = PumpGuidanceAsync(session, interaction, sessionScope.Token);
             settingsTask = PumpSettingsAsync(session, interaction, settings, onChatEntry, sessionScope.Token);
         }
 
         try
         {
-            var reply = await session.SendAndWaitAsync(request.Instruction, null, sessionScope.Token);
-            turns++;
+            string? lastSummary = null;
+            // The first turn is the dispatched instruction; a multi-turn session may start
+            // without one — the operator sends it live.
+            var prompt = request.Instruction is { Length: > 0 } ? request.Instruction : null;
+            if (prompt is null && !multiTurn)
+                return new CodingAgentResult(
+                    Success: false, Summary: null,
+                    ErrorMessage: "A single-turn Copilot session needs an instruction.");
+            do
+            {
+                prompt ??= await WaitForNextTurnAsync(
+                    request.Interaction!, request.EndToken, sessionScope.Token);
+                if (prompt is null)
+                    break; // the operator ended the session while it was idle
+
+                var reply = await session.SendAndWaitAsync(prompt, null, sessionScope.Token);
+                prompt = null;
+                turns++;
+                if (reply?.Data?.Content is { Length: > 0 } content)
+                    lastSummary = content;
+                if (multiTurn && !request.EndToken.IsCancellationRequested
+                    && request.OnTurnEnded is { } onTurnEnded)
+                    await onTurnEnded(turns, lastSummary, sessionScope.Token);
+            }
+            while (multiTurn && !request.EndToken.IsCancellationRequested);
+
             stopwatch.Stop();
             return new CodingAgentResult(
                 Success: true,
-                Summary: reply?.Data?.Content is { Length: > 0 } summary
-                    ? summary : "The Copilot session completed.",
+                Summary: lastSummary ?? "The Copilot session completed.",
                 TurnCount: turns,
                 DurationMs: stopwatch.ElapsedMilliseconds);
         }
@@ -231,6 +264,25 @@ public sealed class CopilotSdkAgent(
             Answer = picked ?? answer.FreeText ?? "",
             WasFreeform = picked is null,
         };
+    }
+
+    /// <summary>
+    /// Multi-turn idle wait: the next guidance text becomes the next turn's prompt; a fired
+    /// end token resolves to null (the operator ended the idle session).
+    /// </summary>
+    private static async Task<string?> WaitForNextTurnAsync(
+        IAgentInteraction interaction, CancellationToken endToken, CancellationToken sessionToken)
+    {
+        using var either = CancellationTokenSource.CreateLinkedTokenSource(endToken, sessionToken);
+        try
+        {
+            return await interaction.WaitForGuidanceAsync(either.Token);
+        }
+        catch (OperationCanceledException) when (
+            endToken.IsCancellationRequested && !sessionToken.IsCancellationRequested)
+        {
+            return null;
+        }
     }
 
     /// <summary>Operator guidance arrives as additional messages into the live session.</summary>
