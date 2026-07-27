@@ -53,6 +53,12 @@ public sealed class DockerWorkflowLauncherSettings
     public Dictionary<string, string> SlotPackages { get; set; } = new();
 
     /// <summary>
+    /// Remove leftover labeled workflow containers from a previous runner process at startup
+    /// (single-runner-per-host assumption). Pairs with the Core's zombie-run sweep.
+    /// </summary>
+    public bool ReapWorkflowContainersOnStart { get; set; } = true;
+
+    /// <summary>
     /// Maps an environment-capability provider type → absolute path of its Dockerfile fragment
     /// on the Core.Runner filesystem. This is the runner-owned side of the environment catalog:
     /// the fragment is layered onto the workflow image when a run selects the capability.

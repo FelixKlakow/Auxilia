@@ -169,6 +169,64 @@ public sealed class FailoverMonitorTests
         Assert.That(_bus.PublishedMessages.Where(p => p.Topic == _settings.RunCommandQueue), Is.Empty);
     }
 
+    private async Task<CoreRunRecord> SeedZombieRunAsync(TimeSpan sinceUpdate)
+    {
+        // The owner NEVER heartbeated at this Core (runner restarted with a fresh ServiceId,
+        // or the Core restarted and lost its liveness memory).
+        var run = new CoreRunRecord
+        {
+            Id = Guid.NewGuid(),
+            WorkflowType = "wf-type",
+            State = "Running",
+            CreatedUtc = _time.Now - sinceUpdate,
+            UpdatedUtc = _time.Now - sinceUpdate,
+            OwnerServiceId = Guid.NewGuid(),
+        };
+        await _runs.SaveAsync(run);
+        return run;
+    }
+
+    [Test]
+    public async Task ZombieRun_UnknownOwnerAndStale_IsFailedOver()
+    {
+        _sut.MarkStarted(_time.Now - TimeSpan.FromMinutes(10));
+        var zombie = await SeedZombieRunAsync(TimeSpan.FromMinutes(5));
+
+        await _sut.ScanOnceAsync(CancellationToken.None);
+
+        var updated = await _runs.ReadAsync(zombie.Id);
+        Assert.Multiple(() =>
+        {
+            Assert.That(updated!.State, Is.EqualTo("Failed"),
+                "A run whose owner was never heard from can never go heartbeat-stale — the sweep must catch it.");
+            Assert.That(updated.ErrorMessage, Is.EqualTo("steering-instance-lost"));
+        });
+    }
+
+    [Test]
+    public async Task ZombieSweep_WaitsOutTheGracePeriod_AfterMonitorStart()
+    {
+        _sut.MarkStarted(_time.Now); // the Core just started — runners haven't beaten yet
+        var zombie = await SeedZombieRunAsync(TimeSpan.FromMinutes(5));
+
+        await _sut.ScanOnceAsync(CancellationToken.None);
+
+        Assert.That((await _runs.ReadAsync(zombie.Id))!.State, Is.EqualTo("Running"),
+            "Right after a Core start every owner looks unknown — the sweep must wait a full heartbeat window.");
+    }
+
+    [Test]
+    public async Task ZombieSweep_LeavesFreshRunsAlone()
+    {
+        _sut.MarkStarted(_time.Now - TimeSpan.FromMinutes(10));
+        var fresh = await SeedZombieRunAsync(TimeSpan.FromSeconds(5)); // updated moments ago
+
+        await _sut.ScanOnceAsync(CancellationToken.None);
+
+        Assert.That((await _runs.ReadAsync(fresh.Id))!.State, Is.EqualTo("Running"),
+            "A recently updated run may simply not have been claimed/beaten yet.");
+    }
+
     [Test]
     public async Task DeadRunner_IsForgottenAfterFailover_SoScanIsIdempotent()
     {

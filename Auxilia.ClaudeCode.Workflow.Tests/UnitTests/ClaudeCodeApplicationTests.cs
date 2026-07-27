@@ -31,7 +31,10 @@ public sealed class AgentSessionApplicationTests
         var agentTurn = new AgentChatEntry(AgentChatRole.Assistant, "On it.", _time.GetUtcNow());
         var agent = new Mock<ICodingAgent>(MockBehavior.Strict);
         agent.Setup(a => a.RunAsync(
-                new CodingAgentRequest("Fix the bug", "/workspace"),
+                // Record equality would also compare the OnPlanUpdate delegate — match the
+                // meaningful fields instead.
+                It.Is<CodingAgentRequest>(r =>
+                    r.Instruction == "Fix the bug" && r.WorkspaceDirectory == "/workspace"),
                 It.IsAny<Func<AgentChatEntry, CancellationToken, Task>>(),
                 It.IsAny<CancellationToken>()))
             .Returns(async (CodingAgentRequest _,

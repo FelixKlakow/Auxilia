@@ -213,6 +213,23 @@ try
     var announcementHandler = app.Services.GetRequiredService<WorkflowAnnouncementHandler>();
     await announcementHandler.StartAsync(app.Lifetime.ApplicationStopping);
 
+    // A previous runner's containers are unmanageable (exit watchers died with it; the fresh
+    // ServiceId never re-adopts) — reap them before accepting work so no container lingers.
+    if (launcherSettings.ReapWorkflowContainersOnStart
+        && app.Services.GetRequiredService<IWorkflowLauncher>() is DockerWorkflowLauncher dockerLauncher)
+    {
+        try
+        {
+            var reaped = await dockerLauncher.ReapOrphanedContainersAsync(app.Lifetime.ApplicationStopping);
+            if (reaped > 0)
+                Log.Warning("Reaped {Count} orphaned workflow container(s) at startup.", reaped);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Startup container reaping failed — continuing; the Core's zombie sweep still covers the run records.");
+        }
+    }
+
     var dispatcher = app.Services.GetRequiredService<WorkflowDispatcher>();
     await dispatcher.StartAsync(app.Lifetime.ApplicationStopping);
 

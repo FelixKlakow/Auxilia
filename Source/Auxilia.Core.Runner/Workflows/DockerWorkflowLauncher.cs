@@ -193,8 +193,19 @@ public sealed class DockerWorkflowLauncher(
         foreach (var plugin in plugins)
         {
             var pluginBytes = await File.ReadAllBytesAsync(plugin.DllPath, ct);
+            IReadOnlyList<string> referenced;
+            try
+            {
+                referenced = PluginCompatibilityChecker.ReferencedAssemblyNames(pluginBytes);
+            }
+            catch (BadImageFormatException)
+            {
+                // Not a readable .NET assembly (test doubles, corrupt file) — nothing to
+                // compare here; loading it will fail loudly later if it is genuinely broken.
+                continue;
+            }
             var targets = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
-            foreach (var name in PluginCompatibilityChecker.ReferencedAssemblyNames(pluginBytes)
+            foreach (var name in referenced
                          .Where(n => n.StartsWith("Auxilia", StringComparison.OrdinalIgnoreCase)))
             {
                 if (!imageAssemblies.TryGetValue(name, out var bytes))
@@ -342,6 +353,43 @@ public sealed class DockerWorkflowLauncher(
     }
 
     /// <summary>
+    /// Every workflow container is labeled so startup reaping (and any operator tooling) can
+    /// find Auxilia's containers WITHOUT touching anything else on the Docker host.
+    /// </summary>
+    internal static readonly Dictionary<string, string> WorkflowContainerLabels =
+        new() { ["auxilia.workflow"] = "1" };
+
+    /// <summary>
+    /// Removes leftover workflow containers from a previous runner process. A runner restart
+    /// orphans its containers (exit watchers die with the process, and the fresh ServiceId
+    /// never re-adopts them) — reaping them at startup pairs with the Core's zombie sweep so
+    /// neither the run record nor the container lingers. NOTE: single-runner-per-host
+    /// assumption; a shared host would need per-runner ownership labels with stable ids.
+    /// </summary>
+    public async Task<int> ReapOrphanedContainersAsync(CancellationToken ct = default)
+    {
+        var settings = settingsOptions.Value;
+        using var client = clientFactory.CreateClient(settings.DockerSocketPath);
+        var leftovers = await client.Containers.ListContainersAsync(new ContainersListParameters
+        {
+            All = true,
+            Filters = new Dictionary<string, IDictionary<string, bool>>
+            {
+                ["label"] = new Dictionary<string, bool> { ["auxilia.workflow=1"] = true },
+            },
+        }, ct);
+        foreach (var container in leftovers)
+        {
+            logger.LogWarning(
+                "Reaping orphaned workflow container {ContainerId} ({Image}, state {State}) from a previous runner.",
+                container.ID[..Math.Min(12, container.ID.Length)], container.Image, container.State);
+            await client.Containers.RemoveContainerAsync(
+                container.ID, new ContainerRemoveParameters { Force = true }, ct);
+        }
+        return leftovers.Count;
+    }
+
+    /// <summary>
     /// Selects the Docker network for a launch. A default-deny policy with no allowed
     /// endpoints is attached to <see cref="DockerWorkflowLauncherSettings.InternalNetworkName"/>
     /// (an operator-created <c>--internal</c> network without internet egress) when configured.
@@ -385,6 +433,7 @@ public sealed class DockerWorkflowLauncher(
             Image = settings.RuntimeImage,
             Cmd = [executablePath],
             Env = env,
+            Labels = WorkflowContainerLabels,
             HostConfig = new HostConfig
             {
                 // No AutoRemove: the exit watcher collects the exit code + log tail first,
@@ -434,6 +483,7 @@ public sealed class DockerWorkflowLauncher(
             Image = request.DockerImageUri,
             Cmd   = null,
             Env   = env,
+            Labels = WorkflowContainerLabels,
             HostConfig = new HostConfig
             {
                 // No AutoRemove: the exit watcher collects the exit code + log tail first,

@@ -24,4 +24,7 @@ public sealed class RunnerLivenessTracker
 
     /// <summary>Drops a runner from tracking so its death triggers failover at most once.</summary>
     public void Forget(Guid serviceId) => _lastSeen.TryRemove(serviceId, out _);
+
+    /// <summary>True when this runner has been heard from at all (since this Core started).</summary>
+    public bool IsKnown(Guid serviceId) => _lastSeen.ContainsKey(serviceId);
 }

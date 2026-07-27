@@ -34,6 +34,7 @@ public sealed class FailoverMonitor(
     private IAsyncDisposable? _subscription;
     private CancellationTokenSource? _loopCts;
     private Task? _loop;
+    private DateTimeOffset _startedAt;
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -41,6 +42,7 @@ public sealed class FailoverMonitor(
         _subscription = await bus.SubscribeToExchangeAsync<RunnerHeartbeat>(
             RunnerHeartbeat.ExchangeName, OnHeartbeatAsync, cancellationToken);
 
+        _startedAt = clock.GetUtcNow();
         _loopCts = new CancellationTokenSource();
         _loop = RunLoopAsync(_loopCts.Token);
 
@@ -80,15 +82,21 @@ public sealed class FailoverMonitor(
         }
     }
 
+    /// <summary>Test hook: stamps the monitor-start time the zombie grace period counts from.</summary>
+    internal void MarkStarted(DateTimeOffset at) => _startedAt = at;
+
     /// <summary>One failover sweep: fail over the runs of every runner whose beat is now stale.</summary>
     internal async Task ScanOnceAsync(CancellationToken ct)
     {
-        var cutoff = clock.GetUtcNow() - TimeSpan.FromSeconds(settings.Value.HeartbeatTimeoutSeconds);
+        var now = clock.GetUtcNow();
+        var timeout = TimeSpan.FromSeconds(settings.Value.HeartbeatTimeoutSeconds);
+        var cutoff = now - timeout;
         var dead = liveness.DeadSince(cutoff);
-        if (dead.Count == 0)
+        var graceElapsed = now - _startedAt >= timeout;
+        if (dead.Count == 0 && !graceElapsed)
             return;
-
         var allRuns = (await runs.ReadAsync(ct)).ToList();
+        var handled = new HashSet<Guid>();
         foreach (var serviceId in dead)
         {
             var orphans = allRuns
@@ -100,10 +108,34 @@ public sealed class FailoverMonitor(
                 serviceId, cutoff, orphans.Count);
 
             foreach (var orphan in orphans)
+            {
                 await FailOverAsync(orphan, ct);
+                handled.Add(orphan.Id);
+            }
 
             // One failover per death: forget the runner so a re-appearing beat is tracked afresh.
             liveness.Forget(serviceId);
+        }
+
+        // ZOMBIE sweep: a non-terminal run whose owner this Core has NEVER heard from (runner
+        // restarted with a fresh ServiceId, or the Core itself restarted and lost the liveness
+        // memory) would linger as Running forever — its heartbeat can never go "stale" because
+        // it was never seen. After a full heartbeat window of grace since monitor start, such
+        // stale-by-update-time runs are failed over like any other orphan.
+        if (!graceElapsed)
+            return;
+        var zombies = allRuns
+            .Where(r => !handled.Contains(r.Id)
+                        && !CoreRunStates.IsTerminal(r.State)
+                        && r.UpdatedUtc < cutoff
+                        && (r.OwnerServiceId is not { } owner || !liveness.IsKnown(owner)))
+            .ToList();
+        foreach (var zombie in zombies)
+        {
+            logger.LogWarning(
+                "Run {RunId} is a zombie: state {State}, owner {Owner} never heartbeated, last update {Updated:O} — failing it over.",
+                zombie.Id, zombie.State, zombie.OwnerServiceId, zombie.UpdatedUtc);
+            await FailOverAsync(zombie, ct);
         }
     }
 
