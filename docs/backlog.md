@@ -25,9 +25,21 @@
 - ~~**Per-repo working directory**~~ — **DONE 2026-07-27** (as data): `git-repository` declares a `WorkingDirectory` setting with role `working-directory`; each mount's effective root (clone + working dir) is announced as `Workflow__WorkspaceMount__<ID>`. Open sliver: the coding-agent context still uses `ISourceControlAccess.WorkingPath`/`Workflow__WorkspaceDirectory` for its cwd — consume the per-mount variables there.
 - **Connector browse beyond GitHub** — `POST /api/connectors/{id}/browse` (live repo/branch lists, credential stays Core-side) implements GitHub only; TFS/Azure DevOps fall back to manual entry.
 - **Zombie-run sweep** — a run whose terminal/failure event is lost (Core.Api or Core.Runner down at the wrong moment) lingers as Running: container-exit watchers do not survive a runner restart, and the FailoverMonitor only fails over runners it has SEEN heartbeat (in-memory). Needs: runner re-adopting (or reaping) its containers on start + a Core-side staleness transition (Running w/o owner heartbeat → Failed). Interim: `DELETE /api/runs?includeStale=true&staleMinutes=N`.
-- **§4 credential-model decision (OPEN)** — Model A (Resource Proxy, token Core-side, build one `IResourceConnector` for git push — the doc's lean) vs Model B (scoped token in the sandbox).
+- ~~**§4 credential-model decision**~~ — **DECIDED 2026-07-27: Model B + interception** (see the steering doc §4). Build items: (1) JIT-resolved, repo-scoped PUSH token delivered per slot binding (write permission opt-in on the binding); (2) `git push` intercepted through the agent permission loop as a decision card; (3) per-action permission policies (ask / auto per action kind — pushes vs edits vs reads), the generalization of today's `permission-mode`; (4) workspace clones preconfigure the git commit identity (from the triggering principal or a binding setting).
 - **the steering client cross-repo dependency → NuGet** — replace the side-by-side-clone `ProjectReference`s to `Auxilia.Core.Client`/`Contracts` (+ a standalone steering-codec package) with published packages.
 - **the steering client desktop per-user sign-in** — replace the API-key principal with interactive (device-code/OIDC) sign-in that mints a per-user bearer (per-user audit/SoD). Needs a Core non-browser token-issue path.
+
+## Environment capabilities (decided 2026-07-27, not yet built)
+Felix's model: a run's container environment is COMPOSED from capability selections — "windows,
+dotnet-10, blender, …" — chosen on the fly in the configuration wizard, with admin-curated
+**templates** (preconfigured combos) selectable directly. Design direction (option 1 of the
+2026-07-27 discussion): environment capabilities are catalog entries (category `environment`,
+runtime-extensible — no compiled enums); an agent workflow declares an optional `environment`
+slot with `AllowMultiple`; the Core passes the bindings generically; the RUNNER owns composition:
+capability set → base image (OS capability) + layer per capability, `docker build`-composed and
+cached by set-hash; templates are named, pre-composed sets. `RequiresEnvironment` (validation
+against the runner profile) stays as the matching layer. Open: Windows-container runners
+(separate Docker engine mode), layer recipes per capability, image GC.
 
 ## Generic binding pipeline — follow-ups (2026-07-27)
 - ~~**Docker system-test pass on the mount pipeline**~~ — **PASSED 2026-07-27**: `RepositoryWorkspaceSystemTests` (generic `git-repository` binding, roles + `git-credential`, authenticated git server) green on real Docker. Still open: OS-sensitive `DockerSocketPath` default (Docker Desktop 29.4.2 broke the unix-socket default on Windows hosts — local runners need `WorkflowLauncher__DockerSocketPath=npipe://./pipe/docker_engine`).
