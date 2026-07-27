@@ -35,7 +35,7 @@ sleep 0.2
 ALLOWED=1
 if [ "$INTERACTIVE" = "1" ]; then
   # Permission prompt: block until the operator's control_response arrives on stdin.
-  echo '{"type":"control_request","request_id":"ctrl_stub_1","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"STUB_NOTES.md"}}}'
+  echo '{"type":"control_request","request_id":"ctrl_stub_1","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"STUB_NOTES.md"},"permission_suggestions":[{"type":"addRules","rules":[{"toolName":"Write","ruleContent":"STUB_NOTES.md"}],"behavior":"allow","destination":"session"}]}}'
   while read -r LINE; do
     case "$LINE" in
       *control_response*) break ;;

@@ -240,6 +240,56 @@ public sealed class ClaudeCodeCliAgentTests
         Assert.That(stdin, Does.Contain("\"behavior\":\"deny\"").And.Contain("too dangerous"));
     }
 
+    [Test]
+    public async Task InteractiveSession_AutoAllowMode_ApprovesWithoutAskingTheOperator()
+    {
+        var stdout = """
+            {"type":"control_request","request_id":"ctrl-3","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"}}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var interaction = new FakeInteraction();
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        await agent.RunAsync(
+            Request with { Interaction = interaction, PermissionMode = AgentPermissionModes.AutoAllow },
+            (_, _) => Task.CompletedTask);
+
+        var stdin = factory.LastProcess!.Input.ToString()!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(interaction.LastQuestion, Is.Null,
+                "Auto-allow answers the control request without an operator round-trip.");
+            Assert.That(stdin, Does.Contain("ctrl-3").And.Contain("\"behavior\":\"allow\""));
+        });
+    }
+
+    [Test]
+    public async Task InteractiveSession_PickedPermissionSuggestion_RidesBackAsUpdatedPermissions()
+    {
+        var stdout = """
+            {"type":"control_request","request_id":"ctrl-4","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"a.md"},"permission_suggestions":[{"type":"addRules","rules":[{"toolName":"Write","ruleContent":"a.md"}],"behavior":"allow"}]}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var interaction = new FakeInteraction(new AgentAnswer(["suggestion:0"]));
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        await agent.RunAsync(Request with { Interaction = interaction }, (_, _) => Task.CompletedTask);
+
+        var stdin = factory.LastProcess!.Input.ToString()!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(interaction.LastQuestion!.Options.Select(o => o.Id),
+                Is.EqualTo(new[] { "allow", "suggestion:0", "deny" }),
+                "The CLI's permission suggestions become selectable outcomes beside allow/deny.");
+            Assert.That(interaction.LastQuestion.Detail, Does.Contain("a.md"),
+                "The tool input rides as the question's detail block, not inside the prompt.");
+            Assert.That(stdin, Does.Contain("\"behavior\":\"allow\"").And.Contain("updatedPermissions")
+                .And.Contain("addRules"));
+        });
+    }
+
     private sealed class FakeInteraction(AgentAnswer? answer = null) : IAgentInteraction
     {
         public AgentQuestion? LastQuestion { get; private set; }

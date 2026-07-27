@@ -5,13 +5,18 @@ using Auxilia.Workflows.Views;
 
 namespace Auxilia.Workflows.Steering;
 
-/// <summary>One question a workflow asks its operator through the steering client.</summary>
+/// <summary>
+/// One question a workflow asks its operator through the steering client. <see cref="Detail"/> is an
+/// optional preformatted block (e.g. the tool input of a permission request) rendered monospace
+/// under the prompt.
+/// </summary>
 public sealed record OperatorQuestion(
     string Id,
     string Prompt,
     IReadOnlyList<OperatorOption> Options,
     bool MultiSelect = false,
-    bool AllowFreeText = false);
+    bool AllowFreeText = false,
+    string? Detail = null);
 
 /// <summary>One selectable option of an <see cref="OperatorQuestion"/>.</summary>
 public sealed record OperatorOption(string Id, string Label, string? Description = null);
@@ -78,7 +83,7 @@ public sealed class OperatorChannel : IAsyncDisposable
             questions.Select(q => new FormQuestionWire(
                 q.Id, q.Prompt,
                 q.Options.Select(o => new OptionWire(o.Id, o.Label, o.Description)).ToList(),
-                q.MultiSelect, q.AllowFreeText)).ToList()), cancellationToken);
+                q.MultiSelect, q.AllowFreeText, q.Detail)).ToList()), cancellationToken);
 
         try
         {
@@ -209,7 +214,8 @@ public sealed class OperatorChannel : IAsyncDisposable
         [property: JsonPropertyName("prompt")] string Prompt,
         [property: JsonPropertyName("options")] IReadOnlyList<OptionWire> Options,
         [property: JsonPropertyName("multiSelect")] bool MultiSelect,
-        [property: JsonPropertyName("allowFreeText")] bool AllowFreeText);
+        [property: JsonPropertyName("allowFreeText")] bool AllowFreeText,
+        [property: JsonPropertyName("detail")] string? Detail);
 
     private sealed record FormRequestedWire(
         [property: JsonPropertyName("$type")] string Type,

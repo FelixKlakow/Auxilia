@@ -57,7 +57,8 @@ public sealed class ClaudeCodeCliAgent(
                 if (request.Interaction is { } steering && TryParseControlRequest(line) is { } control)
                 {
                     await AnswerControlRequestAsync(
-                        process, stdinGate, steering, control, onChatEntry, cancellationToken);
+                        process, stdinGate, steering, control, request.PermissionMode,
+                        onChatEntry, cancellationToken);
                     continue;
                 }
 
@@ -199,7 +200,13 @@ public sealed class ClaudeCodeCliAgent(
             var inputJson = request.TryGetProperty("input", out var input)
                 ? input.GetRawText()
                 : null;
-            return new ControlRequest(requestId, toolName, inputJson);
+            // The CLI may propose standing permission changes (allow-always rules, mode
+            // switches) — carried verbatim so a picked one goes back as updatedPermissions.
+            var suggestions = new List<string>();
+            if (request.TryGetProperty("permission_suggestions", out var proposed)
+                && proposed.ValueKind == JsonValueKind.Array)
+                suggestions.AddRange(proposed.EnumerateArray().Select(s => s.GetRawText()));
+            return new ControlRequest(requestId, toolName, inputJson, suggestions);
         }
         catch (JsonException)
         {
@@ -209,32 +216,47 @@ public sealed class ClaudeCodeCliAgent(
 
     private async Task AnswerControlRequestAsync(
         IClaudeCliProcess process, SemaphoreSlim stdinGate, IAgentInteraction interaction,
-        ControlRequest control, Func<AgentChatEntry, CancellationToken, Task> onChatEntry,
-        CancellationToken ct)
+        ControlRequest control, string permissionMode,
+        Func<AgentChatEntry, CancellationToken, Task> onChatEntry, CancellationToken ct)
     {
-        var detail = control.InputJson is { Length: > 0 } input && input != "{}"
-            ? $" with {Truncate(input, 300)}"
-            : string.Empty;
-        var answer = await interaction.AskAsync(new AgentQuestion(
-            $"The agent asks to use the tool '{control.ToolName}'{detail}. Allow it?",
-            [
-                new AgentQuestionOption("allow", "Allow"),
-                new AgentQuestionOption("deny", "Deny"),
-            ],
-            MultiSelect: false, AllowFreeText: true), ct);
+        // Auto mode: the session stays steerable (guidance, halt), but permission requests are
+        // approved without an operator round-trip — the container is still the sandbox.
+        if (string.Equals(permissionMode, AgentPermissionModes.AutoAllow, StringComparison.OrdinalIgnoreCase))
+        {
+            await WriteLineAsync(process, stdinGate, AllowResponse(control.RequestId), ct);
+            await onChatEntry(new AgentChatEntry(
+                AgentChatRole.System,
+                $"Tool '{control.ToolName}' was allowed automatically (permission mode: auto-allow).",
+                _time.GetUtcNow(), Label: "Permission"), ct);
+            return;
+        }
 
-        var allowed = answer.SelectedIds.Contains("allow", StringComparer.OrdinalIgnoreCase);
+        // A permission decision, not a generic form: the tool input renders as a monospace
+        // detail block, and the CLI's own permission suggestions (allow-always rules, mode
+        // switches) become selectable outcomes beside plain allow/deny. No free-text — nuance
+        // goes through the guidance channel.
+        var options = new List<AgentQuestionOption> { new("allow", "Allow once") };
+        for (var i = 0; i < control.Suggestions.Count; i++)
+            options.Add(new AgentQuestionOption(
+                $"suggestion:{i}", DescribeSuggestion(control.Suggestions[i]),
+                "Also applies this standing permission for the rest of the session."));
+        options.Add(new AgentQuestionOption("deny", "Deny"));
+
+        var answer = await interaction.AskAsync(new AgentQuestion(
+            $"The agent asks to use the tool '{control.ToolName}'. Allow it?",
+            options, MultiSelect: false, AllowFreeText: false,
+            Detail: PrettyJson(control.InputJson)), ct);
+
+        var picked = answer.SelectedIds.FirstOrDefault() ?? "deny";
+        var suggestion = picked.StartsWith("suggestion:", StringComparison.Ordinal)
+                         && int.TryParse(picked["suggestion:".Length..], out var index)
+                         && index < control.Suggestions.Count
+            ? control.Suggestions[index]
+            : null;
+        var allowed = suggestion is not null
+                      || string.Equals(picked, "allow", StringComparison.OrdinalIgnoreCase);
         var response = allowed
-            ? JsonSerializer.Serialize(new
-            {
-                type = "control_response",
-                response = new
-                {
-                    subtype = "success",
-                    request_id = control.RequestId,
-                    response = new { behavior = "allow" }
-                }
-            })
+            ? AllowResponse(control.RequestId, suggestion)
             : JsonSerializer.Serialize(new
             {
                 type = "control_response",
@@ -252,8 +274,88 @@ public sealed class ClaudeCodeCliAgent(
         await WriteLineAsync(process, stdinGate, response, ct);
         await onChatEntry(new AgentChatEntry(
             AgentChatRole.System,
-            $"Tool '{control.ToolName}' was {(allowed ? "allowed" : "denied")} by the operator.",
+            $"Tool '{control.ToolName}' was {(allowed ? "allowed" : "denied")} by the operator"
+            + (suggestion is not null ? $" ({DescribeSuggestion(suggestion)})" : "") + ".",
             _time.GetUtcNow(), Label: "Permission"), ct);
+    }
+
+    /// <summary>A human label for one CLI permission suggestion; falls back to compact JSON.</summary>
+    internal static string DescribeSuggestion(string suggestionJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(suggestionJson);
+            var root = doc.RootElement;
+            var type = root.TryGetProperty("type", out var t) ? t.GetString() : null;
+            switch (type)
+            {
+                case "setMode" when root.TryGetProperty("mode", out var mode):
+                    return $"Allow and switch to '{mode.GetString()}' mode";
+                case "addRules" when root.TryGetProperty("rules", out var rules)
+                                     && rules.ValueKind == JsonValueKind.Array:
+                    var parts = rules.EnumerateArray().Select(rule =>
+                    {
+                        var tool = rule.TryGetProperty("toolName", out var n) ? n.GetString() : null;
+                        var content = rule.TryGetProperty("ruleContent", out var c) ? c.GetString() : null;
+                        return content is { Length: > 0 } ? $"{tool}({content})" : tool;
+                    }).Where(p => p is { Length: > 0 });
+                    return $"Always allow {string.Join(", ", parts)}";
+            }
+        }
+        catch (JsonException)
+        {
+            // fall through to the raw form
+        }
+        return $"Allow with {Truncate(suggestionJson, 120)}";
+    }
+
+    /// <summary>Indented rendering of the tool input for the permission card's detail block.</summary>
+    internal static string? PrettyJson(string? json)
+    {
+        if (json is not { Length: > 0 } || json == "{}")
+            return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return JsonSerializer.Serialize(doc.RootElement, PrettyOptions);
+        }
+        catch (JsonException)
+        {
+            return Truncate(json, 2000);
+        }
+    }
+
+    private static readonly JsonSerializerOptions PrettyOptions = new() { WriteIndented = true };
+
+    /// <summary>An allow response; a picked suggestion rides along as updatedPermissions.</summary>
+    private static string AllowResponse(string requestId, string? suggestionJson = null)
+    {
+        if (suggestionJson is null)
+            return JsonSerializer.Serialize(new
+            {
+                type = "control_response",
+                response = new
+                {
+                    subtype = "success",
+                    request_id = requestId,
+                    response = new { behavior = "allow" }
+                }
+            });
+        using var suggestion = JsonDocument.Parse(suggestionJson);
+        return JsonSerializer.Serialize(new
+        {
+            type = "control_response",
+            response = new
+            {
+                subtype = "success",
+                request_id = requestId,
+                response = new
+                {
+                    behavior = "allow",
+                    updatedPermissions = new[] { suggestion.RootElement }
+                }
+            }
+        });
     }
 
     /// <summary>Forwards every operator guidance as an additional user turn on the CLI's stdin.</summary>
@@ -308,5 +410,10 @@ public sealed class ClaudeCodeCliAgent(
     }
 
     /// <summary>One parsed <c>can_use_tool</c> control request from the CLI.</summary>
-    internal sealed record ControlRequest(string RequestId, string ToolName, string? InputJson);
+    internal sealed record ControlRequest(
+        string RequestId, string ToolName, string? InputJson,
+        IReadOnlyList<string>? PermissionSuggestions = null)
+    {
+        public IReadOnlyList<string> Suggestions => PermissionSuggestions ?? [];
+    }
 }

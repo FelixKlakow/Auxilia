@@ -11,20 +11,25 @@ public sealed record AgentSessionContext(
     string WorkspaceDirectory,
     string OutputDirectory)
 {
+    /// <summary>How permission requests are handled; see <see cref="AgentPermissionModes"/>.</summary>
+    public string PermissionMode { get; init; } = AgentPermissionModes.AskOperator;
+
     public static AgentSessionContext FromEnvironment()
         => FromValues(
             System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__TITLE"),
             System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__BODY")
                 ?? System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__INSTRUCTION"),
             System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.WorkspaceDirectory),
-            System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.OutputDirectory));
+            System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.OutputDirectory),
+            System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__PERMISSION-MODE"));
 
     /// <summary>
     /// The instruction is Title + Body of the dispatch context — the mail subject/body for
     /// mail-triggered runs, the same shape for manual, scheduled, and rerun dispatches.
     /// </summary>
     public static AgentSessionContext FromValues(
-        string? title, string? body, string? workspaceDirectory, string? outputDirectory)
+        string? title, string? body, string? workspaceDirectory, string? outputDirectory,
+        string? permissionMode = null)
     {
         var instruction = string.Join(
             "\n\n",
@@ -36,7 +41,12 @@ public sealed record AgentSessionContext(
         return new AgentSessionContext(
             instruction,
             Fallback(workspaceDirectory, "agent-session-workspace"),
-            Fallback(outputDirectory, "agent-session-output"));
+            Fallback(outputDirectory, "agent-session-output"))
+        {
+            PermissionMode = string.IsNullOrWhiteSpace(permissionMode)
+                ? AgentPermissionModes.AskOperator
+                : permissionMode.Trim(),
+        };
 
         static string Fallback(string? configured, string tempName)
         {

@@ -48,7 +48,8 @@ public sealed class AgentSessionApplication(
                 result = await agent.RunAsync(
                     new CodingAgentRequest(
                         context.Instruction, context.WorkspaceDirectory,
-                        channel is null ? null : new SteeredInteraction(channel, PublishChatAsync, time)),
+                        channel is null ? null : new SteeredInteraction(channel, PublishChatAsync, time),
+                        context.PermissionMode),
                     PublishChatAsync,
                     session.Token);
             }
@@ -108,7 +109,7 @@ public sealed class AgentSessionApplication(
                 new OperatorQuestion(
                     "q1", question.Prompt,
                     question.Options.Select(o => new OperatorOption(o.Id, o.Label, o.Description)).ToList(),
-                    question.MultiSelect, question.AllowFreeText)
+                    question.MultiSelect, question.AllowFreeText, question.Detail)
             ], cancellationToken);
 
             var answer = answers.FirstOrDefault(a => a.QuestionId == "q1")

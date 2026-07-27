@@ -15,7 +15,21 @@ public interface ICodingAgent
 }
 
 public sealed record CodingAgentRequest(
-    string Instruction, string WorkspaceDirectory, IAgentInteraction? Interaction = null);
+    string Instruction, string WorkspaceDirectory, IAgentInteraction? Interaction = null,
+    string PermissionMode = AgentPermissionModes.AskOperator);
+
+/// <summary>
+/// How a steerable agent session handles the agent's permission requests. The vocabulary of the
+/// coding-agent contract — workflows surface it as a declared Choice input.
+/// </summary>
+public static class AgentPermissionModes
+{
+    /// <summary>Every permission request becomes an operator form and blocks until answered.</summary>
+    public const string AskOperator = "ask-operator";
+
+    /// <summary>Permission requests are approved automatically; the session stays steerable (guidance/halt).</summary>
+    public const string AutoAllow = "auto-allow";
+}
 
 /// <summary>
 /// The two-way seam between a running agent and its operator, provided by the workflow: the agent
@@ -34,13 +48,15 @@ public interface IAgentInteraction
 /// <summary>
 /// A question the agent asks the operator. Empty <see cref="Options"/> = pure free text;
 /// <see cref="MultiSelect"/> selects radio vs. checkboxes; <see cref="AllowFreeText"/> adds a
-/// free-text field beside the options.
+/// free-text field beside the options; <see cref="Detail"/> is a preformatted block (e.g. the
+/// tool input of a permission request) rendered monospace under the prompt.
 /// </summary>
 public sealed record AgentQuestion(
     string Prompt,
     IReadOnlyList<AgentQuestionOption> Options,
     bool MultiSelect = false,
-    bool AllowFreeText = false);
+    bool AllowFreeText = false,
+    string? Detail = null);
 
 public sealed record AgentQuestionOption(string Id, string Label, string? Description = null);
 

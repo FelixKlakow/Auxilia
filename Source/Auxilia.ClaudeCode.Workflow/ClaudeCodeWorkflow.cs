@@ -43,6 +43,15 @@ public static class ClaudeCodeWorkflow
             {
                 Kind = "Multiline"
             })
+            .RequiresInput(new WorkflowInputDescriptor(
+                "permission-mode", "Permissions", Required: false,
+                Description: "How the agent's permission requests are handled: ask the operator "
+                             + "per request, or approve automatically (the container stays the sandbox).")
+            {
+                Kind = "Choice",
+                DefaultValue = AgentPermissionModes.AskOperator,
+                Choices = [AgentPermissionModes.AskOperator, AgentPermissionModes.AutoAllow]
+            })
             .DeclaresTrigger(TriggerDeclaration.Mailbox,
                 "A filtered mail starts a run; subject and body become the instruction.")
             .DeclaresTrigger(TriggerDeclaration.Artifact,
