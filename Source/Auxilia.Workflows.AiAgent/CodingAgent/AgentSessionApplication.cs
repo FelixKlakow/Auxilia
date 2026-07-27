@@ -67,6 +67,13 @@ public sealed class AgentSessionApplication(
                                 AgentPlanUpdate.ViewName, new AgentPlanUpdate(items), token),
                         MultiTurn = context.MultiTurn,
                         EndToken = channel?.EndToken ?? CancellationToken.None,
+                        // The agent's live model/effort vocabulary feeds the steering client dropdowns.
+                        OnSessionVocabulary = channel is null
+                            ? null
+                            : (models, token) => channel.PublishSessionVocabularyAsync(
+                                models.Select(m =>
+                                    (m.Id, m.Label, m.ReasoningEfforts, m.DefaultReasoningEffort)).ToList(),
+                                token),
                         // Each finished turn is announced on the steering view (the steering client's
                         // notification cue) and mirrored into the conversation.
                         OnTurnEnded = channel is null

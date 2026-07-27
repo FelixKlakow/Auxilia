@@ -57,6 +57,29 @@ public sealed class CopilotSdkAgent(
         using var events = session.On<SessionEvent>(evt =>
             _ = OnSessionEventAsync(evt, request, plan, onChatEntry, sessionScope.Token));
 
+        // The session's LIVE vocabulary: switchable models + their reasoning efforts — fed to
+        // the steering client dropdowns; failures just leave the dropdowns editable, never static.
+        if (request.OnSessionVocabulary is { } vocabulary)
+        {
+            try
+            {
+                var models = await client.ListModelsAsync(sessionScope.Token);
+                var options = (models ?? [])
+                    .Select(m => new AgentModelOption(
+                        m.Id ?? "", m.Name ?? m.Id ?? "",
+                        m.SupportedReasoningEfforts?.ToList() ?? [],
+                        m.DefaultReasoningEffort))
+                    .Where(m => m.Id.Length > 0)
+                    .ToList();
+                if (options.Count > 0)
+                    await vocabulary(options, sessionScope.Token);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Vocabulary is a nicety — the session runs fine without it.
+            }
+        }
+
         var multiTurn = request.MultiTurn && request.Interaction is not null;
         Task? guidanceTask = null;
         Task? settingsTask = null;
@@ -313,7 +336,18 @@ public sealed class CopilotSdkAgent(
                     settings.PushPolicy = setting.Value;
                     break;
                 case AgentSettingKeys.Model:
-                    await session.SetModelAsync(setting.Value, ct);
+                    // A model switch carries the last chosen reasoning effort along.
+                    settings.Model = setting.Value;
+                    await session.SetModelAsync(setting.Value,
+                        new SetModelOptions { ReasoningEffort = settings.ReasoningEffort }, ct);
+                    break;
+                case AgentSettingKeys.ReasoningEffort:
+                    // Effort rides SetModelAsync — applied now when a model was chosen this
+                    // session, otherwise remembered for the next model switch.
+                    settings.ReasoningEffort = setting.Value;
+                    if (settings.Model is { Length: > 0 } model)
+                        await session.SetModelAsync(model,
+                            new SetModelOptions { ReasoningEffort = setting.Value }, ct);
                     break;
                 default:
                     continue;
@@ -328,5 +362,11 @@ public sealed class CopilotSdkAgent(
     {
         public volatile string PermissionMode = permissionMode;
         public volatile string PushPolicy = pushPolicy;
+
+        /// <summary>The model the operator chose this session; null until the first switch.</summary>
+        public volatile string? Model;
+
+        /// <summary>The chosen reasoning effort; rides along with every model switch.</summary>
+        public volatile string? ReasoningEffort;
     }
 }

@@ -135,6 +135,18 @@ public sealed class OperatorChannel : IAsyncDisposable
     public Task PublishTurnEndedAsync(int turn, string? summary, CancellationToken cancellationToken)
         => _views.PublishAsync(ViewName, new TurnEndedWire("turn-ended", turn, summary), cancellationToken);
 
+    /// <summary>
+    /// Announces the session's live vocabulary — switchable models with their reasoning
+    /// efforts — so steering client dropdowns are never statically populated.
+    /// </summary>
+    public Task PublishSessionVocabularyAsync(
+        IReadOnlyList<(string Id, string Label, IReadOnlyList<string> Efforts, string? DefaultEffort)> models,
+        CancellationToken cancellationToken)
+        => _views.PublishAsync(ViewName, new SessionVocabularyWire(
+            "session-vocabulary",
+            models.Select(m => new VocabularyModelWire(m.Id, m.Label, m.Efforts, m.DefaultEffort)).ToList()),
+            cancellationToken);
+
     public ValueTask DisposeAsync() => _pump.DisposeAsync();
 
     private async Task PumpAsync(IWorkflowInputs inputs, CancellationToken ct)
@@ -273,4 +285,14 @@ public sealed class OperatorChannel : IAsyncDisposable
         [property: JsonPropertyName("$type")] string Type,
         [property: JsonPropertyName("turn")] int Turn,
         [property: JsonPropertyName("summary")] string? Summary);
+
+    private sealed record VocabularyModelWire(
+        [property: JsonPropertyName("id")] string Id,
+        [property: JsonPropertyName("label")] string Label,
+        [property: JsonPropertyName("efforts")] IReadOnlyList<string> Efforts,
+        [property: JsonPropertyName("defaultEffort")] string? DefaultEffort);
+
+    private sealed record SessionVocabularyWire(
+        [property: JsonPropertyName("$type")] string Type,
+        [property: JsonPropertyName("models")] IReadOnlyList<VocabularyModelWire> Models);
 }

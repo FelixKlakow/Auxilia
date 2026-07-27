@@ -46,7 +46,21 @@ public sealed record CodingAgentRequest(
     /// closing summary) — the workflow's cue to notify the operator.
     /// </summary>
     public Func<int, string?, CancellationToken, Task>? OnTurnEnded { get; init; }
+
+    /// <summary>
+    /// Invoked once with the session's LIVE vocabulary — the models the agent can switch to,
+    /// each with its supported reasoning efforts. Agents without a queryable vocabulary never
+    /// call it; nothing is ever listed statically.
+    /// </summary>
+    public Func<IReadOnlyList<AgentModelOption>, CancellationToken, Task>? OnSessionVocabulary { get; init; }
 }
+
+/// <summary>One switchable model of a session, with its reasoning-effort vocabulary (may be empty).</summary>
+public sealed record AgentModelOption(
+    string Id,
+    string Label,
+    IReadOnlyList<string> ReasoningEfforts,
+    string? DefaultReasoningEffort = null);
 
 /// <summary>
 /// How a steerable agent session handles the agent's permission requests. The vocabulary of the
@@ -92,6 +106,9 @@ public static class AgentSettingKeys
 
     /// <summary>Switches the push-action policy; values from <see cref="AgentPermissionModes"/>.</summary>
     public const string PushPolicy = "push-policy";
+
+    /// <summary>Switches the model's reasoning effort (vocabulary from the session's model options).</summary>
+    public const string ReasoningEffort = "reasoning-effort";
 }
 
 /// <summary>
