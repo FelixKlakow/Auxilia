@@ -118,12 +118,20 @@ public sealed class ClaudeHookListener : IConsoleSessionEventSource
                 && hookName.GetString() == "PreToolUse"
                 && root.TryGetProperty("tool_name", out var toolProperty)
                 && toolProperty.GetString() is { Length: > 0 } tool
-                && root.TryGetProperty("tool_input", out var input)
-                && _plan.Apply(tool, input) is { Count: > 0 } snapshot)
-                events.Add(new ConsoleSessionEvent(ConsoleSessionEvent.PlanUpdated, "")
-                {
-                    DetailJson = JsonSerializer.Serialize(snapshot)
-                });
+                && root.TryGetProperty("tool_input", out var input))
+            {
+                if (_plan.Apply(tool, input) is { Count: > 0 } snapshot)
+                    events.Add(new ConsoleSessionEvent(ConsoleSessionEvent.PlanUpdated, "")
+                    {
+                        DetailJson = JsonSerializer.Serialize(snapshot)
+                    });
+
+                // A question is attention RIGHT NOW — the CLI's own Notification hook only
+                // fires for questions after its 60s idle threshold.
+                if (string.Equals(tool, "AskUserQuestion", StringComparison.OrdinalIgnoreCase))
+                    events.Add(new ConsoleSessionEvent(
+                        ConsoleSessionEvent.Attention, QuestionMessage(input)));
+            }
         }
         catch (JsonException)
         {
@@ -215,6 +223,18 @@ public sealed class ClaudeHookListener : IConsoleSessionEventSource
         {
             return null;
         }
+    }
+
+    /// <summary>The first question's text as the attention line; a generic line when unreadable.</summary>
+    private static string QuestionMessage(JsonElement input)
+    {
+        if (input.TryGetProperty("questions", out var questions)
+            && questions.ValueKind == JsonValueKind.Array)
+            foreach (var question in questions.EnumerateArray())
+                if (question.TryGetProperty("question", out var text)
+                    && text.GetString() is { Length: > 0 } prompt)
+                    return $"Claude asks: {prompt}";
+        return "Claude asks you a question.";
     }
 
     private static string ToolMessage(JsonElement root, string? tool, string verb)

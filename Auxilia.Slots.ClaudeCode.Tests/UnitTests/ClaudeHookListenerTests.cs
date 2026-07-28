@@ -72,6 +72,19 @@ public sealed class ClaudeHookListenerTests
     }
 
     [Test]
+    public void Interpret_AskUserQuestion_RaisesImmediateAttention()
+    {
+        // The CLI's own Notification hook only fires for questions after its idle threshold —
+        // the question tool call itself is the immediate cue.
+        var events = new ClaudeHookListener().Interpret(
+            "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"AskUserQuestion\",\"tool_input\":"
+            + "{\"questions\":[{\"question\":\"Coffee or tea?\"}]}}");
+
+        var attention = events.Single(e => e.Kind == ConsoleSessionEvent.Attention);
+        Assert.That(attention.Message, Is.EqualTo("Claude asks: Coffee or tea?"));
+    }
+
+    [Test]
     public void Interpret_TurnEnded_CarriesTheTranscriptsClosingAssistantText()
     {
         var transcript = Path.Combine(Path.GetTempPath(), $"transcript-{Guid.NewGuid():N}.jsonl");
