@@ -22,4 +22,7 @@ public sealed record WorkflowManifest(
 
     /// <summary>Container port of the interactive web terminal, when the workflow hosts one.</summary>
     public int? InteractiveTerminalPort { get; init; }
+
+    /// <summary>Per-run terminal gate (see <see cref="Workflows.InteractiveTerminalGate"/>), when declared.</summary>
+    public InteractiveTerminalGate? InteractiveTerminalGate { get; init; }
 }

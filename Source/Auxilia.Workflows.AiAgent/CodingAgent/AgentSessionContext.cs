@@ -23,6 +23,12 @@ public sealed record AgentSessionContext(
     /// </summary>
     public bool MultiTurn { get; init; }
 
+    /// <summary>How the operator experiences the session (see <see cref="AgentViewModes"/>).</summary>
+    public string ViewMode { get; init; } = AgentViewModes.Advanced;
+
+    public bool IsConsole
+        => string.Equals(ViewMode, AgentViewModes.Console, StringComparison.OrdinalIgnoreCase);
+
     public static AgentSessionContext FromEnvironment()
         => FromValues(
             System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__TITLE"),
@@ -32,7 +38,8 @@ public sealed record AgentSessionContext(
             System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.OutputDirectory),
             System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__PERMISSION-MODE"),
             System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__PUSH-POLICY"),
-            System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__MULTI-TURN"));
+            System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__MULTI-TURN"),
+            System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__VIEW-MODE"));
 
     /// <summary>
     /// The instruction is Title + Body of the dispatch context — the mail subject/body for
@@ -41,16 +48,20 @@ public sealed record AgentSessionContext(
     /// </summary>
     public static AgentSessionContext FromValues(
         string? title, string? body, string? workspaceDirectory, string? outputDirectory,
-        string? permissionMode = null, string? pushPolicy = null, string? multiTurn = null)
+        string? permissionMode = null, string? pushPolicy = null, string? multiTurn = null,
+        string? viewMode = null)
     {
         var isMultiTurn = IsTrue(multiTurn);
+        var isConsole = string.Equals(
+            viewMode?.Trim(), AgentViewModes.Console, StringComparison.OrdinalIgnoreCase);
         var instruction = string.Join(
             "\n\n",
             new[] { title, body }.Where(part => !string.IsNullOrWhiteSpace(part)));
-        if (instruction.Length == 0 && !isMultiTurn)
+        if (instruction.Length == 0 && !isMultiTurn && !isConsole)
             throw new InvalidOperationException(
                 "The dispatch context carries no instruction — a single-turn agent session needs a "
-                + "Title and/or Body context entry (only multi-turn sessions may start without one).");
+                + "Title and/or Body context entry (only multi-turn and console sessions may start "
+                + "without one).");
 
         return new AgentSessionContext(
             instruction,
@@ -64,6 +75,7 @@ public sealed record AgentSessionContext(
                 ? AgentPermissionModes.AskOperator
                 : pushPolicy.Trim(),
             MultiTurn = isMultiTurn,
+            ViewMode = isConsole ? AgentViewModes.Console : AgentViewModes.Advanced,
         };
 
         static bool IsTrue(string? value)

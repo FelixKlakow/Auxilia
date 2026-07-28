@@ -62,6 +62,38 @@ public sealed class AgentSessionContextTests
         Assert.That(context.MultiTurn, Is.False);
     }
 
+    [TestCase("console", true)]
+    [TestCase("Console", true)]
+    [TestCase(" console ", true)]
+    [TestCase("advanced", false)]
+    [TestCase(null, false)]
+    [TestCase("nonsense", false)]
+    public void ViewMode_ResolvesConsole_EverythingElseIsAdvanced(string? viewMode, bool isConsole)
+    {
+        var context = AgentSessionContext.FromValues(
+            "Do something", null, "/w", "/o", viewMode: viewMode);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(context.IsConsole, Is.EqualTo(isConsole));
+            Assert.That(context.ViewMode,
+                Is.EqualTo(isConsole ? AgentViewModes.Console : AgentViewModes.Advanced));
+        });
+    }
+
+    [Test]
+    public void ConsoleMode_MissingInstruction_IsAllowed()
+    {
+        var context = AgentSessionContext.FromValues(
+            null, null, "/w", "/o", viewMode: AgentViewModes.Console);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(context.IsConsole, Is.True);
+            Assert.That(context.Instruction, Is.Empty);
+        });
+    }
+
     [Test]
     public void MissingDirectories_FallBackToCreatedTempDirectories()
     {

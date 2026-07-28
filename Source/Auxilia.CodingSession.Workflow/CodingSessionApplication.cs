@@ -1,3 +1,4 @@
+using Auxilia.Workflows.AiAgent.CodingAgent;
 using Auxilia.Workflows.TaskSource;
 using Auxilia.Workflows.Views;
 
@@ -29,7 +30,12 @@ public sealed class CodingSessionApplication(
 
         await MaterializeAttachmentsAsync(cancellationToken);
 
-        await host.StartAsync(context, cancellationToken);
+        await host.StartAsync(
+            new TerminalSessionInfo(context.WorkspaceDirectory, context.SessionCommand, context.TerminalPort)
+            {
+                Environment = context.SessionEnvironment
+            },
+            cancellationToken);
         await PublishAsync("session",
             $"Live session started — terminal on container port {context.TerminalPort}. " +
             "The run completes when the CLI exits.", cancellationToken);

@@ -7,7 +7,9 @@ the CLI exits.
 
 ## How the session works
 
-- `TmuxSessionHost` starts the CLI in a **detached tmux session** whose command line ends
+- `TmuxSessionHost` (shared session infrastructure in `Auxilia.Workflows.AiAgent` — the
+  claude-code workflow's console mode uses the same host) starts the CLI in a **detached
+  tmux session** whose command line ends
   with `; tmux kill-server` — the CLI's exit tears the tmux server down, which is the
   auto-exit contract. `ttyd` (container port 7681) serves `tmux attach`, so any number of
   browser viewers can attach and detach without ever killing the CLI.

@@ -34,16 +34,21 @@ public sealed class SessionCredentialTests
             }
         };
 
-        var startInfo = TmuxSessionHost.BuildTmuxStartInfo(context);
+        var startInfo = TmuxSessionHost.BuildTmuxStartInfo(
+            new TerminalSessionInfo(context.WorkspaceDirectory, context.SessionCommand, context.TerminalPort)
+            {
+                Environment = context.SessionEnvironment
+            });
 
         Assert.Multiple(() =>
         {
             Assert.That(startInfo.Environment["CLAUDE_CODE_OAUTH_TOKEN"], Is.EqualTo("sk-ant-oat-secret"));
-            Assert.That(startInfo.Arguments, Does.Not.Contain("sk-ant-oat-secret"),
+            Assert.That(startInfo.ArgumentList, Does.Not.Contain("sk-ant-oat-secret"),
                 "the credential must never appear on the command line");
-            Assert.That(startInfo.Arguments, Does.Contain("claude; tmux kill-server"),
+            Assert.That(startInfo.ArgumentList, Does.Contain("claude; tmux kill-server"),
                 "the CLI's exit still tears the session down");
-            Assert.That(startInfo.Arguments, Does.Contain("-c \"/workspace\""));
+            Assert.That(startInfo.ArgumentList, Does.Contain("/workspace"),
+                "the session starts in the workspace");
         });
     }
 }

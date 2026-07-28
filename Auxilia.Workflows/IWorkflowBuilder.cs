@@ -57,8 +57,12 @@ public interface IWorkflowBuilder
     /// </summary>
     IWorkflowBuilder ConsumesArtifact(string artifactType);
 
-    /// <summary>Declares the container port of the workflow's interactive web terminal (ttyd).</summary>
-    IWorkflowBuilder WithInteractiveTerminal(int containerPort = 7681);
+    /// <summary>
+    /// Declares the container port of the workflow's interactive web terminal (ttyd). An
+    /// optional <paramref name="gate"/> makes the terminal per-run: it is exposed only when
+    /// the gate's input resolves to its enabling value (see <see cref="InteractiveTerminalGate"/>).
+    /// </summary>
+    IWorkflowBuilder WithInteractiveTerminal(int containerPort = 7681, InteractiveTerminalGate? gate = null);
 
     /// <summary>
     /// Declares a network endpoint this workflow needs to reach directly (ARCHITECTURE §10).

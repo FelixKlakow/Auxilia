@@ -39,7 +39,21 @@ public sealed record WorkflowSchema(
     /// authenticated — to the run's owner. Null = no terminal.
     /// </summary>
     public int? InteractiveTerminalPort { get; init; }
+
+    /// <summary>
+    /// Optional per-run gate for the interactive terminal: the terminal is exposed only for
+    /// runs whose effective input value matches. Null = every run gets the terminal.
+    /// </summary>
+    public InteractiveTerminalGate? InteractiveTerminalGate { get; init; }
 }
+
+/// <summary>
+/// Data-driven condition a workflow declares alongside its interactive terminal: expose the
+/// terminal only when the run input <paramref name="InputName"/> resolves (dispatch context,
+/// falling back to the input's declared default) to <paramref name="EnabledValue"/>. The Core
+/// evaluates the declaration as data — it never learns what the values mean.
+/// </summary>
+public sealed record InteractiveTerminalGate(string InputName, string EnabledValue);
 
 /// <summary>
 /// A trigger kind a workflow declares it is driven by. The trigger itself lives OUTSIDE the

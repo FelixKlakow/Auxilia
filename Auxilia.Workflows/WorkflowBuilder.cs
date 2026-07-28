@@ -31,6 +31,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     private Func<IServiceProvider, CancellationToken, Task>? _application;
     private WorkflowLifetime _lifetime = WorkflowLifetime.OneShot;
     private int? _interactiveTerminalPort;
+    private InteractiveTerminalGate? _interactiveTerminalGate;
 
     private const string StateQueueName = "workflow.state";
     private const string StateExchangeName = "workflow.state";
@@ -126,10 +127,11 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
         return this;
     }
 
-    public IWorkflowBuilder WithInteractiveTerminal(int containerPort = 7681)
+    public IWorkflowBuilder WithInteractiveTerminal(int containerPort = 7681, InteractiveTerminalGate? gate = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(containerPort);
         _interactiveTerminalPort = containerPort;
+        _interactiveTerminalGate = gate;
         return this;
     }
 
@@ -430,7 +432,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             Triggers = _triggers.AsReadOnly(),
             Inputs = _inputs.AsReadOnly(),
             ConsumedArtifacts = _consumedArtifacts.AsReadOnly(),
-            InteractiveTerminalPort = _interactiveTerminalPort
+            InteractiveTerminalPort = _interactiveTerminalPort,
+            InteractiveTerminalGate = _interactiveTerminalGate
         };
 
     internal WorkflowManifest BuildManifest(Guid instanceId = default)
@@ -445,6 +448,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             Triggers = _triggers.AsReadOnly(),
             Inputs = _inputs.AsReadOnly(),
             ConsumedArtifacts = _consumedArtifacts.AsReadOnly(),
-            InteractiveTerminalPort = _interactiveTerminalPort
+            InteractiveTerminalPort = _interactiveTerminalPort,
+            InteractiveTerminalGate = _interactiveTerminalGate
         };
 }

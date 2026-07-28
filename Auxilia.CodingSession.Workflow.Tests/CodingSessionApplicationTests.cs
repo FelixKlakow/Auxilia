@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Auxilia.CodingSession.Workflow;
+using Auxilia.Workflows.AiAgent.CodingAgent;
 using Auxilia.Workflows.Views;
 using Moq;
 
@@ -15,7 +16,7 @@ public class CodingSessionApplicationTests
         public List<string> Journal { get; } = [];
         public bool EndsOnItsOwn { get; init; } = true;
 
-        public Task StartAsync(SessionRunContext context, CancellationToken ct)
+        public Task StartAsync(TerminalSessionInfo session, CancellationToken ct)
         {
             Journal.Add("start");
             if (EndsOnItsOwn)

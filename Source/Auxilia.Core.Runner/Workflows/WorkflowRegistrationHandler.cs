@@ -199,6 +199,7 @@ public sealed class WorkflowRegistrationHandler(
             // schema, so anything omitted here is wiped by the workflow's first run.
             Inputs = manifest.Inputs,
             ConsumedArtifacts = manifest.ConsumedArtifacts,
-            InteractiveTerminalPort = manifest.InteractiveTerminalPort
+            InteractiveTerminalPort = manifest.InteractiveTerminalPort,
+            InteractiveTerminalGate = manifest.InteractiveTerminalGate
         };
 }

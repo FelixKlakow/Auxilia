@@ -1,8 +1,11 @@
 # Auxilia.ClaudeCode.Workflow
 
-Workflow type `claude-code`: runs an autonomous coding agent (normally the Claude Code CLI,
-provided by the `claude-code-cli` slot provider) against the run's workspace and streams the
-agent's conversation live to the dashboard's BlazorAgentView renderer.
+Workflow type `claude-code`: runs a coding agent (normally the Claude Code CLI, provided by
+the `claude-code-cli` slot provider) against the run's workspace. The `view-mode` run input
+decides the experience: **advanced** (default) parses stream-json and streams the agent's
+conversation live to the chat renderer; **console** runs the REAL interactive CLI in
+tmux+ttyd behind the platform's authenticated web terminal (`AgentConsoleApplication` —
+the terminal is declared with an `InteractiveTerminalGate`, so only console runs expose it).
 
 ## Architecture
 
@@ -29,7 +32,8 @@ flowchart LR
 
 ## Docker image
 
-`Dockerfile` bakes BOTH the real Claude Code CLI (native installer — `claude` on PATH) and
+`Dockerfile` bakes the real Claude Code CLI (native installer — `claude` on PATH), tmux+ttyd
+for console-mode runs, and
 `/usr/local/bin/claude-stub`, a `claude-stub.sh` stand-in that emits a canned stream-json
 transcript. System tests select the stub via the provider's `CliPath` setting (cost rule:
 never real AI in system tests); real runs keep the default `claude`.

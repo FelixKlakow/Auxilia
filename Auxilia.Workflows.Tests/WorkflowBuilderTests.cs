@@ -41,6 +41,22 @@ public class WorkflowBuilderTests
     }
 
     [Test]
+    public void WithInteractiveTerminal_PortAndGate_RideSchemaAndManifest()
+    {
+        var builder = (WorkflowBuilder)WorkflowBuilder.Create("test")
+            .WithInteractiveTerminal(7681, new InteractiveTerminalGate("view-mode", "console"));
+
+        var schema = builder.BuildSchema();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(schema.InteractiveTerminalPort, Is.EqualTo(7681));
+            Assert.That(schema.InteractiveTerminalGate,
+                Is.EqualTo(new InteractiveTerminalGate("view-mode", "console")));
+        });
+    }
+
+    [Test]
     public void Requires_DuplicateSlotName_ThrowsInvalidOperationException()
     {
         var builder = WorkflowBuilder.Create("test");

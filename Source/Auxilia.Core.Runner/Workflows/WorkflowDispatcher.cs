@@ -388,8 +388,9 @@ public sealed class WorkflowDispatcher(
         }
 
         // Workflows declaring an interactive web terminal get its container named so the
-        // backend can reach the terminal by name on the shared network.
-        var terminalPort = (await schemaStore.GetSchemaAsync(workflowType, ct))?.InteractiveTerminalPort;
+        // backend can reach the terminal by name on the shared network. A declared gate makes
+        // the terminal per-run — evaluated as data against the run's context.
+        var terminalPort = InteractiveTerminalResolver.ResolvePort(schema, command.Context);
         var terminalContainerName = terminalPort is null ? null : $"auxilia-session-{instanceId:N}";
 
         // A crashed container must fail its run visibly — never leave it stuck in Queued/Running.
