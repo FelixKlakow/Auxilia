@@ -23,6 +23,17 @@ public sealed class CopilotCliSlotHandler : ISlotHandler
                 services.AddScoped<ICodingAgent>(_ => options.UseSdkSession
                     ? new CopilotSdkAgent(options)
                     : new CopilotCliAgent(options));
+                // Console mode (the interactive CLI in tmux+ttyd) consumes the raw
+                // coordinates; the token rides the session environment as GH_TOKEN.
+                services.AddScoped(_ => new CodingAgentCredentials(
+                    null, null, options.CliPath, options.Model)
+                {
+                    EnvironmentOverrides = new Dictionary<string, string>
+                    {
+                        ["GH_TOKEN"] = options.Token!,
+                        ["GITHUB_TOKEN"] = options.Token!,
+                    }
+                });
                 break;
 
             default:

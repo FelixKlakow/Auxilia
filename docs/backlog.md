@@ -15,6 +15,10 @@
 - **Legacy `ConnectorRecord` cleanup** — superseded by `CoreConnectorRecord`; verify no consumer, then remove.
 - **Per-user bearer hardening** — the short-lived bearer is embedded in the prerendered page (same-origin TLS); consider a server-side opaque-handle store keyed by principal.
 
+## Implementation workflow (docs/implementation-workflow-design.md, started 2026-07-28)
+- **P0 partially delivered 2026-07-28**: Copilot console mode (view-mode input, gated terminal, tmux+ttyd image, GH_TOKEN via `CodingAgentCredentials.EnvironmentOverrides`). OPEN: Copilot console EVENTS — the Copilot CLI has no hook system; needs in-container investigation of its session-log format for a tail-based `IConsoleSessionEventSource` (until then console runs emit no plan/attention/turn events).
+- P1 (work-item states + driven-console primitives), P2 (the pipeline workflow), P3 (steering client polish + system test) — tracked in the design doc.
+
 ## Config-store ownership (Felix's model — deferred as its own step)
 - **Move the persisted config store out of the Core.** "The Core doesn't own persisted workflows." Today `/api/configurations*` + `RunConfigurationAsync` still live in Core (tangled with the `CoreApiDispatch` acceptance test). Target: the product owns the config store; the Core validates a submitted spec against its **schema registry** and runs it via the Run API.
 

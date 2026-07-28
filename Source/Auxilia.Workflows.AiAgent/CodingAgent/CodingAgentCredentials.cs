@@ -12,9 +12,17 @@ public sealed record CodingAgentCredentials(
     string CliPath,
     string? Model)
 {
+    /// <summary>
+    /// Provider-specific credential environment overriding the Claude-shaped default —
+    /// e.g. the Copilot handler exports its GitHub token as <c>GH_TOKEN</c>.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? EnvironmentOverrides { get; init; }
+
     /// <summary>Environment variables for a CLI child process: only the credential in use is exported.</summary>
     public IReadOnlyDictionary<string, string> ToEnvironment()
     {
+        if (EnvironmentOverrides is not null)
+            return EnvironmentOverrides;
         var environment = new Dictionary<string, string>(StringComparer.Ordinal);
         if (OAuthToken is { Length: > 0 })
             environment["CLAUDE_CODE_OAUTH_TOKEN"] = OAuthToken;

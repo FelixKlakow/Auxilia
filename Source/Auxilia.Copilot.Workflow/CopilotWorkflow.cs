@@ -57,6 +57,22 @@ public static class CopilotWorkflow
                 Kind = "Multiline"
             })
             .RequiresInput(new WorkflowInputDescriptor(
+                AgentViewModes.InputName, "View", Required: false,
+                Description: "How you experience the session. Advanced: the parsed conversation "
+                             + "view with steering. Console: the CLI runs interactively behind "
+                             + "the platform's web terminal — the real Copilot console, "
+                             + "remote-controlled; steering inputs do not apply there.")
+            {
+                Kind = "Choice",
+                DefaultValue = AgentViewModes.Advanced,
+                Choices = [AgentViewModes.Advanced, AgentViewModes.Console],
+                ChoiceLabels = new Dictionary<string, string>
+                {
+                    [AgentViewModes.Advanced] = "Advanced (conversation view)",
+                    [AgentViewModes.Console] = "Console (live terminal)",
+                }
+            })
+            .RequiresInput(new WorkflowInputDescriptor(
                 "multi-turn", "Multi-turn session", Required: false,
                 Description: "Keep the session alive after each turn: the agent announces the "
                              + "turn's end and waits for your next instruction from the steering client "
@@ -70,6 +86,11 @@ public static class CopilotWorkflow
                 "A filtered mail starts a run; subject and body become the instruction.")
             .DeclaresTrigger(TriggerDeclaration.Artifact,
                 "Another workflow's output artifact starts a run.")
+            // Console mode: the CLI runs interactively in tmux+ttyd behind the platform's
+            // authenticated web terminal — exposed ONLY for runs whose view-mode is console.
+            .WithInteractiveTerminal(
+                AgentConsoleApplication.TerminalPort,
+                new InteractiveTerminalGate(AgentViewModes.InputName, AgentViewModes.Console))
             // Baseline egress policy (ARCHITECTURE §10): Copilot inference plus the GitHub API
             // the CLI authenticates against — nothing else.
             .RequiresNetworkEndpoint("api.githubcopilot.com", "GitHub Copilot inference calls")
@@ -90,6 +111,18 @@ public static class CopilotWorkflow
         // clone) becomes the agent's working directory; without one the run keeps its default.
         if (provider.GetService<ISourceControlAccess>()?.WorkingPath is { Length: > 0 } workingPath)
             context = context with { WorkspaceDirectory = workingPath };
+
+        // Console mode drives the REAL interactive CLI in tmux+ttyd. NOTE: the Copilot CLI has
+        // no hook system — console runs currently emit no plan/attention/turn events (the
+        // terminal is the full experience); a session-log-tail event source is a known follow-up.
+        if (context.IsConsole)
+            return new AgentConsoleApplication(
+                    new TmuxSessionHost(),
+                    provider.GetService<IViewPublisher>(),
+                    context,
+                    provider.GetService<CodingAgentCredentials>(),
+                    TimeProvider.System)
+                .RunAsync(cancellationToken);
 
         return new AgentSessionApplication(
                 provider.GetRequiredService<ICodingAgent>(),
