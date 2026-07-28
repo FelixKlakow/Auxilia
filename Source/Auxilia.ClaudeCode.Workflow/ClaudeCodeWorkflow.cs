@@ -152,7 +152,8 @@ public static class ClaudeCodeWorkflow
                     provider.GetService<IViewPublisher>(),
                     context,
                     provider.GetService<CodingAgentCredentials>(),
-                    TimeProvider.System)
+                    TimeProvider.System,
+                    provider.GetService<IConsoleSessionPreparer>())
                 .RunAsync(cancellationToken);
 
         return new AgentSessionApplication(

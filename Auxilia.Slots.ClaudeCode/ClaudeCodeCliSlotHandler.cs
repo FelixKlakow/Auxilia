@@ -27,6 +27,10 @@ public sealed class ClaudeCodeCliSlotHandler : ISlotHandler
                 // consume the raw credentials instead of the headless agent.
                 services.AddScoped(_ => new CodingAgentCredentials(
                     options.OAuthToken, options.ApiKey, options.CliPath, options.Model));
+                // Console mode: interactive CLI sessions need the account token materialized
+                // where interactive login reads it (see ClaudeInteractiveLogin).
+                services.AddScoped<IConsoleSessionPreparer>(provider =>
+                    new ClaudeInteractiveLogin(provider.GetRequiredService<CodingAgentCredentials>()));
                 break;
 
             default:

@@ -68,16 +68,28 @@ public sealed class AgentConsoleApplicationTests
             instruction.Length > 0 ? instruction : null, null,
             Path.GetTempPath(), _outputDir, viewMode: AgentViewModes.Console);
 
+    private sealed class RecordingPreparer : IConsoleSessionPreparer
+    {
+        public int Calls { get; private set; }
+
+        public Task PrepareAsync(string workspaceDirectory, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Task.CompletedTask;
+        }
+    }
+
     [Test]
     public async Task Run_StartsWaitsShutsDown_AndWritesTheSessionReport()
     {
         var host = new FakeSessionHost();
         var views = new RecordingViews();
+        var preparer = new RecordingPreparer();
 
         await new AgentConsoleApplication(
                 host, views, Context(),
                 new CodingAgentCredentials("sk-ant-oat-token", null, "claude", null),
-                TimeProvider.System)
+                TimeProvider.System, preparer)
             .RunAsync(CancellationToken.None);
 
         var report = JsonSerializer.Deserialize<SessionReport>(
@@ -85,6 +97,8 @@ public sealed class AgentConsoleApplicationTests
         Assert.Multiple(() =>
         {
             Assert.That(host.Journal, Is.EqualTo(new[] { "start", "wait", "shutdown" }));
+            Assert.That(preparer.Calls, Is.EqualTo(1),
+                "the provider's session preparation (interactive login) runs before the host starts");
             Assert.That(report!.Success, Is.True);
             Assert.That(report.Instruction, Is.EqualTo("Fix the build"));
             Assert.That(views.Published.Select(p => p.View),

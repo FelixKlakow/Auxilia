@@ -13,7 +13,8 @@ public sealed class AgentConsoleApplication(
     IViewPublisher? views,
     AgentSessionContext context,
     CodingAgentCredentials? credentials,
-    TimeProvider time)
+    TimeProvider time,
+    IConsoleSessionPreparer? sessionPreparer = null)
 {
     /// <summary>The instruction reaches the CLI via the session environment, never the command line.</summary>
     public const string InstructionVariable = "AUXILIA_INSTRUCTION";
@@ -37,6 +38,11 @@ public sealed class AgentConsoleApplication(
                 "Console session — the conversation happens in the live terminal, not in this view.",
                 time.GetUtcNow()),
             cancellationToken);
+
+        // Provider-specific session preparation (e.g. materializing the credential where the
+        // CLI's INTERACTIVE mode reads it — env vars only cover headless use).
+        if (sessionPreparer is not null)
+            await sessionPreparer.PrepareAsync(context.WorkspaceDirectory, cancellationToken);
 
         await host.StartAsync(BuildSession(context, credentials), cancellationToken);
         await PublishProgressAsync("session",
