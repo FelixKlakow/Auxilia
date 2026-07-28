@@ -23,6 +23,9 @@ public sealed class AgentConsoleApplication(
     /// <summary>The instruction reaches the CLI via the session environment, never the command line.</summary>
     public const string InstructionVariable = "AUXILIA_INSTRUCTION";
 
+    /// <summary>Base instructions ride the environment too, expanded into the provider's system-prompt argument.</summary>
+    public const string BasePromptVariable = "AUXILIA_BASE_PROMPT";
+
     /// <summary>A forgotten console must not hold the container (and the credential) open forever.</summary>
     public static readonly TimeSpan MaxDuration = TimeSpan.FromHours(4);
 
@@ -104,10 +107,27 @@ public sealed class AgentConsoleApplication(
         var environment = new Dictionary<string, string>(
             credentials?.ToEnvironment() ?? new Dictionary<string, string>());
         var command = cli;
-        if (context.Instruction.Length > 0)
+
+        var instruction = context.Instruction;
+        if (context.BaseInstructions is { Length: > 0 } baseInstructions)
         {
-            environment[InstructionVariable] = context.Instruction;
-            command = $"{cli} \"${InstructionVariable}\"";
+            if (credentials?.SystemPromptCliArgument is { Length: > 0 } systemPromptArgument)
+            {
+                // Provider-native: the base rides the system prompt, expanded from the env.
+                environment[BasePromptVariable] = baseInstructions;
+                command += $" {systemPromptArgument} \"${BasePromptVariable}\"";
+            }
+            else if (instruction.Length > 0)
+            {
+                // No system-prompt seam — the base rides the first prompt instead.
+                instruction = baseInstructions + "\n\n" + instruction;
+            }
+        }
+
+        if (instruction.Length > 0)
+        {
+            environment[InstructionVariable] = instruction;
+            command += $" \"${InstructionVariable}\"";
         }
 
         return new TerminalSessionInfo(context.WorkspaceDirectory, command, TerminalPort)

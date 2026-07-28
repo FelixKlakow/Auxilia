@@ -28,6 +28,13 @@ public sealed record CodingAgentCredentials(
     /// <summary>The CLI's context-compaction command (e.g. <c>/compact</c>); null = unsupported.</summary>
     public string? CompactCommand { get; init; }
 
+    /// <summary>
+    /// The CLI argument that appends BASE INSTRUCTIONS to the system prompt (Claude:
+    /// <c>--append-system-prompt</c>); null = the provider has no such seam and base
+    /// instructions ride the first prompt instead.
+    /// </summary>
+    public string? SystemPromptCliArgument { get; init; }
+
     /// <summary>Environment variables for a CLI child process: only the credential in use is exported.</summary>
     public IReadOnlyDictionary<string, string> ToEnvironment()
     {

@@ -24,7 +24,8 @@ COPY --from=build /app/publish .
 # CR characters in case the files were checked out with Windows line endings.
 COPY Source/Auxilia.ClaudeCode.Workflow/claude-stub.sh /usr/local/bin/claude-stub
 COPY Source/Auxilia.Copilot.Workflow/copilot-stub.sh /usr/local/bin/copilot-stub
-RUN sed -i 's/\r$//' /usr/local/bin/claude-stub /usr/local/bin/copilot-stub \
- && chmod +x /usr/local/bin/claude-stub /usr/local/bin/copilot-stub
+COPY Source/Auxilia.Implementation.Workflow/driven-stub.sh /usr/local/bin/driven-stub
+RUN sed -i 's/\r$//' /usr/local/bin/claude-stub /usr/local/bin/copilot-stub /usr/local/bin/driven-stub \
+ && chmod +x /usr/local/bin/claude-stub /usr/local/bin/copilot-stub /usr/local/bin/driven-stub
 EXPOSE 7681
 ENTRYPOINT ["dotnet", "Auxilia.Implementation.Workflow.dll"]

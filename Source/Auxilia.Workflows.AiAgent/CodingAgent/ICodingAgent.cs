@@ -26,6 +26,13 @@ public sealed record CodingAgentRequest(
     public string PushPolicy { get; init; } = AgentPermissionModes.AskOperator;
 
     /// <summary>
+    /// Base instructions the agent ALWAYS receives (per configuration/run) — delivered
+    /// provider-natively (Claude: appended to the system prompt; providers without such a
+    /// seam prepend it to the instruction).
+    /// </summary>
+    public string? BaseInstructions { get; init; }
+
+    /// <summary>
     /// Invoked with the agent's FULL current plan whenever it revises it (Claude: TodoWrite;
     /// Copilot: checklist lines). Null = the session doesn't surface plans.
     /// </summary>

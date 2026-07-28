@@ -97,8 +97,15 @@ public sealed class CopilotSdkAgent(
         {
             string? lastSummary = null;
             // The first turn is the dispatched instruction; a multi-turn session may start
-            // without one — the operator sends it live.
+            // without one — the operator sends it live. The SDK exposes no system-prompt seam,
+            // so base instructions ride the FIRST prompt of the session.
+            var baseInstructions = request.BaseInstructions is { Length: > 0 } b ? b : null;
             var prompt = request.Instruction is { Length: > 0 } ? request.Instruction : null;
+            if (prompt is not null && baseInstructions is not null)
+            {
+                prompt = baseInstructions + "\n\n" + prompt;
+                baseInstructions = null;
+            }
             if (prompt is null && !multiTurn)
                 return new CodingAgentResult(
                     Success: false, Summary: null,
@@ -109,6 +116,12 @@ public sealed class CopilotSdkAgent(
                     request.Interaction!, request.EndToken, sessionScope.Token);
                 if (prompt is null)
                     break; // the operator ended the session while it was idle
+                if (baseInstructions is not null)
+                {
+                    // No dispatched instruction — the base rides the first LIVE turn instead.
+                    prompt = baseInstructions + "\n\n" + prompt;
+                    baseInstructions = null;
+                }
 
                 var reply = await session.SendAndWaitAsync(prompt, null, sessionScope.Token);
                 prompt = null;

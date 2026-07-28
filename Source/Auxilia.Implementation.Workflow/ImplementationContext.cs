@@ -37,6 +37,12 @@ public sealed record ImplementationContext(
     public TimeSpan GateIdleCompaction { get; init; } = TimeSpan.FromMinutes(10);
     public string? TargetState { get; init; }
 
+    /// <summary>Base instructions the AUTHOR console always receives; null = none.</summary>
+    public string? AuthorBaseInstructions { get; init; }
+
+    /// <summary>Base instructions prepended to every REVIEWER instruction; null = none.</summary>
+    public string? ReviewerBaseInstructions { get; init; }
+
     /// <summary>The file-based exchange between workflow and agent lives here, inside the workspace.</summary>
     public string ExchangeDirectory => Path.Combine(WorkspaceDirectory, ".auxilia");
 
@@ -59,7 +65,9 @@ public sealed record ImplementationContext(
             Get("WORKFLOW_CONTEXT__PUSH-MODE"),
             Get("WORKFLOW_CONTEXT__REVIEWER-MODE"),
             Get("WORKFLOW_CONTEXT__GATE-IDLE-COMPACTION"),
-            Get("WORKFLOW_CONTEXT__TARGET-STATE"));
+            Get("WORKFLOW_CONTEXT__TARGET-STATE"),
+            Get("WORKFLOW_CONTEXT__AUTHOR-BASE-PROMPT"),
+            Get("WORKFLOW_CONTEXT__REVIEWER-BASE-PROMPT"));
 
     private static string? Get(string name) => System.Environment.GetEnvironmentVariable(name);
 
@@ -68,7 +76,7 @@ public sealed record ImplementationContext(
         string? completenessCheck = null, string? aiReview = null, string? maxRounds = null,
         string? userPlanGate = null, string? userCodeGate = null, string? artifactReview = null,
         string? pushMode = null, string? reviewerMode = null, string? gateIdleCompaction = null,
-        string? targetState = null)
+        string? targetState = null, string? authorBasePrompt = null, string? reviewerBasePrompt = null)
     {
         if (workItemId is not { Length: > 0 })
             throw new InvalidOperationException(
@@ -96,6 +104,8 @@ public sealed record ImplementationContext(
                 ? TimeSpan.FromMinutes(minutes)
                 : TimeSpan.FromMinutes(10),
             TargetState = targetState is { Length: > 0 } ? targetState.Trim() : null,
+            AuthorBaseInstructions = authorBasePrompt is { Length: > 0 } ? authorBasePrompt.Trim() : null,
+            ReviewerBaseInstructions = reviewerBasePrompt is { Length: > 0 } ? reviewerBasePrompt.Trim() : null,
         };
 
         static bool Toggle(string? value, bool defaultOn)

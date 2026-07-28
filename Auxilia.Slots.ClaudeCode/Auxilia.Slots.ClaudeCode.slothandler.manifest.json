@@ -27,6 +27,7 @@
       "Label": "Model",
       "Kind": "Text",
       "Required": false,
+      "Browse": "models",
       "HelpText": "Optional model override (e.g. claude-sonnet-4-6); the CLI's default model is used when empty."
     },
     {

@@ -27,6 +27,11 @@ public sealed class ImplementationPipeline(
 {
     private OperatorChannel? _channel;
 
+    // Author base without a provider system-prompt seam rides the FIRST drive instead.
+    private string? _pendingAuthorBase;
+
+    private List<WorkflowStep> _flow = [];
+
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         var started = time.GetUtcNow();
@@ -48,6 +53,7 @@ public sealed class ImplementationPipeline(
         try
         {
             Directory.CreateDirectory(context.ExchangeDirectory);
+            await PublishFlowAsync(activeStep: "workspace", ct);
             var branch = context.BranchNameFor(workItem.Title);
             await git.RunAsync(context.WorkspaceDirectory, $"checkout -b {branch}", ct);
             await ProgressAsync("workspace", $"branch '{branch}' ready", ct);
@@ -57,13 +63,21 @@ public sealed class ImplementationPipeline(
 
             await MaterializeStoryAsync(workItem, ct);
             if (context.CompletenessCheck)
+            {
+                await PublishFlowAsync("completeness", ct);
                 await CompletenessLoopAsync(workItem, ct);
+            }
 
+            await PublishFlowAsync("plan", ct);
             var plan = await PlanLoopAsync(workItem, ct);
+            await PublishFlowAsync("implement", ct);
             await ImplementationLoopAsync(workItem, plan, ct);
 
+            await PublishFlowAsync("push", ct);
             var pushed = await PushAsync(workItem, branch, ct);
+            await PublishFlowAsync("story-state", ct);
             await SetStoryStateAsync(workItem, branch, pushed, ct);
+            await PublishFlowAsync(activeStep: null, ct);
             success = true;
         }
         catch (OperationCanceledException) when (_channel?.HaltToken.IsCancellationRequested == true)
@@ -97,16 +111,78 @@ public sealed class ImplementationPipeline(
             throw new InvalidOperationException(error ?? "The implementation run failed.");
     }
 
+    /// <summary>
+    /// The run's step flow (built once from the toggles, full snapshot per transition):
+    /// everything BEFORE the active step becomes done, disabled steps stay "skipped", a null
+    /// active step marks the whole flow done.
+    /// </summary>
+    private async Task PublishFlowAsync(string? activeStep, CancellationToken ct)
+    {
+        if (views is null)
+            return;
+        if (_flow.Count == 0)
+            _flow =
+            [
+                new WorkflowStep("workspace", "Workspace", "pending", "Branch off the story's repository."),
+                new WorkflowStep("completeness", "Completeness",
+                    context.CompletenessCheck ? "pending" : "skipped",
+                    "Assess the story; open questions become an operator form."),
+                new WorkflowStep("plan", "Plan", "pending",
+                    "Draft the implementation plan"
+                    + (context.AiReview ? " + AI review" : "")
+                    + (context.UserPlanGate ? " + your approval gate." : ".")),
+                new WorkflowStep("implement", "Implement", "pending",
+                    "Implement the approved plan in the SAME console"
+                    + (context.AiReview ? " + AI code review" : "")
+                    + (context.UserCodeGate ? " + your approval gate." : ".")),
+                new WorkflowStep("push", "Push",
+                    context.PushMode == PushModes.Skip ? "skipped" : "pending",
+                    context.PushMode == PushModes.Prompt
+                        ? "The workflow commits and pushes after your confirmation."
+                        : "The workflow commits and pushes automatically."),
+                new WorkflowStep("story-state", "Story state", "pending",
+                    "Set the story's state from the source's own vocabulary."),
+            ];
+
+        var reached = activeStep is null
+            ? _flow.Count
+            : _flow.FindIndex(s => s.Id == activeStep);
+        _flow = _flow.Select((step, index) => step.State == "skipped"
+                ? step
+                : step with
+                {
+                    State = index < reached ? "done" : index == reached ? "active" : "pending"
+                })
+            .ToList();
+        await views.PublishAsync(WorkflowStepFlow.ViewName, new WorkflowStepFlow(_flow), ct);
+    }
+
     private TerminalSessionInfo BuildAuthorSession()
     {
         var cli = authorCredentials?.CliPath is { Length: > 0 } path ? path : "claude";
         var unattended = authorCredentials?.UnattendedCliArguments is { Length: > 0 } arguments
             ? " " + arguments
             : "";
-        return new TerminalSessionInfo(
-            context.WorkspaceDirectory, cli + unattended, AgentConsoleApplication.TerminalPort)
+        var environment = new Dictionary<string, string>(
+            authorCredentials?.ToEnvironment() ?? new Dictionary<string, string>());
+        var command = cli + unattended;
+        if (context.AuthorBaseInstructions is { Length: > 0 } baseInstructions)
         {
-            Environment = authorCredentials?.ToEnvironment() ?? new Dictionary<string, string>(),
+            if (authorCredentials?.SystemPromptCliArgument is { Length: > 0 } systemPromptArgument)
+            {
+                environment[AgentConsoleApplication.BasePromptVariable] = baseInstructions;
+                command += $" {systemPromptArgument} \"${AgentConsoleApplication.BasePromptVariable}\"";
+            }
+            else
+            {
+                _pendingAuthorBase = baseInstructions;
+            }
+        }
+
+        return new TerminalSessionInfo(
+            context.WorkspaceDirectory, command, AgentConsoleApplication.TerminalPort)
+        {
+            Environment = environment,
         };
     }
 
@@ -129,7 +205,7 @@ public sealed class ImplementationPipeline(
     {
         for (var round = 0; round < 2; round++)
         {
-            await author.DriveAsync(
+            await DriveAuthorAsync(
                 $"Read the user story in {Rel(context.ExchangeDirectory)}/story.md (attachments beside it). "
                 + $"Assess whether it is COMPLETE enough to implement. Write any open questions to "
                 + $"{Rel(context.QuestionsPath)}, one per line; if nothing is missing, write exactly NONE.",
@@ -148,7 +224,7 @@ public sealed class ImplementationPipeline(
             var answered = string.Join("\n", answers.Select(a =>
                 $"- {questions.ElementAtOrDefault(int.TryParse(a.QuestionId.TrimStart('q'), out var i) ? i : 0)}: "
                 + (a.FreeText ?? string.Join(", ", a.SelectedIds))));
-            await author.DriveAsync(
+            await DriveAuthorAsync(
                 $"The operator answered the open questions:\n{answered}\n"
                 + $"Update {Rel(context.ExchangeDirectory)}/story.md accordingly, then re-assess completeness "
                 + $"the same way (questions to {Rel(context.QuestionsPath)} or NONE).", ct);
@@ -166,7 +242,7 @@ public sealed class ImplementationPipeline(
                      + "Cover approach, files to touch, tests, and risks. Do NOT implement yet.";
         while (true)
         {
-            await author.DriveAsync(prompt, ct);
+            await DriveAuthorAsync(prompt, ct);
             var plan = await ReadFileAsync(context.PlanPath, ct)
                 ?? throw new InvalidOperationException("The author produced no plan file.");
             await ChatAsync(AgentChatRole.Assistant, plan, "Implementation plan", ct);
@@ -191,7 +267,7 @@ public sealed class ImplementationPipeline(
                      + "point, run the tests you touch, and commit NOTHING — the workflow handles git.";
         while (true)
         {
-            await author.DriveAsync(prompt, ct);
+            await DriveAuthorAsync(prompt, ct);
 
             if (context.AiReview && reviewer is not null)
             {
@@ -234,15 +310,15 @@ public sealed class ImplementationPipeline(
         for (var round = 0; round < context.MaxAiReviewRounds; round++)
         {
             var verdict = await reviewer!.ReviewAsync(
-                $"Review the implementation plan at {Rel(context.PlanPath)} against the story at "
+                WithReviewerBase($"Review the implementation plan at {Rel(context.PlanPath)} against the story at "
                 + $"{Rel(context.ExchangeDirectory)}/story.md. Write your verdict to "
-                + $"{Rel(context.PlanReviewPath)}: first line APPROVE or REVISE, then your notes.",
+                + $"{Rel(context.PlanReviewPath)}: first line APPROVE or REVISE, then your notes."),
                 context.PlanReviewPath, ct);
             await ChatAsync(AgentChatRole.System, verdict.Notes,
                 verdict.Approved ? "AI plan review — approved" : "AI plan review — revise", ct);
             if (verdict.Approved)
                 return plan;
-            await author.DriveAsync(
+            await DriveAuthorAsync(
                 $"A reviewer asks for plan changes:\n{verdict.Notes}\nRework {Rel(context.PlanPath)}.", ct);
             plan = await ReadFileAsync(context.PlanPath, ct) ?? plan;
             await ChatAsync(AgentChatRole.Assistant, plan, "Implementation plan (revised)", ct);
@@ -256,15 +332,15 @@ public sealed class ImplementationPipeline(
         for (var round = 0; round < context.MaxAiReviewRounds; round++)
         {
             verdict = await reviewer!.ReviewAsync(
-                $"Review the UNCOMMITTED changes in this repository (git diff / git status) against the "
+                WithReviewerBase($"Review the UNCOMMITTED changes in this repository (git diff / git status) against the "
                 + $"plan at {Rel(context.PlanPath)}. Write your verdict to {Rel(context.CodeReviewPath)}: "
-                + "first line APPROVE or REVISE, then concrete findings.",
+                + "first line APPROVE or REVISE, then concrete findings."),
                 context.CodeReviewPath, ct);
             await ChatAsync(AgentChatRole.System, verdict.Notes,
                 verdict.Approved ? "AI code review — approved" : "AI code review — revise", ct);
             if (verdict.Approved)
                 return verdict;
-            await author.DriveAsync(
+            await DriveAuthorAsync(
                 $"A code reviewer found issues:\n{verdict.Notes}\nFix them; run affected tests; commit nothing.",
                 ct);
         }
@@ -370,10 +446,30 @@ public sealed class ImplementationPipeline(
         return await ask;
     }
 
+    /// <summary>Every author drive; a base without a provider seam rides the first one.</summary>
+    private Task<string> DriveAuthorAsync(string prompt, CancellationToken ct)
+    {
+        if (_pendingAuthorBase is { } baseInstructions)
+        {
+            _pendingAuthorBase = null;
+            prompt = baseInstructions + "\n\n" + prompt;
+        }
+        return author.DriveAsync(prompt, ct);
+    }
+
+    private string WithReviewerBase(string instruction)
+        => context.ReviewerBaseInstructions is { Length: > 0 } baseInstructions
+            ? baseInstructions + "\n\n" + instruction
+            : instruction;
+
     private static OperatorQuestion ApprovalQuestion(string id, string prompt, string? detail)
         => new(id, prompt,
             [new OperatorOption("approve", "Approve", null), new OperatorOption("revise", "Revise", null)],
-            MultiSelect: false, AllowFreeText: true, Detail: detail);
+            MultiSelect: false, AllowFreeText: true, Detail: detail)
+        {
+            // Plans and review bundles ARE markdown — clients render them as such.
+            DetailFormat = "markdown"
+        };
 
     private static bool IsApproved(OperatorAnswer? answer)
         => answer?.SelectedIds.Contains("approve") == true;

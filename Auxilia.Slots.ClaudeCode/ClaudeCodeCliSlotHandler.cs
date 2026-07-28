@@ -30,6 +30,7 @@ public sealed class ClaudeCodeCliSlotHandler : ISlotHandler
                 {
                     UnattendedCliArguments = "--dangerously-skip-permissions",
                     CompactCommand = "/compact",
+                    SystemPromptCliArgument = "--append-system-prompt",
                 });
                 // Console mode: interactive CLI sessions need the account token materialized
                 // where interactive login reads it (ClaudeInteractiveLogin), and the CLI's
@@ -59,6 +60,7 @@ public sealed class ClaudeCodeCliSlotHandler : ISlotHandler
                 {
                     UnattendedCliArguments = "--dangerously-skip-permissions",
                     CompactCommand = "/compact",
+                    SystemPromptCliArgument = "--append-system-prompt",
                 });
                 break;
 

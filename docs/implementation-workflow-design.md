@@ -82,6 +82,34 @@ hardcoded list).
 4. **Diff bundle artifact**: `review-bundle` output — full `git diff` + changed-file list +
    plan + AI verdicts as markdown, produced before the artifact-review/user code gates.
 
+## Base prompts (adaptive per provider)
+
+Every agent role can carry BASE INSTRUCTIONS configured per workflow configuration/run:
+`base-prompt` on the plain agent workflows, `author-base-prompt`/`reviewer-base-prompt`
+here. Delivery adapts to the provider (`CodingAgentCredentials.SystemPromptCliArgument`):
+Claude appends them to the SYSTEM prompt (`--append-system-prompt`, headless and console —
+riding the session environment, never a log); providers without a system-prompt seam
+(Copilot) get them prepended to the session's first prompt. The base prompt is instructions,
+not secrets — argv exposure is acceptable where a provider needs it.
+
+## Gate rendering: markdown and mermaid
+
+Gate details carry `DetailFormat` (open vocabulary): `"markdown"` renders through the native
+markdown renderer in the steering client's decision cards (plans, review bundles); null/`"code"`
+stays monospace (permission tool inputs). ```mermaid fences inside any markdown surface
+(details, chat) render as REAL diagrams — AgentView.Wpf exposes a host-pluggable
+`MarkdownViewer.FenceRenderer`, and the steering client registers an offline WebView2+mermaid.js
+renderer. Plans should use mermaid for diagrams, per the repo convention.
+
+## The step flow (clickable stepper)
+
+The pipeline publishes its step list as FULL snapshots on the `flow` view
+(`WorkflowStepFlow`): workspace → completeness → plan → implement → push → story-state,
+with disabled steps marked `skipped` and the current one `active`. The steering client renders the
+snapshot as clickable chips above the run surface — the flow of the run is visible at a
+glance, and clicking a chip expands its description (what the step does, which gates it
+carries). Any workflow can adopt the same view; states are an open vocabulary.
+
 ## Idle gates and token economics
 
 A user gate can stay open for hours; the author console's context would then be re-read into

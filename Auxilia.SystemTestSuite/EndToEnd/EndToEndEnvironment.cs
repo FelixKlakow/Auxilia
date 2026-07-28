@@ -52,6 +52,19 @@ public class EndToEndEnvironment
     public   const string ClaudeWorkflowPackageUri = "docker://" + ClaudeWorkflowImageName;
     /// <summary>In-image stand-in CLI — system tests never call real AI (cost rule).</summary>
     public   const string ClaudeStubCliPath        = "/usr/local/bin/claude-stub";
+    public   const string ImplementationWorkflowType       = "implementation";
+    public   const string ImplementationWorkflowImageName  = "auxilia-implementation-workflow:system-test";
+    public   const string ImplementationWorkflowPackageUri = "docker://" + ImplementationWorkflowImageName;
+    /// <summary>In-image DRIVEN stand-in author CLI (tmux + hook Stop protocol; never real AI).</summary>
+    public   const string DrivenStubCliPath        = "/usr/local/bin/driven-stub";
+
+    // Authenticated git server the implementation run's per-run repository is cloned from
+    // (same image + credentials as the CoreApiDispatch repository scenario).
+    internal const string GitServerImageName = "auxilia-git-server:system-test";
+    internal const string GitServerAlias     = "gitserver";
+    public   const string RepositoryCloneUrl = "http://" + GitServerAlias + "/git/test.git";
+    public   const string GitUsername        = "builduser";
+    public   const string GitPassword        = "the-pat";
 
     internal const string CoreApiImageName = "auxilia-core-api:system-test";
     internal const string StudioImageName  = "auxilia-workflow-studio:system-test";
@@ -94,6 +107,7 @@ public class EndToEndEnvironment
     private RabbitMqContainer _rabbitMq   = null!;
     private MongoDbContainer  _mongoDb    = null!;
     private IContainer        _greenMail  = null!;
+    private IContainer        _gitServer  = null!;
     private string            _publishDir = null!;
     private string            _runOutputDir = null!;
     private string            _workspaceDir = null!;
@@ -131,6 +145,7 @@ public class EndToEndEnvironment
             "Auxilia.FakeSlots.CodeReview.Happy/Auxilia.FakeSlots.CodeReview.Happy.csproj", _publishDir);
         await PublishProjectAsync("Auxilia.Slots.Email/Auxilia.Slots.Email.csproj", _publishDir);
         await PublishProjectAsync("Auxilia.Slots.ClaudeCode/Auxilia.Slots.ClaudeCode.csproj", _publishDir);
+        await PublishProjectAsync("Auxilia.Slots.CodingSession/Auxilia.Slots.CodingSession.csproj", _publishDir);
 
         // Sequential on purpose: parallel docker builds have wedged Docker Desktop daemons.
         await WorkflowDispatchEnvironment.BuildImageAsync(
@@ -143,6 +158,10 @@ public class EndToEndEnvironment
             WorkflowImageName, "Source/Auxilia.CodeReview.Workflow/Dockerfile");
         await WorkflowDispatchEnvironment.BuildImageAsync(
             ClaudeWorkflowImageName, "Source/Auxilia.ClaudeCode.Workflow/Dockerfile");
+        await WorkflowDispatchEnvironment.BuildImageAsync(
+            ImplementationWorkflowImageName, "Source/Auxilia.Implementation.Workflow/Dockerfile");
+        await WorkflowDispatchEnvironment.BuildImageAsync(
+            GitServerImageName, "Auxilia.SystemTestSuite/GitServer/Dockerfile");
 
         _network = new NetworkBuilder().WithName(NetworkName).Build();
         await _network.CreateAsync();
@@ -160,6 +179,11 @@ public class EndToEndEnvironment
             .WithWaitStrategy(Wait.ForUnixContainer().UntilInternalTcpPortIsAvailable(ImapPort))
             .Build();
 
+        _gitServer = new ContainerBuilder(GitServerImageName)
+            .WithNetwork(_network).WithNetworkAliases(GitServerAlias)
+            .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("resuming normal operations"))
+            .Build();
+
         _rabbitMq = new RabbitMqBuilder("rabbitmq:3.13-management")
             .WithUsername("guest").WithPassword("guest")
             .WithNetwork(_network).WithNetworkAliases(RabbitMqAlias)
@@ -170,7 +194,9 @@ public class EndToEndEnvironment
         if (DataVolumeName is { Length: > 0 } dataVolume)
             mongoBuilder = mongoBuilder.WithVolumeMount(dataVolume + "-mongo", "/data/db");
         _mongoDb = mongoBuilder.Build();
-        await Task.WhenAll(_greenMail.StartAsync(), _rabbitMq.StartAsync(), _mongoDb.StartAsync());
+        await Task.WhenAll(
+            _greenMail.StartAsync(), _gitServer.StartAsync(),
+            _rabbitMq.StartAsync(), _mongoDb.StartAsync());
 
         MongoConnectionString = _mongoDb.GetConnectionString();
         MailHost   = _greenMail.Hostname;
@@ -196,6 +222,8 @@ public class EndToEndEnvironment
             .WithEnvironment("CoreApi__StaticWorkflowTypes__0__PackageUri", WorkflowPackageUri)
             .WithEnvironment("CoreApi__StaticWorkflowTypes__1__WorkflowType", ClaudeWorkflowType)
             .WithEnvironment("CoreApi__StaticWorkflowTypes__1__PackageUri", ClaudeWorkflowPackageUri)
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__2__WorkflowType", ImplementationWorkflowType)
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__2__PackageUri", ImplementationWorkflowPackageUri)
             .WithPortBinding(8080, true)
             .WithWaitStrategy(
                 Wait.ForUnixContainer().UntilHttpRequestIsSucceeded(r => r.ForPort(8080).ForPath("/health")))
@@ -240,6 +268,8 @@ public class EndToEndEnvironment
                 $"{ContainerPluginsDir}/Auxilia.Slots.Email.slothandler.dll")
             .WithEnvironment("WorkflowLauncher__SlotPackages__claude-code-cli",
                 $"{ContainerPluginsDir}/Auxilia.Slots.ClaudeCode.slothandler.dll")
+            .WithEnvironment("WorkflowLauncher__SlotPackages__coding-session-workspace",
+                $"{ContainerPluginsDir}/Auxilia.Slots.CodingSession.slothandler.dll")
             .WithEnvironment("WorkflowDispatcher__CommandQueueName",        CommandQueue)
             .WithEnvironment("WorkflowDispatcher__RegistrationQueueName",   "workflow-registration-e2e")
             .WithEnvironment("WorkflowDispatcher__AnnouncementQueueName",   "workflow.announcements-e2e")
@@ -308,7 +338,7 @@ public class EndToEndEnvironment
     }
 
     /// <summary>The GreenMail IMAP/SMTP settings shape shared by the slot instance and the config binding.</summary>
-    private static Dictionary<string, string> EmailSettings() => new()
+    internal static Dictionary<string, string> EmailSettings() => new()
     {
         ["ImapHost"] = GreenMailAlias,
         ["ImapPort"] = ImapPort.ToString(),
@@ -420,6 +450,7 @@ public class EndToEndEnvironment
         if (CoreApi is not null) await CoreApi.DisposeAsync();
         if (Runner  is not null) await Runner.DisposeAsync();
         await _greenMail.DisposeAsync();
+        await _gitServer.DisposeAsync();
         await _rabbitMq.DisposeAsync();
         await _mongoDb.DisposeAsync();
         await _network.DisposeAsync();

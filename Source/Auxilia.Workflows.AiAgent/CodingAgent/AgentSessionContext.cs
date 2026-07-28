@@ -26,6 +26,9 @@ public sealed record AgentSessionContext(
     /// <summary>How the operator experiences the session (see <see cref="AgentViewModes"/>).</summary>
     public string ViewMode { get; init; } = AgentViewModes.Advanced;
 
+    /// <summary>Base instructions the agent always receives (per configuration/run); null = none.</summary>
+    public string? BaseInstructions { get; init; }
+
     public bool IsConsole
         => string.Equals(ViewMode, AgentViewModes.Console, StringComparison.OrdinalIgnoreCase);
 
@@ -39,7 +42,8 @@ public sealed record AgentSessionContext(
             System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__PERMISSION-MODE"),
             System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__PUSH-POLICY"),
             System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__MULTI-TURN"),
-            System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__VIEW-MODE"));
+            System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__VIEW-MODE"),
+            System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__BASE-PROMPT"));
 
     /// <summary>
     /// The instruction is Title + Body of the dispatch context — the mail subject/body for
@@ -49,7 +53,7 @@ public sealed record AgentSessionContext(
     public static AgentSessionContext FromValues(
         string? title, string? body, string? workspaceDirectory, string? outputDirectory,
         string? permissionMode = null, string? pushPolicy = null, string? multiTurn = null,
-        string? viewMode = null)
+        string? viewMode = null, string? baseInstructions = null)
     {
         var isMultiTurn = IsTrue(multiTurn);
         var isConsole = string.Equals(
@@ -76,6 +80,7 @@ public sealed record AgentSessionContext(
                 : pushPolicy.Trim(),
             MultiTurn = isMultiTurn,
             ViewMode = isConsole ? AgentViewModes.Console : AgentViewModes.Advanced,
+            BaseInstructions = baseInstructions is { Length: > 0 } ? baseInstructions.Trim() : null,
         };
 
         static bool IsTrue(string? value)

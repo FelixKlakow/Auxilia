@@ -54,6 +54,14 @@ public static class ClaudeCodeWorkflow
                 Kind = "Multiline"
             })
             .RequiresInput(new WorkflowInputDescriptor(
+                "base-prompt", "Base instructions", Required: false,
+                Description: "Instructions the agent ALWAYS receives on top of the task - "
+                             + "conventions, tech context, tone. Delivered provider-natively "
+                             + "(Claude: appended to the system prompt).")
+            {
+                Kind = "Multiline"
+            })
+            .RequiresInput(new WorkflowInputDescriptor(
                 AgentViewModes.InputName, "View", Required: false,
                 Description: "How you experience the session. Advanced: the parsed conversation "
                              + "view with steering, permissions, and the plan. Console: the CLI "

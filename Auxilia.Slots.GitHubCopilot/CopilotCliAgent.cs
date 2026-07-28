@@ -113,7 +113,10 @@ public sealed class CopilotCliAgent(
         };
 
         startInfo.ArgumentList.Add("-p");
-        startInfo.ArgumentList.Add(request.Instruction);
+        // No system-prompt seam in line mode — base instructions ride the prompt itself.
+        startInfo.ArgumentList.Add(request.BaseInstructions is { Length: > 0 } baseInstructions
+            ? baseInstructions + "\n\n" + request.Instruction
+            : request.Instruction);
         // The workflow container IS the sandbox (isolated network, scoped workspace) —
         // interactive tool approvals cannot be answered in a headless run.
         startInfo.ArgumentList.Add("--allow-all-tools");

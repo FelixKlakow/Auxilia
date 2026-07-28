@@ -174,6 +174,45 @@ public sealed class AgentConsoleApplicationTests
     }
 
     [Test]
+    public void BuildSession_BaseInstructions_RideTheSystemPromptArgument_ViaTheEnvironment()
+    {
+        var context = AgentSessionContext.FromValues(
+            "Fix it", null, "/w", _outputDir,
+            viewMode: AgentViewModes.Console, baseInstructions: "Always write NUnit tests.");
+
+        var session = AgentConsoleApplication.BuildSession(
+            context,
+            new CodingAgentCredentials("sk-ant-oat-x", null, "claude", null)
+            {
+                SystemPromptCliArgument = "--append-system-prompt"
+            });
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(session.Command, Is.EqualTo(
+                $"claude --append-system-prompt \"${AgentConsoleApplication.BasePromptVariable}\" "
+                + $"\"${AgentConsoleApplication.InstructionVariable}\""),
+                "base instructions ride the provider's system-prompt argument, never inline");
+            Assert.That(session.Environment[AgentConsoleApplication.BasePromptVariable],
+                Is.EqualTo("Always write NUnit tests."));
+        });
+    }
+
+    [Test]
+    public void BuildSession_WithoutSystemPromptSeam_BaseRidesTheFirstPrompt()
+    {
+        var context = AgentSessionContext.FromValues(
+            "Fix it", null, "/w", _outputDir,
+            viewMode: AgentViewModes.Console, baseInstructions: "House rules.");
+
+        var session = AgentConsoleApplication.BuildSession(
+            context, new CodingAgentCredentials(null, null, "copilot", null));
+
+        Assert.That(session.Environment[AgentConsoleApplication.InstructionVariable],
+            Is.EqualTo("House rules.\n\nFix it"));
+    }
+
+    [Test]
     public void BuildSession_WithoutInstructionOrCredentials_RunsThePlainCli()
     {
         var session = AgentConsoleApplication.BuildSession(Context(instruction: ""), credentials: null);

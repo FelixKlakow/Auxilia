@@ -16,7 +16,14 @@ public sealed record OperatorQuestion(
     IReadOnlyList<OperatorOption> Options,
     bool MultiSelect = false,
     bool AllowFreeText = false,
-    string? Detail = null);
+    string? Detail = null)
+{
+    /// <summary>
+    /// How clients render <see cref="Detail"/> — open vocabulary: null/"code" = monospace,
+    /// "markdown" = rendered markdown (plans, review bundles).
+    /// </summary>
+    public string? DetailFormat { get; init; }
+}
 
 /// <summary>One selectable option of an <see cref="OperatorQuestion"/>.</summary>
 public sealed record OperatorOption(string Id, string Label, string? Description = null);
@@ -100,7 +107,7 @@ public sealed class OperatorChannel : IAsyncDisposable
             questions.Select(q => new FormQuestionWire(
                 q.Id, q.Prompt,
                 q.Options.Select(o => new OptionWire(o.Id, o.Label, o.Description)).ToList(),
-                q.MultiSelect, q.AllowFreeText, q.Detail)).ToList()), cancellationToken);
+                q.MultiSelect, q.AllowFreeText, q.Detail, q.DetailFormat)).ToList()), cancellationToken);
 
         try
         {
@@ -265,7 +272,8 @@ public sealed class OperatorChannel : IAsyncDisposable
         [property: JsonPropertyName("options")] IReadOnlyList<OptionWire> Options,
         [property: JsonPropertyName("multiSelect")] bool MultiSelect,
         [property: JsonPropertyName("allowFreeText")] bool AllowFreeText,
-        [property: JsonPropertyName("detail")] string? Detail);
+        [property: JsonPropertyName("detail")] string? Detail,
+        [property: JsonPropertyName("detailFormat")] string? DetailFormat = null);
 
     private sealed record FormRequestedWire(
         [property: JsonPropertyName("$type")] string Type,

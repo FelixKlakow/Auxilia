@@ -60,6 +60,7 @@ public sealed class AgentSessionApplication(
                         context.PermissionMode)
                     {
                         PushPolicy = context.PushPolicy,
+                        BaseInstructions = context.BaseInstructions,
                         // The agent's plan revisions land on the "plan" view as full snapshots.
                         OnPlanUpdate = views is null
                             ? null

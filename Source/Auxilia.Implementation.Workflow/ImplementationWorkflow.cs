@@ -50,6 +50,9 @@ public static class ImplementationWorkflow
                 ViewRendering.Custom, ViewLifecycle.LiveAndPersisted)
             .DeclaresView<SteeringWireItem>(Auxilia.Workflows.Steering.OperatorChannel.ViewName,
                 ViewRendering.Custom, ViewLifecycle.LiveAndPersisted)
+            // The pipeline's step flow — rendered as a clickable stepper in the steering client.
+            .DeclaresView<WorkflowStepFlow>(WorkflowStepFlow.ViewName,
+                ViewRendering.Custom, ViewLifecycle.LiveAndPersisted)
             .DeclaresOutput("implementation-plan", "plan.md", "The approved implementation plan")
             .DeclaresOutput("review-bundle", "review-bundle.md",
                 "Changed files, plan, AI verdicts, and the full diff — the reviewable artifact")
@@ -104,6 +107,21 @@ public static class ImplementationWorkflow
                              + "compacted so resuming later never re-reads the full context. 0 = off.")
             {
                 Kind = "Number", DefaultValue = "10"
+            })
+            .RequiresInput(new WorkflowInputDescriptor(
+                "author-base-prompt", "Author base instructions", Required: false,
+                Description: "Instructions the AUTHOR agent always receives - conventions, "
+                             + "tech context, tone. Delivered provider-natively "
+                             + "(Claude: appended to the system prompt).")
+            {
+                Kind = "Multiline"
+            })
+            .RequiresInput(new WorkflowInputDescriptor(
+                "reviewer-base-prompt", "Reviewer base instructions", Required: false,
+                Description: "Instructions the REVIEWER agent always receives - review focus, "
+                             + "severity bar, house rules.")
+            {
+                Kind = "Multiline"
             })
             .RequiresInput(new WorkflowInputDescriptor(
                 "target-state", "Preferred story state", Required: false,

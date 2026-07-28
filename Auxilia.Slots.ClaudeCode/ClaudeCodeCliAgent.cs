@@ -298,6 +298,12 @@ public sealed class ClaudeCodeCliAgent(
             startInfo.ArgumentList.Add("--model");
             startInfo.ArgumentList.Add(model);
         }
+        if (request.BaseInstructions is { Length: > 0 } baseInstructions)
+        {
+            // The provider-native base-prompt seam: rides the system prompt, not the turn.
+            startInfo.ArgumentList.Add("--append-system-prompt");
+            startInfo.ArgumentList.Add(baseInstructions);
+        }
 
         // Account token first, API key as the fallback — only the credential in use is
         // exported, and only through the environment.

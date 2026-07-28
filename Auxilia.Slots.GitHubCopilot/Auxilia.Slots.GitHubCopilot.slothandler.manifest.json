@@ -22,6 +22,7 @@
       "Label": "Model",
       "Kind": "Text",
       "Required": false,
+      "Browse": "models",
       "HelpText": "Optional model override; the CLI's default model is used when empty."
     },
     {
