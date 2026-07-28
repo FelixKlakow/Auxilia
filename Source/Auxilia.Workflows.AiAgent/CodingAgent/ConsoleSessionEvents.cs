@@ -16,7 +16,13 @@ public sealed record ConsoleSessionEvent(string Kind, string Message)
     /// <summary>The agent finished responding and is idle at the prompt.</summary>
     public const string TurnEnded = "turn-ended";
 
+    /// <summary>The agent revised its plan; <see cref="DetailJson"/> carries the full snapshot.</summary>
+    public const string PlanUpdated = "plan-updated";
+
     public string? ToolName { get; init; }
+
+    /// <summary>Kind-specific structured payload (e.g. the serialized plan snapshot).</summary>
+    public string? DetailJson { get; init; }
 }
 
 /// <summary>

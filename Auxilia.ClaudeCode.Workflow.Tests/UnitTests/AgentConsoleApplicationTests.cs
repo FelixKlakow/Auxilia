@@ -109,6 +109,43 @@ public sealed class AgentConsoleApplicationTests
     }
 
     [Test]
+    public async Task SessionEvents_LandOnTheRunsSurfaces()
+    {
+        var views = new RecordingViews();
+        var app = new AgentConsoleApplication(
+            new FakeSessionHost(), views, Context(), credentials: null, TimeProvider.System);
+
+        await app.PublishSessionEventAsync(
+            new ConsoleSessionEvent(ConsoleSessionEvent.Attention, "Claude needs permission"),
+            CancellationToken.None);
+        await app.PublishSessionEventAsync(
+            new ConsoleSessionEvent(ConsoleSessionEvent.PlanUpdated, "")
+            {
+                DetailJson = "[{\"Content\":\"step one\",\"Status\":\"pending\"}]"
+            },
+            CancellationToken.None);
+        await app.PublishSessionEventAsync(
+            new ConsoleSessionEvent(ConsoleSessionEvent.TurnEnded, "All done."), CancellationToken.None);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(views.Published.Select(p => p.View),
+                Does.Contain(Auxilia.Workflows.Steering.OperatorChannel.ViewName)
+                    .And.Contain(AgentPlanUpdate.ViewName)
+                    .And.Contain(AgentSessionApplication.ChatViewName));
+            var plan = (AgentPlanUpdate)views.Published
+                .Single(p => p.View == AgentPlanUpdate.ViewName).Item;
+            Assert.That(plan.Items.Single().Content, Is.EqualTo("step one"));
+            var turnChat = views.Published
+                .Where(p => p.View == AgentSessionApplication.ChatViewName)
+                .Select(p => (Auxilia.Workflows.Views.AgentChatEntry)p.Item)
+                .Single(e => e.Role == Auxilia.Workflows.Views.AgentChatRole.Assistant);
+            Assert.That(turnChat.Content, Is.EqualTo("All done."),
+                "the turn's closing text becomes a real conversation entry");
+        });
+    }
+
+    [Test]
     public void BuildSession_CarriesCredentialAndInstruction_OnlyInTheEnvironment()
     {
         var session = AgentConsoleApplication.BuildSession(

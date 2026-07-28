@@ -13,6 +13,7 @@ namespace Auxilia.Slots.ClaudeCode;
 /// </summary>
 public sealed class ClaudeHookListener : IConsoleSessionEventSource
 {
+    private readonly ClaudeCodeCliAgent.PlanTracker _plan = new();
     private HttpListener? _listener;
     private Func<ConsoleSessionEvent, CancellationToken, Task>? _onEvent;
     private CancellationTokenSource? _lifetime;
@@ -74,8 +75,9 @@ public sealed class ClaudeHookListener : IConsoleSessionEventSource
             {
                 using var reader = new StreamReader(context.Request.InputStream);
                 var payload = await reader.ReadToEndAsync(ct);
-                if (Parse(payload) is { } evt && _onEvent is { } handler)
-                    await handler(evt, ct);
+                if (_onEvent is { } handler)
+                    foreach (var evt in Interpret(payload))
+                        await handler(evt, ct);
             }
             catch (Exception e) when (e is not OperationCanceledException)
             {
@@ -87,6 +89,95 @@ public sealed class ClaudeHookListener : IConsoleSessionEventSource
                 context.Response.StatusCode = 200;
                 context.Response.Close();
             }
+        }
+    }
+
+    /// <summary>
+    /// One hook payload → zero or more session events: the direct mapping, a turn-ended
+    /// enriched with the transcript's closing assistant text, and — for plan-shaped tool
+    /// calls — the folded plan snapshot.
+    /// </summary>
+    internal IReadOnlyList<ConsoleSessionEvent> Interpret(string payloadJson)
+    {
+        var events = new List<ConsoleSessionEvent>();
+        var main = Parse(payloadJson);
+        try
+        {
+            using var doc = JsonDocument.Parse(payloadJson);
+            var root = doc.RootElement;
+
+            // The Stop payload names the session transcript — its last assistant text IS the
+            // turn's message (hooks never deliver assistant output directly).
+            if (main is { Kind: ConsoleSessionEvent.TurnEnded }
+                && root.TryGetProperty("transcript_path", out var transcript)
+                && transcript.GetString() is { Length: > 0 } path
+                && TranscriptClosingText(path) is { Length: > 0 } text)
+                main = main with { Message = text };
+
+            if (root.TryGetProperty("hook_event_name", out var hookName)
+                && hookName.GetString() == "PreToolUse"
+                && root.TryGetProperty("tool_name", out var toolProperty)
+                && toolProperty.GetString() is { Length: > 0 } tool
+                && root.TryGetProperty("tool_input", out var input)
+                && _plan.Apply(tool, input) is { Count: > 0 } snapshot)
+                events.Add(new ConsoleSessionEvent(ConsoleSessionEvent.PlanUpdated, "")
+                {
+                    DetailJson = JsonSerializer.Serialize(snapshot)
+                });
+        }
+        catch (JsonException)
+        {
+            // Parse already tolerated it — nothing extra to derive.
+        }
+
+        if (main is not null)
+            events.Insert(0, main);
+        return events;
+    }
+
+    /// <summary>
+    /// The LAST assistant text of a session transcript (JSONL) — the turn's closing message.
+    /// Null when the file is missing or the shape is unknown; the cue still fires without it.
+    /// </summary>
+    internal static string? TranscriptClosingText(string transcriptPath)
+    {
+        try
+        {
+            if (!File.Exists(transcriptPath))
+                return null;
+            string? last = null;
+            foreach (var line in File.ReadLines(transcriptPath))
+            {
+                if (!line.Contains("\"assistant\"", StringComparison.Ordinal))
+                    continue;
+                try
+                {
+                    using var doc = JsonDocument.Parse(line);
+                    var root = doc.RootElement;
+                    if (!root.TryGetProperty("type", out var type) || type.GetString() != "assistant"
+                        || !root.TryGetProperty("message", out var message)
+                        || !message.TryGetProperty("content", out var content)
+                        || content.ValueKind != JsonValueKind.Array)
+                        continue;
+                    var text = string.Join("\n", content.EnumerateArray()
+                        .Where(block => block.TryGetProperty("type", out var kind)
+                                        && kind.GetString() == "text")
+                        .Select(block => block.TryGetProperty("text", out var t) ? t.GetString() : null)
+                        .Where(s => !string.IsNullOrWhiteSpace(s)));
+                    if (text.Length > 0)
+                        last = text;
+                }
+                catch (JsonException)
+                {
+                    // Foreign line shapes are fine — only well-formed assistant lines count.
+                }
+            }
+
+            return last;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
         }
     }
 

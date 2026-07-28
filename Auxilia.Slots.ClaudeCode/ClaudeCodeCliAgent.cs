@@ -529,11 +529,44 @@ public sealed class ClaudeCodeCliAgent(
             }
 
             foreach (var (name, input) in EnumerateToolUses(line, "TaskCreate", "TaskUpdate", "ExitPlanMode"))
+                if (Apply(name, input) is { } snapshot)
+                    return snapshot;
+            return null;
+        }
+
+        /// <summary>
+        /// One plan-shaped tool call (name + input) — the path hook payloads take, where the
+        /// call arrives directly instead of inside a streamed assistant message. Returns the
+        /// updated full snapshot when the call changed the plan; null otherwise.
+        /// </summary>
+        public IReadOnlyList<AgentPlanItem>? Apply(string name, JsonElement input)
+        {
+            switch (name)
             {
+                case "TodoWrite":
+                    if (input.TryGetProperty("todos", out var todosProperty)
+                        && todosProperty.ValueKind == JsonValueKind.Array)
+                    {
+                        var todos = todosProperty.EnumerateArray()
+                            .Select(t => new AgentPlanItem(
+                                t.TryGetProperty("content", out var content) ? content.GetString() ?? "" : "",
+                                t.TryGetProperty("status", out var status)
+                                    ? status.GetString() ?? AgentPlanStatuses.Pending
+                                    : AgentPlanStatuses.Pending))
+                            .Where(t => t.Content.Length > 0)
+                            .ToList();
+                        if (todos.Count > 0)
+                        {
+                            _items.Clear();
+                            _items.AddRange(todos);
+                            return _items.ToList();
+                        }
+                    }
+                    return null;
+
                 // Plan-mode: ExitPlanMode carries the whole approved plan as markdown — its
                 // bullet lines ARE the plan snapshot until task bookkeeping takes over.
-                if (name == "ExitPlanMode")
-                {
+                case "ExitPlanMode":
                     if (input.TryGetProperty("plan", out var planProperty)
                         && planProperty.GetString() is { Length: > 0 } markdown
                         && ParsePlanMarkdown(markdown) is { Count: > 0 } planned)
@@ -542,30 +575,30 @@ public sealed class ClaudeCodeCliAgent(
                         _items.AddRange(planned);
                         return _items.ToList();
                     }
-                    continue;
-                }
+                    return null;
 
-                if (name == "TaskCreate")
-                {
+                case "TaskCreate":
                     var subject = input.TryGetProperty("subject", out var s) ? s.GetString() : null;
-                    if (subject is { Length: > 0 })
-                        _items.Add(new AgentPlanItem(subject, AgentPlanStatuses.Pending));
-                }
-                else if (input.TryGetProperty("taskId", out var idProperty)
-                         && int.TryParse(idProperty.ToString(), out var taskId)
-                         && taskId >= 1 && taskId <= _items.Count
-                         && input.TryGetProperty("status", out var statusProperty)
-                         && statusProperty.GetString() is { Length: > 0 } status)
-                {
-                    _items[taskId - 1] = _items[taskId - 1] with { Status = status };
-                }
-                else
-                {
-                    continue;
-                }
-                return _items.ToList();
+                    if (subject is not { Length: > 0 })
+                        return null;
+                    _items.Add(new AgentPlanItem(subject, AgentPlanStatuses.Pending));
+                    return _items.ToList();
+
+                case "TaskUpdate":
+                    if (input.TryGetProperty("taskId", out var idProperty)
+                        && int.TryParse(idProperty.ToString(), out var taskId)
+                        && taskId >= 1 && taskId <= _items.Count
+                        && input.TryGetProperty("status", out var statusProperty)
+                        && statusProperty.GetString() is { Length: > 0 } status)
+                    {
+                        _items[taskId - 1] = _items[taskId - 1] with { Status = status };
+                        return _items.ToList();
+                    }
+                    return null;
+
+                default:
+                    return null;
             }
-            return null;
         }
 
         /// <summary>The markdown plan's bullet lines as pending plan items ("- [x]" = completed).</summary>

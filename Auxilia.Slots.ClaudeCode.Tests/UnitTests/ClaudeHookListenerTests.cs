@@ -47,6 +47,70 @@ public sealed class ClaudeHookListenerTests
     }
 
     [Test]
+    public void Interpret_FoldsPlanToolCalls_IntoPlanSnapshots()
+    {
+        var listener = new ClaudeHookListener();
+
+        var todoWrite = listener.Interpret(
+            "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"TodoWrite\",\"tool_input\":"
+            + "{\"todos\":[{\"content\":\"step one\",\"status\":\"in_progress\"},{\"content\":\"step two\",\"status\":\"pending\"}]}}");
+        var taskUpdate = listener.Interpret(
+            "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"TaskUpdate\",\"tool_input\":"
+            + "{\"taskId\":\"1\",\"status\":\"completed\"}}");
+
+        Assert.Multiple(() =>
+        {
+            var snapshot = todoWrite.Single(e => e.Kind == ConsoleSessionEvent.PlanUpdated);
+            Assert.That(snapshot.DetailJson, Does.Contain("step one").And.Contain("in_progress"));
+            Assert.That(todoWrite.Any(e => e.Kind == ConsoleSessionEvent.ToolStarted), Is.True,
+                "the plan call still counts as tool activity");
+
+            var updated = taskUpdate.Single(e => e.Kind == ConsoleSessionEvent.PlanUpdated);
+            Assert.That(updated.DetailJson, Does.Contain("step one").And.Contain("completed"),
+                "TaskUpdate folds incrementally onto the tracked snapshot");
+        });
+    }
+
+    [Test]
+    public void Interpret_TurnEnded_CarriesTheTranscriptsClosingAssistantText()
+    {
+        var transcript = Path.Combine(Path.GetTempPath(), $"transcript-{Guid.NewGuid():N}.jsonl");
+        File.WriteAllLines(transcript,
+        [
+            "{\"type\":\"user\",\"message\":{\"content\":\"do it\"}}",
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"working on it\"}]}}",
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Bash\"}]}}",
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"All done — tests pass.\"}]}}",
+        ]);
+        try
+        {
+            var events = new ClaudeHookListener().Interpret(
+                $"{{\"hook_event_name\":\"Stop\",\"transcript_path\":{System.Text.Json.JsonSerializer.Serialize(transcript)}}}");
+
+            var turn = events.Single();
+            Assert.Multiple(() =>
+            {
+                Assert.That(turn.Kind, Is.EqualTo(ConsoleSessionEvent.TurnEnded));
+                Assert.That(turn.Message, Is.EqualTo("All done — tests pass."),
+                    "the LAST assistant text is the turn's message");
+            });
+        }
+        finally
+        {
+            File.Delete(transcript);
+        }
+    }
+
+    [Test]
+    public void Interpret_TurnEnded_WithoutReadableTranscript_StillFiresTheCue()
+    {
+        var events = new ClaudeHookListener().Interpret(
+            "{\"hook_event_name\":\"Stop\",\"transcript_path\":\"/nonexistent/t.jsonl\"}");
+
+        Assert.That(events.Single().Kind, Is.EqualTo(ConsoleSessionEvent.TurnEnded));
+    }
+
+    [Test]
     public async Task Listener_ReceivesPostedHookPayloads_AndAlwaysAnswersEmpty200()
     {
         var listener = new ClaudeHookListener();

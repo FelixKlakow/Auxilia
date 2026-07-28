@@ -135,9 +135,18 @@ public sealed class AgentConsoleApplication(
                     Label: "Waiting for you"), ct);
                 break;
             case ConsoleSessionEvent.TurnEnded:
+                // The turn's closing text (from the session transcript) becomes a real
+                // conversation entry; the steering cue carries a compact summary.
+                if (evt.Message.Length > 0)
+                    await PublishChatAsync(new AgentChatEntry(
+                        AgentChatRole.Assistant, evt.Message, time.GetUtcNow()), ct);
                 await views.PublishAsync(
                     Steering.OperatorChannel.ViewName,
-                    new TurnEndedWire("turn-ended", ++_turns, evt.Message.Length > 0 ? evt.Message : null), ct);
+                    new TurnEndedWire("turn-ended", ++_turns, Summarize(evt.Message)), ct);
+                break;
+            case ConsoleSessionEvent.PlanUpdated:
+                if (Deserialize(evt.DetailJson) is { Count: > 0 } plan)
+                    await views.PublishAsync(AgentPlanUpdate.ViewName, new AgentPlanUpdate(plan), ct);
                 break;
             case ConsoleSessionEvent.ToolStarted or ConsoleSessionEvent.ToolFinished:
                 await PublishChatAsync(new AgentChatEntry(
@@ -147,6 +156,23 @@ public sealed class AgentConsoleApplication(
             default:
                 await PublishProgressAsync("session", evt.Message, ct);
                 break;
+        }
+    }
+
+    private static string? Summarize(string message)
+        => message.Length == 0 ? null : message.Length <= 280 ? message : message[..280] + "…";
+
+    private static IReadOnlyList<AgentPlanItem>? Deserialize(string? planJson)
+    {
+        if (planJson is not { Length: > 0 })
+            return null;
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<List<AgentPlanItem>>(planJson);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
         }
     }
 
