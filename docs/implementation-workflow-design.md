@@ -104,6 +104,19 @@ commit identity) and pushes through the AllowPush binding; `push-mode=prompt` ra
 decision card first. Then the story-state gate asks the operator to pick from the
 source-reported vocabulary (pre-selecting `target-state` if set) and calls `SetStateAsync`.
 
+## Relation to the OLD Auxilia.ImplementationWorkflow
+
+An older-generation `Source/Auxilia.ImplementationWorkflow` exists (headless `IAiAgent`
+orchestrators, result-sink reviewer, PR step satisfied only by fakes, no user gates, no
+console). The new `implementation` workflow REPLACES it (greenfield rule — no coexistence),
+salvaging: `BranchNamingService`, the signal records, `WriteBackService` (comment + status
+write-back over `ITaskSourceAccess.UpdateStatusAsync` — the state-SET half already exists;
+the state VOCABULARY read (`GetStatesAsync`) is new), and the reviewer result-sink pattern
+(`ImplementationReviewResultSinkMcpTools`) for the headless reviewer mode. The old project,
+its fakes (`Auxilia.FakeSlots.Implementation.*`), and its tests are dissolved into the new
+one as P2 lands. P1 must also verify WHICH provider actually implements
+`ITaskSourceAccess`/`IWorkItemAccess` for `tfs-account` and unify state set/read there.
+
 ## Build phases
 
 - **P0** Copilot console+events parity (independent deliverable).
