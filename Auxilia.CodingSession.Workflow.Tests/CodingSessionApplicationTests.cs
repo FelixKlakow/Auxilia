@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Auxilia.CodingSession.Workflow;
 using Auxilia.Workflows.AiAgent.CodingAgent;
+using Auxilia.Workflows.SourceControl;
 using Auxilia.Workflows.Views;
 using Moq;
 
@@ -28,6 +29,12 @@ public class CodingSessionApplicationTests
         {
             Journal.Add("wait");
             await _sessionEnded.Task.WaitAsync(ct);
+        }
+
+        public Task SendTextAsync(string text, CancellationToken ct)
+        {
+            Journal.Add($"send:{text}");
+            return Task.CompletedTask;
         }
 
         public Task ShutdownAsync()

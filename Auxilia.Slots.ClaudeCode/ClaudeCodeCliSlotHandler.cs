@@ -26,7 +26,11 @@ public sealed class ClaudeCodeCliSlotHandler : ISlotHandler
                 // Workflows that drive the CLI themselves (the interactive coding session)
                 // consume the raw credentials instead of the headless agent.
                 services.AddScoped(_ => new CodingAgentCredentials(
-                    options.OAuthToken, options.ApiKey, options.CliPath, options.Model));
+                    options.OAuthToken, options.ApiKey, options.CliPath, options.Model)
+                {
+                    UnattendedCliArguments = "--dangerously-skip-permissions",
+                    CompactCommand = "/compact",
+                });
                 // Console mode: interactive CLI sessions need the account token materialized
                 // where interactive login reads it (ClaudeInteractiveLogin), and the CLI's
                 // hook system wired to the in-container listener so the steering client still sees
@@ -38,6 +42,24 @@ public sealed class ClaudeCodeCliSlotHandler : ISlotHandler
                     new ClaudeInteractiveLogin(
                         provider.GetRequiredService<CodingAgentCredentials>(),
                         provider.GetRequiredService<ClaudeHookListener>()));
+                break;
+
+            // The reviewer of the implementation workflow: a SECOND agent instance, keyed by
+            // slot name so it never collides with the author's registrations.
+            case "review-agent":
+                var reviewerOptions = ClaudeCodeCliOptions.FromSettings(configuration.Settings);
+                if (!reviewerOptions.HasCredential)
+                    throw new InvalidOperationException(
+                        "The claude-code-cli provider requires a credential: connect a Claude "
+                        + "account (OAuthToken) or set the fallback ApiKey.");
+                services.AddKeyedScoped<ICodingAgent>(slotName, (_, _) => new ClaudeCodeCliAgent(reviewerOptions));
+                services.AddKeyedScoped(slotName, (_, _) => new CodingAgentCredentials(
+                    reviewerOptions.OAuthToken, reviewerOptions.ApiKey,
+                    reviewerOptions.CliPath, reviewerOptions.Model)
+                {
+                    UnattendedCliArguments = "--dangerously-skip-permissions",
+                    CompactCommand = "/compact",
+                });
                 break;
 
             default:

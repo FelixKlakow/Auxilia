@@ -1,0 +1,25 @@
+{
+  "ProviderType": "tfs-account",
+  "ContentHashBase64": "",
+  "SignatureBase64": "",
+  "PublicKeyBase64": "",
+  "Contracts": ["Auxilia.Workflows.TaskSource.IWorkItemAccess"],
+  "Category": "task-source",
+  "Description": "Serves work items from Azure DevOps or on-prem TFS over the Work Item Tracking REST API — cloud and on-prem speak the same API, and the same connector that authenticates repositories also binds work items.",
+  "Settings": [
+    {
+      "Key": "OrgUrl",
+      "Label": "Organization / collection URL",
+      "Kind": "Text",
+      "Required": true,
+      "HelpText": "Azure DevOps organization or on-prem TFS collection URL, e.g. https://dev.azure.com/acme or https://tfs.example.com/tfs/DefaultCollection."
+    },
+    {
+      "Key": "token",
+      "Label": "Personal access token",
+      "Kind": "Secret",
+      "Required": true,
+      "HelpText": "PAT with work-item read/write scope; stored encrypted at rest and never displayed back."
+    }
+  ]
+}

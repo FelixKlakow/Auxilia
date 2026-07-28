@@ -18,6 +18,16 @@ public sealed record CodingAgentCredentials(
     /// </summary>
     public IReadOnlyDictionary<string, string>? EnvironmentOverrides { get; init; }
 
+    /// <summary>
+    /// Extra CLI arguments for an UNATTENDED driven console (nobody answers permission
+    /// prompts; the isolated container is the safety net) — e.g. Claude's
+    /// <c>--dangerously-skip-permissions</c>. Null = the provider needs none.
+    /// </summary>
+    public string? UnattendedCliArguments { get; init; }
+
+    /// <summary>The CLI's context-compaction command (e.g. <c>/compact</c>); null = unsupported.</summary>
+    public string? CompactCommand { get; init; }
+
     /// <summary>Environment variables for a CLI child process: only the credential in use is exported.</summary>
     public IReadOnlyDictionary<string, string> ToEnvironment()
     {

@@ -1,33 +1,6 @@
-using System.Diagnostics;
+using Auxilia.Workflows.SourceControl;
 
 namespace Auxilia.CodingSession.Workflow;
-
-/// <summary>Seam for the local git operations of the session (branch, diff — never push).</summary>
-public interface IGitRunner
-{
-    Task<(int ExitCode, string Output)> RunAsync(
-        string workingDirectory, string arguments, CancellationToken cancellationToken);
-}
-
-public sealed class ProcessGitRunner : IGitRunner
-{
-    public async Task<(int ExitCode, string Output)> RunAsync(
-        string workingDirectory, string arguments, CancellationToken cancellationToken)
-    {
-        using var process = Process.Start(new ProcessStartInfo
-        {
-            FileName = "git",
-            Arguments = arguments,
-            WorkingDirectory = workingDirectory,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        }) ?? throw new InvalidOperationException("Failed to start git.");
-        var output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-        return (process.ExitCode, output);
-    }
-}
 
 /// <summary>
 /// LOCAL-ONLY git around the Workspace-Manager-mounted repository: session branch at start,

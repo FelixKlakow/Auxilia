@@ -24,8 +24,6 @@
   <ItemGroup>
     <ProjectReference Include="..\Auxilia.FakeSlots.CodeReview.Happy\Auxilia.FakeSlots.CodeReview.Happy.csproj" />
     <ProjectReference Include="..\Auxilia.FakeSlots.CodeReview.WriteBackFailure\Auxilia.FakeSlots.CodeReview.WriteBackFailure.csproj" />
-    <ProjectReference Include="..\Auxilia.FakeSlots.Implementation.Happy\Auxilia.FakeSlots.Implementation.Happy.csproj" />
-    <ProjectReference Include="..\Auxilia.FakeSlots.Implementation.AgentFailure\Auxilia.FakeSlots.Implementation.AgentFailure.csproj" />
     <ProjectReference Include="..\Auxilia.Workflows\Auxilia.Workflows.csproj" />
     <ProjectReference Include="..\Source\Auxilia.CodeReview.Workflow\Auxilia.CodeReview.Workflow.csproj" />
     <ProjectReference Include="..\Source\Auxilia.Workflows.AiAgent\Auxilia.Workflows.AiAgent.csproj" />

@@ -18,7 +18,7 @@ public sealed class AgentConsoleApplication(
     IConsoleSessionPreparer? sessionPreparer = null,
     IConsoleSessionEventSource? sessionEvents = null)
 {
-    private int _turns;
+    private readonly ConsoleEventViews _eventViews = new(views!, time);
 
     /// <summary>The instruction reaches the CLI via the session environment, never the command line.</summary>
     public const string InstructionVariable = "AUXILIA_INSTRUCTION";
@@ -116,74 +116,9 @@ public sealed class AgentConsoleApplication(
         };
     }
 
-    /// <summary>
-    /// CLI-side events land on the run's surfaces: attention and turn boundaries ride the
-    /// steering view (the steering client's notification cue), tool activity becomes tagged chat
-    /// entries (the generic detail contract — default hidden, per-tag toggle).
-    /// </summary>
-    public async Task PublishSessionEventAsync(ConsoleSessionEvent evt, CancellationToken ct)
-    {
-        if (views is null)
-            return;
-        switch (evt.Kind)
-        {
-            case ConsoleSessionEvent.Attention:
-                await views.PublishAsync(
-                    Steering.OperatorChannel.ViewName, new AttentionWire("attention", evt.Message), ct);
-                await PublishChatAsync(new AgentChatEntry(
-                    AgentChatRole.System, evt.Message, time.GetUtcNow(),
-                    Label: "Waiting for you"), ct);
-                break;
-            case ConsoleSessionEvent.TurnEnded:
-                // The turn's closing text (from the session transcript) becomes a real
-                // conversation entry; the steering cue carries a compact summary.
-                if (evt.Message.Length > 0)
-                    await PublishChatAsync(new AgentChatEntry(
-                        AgentChatRole.Assistant, evt.Message, time.GetUtcNow()), ct);
-                await views.PublishAsync(
-                    Steering.OperatorChannel.ViewName,
-                    new TurnEndedWire("turn-ended", ++_turns, Summarize(evt.Message)), ct);
-                break;
-            case ConsoleSessionEvent.PlanUpdated:
-                if (Deserialize(evt.DetailJson) is { Count: > 0 } plan)
-                    await views.PublishAsync(AgentPlanUpdate.ViewName, new AgentPlanUpdate(plan), ct);
-                break;
-            case ConsoleSessionEvent.ToolStarted or ConsoleSessionEvent.ToolFinished:
-                await PublishChatAsync(new AgentChatEntry(
-                    AgentChatRole.System, evt.Message, time.GetUtcNow(),
-                    Label: evt.ToolName, DetailTag: "console-activity"), ct);
-                break;
-            default:
-                await PublishProgressAsync("session", evt.Message, ct);
-                break;
-        }
-    }
-
-    private static string? Summarize(string message)
-        => message.Length == 0 ? null : message.Length <= 280 ? message : message[..280] + "…";
-
-    private static IReadOnlyList<AgentPlanItem>? Deserialize(string? planJson)
-    {
-        if (planJson is not { Length: > 0 })
-            return null;
-        try
-        {
-            return System.Text.Json.JsonSerializer.Deserialize<List<AgentPlanItem>>(planJson);
-        }
-        catch (System.Text.Json.JsonException)
-        {
-            return null;
-        }
-    }
-
-    private sealed record AttentionWire(
-        [property: JsonPropertyName("$type")] string Type,
-        [property: JsonPropertyName("message")] string Message);
-
-    private sealed record TurnEndedWire(
-        [property: JsonPropertyName("$type")] string Type,
-        [property: JsonPropertyName("turn")] int Turn,
-        [property: JsonPropertyName("summary")] string? Summary);
+    /// <summary>CLI-side events land on the run's surfaces (see <see cref="ConsoleEventViews"/>).</summary>
+    public Task PublishSessionEventAsync(ConsoleSessionEvent evt, CancellationToken ct)
+        => views is null ? Task.CompletedTask : _eventViews.PublishAsync(evt, ct);
 
     private Task PublishChatAsync(AgentChatEntry entry, CancellationToken ct)
         => views?.PublishAsync(AgentSessionApplication.ChatViewName, entry, ct) ?? Task.CompletedTask;

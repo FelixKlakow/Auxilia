@@ -14,6 +14,18 @@ public sealed record TerminalSessionInfo(
 {
     public IReadOnlyDictionary<string, string> Environment { get; init; }
         = new Dictionary<string, string>();
+
+    /// <summary>The tmux session name — distinct per concurrent session (author, reviewer).</summary>
+    public string SessionName { get; init; } = "agent-session";
+
+    /// <summary>Serve this session via ttyd (the run's web terminal). One session per run.</summary>
+    public bool ServeTerminal { get; init; } = true;
+
+    /// <summary>
+    /// Chain <c>tmux kill-server</c> after the command, so the command's exit ends EVERY
+    /// session (the auto-exit contract). Off for secondary sessions beside the main one.
+    /// </summary>
+    public bool EndsServerOnExit { get; init; } = true;
 }
 
 /// <summary>Seam between a session application and the tmux/ttyd host processes.</summary>
@@ -28,6 +40,13 @@ public interface ISessionHost
     /// <summary>Completes when the session command exits (the tmux server dies with it).</summary>
     Task WaitForSessionEndAsync(CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Types <paramref name="text"/> into the session followed by Enter — how a DRIVEN
+    /// console receives its prompts. The text is delivered verbatim (literal keys, no shell
+    /// interpretation) and never logged.
+    /// </summary>
+    Task SendTextAsync(string text, CancellationToken cancellationToken);
+
     /// <summary>Ends the session from outside — cancellation or the max-duration guard.</summary>
     Task ShutdownAsync();
 }
@@ -40,18 +59,21 @@ public interface ISessionHost
 /// </summary>
 public sealed class TmuxSessionHost : ISessionHost
 {
-    private const string TmuxSessionName = "agent-session";
+    private string _sessionName = "agent-session";
     private Process? _ttyd;
 
     public async Task StartAsync(TerminalSessionInfo session, CancellationToken cancellationToken)
     {
+        _sessionName = session.SessionName;
         await RunAsync(BuildTmuxStartInfo(session), cancellationToken);
 
+        if (!session.ServeTerminal)
+            return;
         var ttyd = new ProcessStartInfo { FileName = "ttyd", UseShellExecute = false };
         foreach (var argument in new[]
                  {
                      "--writable", "--port", session.TerminalPort.ToString(),
-                     "tmux", "attach", "-t", TmuxSessionName
+                     "tmux", "attach", "-t", session.SessionName
                  })
             ttyd.ArgumentList.Add(argument);
         _ttyd = Process.Start(ttyd) ?? throw new InvalidOperationException("Failed to start ttyd.");
@@ -75,9 +97,9 @@ public sealed class TmuxSessionHost : ISessionHost
         };
         foreach (var argument in new[]
                  {
-                     "new-session", "-d", "-s", TmuxSessionName,
+                     "new-session", "-d", "-s", session.SessionName,
                      "-c", session.WorkspaceDirectory,
-                     $"{session.Command}; tmux kill-server"
+                     session.EndsServerOnExit ? $"{session.Command}; tmux kill-server" : session.Command
                  })
             startInfo.ArgumentList.Add(argument);
         foreach (var (key, value) in session.Environment)
@@ -85,12 +107,30 @@ public sealed class TmuxSessionHost : ISessionHost
         return startInfo;
     }
 
+    public async Task SendTextAsync(string text, CancellationToken cancellationToken)
+    {
+        // -l = literal keys (no key-name interpretation); Enter is its own key event so a
+        // multi-line prompt arrives as ONE input. The text itself never hits a shell or log.
+        var typeKeys = new ProcessStartInfo
+        {
+            FileName = "tmux",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        foreach (var argument in new[] { "send-keys", "-t", _sessionName, "-l", text })
+            typeKeys.ArgumentList.Add(argument);
+        await RunAsync(typeKeys, cancellationToken);
+        if (await TryRunAsync("tmux", ["send-keys", "-t", _sessionName, "Enter"], cancellationToken) != 0)
+            throw new InvalidOperationException("tmux send-keys Enter failed — is the session gone?");
+    }
+
     public async Task WaitForSessionEndAsync(CancellationToken cancellationToken)
     {
         // 'tmux has-session' exits non-zero once the server is gone.
         while (!cancellationToken.IsCancellationRequested)
         {
-            if (await TryRunAsync("tmux", ["has-session", "-t", TmuxSessionName], cancellationToken) != 0)
+            if (await TryRunAsync("tmux", ["has-session", "-t", _sessionName], cancellationToken) != 0)
                 return;
             await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
         }

@@ -32,7 +32,30 @@ public sealed class CopilotCliSlotHandler : ISlotHandler
                     {
                         ["GH_TOKEN"] = options.Token!,
                         ["GITHUB_TOKEN"] = options.Token!,
-                    }
+                    },
+                    UnattendedCliArguments = "--allow-all-tools",
+                });
+                break;
+
+            // The reviewer of the implementation workflow: a SECOND agent instance, keyed by
+            // slot name so it never collides with the author's registrations.
+            case "review-agent":
+                var reviewerOptions = CopilotCliOptions.FromSettings(configuration.Settings);
+                if (!reviewerOptions.HasCredential)
+                    throw new InvalidOperationException(
+                        "The github-copilot-cli provider requires a GitHub token with Copilot access.");
+                services.AddKeyedScoped<ICodingAgent>(slotName, (_, _) => reviewerOptions.UseSdkSession
+                    ? new CopilotSdkAgent(reviewerOptions)
+                    : new CopilotCliAgent(reviewerOptions));
+                services.AddKeyedScoped(slotName, (_, _) => new CodingAgentCredentials(
+                    null, null, reviewerOptions.CliPath, reviewerOptions.Model)
+                {
+                    EnvironmentOverrides = new Dictionary<string, string>
+                    {
+                        ["GH_TOKEN"] = reviewerOptions.Token!,
+                        ["GITHUB_TOKEN"] = reviewerOptions.Token!,
+                    },
+                    UnattendedCliArguments = "--allow-all-tools",
                 });
                 break;
 

@@ -60,10 +60,9 @@
     <Project Path="Auxilia.CodeReview.Workflow.Tests\Auxilia.CodeReview.Workflow.Tests.csproj" />
     <Project Path="Auxilia.FakeSlots.CodeReview.Happy\Auxilia.FakeSlots.CodeReview.Happy.csproj" />
     <Project Path="Auxilia.FakeSlots.CodeReview.WriteBackFailure\Auxilia.FakeSlots.CodeReview.WriteBackFailure.csproj" />
-    <Project Path="Auxilia.FakeSlots.Implementation.AgentFailure\Auxilia.FakeSlots.Implementation.AgentFailure.csproj" />
-    <Project Path="Auxilia.FakeSlots.Implementation.Happy\Auxilia.FakeSlots.Implementation.Happy.csproj" />
     <Project Path="Auxilia.FakeSlots.Tests\Auxilia.FakeSlots.Tests.csproj" />
-    <Project Path="Auxilia.ImplementationWorkflow.Tests/Auxilia.ImplementationWorkflow.Tests.csproj" />
+    <Project Path="Auxilia.Slots.AzureDevOps.Tests\Auxilia.Slots.AzureDevOps.Tests.csproj" />
+    <Project Path="Auxilia.Slots.AzureDevOps\Auxilia.Slots.AzureDevOps.csproj" />
     <Project Path="Auxilia.Slots.ClaudeCode.Tests\Auxilia.Slots.ClaudeCode.Tests.csproj" />
     <Project Path="Auxilia.Slots.ClaudeCode\Auxilia.Slots.ClaudeCode.csproj" />
     <Project Path="Auxilia.Slots.GitHubCopilot.Tests\Auxilia.Slots.GitHubCopilot.Tests.csproj" />
@@ -75,10 +74,10 @@
     <Project Path="Auxilia.Slots.GitHub.Tests\Auxilia.Slots.GitHub.Tests.csproj" />
     <Project Path="Auxilia.Slots.GitHub\Auxilia.Slots.GitHub.csproj" />
     <Project Path="Source/Auxilia.ClaudeCode.Workflow/Auxilia.ClaudeCode.Workflow.csproj" />
+    <Project Path="Source/Auxilia.Implementation.Workflow/Auxilia.Implementation.Workflow.csproj" />
     <Project Path="Source/Auxilia.Copilot.Workflow/Auxilia.Copilot.Workflow.csproj" />
     <Project Path="Source/Auxilia.CodingSession.Workflow/Auxilia.CodingSession.Workflow.csproj" />
     <Project Path="Source/Auxilia.SessionNotifier.Workflow/Auxilia.SessionNotifier.Workflow.csproj" />
-    <Project Path="Source/Auxilia.ImplementationWorkflow/Auxilia.ImplementationWorkflow.csproj" />
     <Project Path="Source\Auxilia.CodeReview.Workflow\Auxilia.CodeReview.Workflow.csproj" />
   </Folder>
   <Folder Name="/Source/">
@@ -90,6 +89,7 @@
   <Project Path="Auxilia.Core.Api.Tests/Auxilia.Core.Api.Tests.csproj" />
   <Project Path="Auxilia.Core.Client/Auxilia.Core.Client.csproj" />
   <Project Path="Auxilia.Core.Contracts/Auxilia.Core.Contracts.csproj" />
+  <Project Path="Auxilia.Implementation.Workflow.Tests/Auxilia.Implementation.Workflow.Tests.csproj" />
   <Project Path="Auxilia.SystemTestSuite\Auxilia.SystemTestSuite.csproj" />
   <Project Path="Auxilia.WorkflowStudio.Tests/Auxilia.WorkflowStudio.Tests.csproj" />
 </Solution>

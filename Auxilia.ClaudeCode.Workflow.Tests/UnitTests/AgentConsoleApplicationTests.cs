@@ -29,6 +29,15 @@ public sealed class AgentConsoleApplicationTests
             await _sessionEnded.Task.WaitAsync(ct);
         }
 
+        public Task SendTextAsync(string text, CancellationToken ct)
+        {
+            Journal.Add($"send:{text}");
+            Sent.Add(text);
+            return Task.CompletedTask;
+        }
+
+        public List<string> Sent { get; } = [];
+
         public Task ShutdownAsync()
         {
             Journal.Add("shutdown");

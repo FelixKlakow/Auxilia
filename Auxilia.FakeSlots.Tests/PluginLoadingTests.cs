@@ -41,8 +41,6 @@ public class PluginLoadingTests
             var providerTypes = plugins.Select(p => p.ProviderType).ToHashSet();
             Assert.That(providerTypes, Does.Contain("fake-code-review-happy"));
             Assert.That(providerTypes, Does.Contain("fake-code-review-write-back-failure"));
-            Assert.That(providerTypes, Does.Contain("fake-implementation-happy"));
-            Assert.That(providerTypes, Does.Contain("fake-implementation-agent-failure"));
         }
         finally
         {
@@ -68,8 +66,6 @@ public class PluginLoadingTests
 
             Assert.That(resolver.Resolve("fake-code-review-happy"), Is.Not.Null);
             Assert.That(resolver.Resolve("fake-code-review-write-back-failure"), Is.Not.Null);
-            Assert.That(resolver.Resolve("fake-implementation-happy"), Is.Not.Null);
-            Assert.That(resolver.Resolve("fake-implementation-agent-failure"), Is.Not.Null);
         }
         finally
         {
@@ -83,8 +79,6 @@ public class PluginLoadingTests
         {
             "Auxilia.FakeSlots.CodeReview.Happy",
             "Auxilia.FakeSlots.CodeReview.WriteBackFailure",
-            "Auxilia.FakeSlots.Implementation.Happy",
-            "Auxilia.FakeSlots.Implementation.AgentFailure",
         };
 
         foreach (var project in projects)
