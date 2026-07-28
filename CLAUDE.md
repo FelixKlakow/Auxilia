@@ -16,6 +16,7 @@ Every project directory has a `<ProjectName>.project-instructions.md` beside its
 - **`docs/backend-service-retirement-plan.md`** — completed program: BackendService dissolved into Core.Api / Studio, its UI rehomed as `Auxilia.AdminConsole`.
 - **`docs/backlog.md`** — live tracker of known follow-ups (Core client-surface gaps, config-store move, the full steer loop, CI validation).
 - **`docs/workflow-sdk-design.md`** — the workflow SDK / builder contract.
+- **`docs/implementation-workflow-design.md`** — the full assisted-delivery workflow (story → plan → implement → review → push → story state).
 - **`docs/view-data-design.md`** — live views and status fan-out.
 
 **Delivered / historical (`docs/delivered/` — context only, not live design):** core-platform-separation-plan, security-consolidation-plan, governance-rbac-design, enterprise-login-design, goal-v1, workflow-dispatch-test-strategy, human-steering-design (superseded by the steering doc above), and STATS.
