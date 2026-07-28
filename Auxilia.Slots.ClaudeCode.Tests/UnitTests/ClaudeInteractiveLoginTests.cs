@@ -45,6 +45,37 @@ public sealed class ClaudeInteractiveLoginTests
     }
 
     [Test]
+    public async Task Prepare_WithAListener_WiresTheCliHooksToItsPort()
+    {
+        var listener = new ClaudeHookListener();
+        await listener.StartAsync((_, _) => Task.CompletedTask, CancellationToken.None);
+        try
+        {
+            var login = new ClaudeInteractiveLogin(
+                new CodingAgentCredentials("sk-ant-oat-secret", null, "claude", null), listener)
+            {
+                HomeDirectory = _home
+            };
+
+            await login.PrepareAsync("/workspace", CancellationToken.None);
+
+            var settings = await File.ReadAllTextAsync(Path.Combine(_home, ".claude", "settings.json"));
+            Assert.Multiple(() =>
+            {
+                foreach (var hook in new[] { "Notification", "PreToolUse", "PostToolUse", "Stop" })
+                    Assert.That(settings, Does.Contain($"\"{hook}\""));
+                Assert.That(settings, Does.Contain($"127.0.0.1:{listener.Port}"));
+                Assert.That(settings, Does.Contain("|| true"),
+                    "a broken observer must never fail a hook (exit 2 would block the CLI)");
+            });
+        }
+        finally
+        {
+            await listener.StopAsync();
+        }
+    }
+
+    [Test]
     public async Task Prepare_ApiKeyFallback_WritesNothing()
     {
         var login = new ClaudeInteractiveLogin(

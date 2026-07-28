@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Auxilia.Workflows.Views;
 
 namespace Auxilia.Workflows.AiAgent.CodingAgent;
@@ -14,8 +15,11 @@ public sealed class AgentConsoleApplication(
     AgentSessionContext context,
     CodingAgentCredentials? credentials,
     TimeProvider time,
-    IConsoleSessionPreparer? sessionPreparer = null)
+    IConsoleSessionPreparer? sessionPreparer = null,
+    IConsoleSessionEventSource? sessionEvents = null)
 {
+    private int _turns;
+
     /// <summary>The instruction reaches the CLI via the session environment, never the command line.</summary>
     public const string InstructionVariable = "AUXILIA_INSTRUCTION";
 
@@ -38,6 +42,11 @@ public sealed class AgentConsoleApplication(
                 "Console session — the conversation happens in the live terminal, not in this view.",
                 time.GetUtcNow()),
             cancellationToken);
+
+        // The event source starts FIRST so preparation can wire the CLI to its endpoint
+        // (e.g. hook commands pointing at the listener's port).
+        if (sessionEvents is not null)
+            await sessionEvents.StartAsync(PublishSessionEventAsync, cancellationToken);
 
         // Provider-specific session preparation (e.g. materializing the credential where the
         // CLI's INTERACTIVE mode reads it — env vars only cover headless use).
@@ -65,6 +74,8 @@ public sealed class AgentConsoleApplication(
         }
 
         await host.ShutdownAsync();
+        if (sessionEvents is not null)
+            await sessionEvents.StopAsync();
 
         var ended = time.GetUtcNow();
         var report = new SessionReport(
@@ -104,6 +115,49 @@ public sealed class AgentConsoleApplication(
             Environment = environment
         };
     }
+
+    /// <summary>
+    /// CLI-side events land on the run's surfaces: attention and turn boundaries ride the
+    /// steering view (the steering client's notification cue), tool activity becomes tagged chat
+    /// entries (the generic detail contract — default hidden, per-tag toggle).
+    /// </summary>
+    public async Task PublishSessionEventAsync(ConsoleSessionEvent evt, CancellationToken ct)
+    {
+        if (views is null)
+            return;
+        switch (evt.Kind)
+        {
+            case ConsoleSessionEvent.Attention:
+                await views.PublishAsync(
+                    Steering.OperatorChannel.ViewName, new AttentionWire("attention", evt.Message), ct);
+                await PublishChatAsync(new AgentChatEntry(
+                    AgentChatRole.System, evt.Message, time.GetUtcNow(),
+                    Label: "Waiting for you"), ct);
+                break;
+            case ConsoleSessionEvent.TurnEnded:
+                await views.PublishAsync(
+                    Steering.OperatorChannel.ViewName,
+                    new TurnEndedWire("turn-ended", ++_turns, evt.Message.Length > 0 ? evt.Message : null), ct);
+                break;
+            case ConsoleSessionEvent.ToolStarted or ConsoleSessionEvent.ToolFinished:
+                await PublishChatAsync(new AgentChatEntry(
+                    AgentChatRole.System, evt.Message, time.GetUtcNow(),
+                    Label: evt.ToolName, DetailTag: "console-activity"), ct);
+                break;
+            default:
+                await PublishProgressAsync("session", evt.Message, ct);
+                break;
+        }
+    }
+
+    private sealed record AttentionWire(
+        [property: JsonPropertyName("$type")] string Type,
+        [property: JsonPropertyName("message")] string Message);
+
+    private sealed record TurnEndedWire(
+        [property: JsonPropertyName("$type")] string Type,
+        [property: JsonPropertyName("turn")] int Turn,
+        [property: JsonPropertyName("summary")] string? Summary);
 
     private Task PublishChatAsync(AgentChatEntry entry, CancellationToken ct)
         => views?.PublishAsync(AgentSessionApplication.ChatViewName, entry, ct) ?? Task.CompletedTask;

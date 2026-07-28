@@ -28,9 +28,16 @@ public sealed class ClaudeCodeCliSlotHandler : ISlotHandler
                 services.AddScoped(_ => new CodingAgentCredentials(
                     options.OAuthToken, options.ApiKey, options.CliPath, options.Model));
                 // Console mode: interactive CLI sessions need the account token materialized
-                // where interactive login reads it (see ClaudeInteractiveLogin).
+                // where interactive login reads it (ClaudeInteractiveLogin), and the CLI's
+                // hook system wired to the in-container listener so the steering client still sees
+                // notifications and tool activity.
+                services.AddScoped<ClaudeHookListener>();
+                services.AddScoped<IConsoleSessionEventSource>(provider =>
+                    provider.GetRequiredService<ClaudeHookListener>());
                 services.AddScoped<IConsoleSessionPreparer>(provider =>
-                    new ClaudeInteractiveLogin(provider.GetRequiredService<CodingAgentCredentials>()));
+                    new ClaudeInteractiveLogin(
+                        provider.GetRequiredService<CodingAgentCredentials>(),
+                        provider.GetRequiredService<ClaudeHookListener>()));
                 break;
 
             default:

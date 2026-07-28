@@ -12,7 +12,10 @@ namespace Auxilia.Slots.ClaudeCode;
 /// the credential anyway. The first-run wizard is skipped so the operator lands in the session.
 /// An API-key fallback needs no file; it rides the environment.
 /// </summary>
-public sealed class ClaudeInteractiveLogin(CodingAgentCredentials credentials, TimeProvider? time = null)
+public sealed class ClaudeInteractiveLogin(
+    CodingAgentCredentials credentials,
+    ClaudeHookListener? hooks = null,
+    TimeProvider? time = null)
     : IConsoleSessionPreparer
 {
     private readonly TimeProvider _time = time ?? TimeProvider.System;
@@ -24,6 +27,8 @@ public sealed class ClaudeInteractiveLogin(CodingAgentCredentials credentials, T
 
     public async Task PrepareAsync(string workspaceDirectory, CancellationToken cancellationToken)
     {
+        await WriteHookSettingsAsync(cancellationToken);
+
         if (credentials.OAuthToken is not { Length: > 0 } token)
             return;
 
@@ -58,6 +63,44 @@ public sealed class ClaudeInteractiveLogin(CodingAgentCredentials credentials, T
         projects[workspaceDirectory] = project;
         config["projects"] = projects;
         await File.WriteAllTextAsync(configPath, config.ToJsonString(), cancellationToken);
+    }
+
+    /// <summary>
+    /// Wires the CLI's hook system to the in-container listener: Notification, PreToolUse,
+    /// PostToolUse, and Stop each POST their stdin payload to the loopback endpoint. The
+    /// command swallows every failure and prints NOTHING — hook stdout feeds CLI decisions,
+    /// and a broken observer must never break the session.
+    /// </summary>
+    private async Task WriteHookSettingsAsync(CancellationToken cancellationToken)
+    {
+        if (hooks is null)
+            return;
+
+        var command = $"curl -s -m 3 -X POST --data-binary @- http://127.0.0.1:{hooks.Port}/ "
+                      + ">/dev/null 2>&1 || true";
+        JsonNode HookEntry() => new JsonObject
+        {
+            ["hooks"] = new JsonArray(new JsonObject
+            {
+                ["type"] = "command",
+                ["command"] = command,
+            })
+        };
+
+        var settingsPath = Path.Combine(HomeDirectory, ".claude", "settings.json");
+        Directory.CreateDirectory(Path.Combine(HomeDirectory, ".claude"));
+        var settings = File.Exists(settingsPath)
+            ? JsonNode.Parse(await File.ReadAllTextAsync(settingsPath, cancellationToken)) as JsonObject
+              ?? new JsonObject()
+            : new JsonObject();
+        settings["hooks"] = new JsonObject
+        {
+            ["Notification"] = new JsonArray(HookEntry()),
+            ["PreToolUse"] = new JsonArray(HookEntry()),
+            ["PostToolUse"] = new JsonArray(HookEntry()),
+            ["Stop"] = new JsonArray(HookEntry()),
+        };
+        await File.WriteAllTextAsync(settingsPath, settings.ToJsonString(), cancellationToken);
     }
 
     /// <summary>The CLI's on-disk credential shape (camelCase by contract).</summary>
