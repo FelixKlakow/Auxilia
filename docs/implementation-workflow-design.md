@@ -82,6 +82,21 @@ hardcoded list).
 4. **Diff bundle artifact**: `review-bundle` output — full `git diff` + changed-file list +
    plan + AI verdicts as markdown, produced before the artifact-review/user code gates.
 
+## Idle gates and token economics
+
+A user gate can stay open for hours; the author console's context would then be re-read into
+the provider's prompt cache at full input price on resume (cache TTL long expired) — and it
+re-expires on every slow exchange. Mitigation, input `gate-idle-compaction` (minutes,
+default 10, 0 = off): when a gate has been awaiting the operator longer than the threshold,
+the workflow DRIVES a compaction in the author console (Claude: `/compact` via send-keys,
+awaiting its completion like any turn) so the surviving context is small — resuming after
+that costs a small re-read instead of the full transcript. The state that must survive
+compaction verbatim lives OUTSIDE the context by design: the plan file, the review verdicts,
+and the diff are files/artifacts the workflow re-injects into the next driven prompt. If a
+provider has no compaction command, the fallback is the same files-based handoff: end the
+instance at the idle threshold and start a fresh one from plan + verdicts + diff when the
+operator answers ("the next agent picks up without recaching").
+
 ## Commit / push / story state
 
 After the final gate the WORKFLOW (not the agent) commits (`ProcessGitRunner`, provisioned
