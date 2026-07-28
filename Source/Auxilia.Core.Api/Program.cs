@@ -105,6 +105,8 @@ builder.Services.AddSingleton<SlotCredentialResolver>();
 builder.Services.AddSingleton<RunStreamBroker>();
 builder.Services.AddSingleton<Auxilia.Workflows.Messaging.WorkflowStatusPublisher>();
 builder.Services.AddSingleton<RunnerLivenessTracker>();
+builder.Services.AddSingleton<TerminalTicketService>();
+builder.Services.AddSingleton<TerminalProxyService>();
 builder.Services.AddSingleton<FailoverMonitor>();
 builder.Services.AddHostedService<RunTrackingService>();
 builder.Services.AddHostedService<RunViewTrackingService>();
@@ -142,6 +144,7 @@ await app.Services.GetRequiredService<GovernanceSeeder>().SeedAsync(app.Lifetime
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
+app.UseWebSockets();
 
 // --- Interactive sign-in (Entra OIDC) + browser session; local password + API-key auth coexist ---
 app.MapGet("/auth/login", (string? returnUrl, IOptions<OidcSettings> oidc) =>
@@ -413,6 +416,87 @@ app.MapPost("/api/runs/{id:guid}/inputs", async (
         principalId.ToString(), PermissionActions.RunProvideInput, run.Id.ToString(), "delivered", ct: ct);
     return Results.Accepted($"/api/runs/{run.Id}");
 }).RequireAuthorization();
+
+// Terminal access, step 1: an AUTHORIZED caller mints a short-lived ticket for one run's
+// interactive web terminal. The ticket (not the API bearer) then authenticates the proxy's
+// page/asset/websocket requests — a browser surface cannot attach bearer headers to those.
+app.MapPost("/api/runs/{id:guid}/terminal-ticket", async (
+        Guid id, HttpContext http, IPolicyEngine policy,
+        Auxilia.UniversalDataAccess.IDataAccess<CoreRunRecord> runStore,
+        TerminalTicketService tickets, AuditLog audit, CancellationToken ct) =>
+{
+    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+        return Results.Unauthorized();
+    var decision = await policy.EvaluateAsync(
+        new PolicyContext(principalId, PermissionActions.RunOpenTerminal, id.ToString()), ct);
+    if (!decision.Allowed)
+        return Results.Json(new { error = decision.Reason }, statusCode: StatusCodes.Status403Forbidden);
+
+    var run = await runStore.ReadAsync(id, ct)
+              ?? (await runStore.ReadAsync(ct)).FirstOrDefault(r => r.CommandId == id);
+    if (run is null)
+        return Results.NotFound(new { error = "run not found" });
+    if (CoreRunStates.IsTerminal(run.State))
+        return Results.BadRequest(new { error = $"the run has ended ({run.State}) — its terminal is gone" });
+    if (run.TerminalEndpoint is not { Length: > 0 })
+        return Results.NotFound(new { error = "the run hosts no interactive terminal" });
+
+    var (ticket, expires) = tickets.Issue(run.Id);
+    await audit.AppendAsync(
+        principalId.ToString(), PermissionActions.RunOpenTerminal, run.Id.ToString(), "ticket-issued", ct: ct);
+    return Results.Ok(new Auxilia.Core.Contracts.TerminalTicket(
+        run.Id, $"/api/runs/{run.Id}/terminal/?ticket={ticket}", expires));
+}).RequireAuthorization();
+
+// Terminal access, step 2: the ticketed proxy. Serves ttyd's page and assets over HTTP and
+// pumps its websocket — the only path from outside to a run's terminal; the container's
+// address never leaves the Core. The first page response plants a path-scoped cookie so
+// ttyd's follow-up requests (which carry no query ticket) stay authenticated.
+app.Map("/api/runs/{id:guid}/terminal/{**path}", async (
+        Guid id, string? path, HttpContext http,
+        Auxilia.UniversalDataAccess.IDataAccess<CoreRunRecord> runStore,
+        TerminalTicketService tickets, TerminalProxyService proxy, CancellationToken ct) =>
+{
+    var run = await runStore.ReadAsync(id, ct)
+              ?? (await runStore.ReadAsync(ct)).FirstOrDefault(r => r.CommandId == id);
+    if (run is null)
+    {
+        await Results.NotFound(new { error = "run not found" }).ExecuteAsync(http);
+        return;
+    }
+
+    var ticket = http.Request.Query["ticket"].FirstOrDefault()
+                 ?? http.Request.Cookies["auxilia-terminal-ticket"];
+    if (!tickets.Validate(ticket, run.Id))
+    {
+        await Results.Json(new { error = "missing or expired terminal ticket" },
+            statusCode: StatusCodes.Status401Unauthorized).ExecuteAsync(http);
+        return;
+    }
+
+    if (run.TerminalEndpoint is not { Length: > 0 } endpoint || CoreRunStates.IsTerminal(run.State))
+    {
+        await Results.Json(new { error = "the run's terminal is not available" },
+            statusCode: StatusCodes.Status409Conflict).ExecuteAsync(http);
+        return;
+    }
+
+    if (http.WebSockets.IsWebSocketRequest)
+    {
+        await proxy.ForwardWebSocketAsync(http, endpoint, path ?? "", ct);
+        return;
+    }
+
+    if (string.IsNullOrEmpty(path) && ticket == http.Request.Query["ticket"].FirstOrDefault())
+        http.Response.Cookies.Append("auxilia-terminal-ticket", ticket!, new CookieOptions
+        {
+            HttpOnly = true,
+            SameSite = SameSiteMode.Strict,
+            Path = $"/api/runs/{id}/terminal",
+            MaxAge = TerminalTicketService.TimeToLive
+        });
+    await proxy.ForwardHttpAsync(http, endpoint, path ?? "", ct);
+});
 
 // Clear run history: deletes TERMINAL run records and their persisted view items. With
 // includeStale=true it also removes non-terminal ZOMBIES — records whose terminal event was

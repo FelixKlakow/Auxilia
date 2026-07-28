@@ -400,6 +400,9 @@ internal sealed class FakeCoreClient : ICoreClient
 
     public Task ProvideInputAsync(Guid runId, string payloadJson, CancellationToken ct = default)
         => Task.CompletedTask;
+    public Task<TerminalTicket> OpenTerminalAsync(Guid runId, CancellationToken ct = default)
+        => Task.FromResult(new TerminalTicket(
+            runId, $"/api/runs/{runId}/terminal/?ticket=fake", DateTimeOffset.UtcNow.AddMinutes(2)));
     public Task<int> ClearFinishedRunsAsync(CancellationToken ct = default)
         => Task.FromResult(0);
 

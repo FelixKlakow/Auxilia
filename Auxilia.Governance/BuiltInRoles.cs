@@ -36,6 +36,7 @@ public static class BuiltInRoles
                 PermissionActions.WorkflowApprove,
                 PermissionActions.RunObserve,
                 PermissionActions.RunProvideInput,
+                PermissionActions.RunOpenTerminal,
                 PermissionActions.ViewSubscribe,
                 PermissionActions.ArtifactConsume
             },
@@ -52,6 +53,9 @@ public static class BuiltInRoles
                 PermissionActions.WorkflowApprove,
                 PermissionActions.RunObserve,
                 PermissionActions.RunProvideInput,
+                // The raw session console (a shell in the run's container) is operator power —
+                // deliberately NOT granted to User, unlike steering inputs.
+                PermissionActions.RunOpenTerminal,
                 PermissionActions.ViewSubscribe,
                 PermissionActions.ArtifactConsume
             },

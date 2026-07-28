@@ -48,6 +48,13 @@ public interface ICoreClient
     /// </summary>
     Task ProvideInputAsync(Guid runId, string payloadJson, CancellationToken ct = default);
 
+    /// <summary>
+    /// Mints a short-lived ticket for the run's interactive web terminal and returns the
+    /// ready-to-open (absolute) proxy URL. Requires the run.open-terminal permission; only
+    /// runs whose status reports <see cref="RunStatus.HasTerminal"/> have one.
+    /// </summary>
+    Task<TerminalTicket> OpenTerminalAsync(Guid runId, CancellationToken ct = default);
+
     /// <summary>Deletes all finished (terminal) runs and their persisted views; returns how many.</summary>
     Task<int> ClearFinishedRunsAsync(CancellationToken ct = default);
 

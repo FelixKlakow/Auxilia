@@ -429,8 +429,8 @@ public sealed class WorkflowDispatcher(
                 await FailPreFlightAsync(instanceId, workflowType, $"launch failed: {ex.Message}", ct);
                 return;
             }
-            await MarkQueuedAsync(instanceId, workflowType, packageUri, ct);
             await StampTerminalEndpointAsync(instanceId, launched, ct);
+            await MarkQueuedAsync(instanceId, workflowType, packageUri, launched.TerminalEndpoint, ct);
             return;
         }
 
@@ -484,8 +484,8 @@ public sealed class WorkflowDispatcher(
             TerminalContainerName = terminalContainerName,
             OnExited = onContainerExited
         }, ct);
-        await MarkQueuedAsync(instanceId, workflowType, packageUri, ct);
         await StampTerminalEndpointAsync(instanceId, launchResult, ct);
+        await MarkQueuedAsync(instanceId, workflowType, packageUri, launchResult.TerminalEndpoint, ct);
     }
 
     /// <summary>The dashboard proxies this endpoint — authenticated — to the run's owner.</summary>
@@ -572,13 +572,17 @@ public sealed class WorkflowDispatcher(
         tokenRegistry.Consume(instanceId);
     }
 
-    private async Task MarkQueuedAsync(Guid instanceId, string workflowType, string packageUri, CancellationToken ct)
+    private async Task MarkQueuedAsync(
+        Guid instanceId, string workflowType, string packageUri, string? terminalEndpoint, CancellationToken ct)
     {
         // Every successfully dispatched package is known to the registry from then on, so the
         // configuration editor can offer it without a separate deployment registration.
         await packageStore.LearnAsync(workflowType, packageUri, ct);
         await instanceRegistry.SetStateAsync(instanceId, "Queued", ct: ct);
-        await statusPublisher.PublishAsync(instanceId, workflowType, "Queued", ct: ct);
+        // The terminal endpoint (Core-reachable, per launch) rides the Queued event; the Core
+        // preserves it across later transitions.
+        await statusPublisher.PublishAsync(
+            instanceId, workflowType, "Queued", terminalEndpoint: terminalEndpoint, ct: ct);
     }
 
     public async ValueTask StopAsync()

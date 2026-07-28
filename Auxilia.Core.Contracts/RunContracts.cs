@@ -30,11 +30,20 @@ public sealed record RunStatus(
     Guid? ConfigurationId,
     string? ConfigurationName,
     /// <summary>When the run reached its terminal state; null while it is still in flight.</summary>
-    DateTimeOffset? CompletedUtc = null)
+    DateTimeOffset? CompletedUtc = null,
+    /// <summary>The run hosts an interactive web terminal reachable via the terminal-ticket endpoint.</summary>
+    bool HasTerminal = false)
 {
     /// <summary>Wall-clock duration; null until the run completes.</summary>
     public TimeSpan? Duration => CompletedUtc - CreatedUtc;
 }
+
+/// <summary>
+/// Short-lived access to a run's interactive web terminal: open <see cref="Url"/> (relative to
+/// the Core base address) before <see cref="ExpiresUtc"/> — the Core proxies the terminal;
+/// the workflow container itself is never reachable directly.
+/// </summary>
+public sealed record TerminalTicket(Guid RunId, string Url, DateTimeOffset ExpiresUtc);
 
 /// <summary>Filter for querying runs. Unset fields are ignored; paging is always applied.</summary>
 public sealed record RunQuery(

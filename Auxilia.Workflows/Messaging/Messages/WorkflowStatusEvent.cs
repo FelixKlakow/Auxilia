@@ -23,7 +23,13 @@ public sealed record WorkflowStatusEvent(
     /// runner-assigned instance id back to the originating command (e.g. to recover the stored dispatch
     /// command for failover re-dispatch). Optional for back-compat.
     /// </summary>
-    Guid? CommandId = null)
+    Guid? CommandId = null,
+    /// <summary>
+    /// Where the run's interactive web terminal (ttyd) is reachable FROM THE CORE — never handed
+    /// to end clients, which only ever talk to the Core's authenticated terminal proxy. Stamped
+    /// on the transition after launch; consumers preserve the last non-null value.
+    /// </summary>
+    string? TerminalEndpoint = null)
 {
     public const string ExchangeName = "workflow.status-events";
 }

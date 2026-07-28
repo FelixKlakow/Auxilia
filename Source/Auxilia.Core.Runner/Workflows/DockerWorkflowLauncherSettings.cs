@@ -70,6 +70,15 @@ public sealed class DockerWorkflowLauncherSettings
     /// For example: <c>{"AUXILIA_DEVELOPER_MODE": "1"}</c>.
     /// </summary>
     public Dictionary<string, string>? ExtraEnvironmentVariables { get; set; }
+
+    /// <summary>
+    /// How a declared interactive terminal is made reachable for the Core's proxy.
+    /// "loopback" (default) publishes the container port to an ephemeral 127.0.0.1 host port —
+    /// right when Core.Api runs as a host process beside this runner. "container-network"
+    /// publishes no host port; the endpoint is the container name on the shared Docker network —
+    /// right when the Core itself is containerized. End clients never reach either directly.
+    /// </summary>
+    public string TerminalPublishMode { get; set; } = "loopback";
 }
 
 

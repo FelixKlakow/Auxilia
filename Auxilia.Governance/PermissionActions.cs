@@ -9,6 +9,7 @@ public static class PermissionActions
     public const string WorkflowApprove = "workflow.approve";
     public const string RunObserve = "run.observe";
     public const string RunProvideInput = "run.provide-input";
+    public const string RunOpenTerminal = "run.open-terminal";
     public const string ViewSubscribe = "view.subscribe";
     public const string ArtifactConsume = "artifact.consume";
     public const string SlotConfigWrite = "slot-config.write";

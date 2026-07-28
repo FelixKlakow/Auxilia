@@ -91,6 +91,16 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
     public Task ProvideInputAsync(Guid runId, string payloadJson, CancellationToken ct = default)
         => PostAsync($"/api/runs/{runId}/inputs", new ProvideRunInput(payloadJson), ct);
 
+    public async Task<TerminalTicket> OpenTerminalAsync(Guid runId, CancellationToken ct = default)
+    {
+        var ticket = await PostAsync<TerminalTicket>($"/api/runs/{runId}/terminal-ticket", ct);
+        // The Core hands out a relative URL; resolve it against this client's base address so
+        // callers can open it directly (browser, WebView) without knowing the Core's address.
+        return http.BaseAddress is { } baseAddress
+            ? ticket with { Url = new Uri(baseAddress, ticket.Url).ToString() }
+            : ticket;
+    }
+
     public async Task<int> ClearFinishedRunsAsync(CancellationToken ct = default)
     {
         using var response = await http.DeleteAsync("/api/runs", ct);

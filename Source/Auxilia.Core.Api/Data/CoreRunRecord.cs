@@ -39,4 +39,11 @@ public sealed record CoreRunRecord : IEntity
     /// re-dispatched once on failover. Present only once the run's claim event has been correlated.
     /// </summary>
     public string? DispatchCommandJson { get; init; }
+
+    /// <summary>
+    /// Core-reachable address of the run's interactive web terminal (ttyd), learned from the
+    /// runner's status events. Only the Core's authenticated terminal proxy ever dials it —
+    /// the address itself never leaves the Core.
+    /// </summary>
+    public string? TerminalEndpoint { get; init; }
 }

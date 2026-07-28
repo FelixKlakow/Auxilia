@@ -13,7 +13,7 @@ public sealed class WorkflowStatusPublisher(IMessageBusClient messageBus, TimePr
 
     public async Task PublishAsync(
         Guid instanceId, string workflowType, string state, string? errorMessage = null,
-        Guid? ownerServiceId = null, Guid? commandId = null,
+        Guid? ownerServiceId = null, Guid? commandId = null, string? terminalEndpoint = null,
         CancellationToken ct = default)
     {
         if (!_exchangeDeclared)
@@ -25,6 +25,6 @@ public sealed class WorkflowStatusPublisher(IMessageBusClient messageBus, TimePr
         await messageBus.PublishToExchangeAsync(WorkflowStatusEvent.ExchangeName,
             new WorkflowStatusEvent(
                 instanceId, workflowType, state, errorMessage, timeProvider.GetUtcNow(),
-                ownerServiceId, commandId), ct);
+                ownerServiceId, commandId, terminalEndpoint), ct);
     }
 }

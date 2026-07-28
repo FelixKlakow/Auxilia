@@ -38,5 +38,6 @@ public sealed class RunReadService(IDataAccess<CoreRunRecord> runs)
 
     private static RunStatus ToDto(CoreRunRecord r) => new(
         r.Id, r.WorkflowType, r.State, r.ErrorMessage, r.CreatedUtc, r.ConfigurationId, r.ConfigurationName,
-        r.CompletedUtc);
+        r.CompletedUtc,
+        HasTerminal: r.TerminalEndpoint is { Length: > 0 } && !CoreRunStates.IsTerminal(r.State));
 }

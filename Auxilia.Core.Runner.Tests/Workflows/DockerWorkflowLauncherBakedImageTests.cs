@@ -192,7 +192,7 @@ public class DockerWorkflowLauncherBakedImageTests
     }
 
     [Test]
-    public void BuildBakedImageContainerParameters_WithTerminal_ExposesThePortAndNamesTheContainer()
+    public void BuildBakedImageContainerParameters_WithTerminal_PublishesAnEphemeralLoopbackPort()
     {
         var request = MakeBakedRequest() with
         {
@@ -200,14 +200,38 @@ public class DockerWorkflowLauncherBakedImageTests
             TerminalContainerName = "auxilia-session-abc"
         };
 
+        // Default mode "loopback": a host-process Core reaches the terminal via 127.0.0.1.
         var p = DockerWorkflowLauncher.BuildBakedImageContainerParameters(request, DefaultSettings);
 
         Assert.Multiple(() =>
         {
             Assert.That(p.ExposedPorts, Contains.Key("7681/tcp"));
+            Assert.That(p.Name, Is.EqualTo("auxilia-session-abc"));
+            var binding = p.HostConfig.PortBindings["7681/tcp"].Single();
+            Assert.That(binding.HostIP, Is.EqualTo("127.0.0.1"),
+                "the terminal must never listen on a non-local interface");
+            Assert.That(binding.HostPort, Is.Empty, "the daemon assigns an ephemeral port");
+        });
+    }
+
+    [Test]
+    public void BuildBakedImageContainerParameters_ContainerNetworkMode_PublishesNoHostPort()
+    {
+        var request = MakeBakedRequest() with
+        {
+            PublishTerminalPort = 7681,
+            TerminalContainerName = "auxilia-session-abc"
+        };
+        var settings = new DockerWorkflowLauncherSettings { TerminalPublishMode = "container-network" };
+
+        var p = DockerWorkflowLauncher.BuildBakedImageContainerParameters(request, settings);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(p.ExposedPorts, Contains.Key("7681/tcp"));
             Assert.That(p.Name, Is.EqualTo("auxilia-session-abc"),
-                "the deterministic name is how the backend reaches the terminal on the shared network");
-            Assert.That(p.HostConfig.PortBindings, Is.Null, "no host port is published — proxy is container-to-container");
+                "the deterministic name is how a containerized Core reaches the terminal on the shared network");
+            Assert.That(p.HostConfig.PortBindings, Is.Null, "no host port — proxy is container-to-container");
         });
     }
 

@@ -55,7 +55,8 @@ public sealed class RunTrackingService(
             ConfigurationName = existing?.ConfigurationName,
             OwnerServiceId = ownerServiceId,
             CommandId = statusEvent.CommandId ?? existing?.CommandId,
-            DispatchCommandJson = dispatchCommandJson
+            DispatchCommandJson = dispatchCommandJson,
+            TerminalEndpoint = statusEvent.TerminalEndpoint ?? existing?.TerminalEndpoint
         }, ct);
     }
 

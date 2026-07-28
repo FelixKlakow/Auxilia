@@ -115,17 +115,13 @@ public sealed class DockerWorkflowLauncher(
         // and hand the exit to the dispatcher so a crashed workflow fails its run.
         _ = Task.Run(() => WatchContainerAsync(settings, created.ID, request.OnExited));
 
-        // Terminal reachability is container-to-container on the shared network: the backend
-        // proxies to "<name>:<port>". No host port is published — the browser only ever talks
-        // to the backend, never to the workflow container directly.
-        if (request is { PublishTerminalPort: { } terminalPort, TerminalContainerName: { } name })
-        {
-            logger.LogInformation(
-                "Workflow terminal available. Name={Name} ContainerPort={ContainerPort}", name, terminalPort);
-            return new WorkflowLaunchResult($"{name}:{terminalPort}");
-        }
-
-        return new WorkflowLaunchResult();
+        // Terminal reachability per publish mode (loopback host port, or container name on the
+        // shared network). The browser only ever talks to the Core's authenticated proxy,
+        // never to the workflow container directly.
+        var terminalEndpoint = await ResolveTerminalEndpointAsync(client, created.ID, request, settings, ct);
+        if (terminalEndpoint is not null)
+            logger.LogInformation("Workflow terminal available. Endpoint={Endpoint}", terminalEndpoint);
+        return new WorkflowLaunchResult(terminalEndpoint);
     }
 
     /// <summary>
@@ -466,7 +462,7 @@ public sealed class DockerWorkflowLauncher(
             };
         }
 
-        ApplyTerminalPort(parameters, request);
+        ApplyTerminalPort(parameters, request, settings);
         return parameters;
     }
 
@@ -516,23 +512,58 @@ public sealed class DockerWorkflowLauncher(
             };
         }
 
-        ApplyTerminalPort(parameters, request);
+        ApplyTerminalPort(parameters, request, settings);
         return parameters;
     }
 
     /// <summary>
-    /// Exposes the workflow's declared web-terminal port and names the container so the backend
-    /// (on the same Docker network) can reach the terminal at "&lt;name&gt;:&lt;port&gt;". No host
-    /// port is published — the dashboard is the only client, and it proxies over the network.
+    /// Exposes the workflow's declared web-terminal port and names the container. In "loopback"
+    /// mode the port is additionally published to an ephemeral 127.0.0.1 host port (for a
+    /// host-process Core beside this runner); in "container-network" mode it stays
+    /// container-to-container ("&lt;name&gt;:&lt;port&gt;" on the shared network). Either way the
+    /// Core's authenticated proxy is the only thing end clients ever talk to.
     /// </summary>
     internal static void ApplyTerminalPort(
-        CreateContainerParameters parameters, WorkflowLaunchRequest request)
+        CreateContainerParameters parameters, WorkflowLaunchRequest request,
+        DockerWorkflowLauncherSettings settings)
     {
         if (request.PublishTerminalPort is not { } port)
             return;
         parameters.ExposedPorts = new Dictionary<string, EmptyStruct> { [$"{port}/tcp"] = default };
         if (request.TerminalContainerName is { Length: > 0 } name)
             parameters.Name = name;
+        if (UsesLoopbackTerminal(settings))
+        {
+            parameters.HostConfig ??= new HostConfig();
+            parameters.HostConfig.PortBindings = new Dictionary<string, IList<PortBinding>>
+            {
+                // Empty HostPort = the daemon assigns an ephemeral port; 127.0.0.1 keeps the
+                // terminal off every non-local interface.
+                [$"{port}/tcp"] = [new PortBinding { HostIP = "127.0.0.1", HostPort = "" }]
+            };
+        }
+    }
+
+    internal static bool UsesLoopbackTerminal(DockerWorkflowLauncherSettings settings)
+        => !string.Equals(settings.TerminalPublishMode, "container-network", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The Core-reachable endpoint of a started container's terminal, per publish mode.</summary>
+    private static async Task<string?> ResolveTerminalEndpointAsync(
+        IDockerClient client, string containerId, WorkflowLaunchRequest request,
+        DockerWorkflowLauncherSettings settings, CancellationToken ct)
+    {
+        if (request.PublishTerminalPort is not { } port)
+            return null;
+        if (!UsesLoopbackTerminal(settings))
+            return request.TerminalContainerName is { Length: > 0 } name ? $"{name}:{port}" : null;
+
+        var inspection = await client.Containers.InspectContainerAsync(containerId, ct);
+        var bindings = inspection.NetworkSettings?.Ports is { } ports
+                       && ports.TryGetValue($"{port}/tcp", out var bound)
+            ? bound
+            : null;
+        var hostPort = bindings?.FirstOrDefault(b => b.HostPort is { Length: > 0 })?.HostPort;
+        return hostPort is null ? null : $"127.0.0.1:{hostPort}";
     }
 
     /// <summary>
