@@ -35,3 +35,80 @@ Start-Process pwsh -WorkingDirectory $repo -ArgumentList "-NoExit", "-Command",
     "$envSetup; dotnet run --project Source/Auxilia.Core.Runner --no-build"
 
 Write-Host "Core.Api starting on http://localhost:5280; Core.Runner starting (Docker runs enabled)."
+
+# ---- Simulation seed (idempotent) ------------------------------------------------------------
+# The sim git server + the dummy pieces behind "[SIM] Implementation (driven stub)": provider
+# catalog entries, the git credential connector, and the configuration itself — so a fresh
+# stack always comes up simulation-ready.
+
+if (-not (docker ps --format "{{.Names}}" | Select-String -Quiet "^auxilia-sim-git$")) {
+    docker rm -f auxilia-sim-git 2>$null | Out-Null
+    docker run -d --name auxilia-sim-git -p 8418:80 auxilia-git-server:system-test | Out-Null
+    Write-Host "auxilia-sim-git started (http://localhost:8418, builduser/the-pat)."
+}
+
+$headers = @{ Authorization = "Bearer auxilia-steering-dev-key" }
+$apiUp = $false
+foreach ($attempt in 1..30) {
+    try {
+        Invoke-RestMethod "http://localhost:5280/api/workflow-types?take=1" -Headers $headers -TimeoutSec 3 | Out-Null
+        $apiUp = $true; break
+    } catch { Start-Sleep 2 }
+}
+if (-not $apiUp) { Write-Warning "Core.Api did not come up — simulation seed skipped."; return }
+
+$catalog = (Invoke-RestMethod "http://localhost:5280/api/provider-catalog" -Headers $headers).items.providerType
+if ($catalog -notcontains "simulated-work-items") {
+    Invoke-RestMethod -Method Post "http://localhost:5280/api/provider-catalog" -Headers $headers -ContentType "application/json" -Body (@{
+        providerType = "simulated-work-items"; category = "task-source"
+        description = "SIMULATION: scripted TFS stand-in with per-operation delay - live-view testing only."
+        contracts = @("Auxilia.Workflows.TaskSource.IWorkItemAccess")
+        settings = @(
+            @{ key = "Title"; label = "Story title"; kind = "Text"; required = $false },
+            @{ key = "Description"; label = "Story description"; kind = "Text"; required = $false },
+            @{ key = "DelaySeconds"; label = "Delay per operation (s)"; kind = "Number"; required = $false })
+    } | ConvertTo-Json -Depth 4) | Out-Null
+    Write-Host "Provider simulated-work-items registered."
+}
+if ($catalog -notcontains "coding-session-workspace") {
+    Invoke-RestMethod -Method Post "http://localhost:5280/api/provider-catalog" -Headers $headers -ContentType "application/json" -Body (@{
+        providerType = "coding-session-workspace"; category = "coding-session"
+        description = "Backs a session with the mounted workspace directory."
+        contracts = @("Auxilia.Workflows.SourceControl.ISourceControlAccess", "Auxilia.Workflows.TaskSource.IWorkItemAccess")
+        settings = @(@{ key = "WorkingPath"; label = "Working path"; kind = "Text"; required = $false })
+    } | ConvertTo-Json -Depth 4) | Out-Null
+    Write-Host "Provider coding-session-workspace registered."
+}
+
+$connectors = (Invoke-RestMethod "http://localhost:5280/api/connectors" -Headers $headers).items
+$simGit = $connectors | Where-Object name -eq "SIM git server (builduser)"
+if (-not $simGit) {
+    $simGit = Invoke-RestMethod -Method Post "http://localhost:5280/api/connectors" -Headers $headers -ContentType "application/json" -Body (@{
+        name = "SIM git server (builduser)"; providerType = "azure-devops"
+        settings = @{ username = "builduser"; token = "the-pat" }
+    } | ConvertTo-Json)
+    Write-Host "Connector 'SIM git server (builduser)' created."
+}
+
+$configurations = (Invoke-RestMethod "http://localhost:5280/api/configurations?take=200" -Headers $headers).items
+if ($configurations.name -notcontains "[SIM] Implementation (driven stub)") {
+    Invoke-RestMethod -Method Post "http://localhost:5280/api/configurations" -Headers $headers -ContentType "application/json" -Body (@{
+        name = "[SIM] Implementation (driven stub)"; workflowType = "implementation"; tags = @("sim")
+        context = @{
+            "completeness-check" = "true"; "ai-plan-review" = "false"; "ai-code-review" = "false"
+            "user-plan-gate" = "true"; "user-code-gate" = "true"; "push-mode" = "prompt"
+            "gate-idle-compaction" = "0"
+        }
+        slotBindings = @(
+            @{ slotName = "work-items"; providerType = "simulated-work-items"
+               settings = @{ Title = "Simulated story: add the implemented marker"; DelaySeconds = "3" } },
+            @{ slotName = "coding-agent"; providerType = "claude-code-cli"
+               settings = @{ OAuthToken = "sim-fake-oauth-token"; CliPath = "/usr/local/bin/driven-stub" } },
+            @{ slotName = "workspace-repo"; providerType = "git-repository"; connectorId = $simGit.id
+               settings = @{ CloneUrl = "http://host.docker.internal:8418/git/test.git"; NoCache = "true"; AllowPush = "true" } },
+            @{ slotName = "repository"; providerType = "coding-session-workspace"
+               settings = @{ WorkingPath = "/workspace/repos/workspace-repo" } })
+    } | ConvertTo-Json -Depth 5) | Out-Null
+    Write-Host "Configuration '[SIM] Implementation (driven stub)' created."
+}
+Write-Host "Simulation ready."
