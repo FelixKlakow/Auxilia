@@ -64,7 +64,11 @@ public static class ImplementationWorkflow
                 "Run from the dashboard with a work-item id.")
             .RequiresInput(new WorkflowInputDescriptor(
                 "work-item-id", "Work item", Required: true,
-                Description: "The user story to implement — its id at the bound source."))
+                Description: "The user story to implement — its id at the bound source.")
+            {
+                // A story is different every run by nature — never baked into a configuration.
+                PerRun = true
+            })
             .RequiresInput(Toggle("completeness-check", "Completeness check",
                 "Assess the story first; open questions become an operator form.", on: true))
             .RequiresInput(Toggle("ai-plan-review", "AI plan review",

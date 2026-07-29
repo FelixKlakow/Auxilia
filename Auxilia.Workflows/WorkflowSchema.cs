@@ -97,4 +97,10 @@ public sealed record WorkflowInputDescriptor(
 
     /// <summary>Optional human labels per choice value — editors show the label, store the value.</summary>
     public IReadOnlyDictionary<string, string>? ChoiceLabels { get; init; }
+
+    /// <summary>
+    /// Asked at dispatch, NEVER fixable in a stored configuration — for values that are
+    /// different every run by nature (e.g. the work item to implement).
+    /// </summary>
+    public bool PerRun { get; init; }
 }

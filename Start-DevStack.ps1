@@ -57,7 +57,8 @@ foreach ($attempt in 1..30) {
 }
 if (-not $apiUp) { Write-Warning "Core.Api did not come up — simulation seed skipped."; return }
 
-$catalog = (Invoke-RestMethod "http://localhost:5280/api/provider-catalog" -Headers $headers).items.providerType
+$catalogItems = (Invoke-RestMethod "http://localhost:5280/api/provider-catalog" -Headers $headers).items
+$catalog = $catalogItems.providerType
 if ($catalog -notcontains "simulated-work-items") {
     Invoke-RestMethod -Method Post "http://localhost:5280/api/provider-catalog" -Headers $headers -ContentType "application/json" -Body (@{
         providerType = "simulated-work-items"; category = "task-source"
@@ -78,6 +79,15 @@ if ($catalog -notcontains "coding-session-workspace") {
         settings = @(@{ key = "WorkingPath"; label = "Working path"; kind = "Text"; required = $false })
     } | ConvertTo-Json -Depth 4) | Out-Null
     Write-Host "Provider coding-session-workspace registered."
+}
+
+# Availability is deny-by-default — the editors only offer AVAILABLE providers.
+foreach ($type in "simulated-work-items", "coding-session-workspace") {
+    if (($catalogItems | Where-Object providerType -eq $type).available -ne $true) {
+        Invoke-RestMethod -Method Post "http://localhost:5280/api/provider-catalog/$type/availability" `
+            -Headers $headers -ContentType "application/json" -Body '{"available":true}' | Out-Null
+        Write-Host "Provider $type made available."
+    }
 }
 
 $connectors = (Invoke-RestMethod "http://localhost:5280/api/connectors" -Headers $headers).items
