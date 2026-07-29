@@ -23,6 +23,29 @@ WorkflowBuilder.Create("pull-request-code-review")
 and `WorkflowManifest.Views`. Rendering: `Stream | Log | Table | Chart | Markdown | Custom`.
 Lifecycle: `Live | Persisted | LiveAndPersisted`.
 
+### Declared flow — presentation metadata in the schema
+
+Workflows control their *look* declaratively, not with custom frontend code. The first such
+metadata is the **declared step flow**:
+
+```csharp
+WorkflowBuilder.Create("implementation")
+    .DeclaresFlow(
+        new FlowStepDescriptor("plan", "Plan", "Draft the implementation plan."),
+        new FlowStepDescriptor("push", "Push", "Commit and push.",
+            SkipInput: "push-mode", SkipValue: "skip"))
+```
+
+`FlowStepDescriptor(Id, Label, Description, SkipInput, SkipValue)` rides
+`WorkflowSchema.Flow`/`WorkflowManifest.Flow`, so config and dispatch UIs render the
+pipeline's shape **before any run exists** — the stage view in the configuration panel.
+`SkipInput`/`SkipValue` is a data-driven hint: editors present the step as skipped when the
+effective value of that run input equals the value (live, as the operator toggles inputs);
+the platform never learns what either means. The runtime `"flow"` view then carries only
+**state snapshots** (`WorkflowStepFlow` = `WorkflowStepState(Id, State)` per step, open state
+vocabulary: pending/active/done/skipped) — observers join states onto the declared steps by
+id. Labels and descriptions live in exactly one place: the schema.
+
 ## 2. Publication (SDK, run time)
 
 Workflows resolve `IViewPublisher` from DI:

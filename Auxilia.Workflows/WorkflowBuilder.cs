@@ -23,6 +23,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     private readonly List<Workspace.RepositoryDeclaration> _repositories = new();
     private readonly List<SignalDescriptor> _signals = new();
     private readonly List<Views.ViewDescriptor> _views = new();
+    private readonly List<Views.FlowStepDescriptor> _flow = new();
     private readonly List<TriggerDeclaration> _triggers = new();
     private readonly List<WorkflowInputDescriptor> _inputs = new();
     private readonly List<string> _consumedArtifacts = new();
@@ -173,6 +174,22 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             throw new InvalidOperationException($"A view with name '{name}' has already been declared.");
         var schema = JsonSchemaExporter.GetJsonSchemaAsNode(JsonSerializerOptions.Default, typeof(TItem));
         _views.Add(new Views.ViewDescriptor(name, schema.ToJsonString(), rendering, lifecycle, rendererKey));
+        return this;
+    }
+
+    public IWorkflowBuilder DeclaresFlow(params IReadOnlyList<Views.FlowStepDescriptor> steps)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        if (_flow.Count > 0)
+            throw new InvalidOperationException("The flow has already been declared.");
+        foreach (var step in steps)
+        {
+            ArgumentException.ThrowIfNullOrEmpty(step.Id);
+            ArgumentException.ThrowIfNullOrEmpty(step.Label);
+            if (_flow.Any(s => s.Id == step.Id))
+                throw new InvalidOperationException($"A flow step with id '{step.Id}' has already been declared.");
+            _flow.Add(step);
+        }
         return this;
     }
 
@@ -427,6 +444,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             Signals = _signals.AsReadOnly(),
             Lifetime = _lifetime,
             Views = _views.AsReadOnly(),
+            Flow = _flow.AsReadOnly(),
             NetworkEndpoints = _networkEndpoints.AsReadOnly(),
             Repositories = _repositories.AsReadOnly(),
             Triggers = _triggers.AsReadOnly(),
@@ -443,6 +461,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             Signals = _signals.AsReadOnly(),
             Lifetime = _lifetime,
             Views = _views.AsReadOnly(),
+            Flow = _flow.AsReadOnly(),
             NetworkEndpoints = _networkEndpoints.AsReadOnly(),
             Repositories = _repositories.AsReadOnly(),
             Triggers = _triggers.AsReadOnly(),

@@ -101,14 +101,17 @@ stays monospace (permission tool inputs). ```mermaid fences inside any markdown 
 `MarkdownViewer.FenceRenderer`, and the steering client registers an offline WebView2+mermaid.js
 renderer. Plans should use mermaid for diagrams, per the repo convention.
 
-## The step flow (clickable stepper)
+## The step flow (declared stage view + runtime states)
 
-The pipeline publishes its step list as FULL snapshots on the `flow` view
-(`WorkflowStepFlow`): workspace → completeness → plan → implement → push → story-state,
-with disabled steps marked `skipped` and the current one `active`. The steering client renders the
-snapshot as clickable chips above the run surface — the flow of the run is visible at a
-glance, and clicking a chip expands its description (what the step does, which gates it
-carries). Any workflow can adopt the same view; states are an open vocabulary.
+The pipeline's shape is DECLARED in the schema (`DeclaresFlow`, one source:
+`ImplementationFlow.Steps`): workspace → completeness → plan → implement → push →
+story-state, with data-driven skip hints (completeness-check=false, push-mode=skip) so the
+steering client's configuration and run panels render the stage view — steps dimming live as
+toggles change — before any run exists. At run time the pipeline publishes FULL state
+snapshots on the `flow` view (`WorkflowStepFlow` = per-step `Id`+`State`); the steering client joins
+them onto the declared steps by id and renders clickable chips above the run surface —
+clicking a chip expands its description. Any workflow can adopt the same mechanism; states
+are an open vocabulary. (See docs/view-data-design.md, "Declared flow".)
 
 ## Idle gates and token economics
 

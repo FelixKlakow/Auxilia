@@ -93,6 +93,13 @@ public interface IWorkflowBuilder
     IWorkflowBuilder DeclaresView<TItem>(
         string name, Views.ViewRendering rendering, Views.ViewLifecycle lifecycle, string? rendererKey);
 
+    /// <summary>
+    /// Declares the workflow's step flow (<see cref="Views.FlowStepDescriptor"/>) — the pipeline's
+    /// shape as presentation metadata in the schema. Config/dispatch UIs render it as a stage view
+    /// before any run exists; runtime <see cref="Views.WorkflowStepFlow"/> states join by step id.
+    /// </summary>
+    IWorkflowBuilder DeclaresFlow(params IReadOnlyList<Views.FlowStepDescriptor> steps);
+
     IWorkflowBuilder ConfigureServices(Action<IServiceCollection> configure);
 
     IWorkflowBuilder WithApplication(Func<IServiceProvider, CancellationToken, Task> run);

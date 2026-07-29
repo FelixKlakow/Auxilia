@@ -83,5 +83,7 @@ public sealed class WorkflowSchemaReadService(IDataAccess<CoreWorkflowTypeRecord
             schema.InteractiveTerminalPort,
             JsonSerializer.Serialize(schema.EnvironmentRequirements, JsonOptions),
             packageUri,
-            status);
+            status,
+            schema.Flow.Select(f => new WorkflowFlowStepDto(
+                f.Id, f.Label, f.Description, f.SkipInput, f.SkipValue)).ToList());
 }

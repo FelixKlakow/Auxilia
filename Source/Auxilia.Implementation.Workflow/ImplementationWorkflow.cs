@@ -50,7 +50,9 @@ public static class ImplementationWorkflow
                 ViewRendering.Custom, ViewLifecycle.LiveAndPersisted)
             .DeclaresView<SteeringWireItem>(Auxilia.Workflows.Steering.OperatorChannel.ViewName,
                 ViewRendering.Custom, ViewLifecycle.LiveAndPersisted)
-            // The pipeline's step flow — rendered as a clickable stepper in the steering client.
+            // The pipeline's shape lives in the schema (stage view at config time); the runtime
+            // view carries only per-step states, joined onto the declaration by id.
+            .DeclaresFlow(ImplementationFlow.Steps)
             .DeclaresView<WorkflowStepFlow>(WorkflowStepFlow.ViewName,
                 ViewRendering.Custom, ViewLifecycle.LiveAndPersisted)
             .DeclaresOutput("implementation-plan", "plan.md", "The approved implementation plan")

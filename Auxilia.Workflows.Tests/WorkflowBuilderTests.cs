@@ -432,6 +432,34 @@ public class WorkflowBuilderTests
     }
 
     [Test]
+    public void DeclaresFlow_Steps_LandInSchemaAndManifest()
+    {
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+        wb.DeclaresFlow(
+            new Views.FlowStepDescriptor("plan", "Plan", "Draft the plan."),
+            new Views.FlowStepDescriptor("push", "Push", SkipInput: "push-mode", SkipValue: "skip"));
+
+        var schema = wb.BuildSchema();
+        var manifest = wb.BuildManifest();
+
+        Assert.That(schema.Flow, Has.Count.EqualTo(2));
+        Assert.That(schema.Flow[0], Is.EqualTo(new Views.FlowStepDescriptor("plan", "Plan", "Draft the plan.")));
+        Assert.That(schema.Flow[1].SkipInput, Is.EqualTo("push-mode"));
+        Assert.That(schema.Flow[1].SkipValue, Is.EqualTo("skip"));
+        Assert.That(manifest.Flow, Is.EqualTo(schema.Flow));
+    }
+
+    [Test]
+    public void DeclaresFlow_DuplicateStepId_Throws()
+    {
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+
+        Assert.Throws<InvalidOperationException>(() => wb.DeclaresFlow(
+            new Views.FlowStepDescriptor("plan", "Plan"),
+            new Views.FlowStepDescriptor("plan", "Plan again")));
+    }
+
+    [Test]
     public void DeclaresView_WithoutRendererKey_RendererKeyIsNull()
     {
         var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");

@@ -17,6 +17,13 @@ public sealed record WorkflowSchema(
     public IReadOnlyList<Network.NetworkEndpointDeclaration> NetworkEndpoints { get; init; } = [];
     public IReadOnlyList<Workspace.RepositoryDeclaration> Repositories { get; init; } = [];
 
+    /// <summary>
+    /// The workflow's declared step flow (see <see cref="Views.FlowStepDescriptor"/>) — presentation
+    /// metadata: config/dispatch UIs render the pipeline's shape from it before any run exists, and
+    /// runtime "flow" view states join onto it by step id. Empty = no stage view.
+    /// </summary>
+    public IReadOnlyList<Views.FlowStepDescriptor> Flow { get; init; } = [];
+
     /// <summary>Trigger kinds this workflow is designed to be started by (see <see cref="TriggerDeclaration"/>).</summary>
     public IReadOnlyList<TriggerDeclaration> Triggers { get; init; } = [];
 

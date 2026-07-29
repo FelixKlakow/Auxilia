@@ -116,6 +116,19 @@ public sealed record WorkflowViewDto(
 public sealed record WorkflowTriggerDto(string Kind, string? Description);
 
 /// <summary>
+/// One step of a workflow's declared flow — presentation metadata: config/dispatch UIs render the
+/// pipeline's shape from these before any run exists, and join runtime "flow" view states onto
+/// them by <see cref="Id"/>. <see cref="SkipInput"/>/<see cref="SkipValue"/> is a data-driven skip
+/// hint: present the step as skipped when the effective value of that run input equals the value.
+/// </summary>
+public sealed record WorkflowFlowStepDto(
+    string Id,
+    string Label,
+    string? Description,
+    string? SkipInput = null,
+    string? SkipValue = null);
+
+/// <summary>
 /// The full schema of a registered workflow type — everything the config editor needs to build a
 /// configuration: declared slots + their capability requirements, run inputs, views, trigger kinds,
 /// consumed artifact types, environment requirements (raw JSON), and the interactive terminal port.
@@ -134,4 +147,5 @@ public sealed record WorkflowSchemaDto(
     int? InteractiveTerminalPort,
     string EnvironmentRequirementsJson,
     string? PackageUri = null,
-    string Status = WorkflowTypeStatus.Active);
+    string Status = WorkflowTypeStatus.Active,
+    IReadOnlyList<WorkflowFlowStepDto>? Flow = null);

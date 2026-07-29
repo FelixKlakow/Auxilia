@@ -30,7 +30,7 @@ public sealed class ImplementationPipeline(
     // Author base without a provider system-prompt seam rides the FIRST drive instead.
     private string? _pendingAuthorBase;
 
-    private List<WorkflowStep> _flow = [];
+    private List<WorkflowStepState> _flow = [];
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
@@ -112,37 +112,18 @@ public sealed class ImplementationPipeline(
     }
 
     /// <summary>
-    /// The run's step flow (built once from the toggles, full snapshot per transition):
-    /// everything BEFORE the active step becomes done, disabled steps stay "skipped", a null
-    /// active step marks the whole flow done.
+    /// The run's step STATES against the declared flow (full snapshot per transition):
+    /// everything BEFORE the active step becomes done, toggled-off steps stay "skipped", a null
+    /// active step marks the whole flow done. Labels and descriptions ride the schema.
     /// </summary>
     private async Task PublishFlowAsync(string? activeStep, CancellationToken ct)
     {
         if (views is null)
             return;
         if (_flow.Count == 0)
-            _flow =
-            [
-                new WorkflowStep("workspace", "Workspace", "pending", "Branch off the story's repository."),
-                new WorkflowStep("completeness", "Completeness",
-                    context.CompletenessCheck ? "pending" : "skipped",
-                    "Assess the story; open questions become an operator form."),
-                new WorkflowStep("plan", "Plan", "pending",
-                    "Draft the implementation plan"
-                    + (context.AiReview ? " + AI review" : "")
-                    + (context.UserPlanGate ? " + your approval gate." : ".")),
-                new WorkflowStep("implement", "Implement", "pending",
-                    "Implement the approved plan in the SAME console"
-                    + (context.AiReview ? " + AI code review" : "")
-                    + (context.UserCodeGate ? " + your approval gate." : ".")),
-                new WorkflowStep("push", "Push",
-                    context.PushMode == PushModes.Skip ? "skipped" : "pending",
-                    context.PushMode == PushModes.Prompt
-                        ? "The workflow commits and pushes after your confirmation."
-                        : "The workflow commits and pushes automatically."),
-                new WorkflowStep("story-state", "Story state", "pending",
-                    "Set the story's state from the source's own vocabulary."),
-            ];
+            _flow = ImplementationFlow.Steps
+                .Select(step => new WorkflowStepState(step.Id, IsSkipped(step.Id) ? "skipped" : "pending"))
+                .ToList();
 
         var reached = activeStep is null
             ? _flow.Count
@@ -156,6 +137,13 @@ public sealed class ImplementationPipeline(
             .ToList();
         await views.PublishAsync(WorkflowStepFlow.ViewName, new WorkflowStepFlow(_flow), ct);
     }
+
+    private bool IsSkipped(string stepId) => stepId switch
+    {
+        "completeness" => !context.CompletenessCheck,
+        "push" => context.PushMode == PushModes.Skip,
+        _ => false
+    };
 
     private TerminalSessionInfo BuildAuthorSession()
     {
