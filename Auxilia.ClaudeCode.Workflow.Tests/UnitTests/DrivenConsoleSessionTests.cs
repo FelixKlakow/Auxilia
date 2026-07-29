@@ -7,7 +7,12 @@ public sealed class DrivenConsoleSessionTests
 {
     private sealed class ScriptedHost : ISessionHost
     {
+        private readonly TaskCompletionSource _sessionEnd = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public List<string> Journal { get; } = [];
+
+        /// <summary>Simulates the CLI dying — the tmux session (and its server) is gone.</summary>
+        public void EndSession() => _sessionEnd.TrySetResult();
 
         public Task StartAsync(TerminalSessionInfo session, CancellationToken ct)
         {
@@ -15,7 +20,11 @@ public sealed class DrivenConsoleSessionTests
             return Task.CompletedTask;
         }
 
-        public Task WaitForSessionEndAsync(CancellationToken ct) => Task.CompletedTask;
+        public async Task WaitForSessionEndAsync(CancellationToken ct)
+        {
+            await using var cancel = ct.Register(() => _sessionEnd.TrySetCanceled(ct));
+            await _sessionEnd.Task;
+        }
 
         public Task SendTextAsync(string text, CancellationToken ct)
         {
@@ -114,6 +123,24 @@ public sealed class DrivenConsoleSessionTests
                 Is.EqualTo(new[] { ConsoleSessionEvent.ToolStarted, ConsoleSessionEvent.TurnEnded }),
                 "every event still reaches the view-publishing callback");
         });
+    }
+
+    [Test]
+    public async Task Drive_SessionDiesMidTurn_ThrowsInsteadOfHangingForever()
+    {
+        var host = new ScriptedHost();
+        var events = new ManualEvents();
+        await using var session = new DrivenConsoleSession(host, null, events);
+        await session.StartAsync(Session(), CancellationToken.None);
+
+        var drive = session.DriveAsync("write the plan", CancellationToken.None);
+        Assert.That(drive.IsCompleted, Is.False);
+
+        // The CLI crashes — tmux kills the server, the Stop event never comes.
+        host.EndSession();
+
+        var error = Assert.ThrowsAsync<InvalidOperationException>(() => drive)!;
+        Assert.That(error.Message, Does.Contain("console session ended"));
     }
 
     [Test]

@@ -146,6 +146,8 @@ public class EndToEndEnvironment
         await PublishProjectAsync("Auxilia.Slots.Email/Auxilia.Slots.Email.csproj", _publishDir);
         await PublishProjectAsync("Auxilia.Slots.ClaudeCode/Auxilia.Slots.ClaudeCode.csproj", _publishDir);
         await PublishProjectAsync("Auxilia.Slots.CodingSession/Auxilia.Slots.CodingSession.csproj", _publishDir);
+        await PublishProjectAsync(
+            "Auxilia.Slots.SimulatedWorkItems/Auxilia.Slots.SimulatedWorkItems.csproj", _publishDir);
 
         // Sequential on purpose: parallel docker builds have wedged Docker Desktop daemons.
         await WorkflowDispatchEnvironment.BuildImageAsync(
@@ -270,6 +272,8 @@ public class EndToEndEnvironment
                 $"{ContainerPluginsDir}/Auxilia.Slots.ClaudeCode.slothandler.dll")
             .WithEnvironment("WorkflowLauncher__SlotPackages__coding-session-workspace",
                 $"{ContainerPluginsDir}/Auxilia.Slots.CodingSession.slothandler.dll")
+            .WithEnvironment("WorkflowLauncher__SlotPackages__simulated-work-items",
+                $"{ContainerPluginsDir}/Auxilia.Slots.SimulatedWorkItems.slothandler.dll")
             .WithEnvironment("WorkflowDispatcher__CommandQueueName",        CommandQueue)
             .WithEnvironment("WorkflowDispatcher__RegistrationQueueName",   "workflow-registration-e2e")
             .WithEnvironment("WorkflowDispatcher__AnnouncementQueueName",   "workflow.announcements-e2e")

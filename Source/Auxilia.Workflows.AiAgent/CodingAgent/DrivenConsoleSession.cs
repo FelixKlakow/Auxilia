@@ -51,7 +51,29 @@ public sealed class DrivenConsoleSession(
 
         await host.SendTextAsync(prompt, cancellationToken);
         await using var cancel = cancellationToken.Register(() => waiter.TrySetCanceled(cancellationToken));
-        return await waiter.Task;
+
+        // A crashed CLI takes the tmux session down and its Stop event never comes — racing
+        // the turn against session death turns an eternal hang into a failed run.
+        using var sessionWatch = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var sessionEnd = host.WaitForSessionEndAsync(sessionWatch.Token);
+        if (await Task.WhenAny(waiter.Task, sessionEnd) == waiter.Task)
+        {
+            sessionWatch.Cancel();
+            try
+            {
+                await sessionEnd;
+            }
+            catch (OperationCanceledException)
+            {
+                // The watch is only being retired.
+            }
+            return await waiter.Task;
+        }
+
+        await sessionEnd;
+        throw new InvalidOperationException(
+            "The console session ended while a driven turn was awaiting completion — "
+            + "the agent CLI crashed or exited (check its credentials and command).");
     }
 
     /// <summary>

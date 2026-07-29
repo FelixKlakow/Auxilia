@@ -186,6 +186,173 @@ public sealed class ImplementationWorkflowSystemTests
         });
     }
 
+    /// <summary>
+    /// The SIMULATION path end to end — what the steering client's "[SIM]" configuration runs: the
+    /// scripted work-item source (TFS stand-in) supplies the story AND a state vocabulary, so
+    /// the finalization stage raises the story-state gate; the test answers it over the raw
+    /// steering wire (form-answer via deliver-input) like the steering client would. Asserts the
+    /// declared flow's runtime states walk workspace → completeness → plan → implement →
+    /// finalization in order and end all-done.
+    /// </summary>
+    [Test]
+    [CancelAfter(540_000)]
+    public async Task SimulatedStory_StateGateAnswered_WalksTheDeclaredFlow(
+        CancellationToken cancellationToken)
+    {
+        var bus = EndToEndEnvironment.MessageBusClient;
+
+        var statusEvents = new ConcurrentQueue<WorkflowStatusEvent>();
+        await bus.DeclareExchangeAsync(WorkflowStatusEvent.ExchangeName, cancellationToken);
+        await using var statusSubscription = await bus.SubscribeToExchangeAsync<WorkflowStatusEvent>(
+            WorkflowStatusEvent.ExchangeName,
+            (msg, _) => { statusEvents.Enqueue(msg); return Task.CompletedTask; },
+            cancellationToken);
+
+        var flowSnapshots = new ConcurrentQueue<(Guid Instance, string Payload)>();
+        var stateGates = new ConcurrentQueue<(Guid Instance, string RequestId)>();
+        await bus.DeclareExchangeAsync(ViewDataMessage.ExchangeName, cancellationToken);
+        await using var viewSubscription = await bus.SubscribeToExchangeAsync<ViewDataMessage>(
+            ViewDataMessage.ExchangeName,
+            (msg, _) =>
+            {
+                if (msg.ViewName == "flow")
+                    flowSnapshots.Enqueue((msg.WorkflowInstanceId, msg.PayloadJson));
+                if (msg.ViewName == "steering"
+                    && msg.PayloadJson.Contains("form-requested")
+                    && msg.PayloadJson.Contains("state-gate"))
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(msg.PayloadJson);
+                    if (doc.RootElement.TryGetProperty("requestId", out var rid)
+                        && rid.GetString() is { Length: > 0 } requestId)
+                        stateGates.Enqueue((msg.WorkflowInstanceId, requestId));
+                }
+                return Task.CompletedTask;
+            },
+            cancellationToken);
+
+        // The git mount provider/credential — registered by the sibling test when it ran
+        // first; a duplicate registration is fine to ignore.
+        await EndToEndEnvironment.CoreApiClient.PostAsJsonAsync(
+            "/api/provider-catalog",
+            new RegisterSlotProvider(
+                ProviderType: "git-repository",
+                Category: "workspace",
+                Description: "A git repository materialized into the run's workspace.",
+                Contracts: ["Auxilia.Workflows.SourceControl.ISourceControlAccess"],
+                Settings:
+                [
+                    new RegisterProviderSetting("CloneUrl", "Repository", "Text", Required: true, Role: "clone-url"),
+                    new RegisterProviderSetting("NoCache", "Fresh clone per run", "Boolean", Role: "no-cache"),
+                    new RegisterProviderSetting("AllowPush", "Allow pushing", "Boolean", Role: "allow-push"),
+                ],
+                RequiredCredentialContract: "git-credential",
+                MountsIntoWorkspace: true),
+            cancellationToken);
+        var connectorResp = await EndToEndEnvironment.CoreApiClient.PostAsJsonAsync(
+            "/api/connectors",
+            new CreateConnector(
+                Name: "sim-git-auth-" + Guid.NewGuid().ToString("N"),
+                ProviderType: "azure-devops",
+                Settings: new Dictionary<string, string>
+                {
+                    ["username"] = EndToEndEnvironment.GitUsername,
+                    ["token"] = EndToEndEnvironment.GitPassword
+                }),
+            cancellationToken);
+        connectorResp.EnsureSuccessStatusCode();
+        var connector = (await connectorResp.Content.ReadFromJsonAsync<Connector>(cancellationToken))!;
+
+        var runResp = await EndToEndEnvironment.CoreApiClient.PostAsJsonAsync(
+            "/api/runs",
+            new RunRequest(
+                EndToEndEnvironment.ImplementationWorkflowType,
+                new Dictionary<string, string>
+                {
+                    ["work-item-id"] = "SIM-42",
+                    ["completeness-check"] = "true",
+                    ["ai-plan-review"] = "false",
+                    ["ai-code-review"] = "false",
+                    ["user-plan-gate"] = "false",
+                    ["user-code-gate"] = "false",
+                    ["push-mode"] = "skip",
+                    ["gate-idle-compaction"] = "0"
+                },
+                SlotBindings: new List<SlotBinding>
+                {
+                    new("work-items", "simulated-work-items", Settings: new Dictionary<string, string>
+                    {
+                        ["Title"] = "Simulated story: add the implemented marker",
+                        ["DelaySeconds"] = "0"
+                    }),
+                    new("coding-agent", "claude-code-cli", Settings: new Dictionary<string, string>
+                    {
+                        ["OAuthToken"] = "e2e-fake-oauth-token",
+                        ["CliPath"] = EndToEndEnvironment.DrivenStubCliPath
+                    }),
+                    new("workspace-repo", "git-repository", ConnectorId: connector.Id,
+                        Settings: new Dictionary<string, string>
+                        {
+                            ["CloneUrl"] = EndToEndEnvironment.RepositoryCloneUrl,
+                            ["NoCache"] = "true",
+                            ["AllowPush"] = "true"
+                        }),
+                    new("repository", "coding-session-workspace", Settings: new Dictionary<string, string>
+                    {
+                        ["WorkingPath"] = "/workspace/repos/workspace-repo"
+                    })
+                }),
+            cancellationToken);
+        runResp.EnsureSuccessStatusCode();
+
+        // The finalization stage must raise the story-state gate (the sim source HAS states).
+        var gateSeen = await WaitForAsync(() => !stateGates.IsEmpty,
+            TimeSpan.FromSeconds(240), cancellationToken);
+        if (!gateSeen)
+            await FailWithDiagnosticsAsync("The story-state gate never arrived.", statusEvents);
+        stateGates.TryDequeue(out var gate);
+
+        // Answer it over the wire exactly like the steering client: form-answer via deliver-input.
+        var answer = await EndToEndEnvironment.CoreApiClient.PostAsJsonAsync(
+            $"/api/runs/{gate.Instance}/inputs",
+            new ProvideRunInput(
+                """{"$type":"form-answer","requestId":"__RID__","answers":[{"questionId":"state-gate","selectedIds":["Resolved"]}]}"""
+                    .Replace("__RID__", gate.RequestId)),
+            cancellationToken);
+        answer.EnsureSuccessStatusCode();
+
+        var completed = await WaitForAsync(() => statusEvents.Any(
+                e => e.WorkflowInstanceId == gate.Instance && e.State == "Success"),
+            TimeSpan.FromSeconds(120), cancellationToken);
+        if (!completed)
+            await FailWithDiagnosticsAsync(
+                "The simulated run must reach Success after the state gate is answered.", statusEvents);
+
+        // The declared flow's runtime states must have walked the stages in order and end done.
+        var snapshots = flowSnapshots.Where(f => f.Instance == gate.Instance)
+            .Select(f => ParseFlow(f.Payload)).ToList();
+        var activeSequence = snapshots
+            .Select(steps => steps.FirstOrDefault(s => s.State == "active").Id)
+            .Where(id => id is not null)
+            .Distinct()
+            .ToList();
+        Assert.Multiple(() =>
+        {
+            Assert.That(activeSequence, Is.EqualTo(new[]
+                    { "workspace", "completeness", "plan", "implement", "finalization" }),
+                "The stages must activate in declared order.");
+            Assert.That(snapshots.Last().Select(s => s.State), Is.All.EqualTo("done"),
+                "The final snapshot marks every stage done.");
+        });
+    }
+
+    private static List<(string Id, string State)> ParseFlow(string payloadJson)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(payloadJson);
+        return doc.RootElement.GetProperty("Steps").EnumerateArray()
+            .Select(s => (s.GetProperty("Id").GetString()!, s.GetProperty("State").GetString()!))
+            .ToList();
+    }
+
     private static async Task<bool> WaitForAsync(
         Func<bool> condition, TimeSpan timeout, CancellationToken ct)
     {
