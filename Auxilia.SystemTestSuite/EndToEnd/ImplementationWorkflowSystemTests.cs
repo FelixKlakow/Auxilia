@@ -93,7 +93,8 @@ public sealed class ImplementationWorkflowSystemTests
                 {
                     ["work-item-id"] = StoryId,
                     ["completeness-check"] = "true",
-                    ["ai-review"] = "false",
+                    ["ai-plan-review"] = "false",
+                    ["ai-code-review"] = "false",
                     ["user-plan-gate"] = "false",
                     ["user-code-gate"] = "false",
                     ["push-mode"] = "skip",

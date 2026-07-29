@@ -51,7 +51,8 @@ while read -r LINE; do
       ;;
   esac
 
-  sleep 0.2
+  # Simulation pacing: DRIVEN_STUB_DELAY (seconds per turn) makes the live view watchable.
+  sleep "${DRIVEN_STUB_DELAY:-0.2}"
   signal_stop
 done
 

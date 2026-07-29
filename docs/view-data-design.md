@@ -38,7 +38,7 @@ its steps as data —
     WorkflowStepFlow.RendererKey,
     declaredData: new[] {
         new FlowStepDescriptor("plan", "Plan", "Draft the implementation plan.",
-            Inputs: ["user-plan-gate", "ai-review"]),
+            Inputs: ["user-plan-gate", "ai-plan-review"]),
         new FlowStepDescriptor("push", "Push", "Commit and push.",
             SkipInput: "push-mode", SkipValue: "skip", Inputs: ["push-mode"]) })
 ```

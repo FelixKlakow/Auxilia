@@ -1,0 +1,32 @@
+{
+  "ProviderType": "simulated-work-items",
+  "ContentHashBase64": "",
+  "SignatureBase64": "",
+  "PublicKeyBase64": "",
+  "Contracts": ["Auxilia.Workflows.TaskSource.IWorkItemAccess"],
+  "Category": "task-source",
+  "Description": "SIMULATION: a scripted work-item source (TFS stand-in) for live-view testing — every id resolves to the configured story, with a configurable delay per operation. Never for production.",
+  "Settings": [
+    {
+      "Key": "Title",
+      "Label": "Story title",
+      "Kind": "Text",
+      "Required": false,
+      "HelpText": "Title of the simulated story; default 'Simulated story'."
+    },
+    {
+      "Key": "Description",
+      "Label": "Story description",
+      "Kind": "Text",
+      "Required": false,
+      "HelpText": "Body of the simulated story."
+    },
+    {
+      "Key": "DelaySeconds",
+      "Label": "Delay per operation (seconds)",
+      "Kind": "Number",
+      "Required": false,
+      "HelpText": "Every work-item operation sleeps this long — paces the run so the live view is watchable. Default 3."
+    }
+  ]
+}

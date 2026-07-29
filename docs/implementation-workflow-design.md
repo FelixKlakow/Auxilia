@@ -62,7 +62,8 @@ Copilot or vice versa.
 
 ## Step configuration (run inputs, all toggles)
 
-`completeness-check` (bool, default on), `ai-review` (bool, on) + `max-ai-review-rounds`
+`completeness-check` (bool, default on), `ai-plan-review` + `ai-code-review` (bool, on —
+PER-STAGE AI review) + `max-ai-review-rounds`
 (number, 2), `user-plan-gate` (bool, on), `user-code-gate` (bool, on), `artifact-review`
 (bool, off), `push-mode` (choice: prompt/auto/skip, default prompt), `target-state`
 (choice, populated at the gate from the story source's ACTUAL state vocabulary — never a

@@ -67,8 +67,10 @@ public static class ImplementationWorkflow
                 Description: "The user story to implement — its id at the bound source."))
             .RequiresInput(Toggle("completeness-check", "Completeness check",
                 "Assess the story first; open questions become an operator form.", on: true))
-            .RequiresInput(Toggle("ai-review", "AI review loops",
-                "A second agent reviews plan and code, with bounded refinement rounds.", on: true))
+            .RequiresInput(Toggle("ai-plan-review", "AI plan review",
+                "A second agent reviews the PLAN, with bounded refinement rounds.", on: true))
+            .RequiresInput(Toggle("ai-code-review", "AI code review",
+                "A second agent reviews the IMPLEMENTATION, with bounded refinement rounds.", on: true))
             .RequiresInput(new WorkflowInputDescriptor(
                 "max-ai-review-rounds", "Max AI review rounds", Required: false,
                 Description: "Upper bound per AI review loop.")
@@ -183,7 +185,7 @@ public static class ImplementationWorkflow
 
     private static IReviewRunner? BuildReviewer(IServiceProvider provider, ImplementationContext context)
     {
-        if (!context.AiReview)
+        if (!context.AiPlanReview && !context.AiCodeReview)
             return null;
         var credentials = provider.GetKeyedService<CodingAgentCredentials>("review-agent");
         var agent = provider.GetKeyedService<ICodingAgent>("review-agent");

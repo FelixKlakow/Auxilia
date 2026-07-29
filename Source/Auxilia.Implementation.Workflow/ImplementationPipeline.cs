@@ -233,7 +233,7 @@ public sealed class ImplementationPipeline(
                 ?? throw new InvalidOperationException("The author produced no plan file.");
             await ChatAsync(AgentChatRole.Assistant, plan, "Implementation plan", ct);
 
-            if (context.AiReview && reviewer is not null)
+            if (context.AiPlanReview && reviewer is not null)
                 plan = await AiReviewLoopAsync(plan, isPlan: true, ct);
 
             if (!context.UserPlanGate || _channel is null)
@@ -255,7 +255,7 @@ public sealed class ImplementationPipeline(
         {
             await DriveAuthorAsync(prompt, ct);
 
-            if (context.AiReview && reviewer is not null)
+            if (context.AiCodeReview && reviewer is not null)
             {
                 var verdict = await AiCodeReviewAsync(ct);
                 if (!verdict.Approved && context.MaxAiReviewRounds > 0)
