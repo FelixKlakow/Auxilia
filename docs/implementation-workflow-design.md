@@ -101,17 +101,18 @@ stays monospace (permission tool inputs). ```mermaid fences inside any markdown 
 `MarkdownViewer.FenceRenderer`, and the steering client registers an offline WebView2+mermaid.js
 renderer. Plans should use mermaid for diagrams, per the repo convention.
 
-## The step flow (declared stage view + runtime states)
+## The step flow (declared view data + runtime states)
 
-The pipeline's shape is DECLARED in the schema (`DeclaresFlow`, one source:
-`ImplementationFlow.Steps`): workspace → completeness → plan → implement → push →
-story-state, with data-driven skip hints (completeness-check=false, push-mode=skip) so the
-steering client's configuration and run panels render the stage view — steps dimming live as
-toggles change — before any run exists. At run time the pipeline publishes FULL state
-snapshots on the `flow` view (`WorkflowStepFlow` = per-step `Id`+`State`); the steering client joins
-them onto the declared steps by id and renders clickable chips above the run surface —
-clicking a chip expands its description. Any workflow can adopt the same mechanism; states
-are an open vocabulary. (See docs/view-data-design.md, "Declared flow".)
+The pipeline's shape is the `flow` view's DECLARED DATA (renderer key `step-flow`, one
+source: `ImplementationFlow.Steps`): workspace → completeness → plan → implement → push →
+story-state, with data-driven skip hints (completeness-check=false, push-mode=skip) and each
+step naming the inputs it owns. The steering client's configuration and run panels render the stage
+view before any run exists — steps dim live as toggles change, and a skipped step's
+exclusive inputs drop out of the form (gating inputs stay). At run time the pipeline
+publishes FULL state snapshots on the same view (`WorkflowStepFlow` = per-step `Id`+`State`);
+the steering client joins them onto the declared steps by id and renders clickable chips above the
+run surface — clicking a chip expands its description. Any workflow can adopt the same
+mechanism; states are an open vocabulary. (See docs/view-data-design.md, "Declared view data".)
 
 ## Idle gates and token economics
 

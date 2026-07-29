@@ -23,28 +23,36 @@ WorkflowBuilder.Create("pull-request-code-review")
 and `WorkflowManifest.Views`. Rendering: `Stream | Log | Table | Chart | Markdown | Custom`.
 Lifecycle: `Live | Persisted | LiveAndPersisted`.
 
-### Declared flow — presentation metadata in the schema
+### Declared view data — presentation content before any run
 
-Workflows control their *look* declaratively, not with custom frontend code. The first such
-metadata is the **declared step flow**:
+A view may carry **packaging-time data**: `ViewDescriptor.DeclaredDataJson`, opaque JSON
+whose meaning belongs to the view's renderer (named by `RendererKey`). The platform only
+transports it — no schema field per presentation concept, no Core semantics.
+
+The first user is the **step flow**: the `"flow"` view (renderer key `step-flow`) declares
+its steps as data —
 
 ```csharp
-WorkflowBuilder.Create("implementation")
-    .DeclaresFlow(
-        new FlowStepDescriptor("plan", "Plan", "Draft the implementation plan."),
+.DeclaresView<WorkflowStepFlow>(WorkflowStepFlow.ViewName,
+    ViewRendering.Custom, ViewLifecycle.LiveAndPersisted,
+    WorkflowStepFlow.RendererKey,
+    declaredData: new[] {
+        new FlowStepDescriptor("plan", "Plan", "Draft the implementation plan.",
+            Inputs: ["user-plan-gate", "ai-review"]),
         new FlowStepDescriptor("push", "Push", "Commit and push.",
-            SkipInput: "push-mode", SkipValue: "skip"))
+            SkipInput: "push-mode", SkipValue: "skip", Inputs: ["push-mode"]) })
 ```
 
-`FlowStepDescriptor(Id, Label, Description, SkipInput, SkipValue)` rides
-`WorkflowSchema.Flow`/`WorkflowManifest.Flow`, so config and dispatch UIs render the
-pipeline's shape **before any run exists** — the stage view in the configuration panel.
-`SkipInput`/`SkipValue` is a data-driven hint: editors present the step as skipped when the
-effective value of that run input equals the value (live, as the operator toggles inputs);
-the platform never learns what either means. The runtime `"flow"` view then carries only
-**state snapshots** (`WorkflowStepFlow` = `WorkflowStepState(Id, State)` per step, open state
-vocabulary: pending/active/done/skipped) — observers join states onto the declared steps by
-id. Labels and descriptions live in exactly one place: the schema.
+`FlowStepDescriptor(Id, Label, Description, SkipInput, SkipValue, Inputs)`: config and
+dispatch UIs render the pipeline's shape **before any run exists** — the stage view in the
+configuration panel. `SkipInput`/`SkipValue` is a data-driven hint: the step presents as
+skipped when the effective value of that run input equals the value (live, as the operator
+toggles inputs). `Inputs` names the run inputs belonging to the step — a skipped step's
+exclusive inputs drop out of the form (a step's gating input always stays visible so it can
+be re-enabled). The platform never learns what any of it means. The runtime `"flow"` view
+then carries only **state snapshots** (`WorkflowStepFlow` = `WorkflowStepState(Id, State)`,
+open state vocabulary: pending/active/done/skipped) — observers join states onto the
+declared steps by id. Labels and descriptions live in exactly one place: the declaration.
 
 ## 2. Publication (SDK, run time)
 

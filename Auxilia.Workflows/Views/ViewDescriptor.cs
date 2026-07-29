@@ -15,4 +15,10 @@ public sealed record ViewDescriptor(
     ViewRendering Rendering,
     ViewLifecycle Lifecycle,
     /// <summary>Dashboard renderer plug-in key; only meaningful for <see cref="ViewRendering.Custom"/>.</summary>
-    string? RendererKey = null);
+    string? RendererKey = null,
+    /// <summary>
+    /// Optional packaging-time data of the view (opaque JSON) — presentation content that exists
+    /// before any run, e.g. a step-flow's declared steps. Its meaning belongs to the renderer
+    /// (keyed by <see cref="RendererKey"/>); the platform only transports it.
+    /// </summary>
+    string? DeclaredDataJson = null);

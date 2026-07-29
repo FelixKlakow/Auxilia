@@ -94,11 +94,14 @@ public interface IWorkflowBuilder
         string name, Views.ViewRendering rendering, Views.ViewLifecycle lifecycle, string? rendererKey);
 
     /// <summary>
-    /// Declares the workflow's step flow (<see cref="Views.FlowStepDescriptor"/>) — the pipeline's
-    /// shape as presentation metadata in the schema. Config/dispatch UIs render it as a stage view
-    /// before any run exists; runtime <see cref="Views.WorkflowStepFlow"/> states join by step id.
+    /// Declares a view WITH packaging-time data (<see cref="Views.ViewDescriptor.DeclaredDataJson"/>):
+    /// presentation content that exists before any run — e.g. the "flow" view's declared steps
+    /// (<see cref="Views.FlowStepDescriptor"/>) rendered as a stage view at configuration time.
+    /// The data's meaning belongs to the renderer named by <paramref name="rendererKey"/>.
     /// </summary>
-    IWorkflowBuilder DeclaresFlow(params IReadOnlyList<Views.FlowStepDescriptor> steps);
+    IWorkflowBuilder DeclaresView<TItem>(
+        string name, Views.ViewRendering rendering, Views.ViewLifecycle lifecycle,
+        string? rendererKey, object? declaredData);
 
     IWorkflowBuilder ConfigureServices(Action<IServiceCollection> configure);
 

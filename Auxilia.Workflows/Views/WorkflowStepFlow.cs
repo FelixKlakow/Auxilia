@@ -1,18 +1,21 @@
 namespace Auxilia.Workflows.Views;
 
 /// <summary>
-/// One step of a workflow's DECLARED flow (packaging time): the pipeline's shape, carried in the
-/// schema so dispatch/config UIs render the stage view before any run exists. The optional
-/// <paramref name="SkipInput"/>/<paramref name="SkipValue"/> pair is a data-driven skip hint —
-/// editors present the step as skipped when the effective value of that run input equals the
-/// value; the platform never learns what either means.
+/// One step of a workflow's DECLARED flow — the packaging-time data of the "flow" view
+/// (<see cref="ViewDescriptor.DeclaredDataJson"/>), so dispatch/config UIs render the stage view
+/// before any run exists. The optional <paramref name="SkipInput"/>/<paramref name="SkipValue"/>
+/// pair is a data-driven skip hint — editors present the step as skipped when the effective value
+/// of that run input equals the value; the platform never learns what either means.
+/// <paramref name="Inputs"/> names the run inputs belonging to this step: editors hide a skipped
+/// step's exclusive inputs (a step's own gating input always stays visible).
 /// </summary>
 public sealed record FlowStepDescriptor(
     string Id,
     string Label,
     string? Description = null,
     string? SkipInput = null,
-    string? SkipValue = null);
+    string? SkipValue = null,
+    IReadOnlyList<string>? Inputs = null);
 
 /// <summary>Runtime state of one declared step; states are an open vocabulary
 /// ("pending", "active", "done", "skipped" by convention).</summary>
@@ -26,4 +29,7 @@ public sealed record WorkflowStepState(string Id, string State);
 public sealed record WorkflowStepFlow(IReadOnlyList<WorkflowStepState> Steps)
 {
     public const string ViewName = "flow";
+
+    /// <summary>Renderer key of the stage view; its declared data is a <see cref="FlowStepDescriptor"/> list.</summary>
+    public const string RendererKey = "step-flow";
 }

@@ -50,11 +50,11 @@ public static class ImplementationWorkflow
                 ViewRendering.Custom, ViewLifecycle.LiveAndPersisted)
             .DeclaresView<SteeringWireItem>(Auxilia.Workflows.Steering.OperatorChannel.ViewName,
                 ViewRendering.Custom, ViewLifecycle.LiveAndPersisted)
-            // The pipeline's shape lives in the schema (stage view at config time); the runtime
-            // view carries only per-step states, joined onto the declaration by id.
-            .DeclaresFlow(ImplementationFlow.Steps)
+            // The stage view IS a view: its declared data carries the pipeline's shape (rendered
+            // at config time); the runtime items are per-step states, joined by id.
             .DeclaresView<WorkflowStepFlow>(WorkflowStepFlow.ViewName,
-                ViewRendering.Custom, ViewLifecycle.LiveAndPersisted)
+                ViewRendering.Custom, ViewLifecycle.LiveAndPersisted,
+                WorkflowStepFlow.RendererKey, ImplementationFlow.Steps)
             .DeclaresOutput("implementation-plan", "plan.md", "The approved implementation plan")
             .DeclaresOutput("review-bundle", "review-bundle.md",
                 "Changed files, plan, AI verdicts, and the full diff — the reviewable artifact")

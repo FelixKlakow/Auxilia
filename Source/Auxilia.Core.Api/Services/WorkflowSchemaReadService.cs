@@ -77,13 +77,12 @@ public sealed class WorkflowSchemaReadService(IDataAccess<CoreWorkflowTypeRecord
                 i.Name, i.Label, i.Required, i.Description, i.Kind, i.DefaultValue, i.Choices,
                 i.ChoiceLabels)).ToList(),
             schema.Views.Select(v => new WorkflowViewDto(
-                v.Name, v.Rendering.ToString(), v.Lifecycle.ToString(), v.RendererKey, v.ItemSchemaJson)).ToList(),
+                v.Name, v.Rendering.ToString(), v.Lifecycle.ToString(), v.RendererKey, v.ItemSchemaJson,
+                v.DeclaredDataJson)).ToList(),
             schema.Triggers.Select(t => new WorkflowTriggerDto(t.Kind, t.Description)).ToList(),
             schema.ConsumedArtifacts,
             schema.InteractiveTerminalPort,
             JsonSerializer.Serialize(schema.EnvironmentRequirements, JsonOptions),
             packageUri,
-            status,
-            schema.Flow.Select(f => new WorkflowFlowStepDto(
-                f.Id, f.Label, f.Description, f.SkipInput, f.SkipValue)).ToList());
+            status);
 }

@@ -432,31 +432,39 @@ public class WorkflowBuilderTests
     }
 
     [Test]
-    public void DeclaresFlow_Steps_LandInSchemaAndManifest()
+    public void DeclaresView_WithDeclaredData_SerializesIntoSchemaAndManifest()
     {
-        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
-        wb.DeclaresFlow(
+        var steps = new[]
+        {
             new Views.FlowStepDescriptor("plan", "Plan", "Draft the plan."),
-            new Views.FlowStepDescriptor("push", "Push", SkipInput: "push-mode", SkipValue: "skip"));
+            new Views.FlowStepDescriptor("push", "Push",
+                SkipInput: "push-mode", SkipValue: "skip", Inputs: ["push-mode"]),
+        };
+        var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+        wb.DeclaresView<Views.WorkflowStepFlow>(Views.WorkflowStepFlow.ViewName,
+            Views.ViewRendering.Custom, Views.ViewLifecycle.LiveAndPersisted,
+            Views.WorkflowStepFlow.RendererKey, steps);
 
-        var schema = wb.BuildSchema();
-        var manifest = wb.BuildManifest();
-
-        Assert.That(schema.Flow, Has.Count.EqualTo(2));
-        Assert.That(schema.Flow[0], Is.EqualTo(new Views.FlowStepDescriptor("plan", "Plan", "Draft the plan.")));
-        Assert.That(schema.Flow[1].SkipInput, Is.EqualTo("push-mode"));
-        Assert.That(schema.Flow[1].SkipValue, Is.EqualTo("skip"));
-        Assert.That(manifest.Flow, Is.EqualTo(schema.Flow));
+        var view = wb.BuildSchema().Views.Single();
+        Assert.That(view.RendererKey, Is.EqualTo(Views.WorkflowStepFlow.RendererKey));
+        Assert.That(view.DeclaredDataJson, Is.Not.Null);
+        var roundTripped = System.Text.Json.JsonSerializer
+            .Deserialize<Views.FlowStepDescriptor[]>(view.DeclaredDataJson!)!;
+        Assert.That(roundTripped.Select(s => s.Id), Is.EqualTo(steps.Select(s => s.Id)));
+        Assert.That(roundTripped[1].SkipInput, Is.EqualTo("push-mode"));
+        Assert.That(roundTripped[1].SkipValue, Is.EqualTo("skip"));
+        Assert.That(roundTripped[1].Inputs, Is.EqualTo(new[] { "push-mode" }));
+        Assert.That(wb.BuildManifest().Views.Single().DeclaredDataJson,
+            Is.EqualTo(view.DeclaredDataJson));
     }
 
     [Test]
-    public void DeclaresFlow_DuplicateStepId_Throws()
+    public void DeclaresView_WithoutDeclaredData_DeclaredDataJsonIsNull()
     {
         var wb = (WorkflowBuilder)WorkflowBuilder.Create("test");
+        wb.DeclaresView<ViewItem>("progress", Views.ViewRendering.Log, Views.ViewLifecycle.Live);
 
-        Assert.Throws<InvalidOperationException>(() => wb.DeclaresFlow(
-            new Views.FlowStepDescriptor("plan", "Plan"),
-            new Views.FlowStepDescriptor("plan", "Plan again")));
+        Assert.That(wb.BuildSchema().Views.Single().DeclaredDataJson, Is.Null);
     }
 
     [Test]

@@ -104,29 +104,20 @@ public static class InputKinds
     public const string Number = "Number";
 }
 
-/// <summary>A schema-declared view the dashboard renders from these descriptors alone.</summary>
+/// <summary>A schema-declared view the dashboard renders from these descriptors alone.
+/// <see cref="DeclaredDataJson"/> is the view's optional packaging-time data (opaque JSON whose
+/// meaning belongs to the renderer named by <see cref="RendererKey"/>) — e.g. the "flow" view's
+/// declared steps, rendered as a stage view before any run exists.</summary>
 public sealed record WorkflowViewDto(
     string Name,
     string Rendering,
     string Lifecycle,
     string? RendererKey,
-    string ItemSchemaJson);
+    string ItemSchemaJson,
+    string? DeclaredDataJson = null);
 
 /// <summary>A trigger kind a workflow declares it can be started by (wired per configuration).</summary>
 public sealed record WorkflowTriggerDto(string Kind, string? Description);
-
-/// <summary>
-/// One step of a workflow's declared flow — presentation metadata: config/dispatch UIs render the
-/// pipeline's shape from these before any run exists, and join runtime "flow" view states onto
-/// them by <see cref="Id"/>. <see cref="SkipInput"/>/<see cref="SkipValue"/> is a data-driven skip
-/// hint: present the step as skipped when the effective value of that run input equals the value.
-/// </summary>
-public sealed record WorkflowFlowStepDto(
-    string Id,
-    string Label,
-    string? Description,
-    string? SkipInput = null,
-    string? SkipValue = null);
 
 /// <summary>
 /// The full schema of a registered workflow type — everything the config editor needs to build a
@@ -147,5 +138,4 @@ public sealed record WorkflowSchemaDto(
     int? InteractiveTerminalPort,
     string EnvironmentRequirementsJson,
     string? PackageUri = null,
-    string Status = WorkflowTypeStatus.Active,
-    IReadOnlyList<WorkflowFlowStepDto>? Flow = null);
+    string Status = WorkflowTypeStatus.Active);
