@@ -26,4 +26,11 @@ public sealed record PluginManifest(
     /// carry (SDK clients etc.); shared Auxilia contracts always come from the image.
     /// </summary>
     public bool BundleDependencies { get; init; }
+
+    /// <summary>
+    /// Auxilia-prefixed sibling DLLs to bundle DESPITE the shared-contracts-from-the-image rule —
+    /// a plugin's OWN Auxilia assemblies (e.g. its adapter) that no workflow image carries.
+    /// Only meaningful with <see cref="BundleDependencies"/>.
+    /// </summary>
+    public IReadOnlyList<string>? BundledAuxiliaAssemblies { get; init; }
 }

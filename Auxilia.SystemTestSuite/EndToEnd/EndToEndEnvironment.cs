@@ -274,6 +274,10 @@ public class EndToEndEnvironment
                 $"{ContainerPluginsDir}/Auxilia.Slots.CodingSession.slothandler.dll")
             .WithEnvironment("WorkflowLauncher__SlotPackages__simulated-work-items",
                 $"{ContainerPluginsDir}/Auxilia.Slots.SimulatedWorkItems.slothandler.dll")
+            // Long-living lifetimes are rejected unless operator-approved — the implementation
+            // workflow (LongLiving) needs this or its registration dies at the directive step.
+            .WithEnvironment("WorkflowDispatcher__ApprovedLongLivingWorkflowTypes__0",
+                ImplementationWorkflowType)
             .WithEnvironment("WorkflowDispatcher__CommandQueueName",        CommandQueue)
             .WithEnvironment("WorkflowDispatcher__RegistrationQueueName",   "workflow-registration-e2e")
             .WithEnvironment("WorkflowDispatcher__AnnouncementQueueName",   "workflow.announcements-e2e")
@@ -467,10 +471,14 @@ public class EndToEndEnvironment
     {
         try
         {
-            if (Directory.Exists(directory))
-                Directory.Delete(directory, recursive: true);
+            if (!Directory.Exists(directory))
+                return;
+            // Git object/pack files are read-only — strip the attribute or recursive delete throws.
+            foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+                File.SetAttributes(file, FileAttributes.Normal);
+            Directory.Delete(directory, recursive: true);
         }
-        catch (IOException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             // Best effort — leftover temp directories are harmless.
         }

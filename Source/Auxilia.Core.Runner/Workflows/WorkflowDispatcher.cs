@@ -200,7 +200,11 @@ public sealed class WorkflowDispatcher(
                 if (manifest is { BundleDependencies: true })
                     dependencies = Directory.GetFiles(Path.GetDirectoryName(dllPath)!, "*.dll")
                         .Where(f => !string.Equals(f, dllPath, StringComparison.OrdinalIgnoreCase)
-                                    && !Path.GetFileName(f).StartsWith("Auxilia", StringComparison.OrdinalIgnoreCase))
+                                    && (!Path.GetFileName(f).StartsWith("Auxilia", StringComparison.OrdinalIgnoreCase)
+                                        // A plugin's OWN Auxilia assemblies (its adapter) are not
+                                        // in any image — the manifest names them explicitly.
+                                        || manifest.BundledAuxiliaAssemblies?.Contains(
+                                            Path.GetFileName(f), StringComparer.OrdinalIgnoreCase) == true))
                         .ToList();
             }
             catch (JsonException)
