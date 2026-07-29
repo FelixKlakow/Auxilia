@@ -73,9 +73,8 @@ public sealed class ImplementationPipeline(
             await PublishFlowAsync("implement", ct);
             await ImplementationLoopAsync(workItem, plan, ct);
 
-            await PublishFlowAsync("push", ct);
+            await PublishFlowAsync("finalization", ct);
             var pushed = await PushAsync(workItem, branch, ct);
-            await PublishFlowAsync("story-state", ct);
             await SetStoryStateAsync(workItem, branch, pushed, ct);
             await PublishFlowAsync(activeStep: null, ct);
             success = true;
@@ -141,7 +140,6 @@ public sealed class ImplementationPipeline(
     private bool IsSkipped(string stepId) => stepId switch
     {
         "completeness" => !context.CompletenessCheck,
-        "push" => context.PushMode == PushModes.Skip,
         _ => false
     };
 

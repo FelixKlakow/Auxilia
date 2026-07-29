@@ -6,8 +6,10 @@ namespace Auxilia.Workflows.Views;
 /// before any run exists. The optional <paramref name="SkipInput"/>/<paramref name="SkipValue"/>
 /// pair is a data-driven skip hint — editors present the step as skipped when the effective value
 /// of that run input equals the value; the platform never learns what either means.
-/// <paramref name="Inputs"/> names the run inputs belonging to this step: editors hide a skipped
-/// step's exclusive inputs (a step's own gating input always stays visible).
+/// <paramref name="Inputs"/> and <paramref name="Slots"/> name the run inputs and capability
+/// slots belonging to this step: editors hide a skipped step's exclusive ones (a step's own
+/// gating input always stays visible), and selecting a step filters the form down to what
+/// that step owns.
 /// </summary>
 public sealed record FlowStepDescriptor(
     string Id,
@@ -15,7 +17,8 @@ public sealed record FlowStepDescriptor(
     string? Description = null,
     string? SkipInput = null,
     string? SkipValue = null,
-    IReadOnlyList<string>? Inputs = null);
+    IReadOnlyList<string>? Inputs = null,
+    IReadOnlyList<string>? Slots = null);
 
 /// <summary>Runtime state of one declared step; states are an open vocabulary
 /// ("pending", "active", "done", "skipped" by convention).</summary>
