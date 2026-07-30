@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using Auxilia.Workflows.AiAgent.CodingAgent;
 using Auxilia.Workflows.Views;
@@ -252,12 +253,18 @@ public sealed class ClaudeCodeCliAgent(
     internal ProcessStartInfo BuildStartInfo(CodingAgentRequest request)
     {
         var interactive = request.Interaction is not null;
+        // The CLI speaks UTF-8; without pinning it, Windows hosts decode the pipes with the
+        // OEM codepage and every non-ASCII character reaches the views as mojibake.
+        var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
         var startInfo = new ProcessStartInfo(options.CliPath)
         {
             WorkingDirectory = request.WorkspaceDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             RedirectStandardInput = interactive,
+            StandardOutputEncoding = utf8,
+            StandardErrorEncoding = utf8,
+            StandardInputEncoding = interactive ? utf8 : null,
             UseShellExecute = false
         };
 
