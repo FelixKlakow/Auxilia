@@ -21,6 +21,39 @@
 
 - **Declared flow (presentation metadata) DELIVERED 2026-07-29**, reworked same day per Felix's feedback into GENERAL declared view data: `ViewDescriptor.DeclaredDataJson` (opaque, renderer-key-scoped packaging-time content — no bespoke schema field) with the `flow` view (`step-flow` renderer key) declaring `FlowStepDescriptor(Id, Label, Description, SkipInput, SkipValue, Inputs)`; the runtime `flow` view slimmed to per-step states (`WorkflowStepState`), joined client-side. The steering client renders the stage view in the CONFIGURE and RUN panels (skip hints dim live; a skipped step's exclusive inputs drop out of the form, gating inputs stay) and the monitor joins live states (shared `FlowStrip` stepper control). Dev stack scripts added: `Start-DevStack.ps1` (the launch recipe, previously session-memory only) + `Cleanup-TestWorkflows.ps1` (testing configurations/types/finished runs — run after test sessions so the steering client stays clean; executed 2026-07-29, echo/sleeping/crashing/steering-sample family removed from the dev Core). Direction: more presentation metadata (input grouping/ordering) can follow the same schema-declared pattern instead of per-workflow frontend code. All three workflow images (implementation/claude-code/copilot) rebuilt for the new flow shape 2026-07-29 (after a transient router-DNS outage on mcr.microsoft.com).
 
+## Implementation workflow — feedback batch 2026-07-30 (Felix)
+- ~~**Review-bundle presentation**~~ — **DONE 2026-07-30**: porcelain codes translate to
+  readable labels (`ImplementationPipeline.DescribeChanges`); NOT an encoding issue (verified).
+- ~~**Rename the `completeness` stage → `refinement`**~~ — **DONE 2026-07-30** (step id, input
+  `refinement-check`, context, prompts, stub, seeds, system tests, docs). Schema-affecting:
+  re-register the type + rebuild the image.
+- ~~**Agent sharing across stages**~~ — **DONE 2026-07-30**: the author console was ALREADY
+  shared across refinement→plan→implementation; now per-stage overrides exist —
+  `plan-agent`/`implement-agent` (shared/fresh/reviewer; `AgentConsolePool`, one event source
+  fanned out via `ConsoleSessionEventHub`, secondary tmux sessions killed session-scoped) and
+  `review-by` (reviewer/refinement-agent — the refiner reviews with its full context).
+  Follow-ups: summarization-on-demand for a tight window (today: the gate-idle `/compact`
+  rule); a THIRD agent binding for cross-provider stage mixes beyond author+reviewer.
+- ~~**Default per-stage instructions**~~ — **DONE 2026-07-30**: `refinement-instructions` /
+  `plan-instructions` / `implement-instructions` / `review-instructions` (multiline inputs,
+  schema default = `ImplementationPrompts`; pipeline appends the fixed `.auxilia/` contract).
+- ~~**Plan artifacts**~~ — **DONE 2026-07-30**: default plan instructions demand a mermaid
+  `## Design` section; plan.md is copied to the run outputs the moment it exists (reviewable
+  at the plan gate, not only after implementation).
+- **Work-item MCP** — the agent must reach `IWorkItemAccess`/task-source detail (links, parent
+  work items, relations) via MCP inside the session (the `CapabilityMcpToolsBase` pattern is the
+  planned road). Later, separately: externally configured MCP servers passed into sessions —
+  deferred, complicated.
+
+## steering client — feedback batch 2026-07-30 (steering client repo)
+- **Step click-through** — clicking a finished workflow step opens that step's data (the last
+  view data available for it), including executed plans.
+- **Live wall** — a "remove finished/old agents" button; tiles KEEP their position; agent
+  selection moves onto the single tile (dropdown at the tile: active agents first, finished
+  sessions after).
+- **Implementation run setup** — show the advanced settings inline (the settings count shrank;
+  the extra fold/panel is no longer worth it).
+
 ## Config-store ownership (Felix's model — deferred as its own step)
 - **Move the persisted config store out of the Core.** "The Core doesn't own persisted workflows." Today `/api/configurations*` + `RunConfigurationAsync` still live in Core (tangled with the `CoreApiDispatch` acceptance test). Target: the product owns the config store; the Core validates a submitted spec against its **schema registry** and runs it via the Run API.
 

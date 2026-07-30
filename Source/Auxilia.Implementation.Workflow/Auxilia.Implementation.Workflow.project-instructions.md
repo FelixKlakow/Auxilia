@@ -1,16 +1,20 @@
 # Auxilia.Implementation.Workflow
 
 Workflow type `implementation` (long-living): the full assisted-delivery pipeline — a user
-story (TFS/Azure DevOps or mail) is completeness-checked, planned, implemented, reviewed
+story (TFS/Azure DevOps or mail) is refined, planned, implemented, reviewed
 (AI + operator gates), pushed by the WORKFLOW, and its state set from the source's own
 vocabulary. **Design (read first): `docs/implementation-workflow-design.md`.** Replaces the
 retired old-generation `Auxilia.ImplementationWorkflow`.
 
 ## How it hangs together
 
-- **`ImplementationPipeline`** orchestrates; **one `DrivenConsoleSession`** (tmux+ttyd,
-  visible in the run terminal) is the author across ALL phases — prompts go in via
-  `tmux send-keys`, turn completion comes from the provider's console events (Claude: hooks).
+- **`ImplementationPipeline`** orchestrates over an **`AgentConsolePool`** of driven consoles
+  (tmux+ttyd; the AUTHOR serves the run terminal and spans refinement/plan/implementation by
+  default; `plan-agent`/`implement-agent`/`review-by` select fresh or reviewer-bound consoles
+  per stage) — prompts go in via `tmux send-keys` (ONE line per drive), turn completion comes
+  from the provider's console events (Claude: hooks) fanned out by `ConsoleSessionEventHub`.
+- Stage drives are `<instructions input, defaulted from ImplementationPrompts>` + the fixed
+  file contract; the plan stage's default demands a mermaid `## Design` section.
 - The workflow↔agent exchange is FILES under `.auxilia/` in the workspace (story.md, plan.md,
   questions.md, verdict files) — never parsed chat output.
 - **`IReviewRunner`**: `HeadlessReviewRunner` (second `ICodingAgent`, keyed slot

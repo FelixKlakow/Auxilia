@@ -9,15 +9,15 @@ Decided with Felix 2026-07-28.
 
 ```mermaid
 flowchart LR
-    A[User story] --> B[Completeness check]
+    A[User story] --> B[Refinement]
     B -->|gaps| U0[User clarification form]
     U0 --> B
-    B --> C[Plan draft - author console]
+    B --> C[Plan draft - stage console]
     C --> D[AI plan review]
     D -->|refine| C
     D --> E[User plan gate]
     E -->|feedback| C
-    E --> F[Implementation - SAME author instance]
+    E --> F[Implementation - shared console by default]
     F --> G[AI code review]
     G -->|issues| F
     G --> H[User code gate]
@@ -31,19 +31,36 @@ Every loop is bounded (`max-ai-review-rounds`, default 2); every user gate rides
 steering surface (forms / decision cards / attention cues); the run's terminal shows the live
 author console throughout.
 
-## Session model — the DRIVEN console
+## Session model — driven consoles, shared by default (2026-07-30)
 
-The author agent is ONE interactive CLI instance in tmux+ttyd for the whole run (context is
-never lost between plan and implementation; the operator can watch — and, in the feedback
-phases, type — through the run terminal):
+The AUTHOR console is one interactive CLI instance in tmux+ttyd, serving the run terminal.
+By default it spans refinement, plan, and implementation — context is never lost. Per-stage
+overrides (`plan-agent` / `implement-agent`: `shared` | `fresh` | `reviewer`) run a stage in a
+FRESH author instance or on the reviewer binding, each in its own tmux session beside the
+author's (`AgentConsolePool`; one provider event source fans out through
+`ConsoleSessionEventHub` — the pipeline drives one console at a time). `review-by`
+(`reviewer` | `refinement-agent`) can hand the AI review passes to the console that refined
+the story instead of the review-agent binding (full context; gate-idle compaction still
+applies). Example: refinement on console A, plan+implement on a fresh console B, reviews by A.
 
 - Prompts are DRIVEN by the workflow: `tmux send-keys` into the session
-  (`ISessionHost.SendTextAsync`).
+  (`ISessionHost.SendTextAsync`), flattened to ONE line per drive (one input = one turn).
 - Turn completion is signaled by the provider's console event source (Claude: the Stop hook —
   already built). The workflow awaits `turn-ended` between drives.
 - The plan file is written by the agent to a workflow-designated path in the workspace
-  (`.auxilia/plan.md`), published as the `implementation-plan` artifact and re-published on
-  every refinement.
+  (`.auxilia/plan.md`) and copied to the run outputs the moment it exists — the
+  `implementation-plan` artifact is reviewable at the plan gate, re-published on every
+  refinement. The default plan instructions require a `## Design` section with a MERMAID
+  diagram, so the gate renders a real picture of the change.
+
+## Per-stage instructions (defaults visible, 2026-07-30)
+
+Every stage drive is `<instructions> + <file-exchange contract>`. The instructions are run
+inputs with the built-in text as their schema DEFAULT (`refinement-instructions`,
+`plan-instructions`, `implement-instructions`, `review-instructions` — source:
+`ImplementationPrompts`), so the operator sees and can rewrite what each stage tells the
+agent. The file contract (paths under `.auxilia/`) is appended by the pipeline and never
+user-editable.
 
 ## Reviewer — configurable per run
 
@@ -62,12 +79,14 @@ Copilot or vice versa.
 
 ## Step configuration (run inputs, all toggles)
 
-`completeness-check` (bool, default on), `ai-plan-review` + `ai-code-review` (bool, on —
+`refinement-check` (bool, default on), `ai-plan-review` + `ai-code-review` (bool, on —
 PER-STAGE AI review) + `max-ai-review-rounds`
 (number, 2), `user-plan-gate` (bool, on), `user-code-gate` (bool, on), `artifact-review`
 (bool, off), `push-mode` (choice: prompt/auto/skip, default prompt), `target-state`
 (choice, populated at the gate from the story source's ACTUAL state vocabulary — never a
-hardcoded list).
+hardcoded list), `plan-agent` + `implement-agent` (choice: shared/fresh/reviewer, default
+shared), `review-by` (choice: reviewer/refinement-agent, default reviewer), and the four
+per-stage instruction inputs (multiline, defaults = `ImplementationPrompts`).
 
 ## Platform surface to add
 
@@ -105,9 +124,9 @@ renderer. Plans should use mermaid for diagrams, per the repo convention.
 ## The step flow (declared view data + runtime states)
 
 The pipeline's shape is the `flow` view's DECLARED DATA (renderer key `step-flow`, one
-source: `ImplementationFlow.Steps`): workspace → completeness → plan → implement →
+source: `ImplementationFlow.Steps`): workspace → refinement → plan → implement →
 finalization (commit/push + story state combined), with a data-driven skip hint
-(completeness-check=false) and each step naming the inputs AND capability slots it owns.
+(refinement-check=false) and each step naming the inputs AND capability slots it owns.
 The steering client's configuration and run panels render the stage view before any run exists —
 steps dim live as toggles change, a skipped step's exclusive inputs drop out of the form
 (gating inputs stay), and SELECTING a step filters the whole form down to exactly what that

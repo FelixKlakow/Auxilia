@@ -60,11 +60,13 @@ public interface ISessionHost
 public sealed class TmuxSessionHost : ISessionHost
 {
     private string _sessionName = "agent-session";
+    private bool _ownsServer = true;
     private Process? _ttyd;
 
     public async Task StartAsync(TerminalSessionInfo session, CancellationToken cancellationToken)
     {
         _sessionName = session.SessionName;
+        _ownsServer = session.EndsServerOnExit;
         await RunAsync(BuildTmuxStartInfo(session), cancellationToken);
 
         if (!session.ServeTerminal)
@@ -140,7 +142,12 @@ public sealed class TmuxSessionHost : ISessionHost
 
     public async Task ShutdownAsync()
     {
-        await TryRunAsync("tmux", ["kill-server"], CancellationToken.None);
+        // A secondary session (EndsServerOnExit=false) must never take the author's server
+        // down with it — kill only its own session.
+        await TryRunAsync(
+            "tmux",
+            _ownsServer ? ["kill-server"] : ["kill-session", "-t", _sessionName],
+            CancellationToken.None);
         try
         {
             if (_ttyd is { HasExited: false })

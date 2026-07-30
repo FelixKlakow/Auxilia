@@ -153,7 +153,7 @@ function Ensure-Configuration($name, $storyTitle, $agentBinding) {
     Invoke-RestMethod -Method Post "http://localhost:5280/api/configurations" -Headers $headers -ContentType "application/json" -Body (@{
         name = $name; workflowType = "implementation"; tags = @("sim")
         context = @{
-            "completeness-check" = "true"; "ai-plan-review" = "false"; "ai-code-review" = "false"
+            "refinement-check" = "true"; "ai-plan-review" = "false"; "ai-code-review" = "false"
             "user-plan-gate" = "true"; "user-code-gate" = "true"; "push-mode" = "prompt"
             "gate-idle-compaction" = "0"
         }
@@ -182,5 +182,5 @@ Write-Host "Demo ready - ONE workflow type, two authors:" -ForegroundColor Green
 Write-Host "  [SIM] Implementation (driven stub)      -> author: Claude Code"
 Write-Host "  [SIM] Implementation (GitHub Copilot)   -> author: GitHub Copilot"
 Write-Host "Start either from the steering client with any work-item id (e.g. SIM-42) and watch:"
-Write-Host "  completeness -> plan (approval gate) -> implement (code gate) -> push prompt -> story-state gate."
+Write-Host "  refinement -> plan (approval gate) -> implement (code gate) -> push prompt -> story-state gate."
 Write-Host "Turn pacing rides DRIVEN_STUB_DELAY (Start-DevStack sets 4s). Afterwards: Cleanup-TestWorkflows.ps1."

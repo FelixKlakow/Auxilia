@@ -8,8 +8,9 @@ using Auxilia.Workflows.Views;
 namespace Auxilia.Implementation.Workflow;
 
 /// <summary>
-/// The assisted-delivery pipeline (docs/implementation-workflow-design.md): one DRIVEN author
-/// console spans completeness check, plan, and implementation (context never lost); AI review
+/// The assisted-delivery pipeline (docs/implementation-workflow-design.md): driven consoles
+/// span refinement, plan, and implementation — ONE shared author console by default (context
+/// never lost), per-stage overrides for a fresh instance or the reviewer binding. AI review
 /// passes and operator gates sit between the phases; the WORKFLOW commits and pushes; the
 /// story's state is set from its source's own vocabulary. Every gate obeys the idle-compaction
 /// rule so a slow operator never forces a full context re-read.
@@ -19,17 +20,12 @@ public sealed class ImplementationPipeline(
     IViewPublisher? views,
     IWorkflowInputs? inputs,
     ImplementationContext context,
-    DrivenConsoleSession author,
-    CodingAgentCredentials? authorCredentials,
+    AgentConsolePool consoles,
     IReviewRunner? reviewer,
     IGitRunner git,
     TimeProvider time)
 {
     private OperatorChannel? _channel;
-
-    // Author base without a provider system-prompt seam rides the FIRST drive instead.
-    private string? _pendingAuthorBase;
-
     private List<WorkflowStepState> _flow = [];
 
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -58,20 +54,22 @@ public sealed class ImplementationPipeline(
             await git.RunAsync(context.WorkspaceDirectory, $"checkout -b {branch}", ct);
             await ProgressAsync("workspace", $"branch '{branch}' ready", ct);
 
-            await author.StartAsync(BuildAuthorSession(), ct);
+            await consoles.StartAuthorAsync(ct);
             await ProgressAsync("session", "author console up — visible in the run terminal", ct);
 
             await MaterializeStoryAsync(workItem, ct);
-            if (context.CompletenessCheck)
+            if (context.RefinementCheck)
             {
-                await PublishFlowAsync("completeness", ct);
-                await CompletenessLoopAsync(workItem, ct);
+                await PublishFlowAsync("refinement", ct);
+                await RefinementLoopAsync(workItem, ct);
             }
 
             await PublishFlowAsync("plan", ct);
-            var plan = await PlanLoopAsync(workItem, ct);
+            var planConsole = StageConsole(context.PlanAgent, consoles.Author, "plan");
+            var plan = await PlanLoopAsync(planConsole, ct);
             await PublishFlowAsync("implement", ct);
-            await ImplementationLoopAsync(workItem, plan, ct);
+            var implementConsole = StageConsole(context.ImplementAgent, planConsole, "implement");
+            await ImplementationLoopAsync(implementConsole, plan, ct);
 
             await PublishFlowAsync("finalization", ct);
             var pushed = await PushAsync(workItem, branch, ct);
@@ -89,7 +87,7 @@ public sealed class ImplementationPipeline(
         }
         finally
         {
-            await author.DisposeAsync();
+            await consoles.DisposeAsync();
             var ended = time.GetUtcNow();
             await new SessionReportWriter(context.OutputDirectory).WriteAsync(
                 new SessionReport(
@@ -109,6 +107,24 @@ public sealed class ImplementationPipeline(
         if (!success)
             throw new InvalidOperationException(error ?? "The implementation run failed.");
     }
+
+    /// <summary>Resolves which console a stage drives; Shared = the preceding stage's console.</summary>
+    private AgentConsolePool.AgentConsole StageConsole(
+        string choice, AgentConsolePool.AgentConsole shared, string stage) => choice switch
+    {
+        StageAgents.Fresh => consoles.FreshAuthor(stage),
+        StageAgents.Reviewer => consoles.ReviewerConsole(),
+        _ => shared
+    };
+
+    /// <summary>
+    /// The reviewer for the AI passes: the review-agent binding by default, or — review-by
+    /// refinement-agent — the console that refined the story, driven with review instructions.
+    /// </summary>
+    private IReviewRunner? ResolveReviewer()
+        => context.ReviewBy == ReviewAgents.RefinementAgent
+            ? new DrivenReviewRunner(consoles, consoles.Author)
+            : reviewer;
 
     /// <summary>
     /// The run's step STATES against the declared flow (full snapshot per transition):
@@ -139,38 +155,9 @@ public sealed class ImplementationPipeline(
 
     private bool IsSkipped(string stepId) => stepId switch
     {
-        "completeness" => !context.CompletenessCheck,
+        "refinement" => !context.RefinementCheck,
         _ => false
     };
-
-    private TerminalSessionInfo BuildAuthorSession()
-    {
-        var cli = authorCredentials?.CliPath is { Length: > 0 } path ? path : "claude";
-        var unattended = authorCredentials?.UnattendedCliArguments is { Length: > 0 } arguments
-            ? " " + arguments
-            : "";
-        var environment = new Dictionary<string, string>(
-            authorCredentials?.ToEnvironment() ?? new Dictionary<string, string>());
-        var command = cli + unattended;
-        if (context.AuthorBaseInstructions is { Length: > 0 } baseInstructions)
-        {
-            if (authorCredentials?.SystemPromptCliArgument is { Length: > 0 } systemPromptArgument)
-            {
-                environment[AgentConsoleApplication.BasePromptVariable] = baseInstructions;
-                command += $" {systemPromptArgument} \"${AgentConsoleApplication.BasePromptVariable}\"";
-            }
-            else
-            {
-                _pendingAuthorBase = baseInstructions;
-            }
-        }
-
-        return new TerminalSessionInfo(
-            context.WorkspaceDirectory, command, AgentConsoleApplication.TerminalPort)
-        {
-            Environment = environment,
-        };
-    }
 
     /// <summary>The story lands as a FILE so drives can reference it without re-pasting it.</summary>
     private async Task MaterializeStoryAsync(WorkItem workItem, CancellationToken ct)
@@ -187,14 +174,15 @@ public sealed class ImplementationPipeline(
         }
     }
 
-    private async Task CompletenessLoopAsync(WorkItem workItem, CancellationToken ct)
+    private async Task RefinementLoopAsync(WorkItem workItem, CancellationToken ct)
     {
         for (var round = 0; round < 2; round++)
         {
-            await DriveAuthorAsync(
-                $"Read the user story in {Rel(context.ExchangeDirectory)}/story.md (attachments beside it). "
-                + $"Assess whether it is COMPLETE enough to implement. Write any open questions to "
-                + $"{Rel(context.QuestionsPath)}, one per line; if nothing is missing, write exactly NONE.",
+            await DriveAsync(consoles.Author,
+                $"{context.RefinementInstructions}\n"
+                + $"The story is at {Rel(context.ExchangeDirectory)}/story.md (attachments beside it). "
+                + $"Write any open questions to {Rel(context.QuestionsPath)}, one per line; "
+                + "if nothing is missing, write exactly NONE.",
                 ct);
             var questions = ReadLines(context.QuestionsPath)
                 .Where(l => !string.Equals(l, "NONE", StringComparison.OrdinalIgnoreCase))
@@ -202,7 +190,7 @@ public sealed class ImplementationPipeline(
             if (questions.Count == 0 || _channel is null)
                 return;
 
-            await ProgressAsync("completeness", $"{questions.Count} open question(s) for the operator", ct);
+            await ProgressAsync("refinement", $"{questions.Count} open question(s) for the operator", ct);
             var answers = await GateAsync(questions
                 .Select((q, i) => new OperatorQuestion(
                     $"q{i}", q, [], MultiSelect: false, AllowFreeText: true, Detail: null))
@@ -210,9 +198,9 @@ public sealed class ImplementationPipeline(
             var answered = string.Join("\n", answers.Select(a =>
                 $"- {questions.ElementAtOrDefault(int.TryParse(a.QuestionId.TrimStart('q'), out var i) ? i : 0)}: "
                 + (a.FreeText ?? string.Join(", ", a.SelectedIds))));
-            await DriveAuthorAsync(
+            await DriveAsync(consoles.Author,
                 $"The operator answered the open questions:\n{answered}\n"
-                + $"Update {Rel(context.ExchangeDirectory)}/story.md accordingly, then re-assess completeness "
+                + $"Update {Rel(context.ExchangeDirectory)}/story.md accordingly, then re-assess the story "
                 + $"the same way (questions to {Rel(context.QuestionsPath)} or NONE).", ct);
             var remaining = ReadLines(context.QuestionsPath)
                 .Where(l => !string.Equals(l, "NONE", StringComparison.OrdinalIgnoreCase)).ToList();
@@ -221,20 +209,21 @@ public sealed class ImplementationPipeline(
         }
     }
 
-    private async Task<string> PlanLoopAsync(WorkItem workItem, CancellationToken ct)
+    private async Task<string> PlanLoopAsync(AgentConsolePool.AgentConsole console, CancellationToken ct)
     {
-        var prompt = $"Create a detailed implementation plan (markdown) for the story in "
-                     + $"{Rel(context.ExchangeDirectory)}/story.md and write it to {Rel(context.PlanPath)}. "
-                     + "Cover approach, files to touch, tests, and risks. Do NOT implement yet.";
+        var prompt = $"{context.PlanInstructions}\n"
+                     + $"The story is at {Rel(context.ExchangeDirectory)}/story.md. "
+                     + $"Write the plan (markdown) to {Rel(context.PlanPath)}.";
         while (true)
         {
-            await DriveAuthorAsync(prompt, ct);
+            await DriveAsync(console, prompt, ct);
             var plan = await ReadFileAsync(context.PlanPath, ct)
                 ?? throw new InvalidOperationException("The author produced no plan file.");
             await ChatAsync(AgentChatRole.Assistant, plan, "Implementation plan", ct);
+            PersistPlanArtifact();
 
-            if (context.AiPlanReview && reviewer is not null)
-                plan = await AiReviewLoopAsync(plan, isPlan: true, ct);
+            if (context.AiPlanReview && ResolveReviewer() is { } planReviewer)
+                plan = await AiReviewLoopAsync(planReviewer, console, plan, ct);
 
             if (!context.UserPlanGate || _channel is null)
                 return plan;
@@ -247,17 +236,18 @@ public sealed class ImplementationPipeline(
         }
     }
 
-    private async Task ImplementationLoopAsync(WorkItem workItem, string plan, CancellationToken ct)
+    private async Task ImplementationLoopAsync(
+        AgentConsolePool.AgentConsole console, string plan, CancellationToken ct)
     {
-        var prompt = $"Implement the approved plan in {Rel(context.PlanPath)}. Work the plan point by "
-                     + "point, run the tests you touch, and commit NOTHING — the workflow handles git.";
+        var prompt = $"{context.ImplementInstructions}\n"
+                     + $"The approved plan is at {Rel(context.PlanPath)}.";
         while (true)
         {
-            await DriveAuthorAsync(prompt, ct);
+            await DriveAsync(console, prompt, ct);
 
-            if (context.AiCodeReview && reviewer is not null)
+            if (context.AiCodeReview && ResolveReviewer() is { } codeReviewer)
             {
-                var verdict = await AiCodeReviewAsync(ct);
+                var verdict = await AiCodeReviewAsync(codeReviewer, console, ct);
                 if (!verdict.Approved && context.MaxAiReviewRounds > 0)
                 {
                     // Bounded refinement happened inside AiCodeReviewAsync; a still-failing
@@ -291,12 +281,14 @@ public sealed class ImplementationPipeline(
     }
 
     /// <summary>Bounded refine loop: review → REVISE feedback driven into the author → re-review.</summary>
-    private async Task<string> AiReviewLoopAsync(string plan, bool isPlan, CancellationToken ct)
+    private async Task<string> AiReviewLoopAsync(
+        IReviewRunner planReviewer, AgentConsolePool.AgentConsole console, string plan, CancellationToken ct)
     {
         for (var round = 0; round < context.MaxAiReviewRounds; round++)
         {
-            var verdict = await reviewer!.ReviewAsync(
-                WithReviewerBase($"Review the implementation plan at {Rel(context.PlanPath)} against the story at "
+            var verdict = await planReviewer.ReviewAsync(
+                WithReviewerBase($"{context.ReviewInstructions} "
+                + $"Review the implementation plan at {Rel(context.PlanPath)} against the story at "
                 + $"{Rel(context.ExchangeDirectory)}/story.md. Write your verdict to "
                 + $"{Rel(context.PlanReviewPath)}: first line APPROVE or REVISE, then your notes."),
                 context.PlanReviewPath, ct);
@@ -304,21 +296,24 @@ public sealed class ImplementationPipeline(
                 verdict.Approved ? "AI plan review — approved" : "AI plan review — revise", ct);
             if (verdict.Approved)
                 return plan;
-            await DriveAuthorAsync(
+            await DriveAsync(console,
                 $"A reviewer asks for plan changes:\n{verdict.Notes}\nRework {Rel(context.PlanPath)}.", ct);
             plan = await ReadFileAsync(context.PlanPath, ct) ?? plan;
             await ChatAsync(AgentChatRole.Assistant, plan, "Implementation plan (revised)", ct);
+            PersistPlanArtifact();
         }
         return plan;
     }
 
-    private async Task<ReviewVerdict> AiCodeReviewAsync(CancellationToken ct)
+    private async Task<ReviewVerdict> AiCodeReviewAsync(
+        IReviewRunner codeReviewer, AgentConsolePool.AgentConsole console, CancellationToken ct)
     {
         ReviewVerdict verdict = new(false, "no review ran");
         for (var round = 0; round < context.MaxAiReviewRounds; round++)
         {
-            verdict = await reviewer!.ReviewAsync(
-                WithReviewerBase($"Review the UNCOMMITTED changes in this repository (git diff / git status) against the "
+            verdict = await codeReviewer.ReviewAsync(
+                WithReviewerBase($"{context.ReviewInstructions} "
+                + $"Review the UNCOMMITTED changes in this repository (git diff / git status) against the "
                 + $"plan at {Rel(context.PlanPath)}. Write your verdict to {Rel(context.CodeReviewPath)}: "
                 + "first line APPROVE or REVISE, then concrete findings."),
                 context.CodeReviewPath, ct);
@@ -326,7 +321,7 @@ public sealed class ImplementationPipeline(
                 verdict.Approved ? "AI code review — approved" : "AI code review — revise", ct);
             if (verdict.Approved)
                 return verdict;
-            await DriveAuthorAsync(
+            await DriveAsync(console,
                 $"A code reviewer found issues:\n{verdict.Notes}\nFix them; run affected tests; commit nothing.",
                 ct);
         }
@@ -340,7 +335,7 @@ public sealed class ImplementationPipeline(
         var planVerdict = await ReadFileAsync(context.PlanReviewPath, ct);
         var codeVerdict = await ReadFileAsync(context.CodeReviewPath, ct);
         var bundle = $"# Review bundle — {context.WorkItemId}\n\n"
-                     + $"## Changed files\n```\n{status}\n```\n\n"
+                     + $"## Changed files\n{DescribeChanges(status)}\n\n"
                      + $"## Plan\n{plan}\n\n"
                      + (planVerdict is null ? "" : $"## AI plan review\n{planVerdict}\n\n")
                      + (codeVerdict is null ? "" : $"## AI code review\n{codeVerdict}\n\n")
@@ -348,9 +343,42 @@ public sealed class ImplementationPipeline(
         Directory.CreateDirectory(context.OutputDirectory);
         await File.WriteAllTextAsync(
             Path.Combine(context.OutputDirectory, "review-bundle.md"), bundle, ct);
-        if (File.Exists(context.PlanPath))
-            File.Copy(context.PlanPath, Path.Combine(context.OutputDirectory, "plan.md"), overwrite: true);
+        PersistPlanArtifact();
         return bundle;
+    }
+
+    /// <summary>
+    /// git porcelain codes read like line noise in a review card — translate them. The
+    /// two-letter code's staged/unstaged nuance doesn't matter pre-commit; the kind does.
+    /// </summary>
+    internal static string DescribeChanges(string porcelain)
+    {
+        var lines = porcelain.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Where(l => l.Length > 3)
+            .Select(l =>
+            {
+                var kind = l[..2].Trim() switch
+                {
+                    "??" => "new",
+                    "A" => "added",
+                    "D" => "deleted",
+                    "R" => "renamed",
+                    "C" => "copied",
+                    _ => "modified"
+                };
+                return $"- {kind}: `{l[3..].Trim()}`";
+            })
+            .ToList();
+        return lines.Count == 0 ? "_(no changes)_" : string.Join("\n", lines);
+    }
+
+    /// <summary>The plan is an artifact from the moment it exists — reviewable at the gate.</summary>
+    private void PersistPlanArtifact()
+    {
+        if (!File.Exists(context.PlanPath))
+            return;
+        Directory.CreateDirectory(context.OutputDirectory);
+        File.Copy(context.PlanPath, Path.Combine(context.OutputDirectory, "plan.md"), overwrite: true);
     }
 
     private async Task<bool> PushAsync(WorkItem workItem, string branch, CancellationToken ct)
@@ -419,28 +447,36 @@ public sealed class ImplementationPipeline(
             return [];
         var ask = _channel.AskAsync(questions, ct);
         if (context.GateIdleCompaction > TimeSpan.Zero
-            && authorCredentials?.CompactCommand is { Length: > 0 } compact)
+            && consoles.AuthorCredentials?.CompactCommand is { Length: > 0 } compact)
         {
             var idle = Task.Delay(context.GateIdleCompaction, ct);
             if (await Task.WhenAny(ask, idle) == idle && !ask.IsCompleted)
             {
                 await ProgressAsync("gate",
                     "operator idle — compacting the author console so resuming stays cheap", ct);
-                await author.SendCommandAsync(compact, TimeSpan.FromSeconds(20), ct);
+                await consoles.SendCommandAsync(
+                    consoles.Author, compact, TimeSpan.FromSeconds(20), ct);
             }
         }
         return await ask;
     }
 
-    /// <summary>Every author drive; a base without a provider seam rides the first one.</summary>
-    private Task<string> DriveAuthorAsync(string prompt, CancellationToken ct)
+    private Task<string> DriveAsync(
+        AgentConsolePool.AgentConsole console, string prompt, CancellationToken ct)
+        => consoles.DriveAsync(console, prompt, ct);
+
+    /// <summary>Reviews driven into a console (review-by refinement-agent) — same file contract.</summary>
+    private sealed class DrivenReviewRunner(
+        AgentConsolePool pool, AgentConsolePool.AgentConsole console) : IReviewRunner
     {
-        if (_pendingAuthorBase is { } baseInstructions)
+        public async Task<ReviewVerdict> ReviewAsync(
+            string instruction, string verdictPath, CancellationToken ct)
         {
-            _pendingAuthorBase = null;
-            prompt = baseInstructions + "\n\n" + prompt;
+            if (File.Exists(verdictPath))
+                File.Delete(verdictPath);
+            await pool.DriveAsync(console, instruction, ct);
+            return ReviewVerdict.FromFile(verdictPath);
         }
-        return author.DriveAsync(prompt, ct);
     }
 
     private string WithReviewerBase(string instruction)

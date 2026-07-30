@@ -13,7 +13,7 @@ namespace Auxilia.SystemTestSuite.EndToEnd;
 /// The implementation workflow end to end: a dispatched run clones the per-run repository from
 /// the authenticated git server (mount provider + connector), the REAL claude-code-cli slot
 /// provider prepares the console (hook settings + fake account token) and the pipeline DRIVES
-/// the in-image driven-stub CLI through tmux — completeness check, plan, implementation — with
+/// the in-image driven-stub CLI through tmux — refinement check, plan, implementation — with
 /// turn completion arriving over the Claude Stop-hook contract. The story is the email
 /// work-items slot's launch-context mail; AI review and the operator gates are disabled by run
 /// inputs (no operator answers in a system test), push-mode=skip. Success must yield the
@@ -92,7 +92,7 @@ public sealed class ImplementationWorkflowSystemTests
                 new Dictionary<string, string>
                 {
                     ["work-item-id"] = StoryId,
-                    ["completeness-check"] = "true",
+                    ["refinement-check"] = "true",
                     ["ai-plan-review"] = "false",
                     ["ai-code-review"] = "false",
                     ["user-plan-gate"] = "false",
@@ -191,7 +191,7 @@ public sealed class ImplementationWorkflowSystemTests
     /// scripted work-item source (TFS stand-in) supplies the story AND a state vocabulary, so
     /// the finalization stage raises the story-state gate; the test answers it over the raw
     /// steering wire (form-answer via deliver-input) like the steering client would. Asserts the
-    /// declared flow's runtime states walk workspace → completeness → plan → implement →
+    /// declared flow's runtime states walk workspace → refinement → plan → implement →
     /// finalization in order and end all-done.
     /// </summary>
     [Test]
@@ -269,7 +269,7 @@ public sealed class ImplementationWorkflowSystemTests
                 new Dictionary<string, string>
                 {
                     ["work-item-id"] = "SIM-42",
-                    ["completeness-check"] = "true",
+                    ["refinement-check"] = "true",
                     ["ai-plan-review"] = "false",
                     ["ai-code-review"] = "false",
                     ["user-plan-gate"] = "false",
@@ -338,7 +338,7 @@ public sealed class ImplementationWorkflowSystemTests
         Assert.Multiple(() =>
         {
             Assert.That(activeSequence, Is.EqualTo(new[]
-                    { "workspace", "completeness", "plan", "implement", "finalization" }),
+                    { "workspace", "refinement", "plan", "implement", "finalization" }),
                 "The stages must activate in declared order.");
             Assert.That(snapshots.Last().Select(s => s.State), Is.All.EqualTo("done"),
                 "The final snapshot marks every stage done.");

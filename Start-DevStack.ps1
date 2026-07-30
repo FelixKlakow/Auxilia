@@ -119,7 +119,7 @@ if ($configurations.name -notcontains "[SIM] Implementation (driven stub)") {
     Invoke-RestMethod -Method Post "http://localhost:5280/api/configurations" -Headers $headers -ContentType "application/json" -Body (@{
         name = "[SIM] Implementation (driven stub)"; workflowType = "implementation"; tags = @("sim")
         context = @{
-            "completeness-check" = "true"; "ai-plan-review" = "false"; "ai-code-review" = "false"
+            "refinement-check" = "true"; "ai-plan-review" = "false"; "ai-code-review" = "false"
             "user-plan-gate" = "true"; "user-code-gate" = "true"; "push-mode" = "prompt"
             "gate-idle-compaction" = "0"
         }

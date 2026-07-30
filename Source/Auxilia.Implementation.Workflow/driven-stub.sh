@@ -24,9 +24,9 @@ echo "driven-stub ready (hook port: ${HOOK_PORT:-none})"
 while read -r LINE; do
   mkdir -p .auxilia
 
-  # Completeness drive: the story is always complete enough — no open questions.
+  # Refinement drive (names the questions file): the story is always complete enough.
   case "$LINE" in
-    *COMPLETE*)
+    *questions*)
       printf 'NONE\n' > .auxilia/questions.md
       ;;
   esac

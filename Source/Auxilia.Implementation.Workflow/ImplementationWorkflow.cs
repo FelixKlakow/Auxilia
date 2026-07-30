@@ -28,7 +28,7 @@ public static class ImplementationWorkflow
             .Requires<ICodingAgent>("coding-agent",
                 new AiCapabilities { MinContextWindow = 128_000, SupportedModalities = [Modality.Text] },
                 "The AUTHOR: one interactive CLI instance (visible in the run terminal) spans "
-                + "completeness check, plan, and implementation",
+                + "refinement, plan, and implementation by default",
                 providerTypes: ["claude-code-cli", "github-copilot-cli"])
             .Requires<ICodingAgent>("review-agent",
                 new AiCapabilities { MinContextWindow = 128_000, SupportedModalities = [Modality.Text] },
@@ -69,8 +69,59 @@ public static class ImplementationWorkflow
                 // A story is different every run by nature — never baked into a configuration.
                 PerRun = true
             })
-            .RequiresInput(Toggle("completeness-check", "Completeness check",
-                "Assess the story first; open questions become an operator form.", on: true))
+            .RequiresInput(Toggle("refinement-check", "Refinement",
+                "Refine the story first; open questions become an operator form.", on: true))
+            .RequiresInput(Multiline("refinement-instructions", "Refinement instructions",
+                "What the refinement drive tells the agent to do.", ImplementationPrompts.Refinement))
+            .RequiresInput(Multiline("plan-instructions", "Plan instructions",
+                "What the plan drive tells the agent to do — includes the mermaid design diagram.",
+                ImplementationPrompts.Plan))
+            .RequiresInput(Multiline("implement-instructions", "Implementation instructions",
+                "What the implementation drive tells the agent to do.", ImplementationPrompts.Implement))
+            .RequiresInput(Multiline("review-instructions", "Review instructions",
+                "The review stance for BOTH AI review passes (plan and code).",
+                ImplementationPrompts.Review))
+            .RequiresInput(new WorkflowInputDescriptor(
+                "plan-agent", "Planning agent", Required: false,
+                Description: "Which console plans: the refinement console (shared context, "
+                             + "default), a fresh author instance, or the reviewer binding.")
+            {
+                Kind = "Choice", DefaultValue = StageAgents.Shared,
+                Choices = [StageAgents.Shared, StageAgents.Fresh, StageAgents.Reviewer],
+                ChoiceLabels = new Dictionary<string, string>
+                {
+                    [StageAgents.Shared] = "Same console as refinement (keep context)",
+                    [StageAgents.Fresh] = "A fresh author instance",
+                    [StageAgents.Reviewer] = "The reviewer binding",
+                }
+            })
+            .RequiresInput(new WorkflowInputDescriptor(
+                "implement-agent", "Implementation agent", Required: false,
+                Description: "Which console implements: the planning console (shared context, "
+                             + "default), a fresh author instance, or the reviewer binding.")
+            {
+                Kind = "Choice", DefaultValue = StageAgents.Shared,
+                Choices = [StageAgents.Shared, StageAgents.Fresh, StageAgents.Reviewer],
+                ChoiceLabels = new Dictionary<string, string>
+                {
+                    [StageAgents.Shared] = "Same console as planning (keep context)",
+                    [StageAgents.Fresh] = "A fresh author instance",
+                    [StageAgents.Reviewer] = "The reviewer binding",
+                }
+            })
+            .RequiresInput(new WorkflowInputDescriptor(
+                "review-by", "Reviews are done by", Required: false,
+                Description: "The review-agent binding (independent perspective), or the console "
+                             + "that refined the story (full context; compaction applies on demand).")
+            {
+                Kind = "Choice", DefaultValue = ReviewAgents.Reviewer,
+                Choices = [ReviewAgents.Reviewer, ReviewAgents.RefinementAgent],
+                ChoiceLabels = new Dictionary<string, string>
+                {
+                    [ReviewAgents.Reviewer] = "The reviewer binding (independent)",
+                    [ReviewAgents.RefinementAgent] = "The agent that refined the story",
+                }
+            })
             .RequiresInput(Toggle("ai-plan-review", "AI plan review",
                 "A second agent reviews the PLAN, with bounded refinement rounds.", on: true))
             .RequiresInput(Toggle("ai-code-review", "AI code review",
@@ -157,6 +208,15 @@ public static class ImplementationWorkflow
             DefaultValue = on ? "true" : "false"
         };
 
+    /// <summary>A multiline input whose DEFAULT is the built-in text — visible and editable.</summary>
+    private static WorkflowInputDescriptor Multiline(
+        string name, string label, string description, string defaultValue)
+        => new(name, label, Required: false, Description: description)
+        {
+            Kind = "Multiline",
+            DefaultValue = defaultValue
+        };
+
     public static Task RunAsync() => Main(["--test-harness"]);
 
     private static Task ExecuteAsync(IServiceProvider provider, CancellationToken cancellationToken)
@@ -168,23 +228,48 @@ public static class ImplementationWorkflow
         var views = provider.GetService<IViewPublisher>();
         var time = TimeProvider.System;
         var eventViews = views is null ? null : new ConsoleEventViews(views, time);
-        var author = new DrivenConsoleSession(
-            new TmuxSessionHost(),
-            provider.GetService<IConsoleSessionPreparer>(),
-            provider.GetService<IConsoleSessionEventSource>(),
-            eventViews is null ? null : eventViews.PublishAsync);
 
-        return new ImplementationPipeline(
-                provider.GetRequiredService<IWorkItemAccess>(),
-                views,
-                provider.GetService<IWorkflowInputs>(),
-                context,
-                author,
-                provider.GetService<CodingAgentCredentials>(),
-                BuildReviewer(provider, context),
-                new ProcessGitRunner(),
-                time)
-            .RunAsync(cancellationToken);
+        // Every console CLI in the container posts to the same provider listener — one hub
+        // fans it out: view routing once, turn completion per console.
+        var eventSource = provider.GetService<IConsoleSessionEventSource>();
+        var hub = eventSource is null ? null : new ConsoleSessionEventHub(eventSource);
+        if (hub is not null && eventViews is not null)
+            hub.OnEvent(eventViews.PublishAsync);
+
+        var consoles = new AgentConsolePool(
+            context,
+            provider.GetService<CodingAgentCredentials>(),
+            provider.GetKeyedService<CodingAgentCredentials>("review-agent"),
+            () => new TmuxSessionHost(),
+            () => hub?.CreateSource(),
+            provider.GetService<IConsoleSessionPreparer>());
+
+        return RunAsync(provider, context, views, consoles, hub, time, cancellationToken);
+    }
+
+    private static async Task RunAsync(
+        IServiceProvider provider, ImplementationContext context, IViewPublisher? views,
+        AgentConsolePool consoles, ConsoleSessionEventHub? hub, TimeProvider time,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await new ImplementationPipeline(
+                    provider.GetRequiredService<IWorkItemAccess>(),
+                    views,
+                    provider.GetService<IWorkflowInputs>(),
+                    context,
+                    consoles,
+                    BuildReviewer(provider, context),
+                    new ProcessGitRunner(),
+                    time)
+                .RunAsync(cancellationToken);
+        }
+        finally
+        {
+            if (hub is not null)
+                await hub.DisposeAsync();
+        }
     }
 
     private static IReviewRunner? BuildReviewer(IServiceProvider provider, ImplementationContext context)
