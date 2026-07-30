@@ -10,6 +10,34 @@ The platform is three deployables sharing the `Auxilia.Core.Contracts` / `Auxili
 
 Each service owns its own database; secrets live only in the Core.
 
+## License
+
+**Auxilia is source-available, not Open Source.**
+
+| | |
+|---|---|
+| **Free, no license needed** | Evaluation, testing, development, CI, proof of concept, teaching, personal use |
+| **Requires a commercial license** | Any production use, including internal business tools |
+| **Becomes Apache-2.0 on** | 2030-07-28 (this version) |
+
+Auxilia is licensed under the [Business Source License 1.1](LICENSE) — the
+same model used by MariaDB, Sentry and HashiCorp. You may read, fork, modify
+and redistribute the code freely. You may run it as much as you like for
+anything that is not production.
+
+Once you want to run Auxilia in production, [buy a commercial
+license](LICENSE-COMMERCIAL.md). On the Change Date above, this version
+converts automatically to Apache-2.0 and the restriction disappears for good.
+
+I use the term *source-available* deliberately rather than *Open Source*: the
+[Open Source Definition](https://opensource.org/osd) forbids restrictions on
+the field of use, and this license has one. Calling it Open Source would be
+inaccurate.
+
+Questions about whether your use needs a license? Open an issue or
+discussion on this repository — I would much rather answer a question than
+send an invoice to someone who got it wrong by accident.
+
 ## Getting started
 
 Requires .NET 10. Solution file: `Auxilia.slnx`.
