@@ -335,7 +335,7 @@ public sealed class DockerWorkflowLauncher(
     /// <summary>Content-addressed tag: same base + same fragments = the same cached image.</summary>
     internal static string ComposedImageTag(string baseImage, IReadOnlyList<string> layers)
     {
-        var content = baseImage + "\n " + string.Join("\n ", layers);
+        var content = baseImage + "\n\0" + string.Join("\n\0", layers);
         var hash = Convert.ToHexStringLower(
             System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(content)));
         return $"auxilia-env:{hash[..16]}";
