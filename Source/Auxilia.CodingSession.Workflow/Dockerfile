@@ -22,5 +22,8 @@ COPY --from=build /app/publish .
 # CR characters in case the file was checked out with Windows line endings.
 COPY Source/Auxilia.CodingSession.Workflow/claude-session-stub.sh /usr/local/bin/claude-session-stub
 RUN sed -i 's/\r$//' /usr/local/bin/claude-session-stub && chmod +x /usr/local/bin/claude-session-stub
+# The base image ships no locale (POSIX/C = ASCII): tmux and the CLIs would mangle every
+# non-ASCII character. Late in the file so the cached tooling layers stay untouched.
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 EXPOSE 7681
 ENTRYPOINT ["dotnet", "Auxilia.CodingSession.Workflow.dll"]

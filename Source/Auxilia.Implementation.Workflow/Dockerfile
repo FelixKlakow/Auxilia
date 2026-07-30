@@ -27,5 +27,8 @@ COPY Source/Auxilia.Copilot.Workflow/copilot-stub.sh /usr/local/bin/copilot-stub
 COPY Source/Auxilia.Implementation.Workflow/driven-stub.sh /usr/local/bin/driven-stub
 RUN sed -i 's/\r$//' /usr/local/bin/claude-stub /usr/local/bin/copilot-stub /usr/local/bin/driven-stub \
  && chmod +x /usr/local/bin/claude-stub /usr/local/bin/copilot-stub /usr/local/bin/driven-stub
+# The base image ships no locale (POSIX/C = ASCII): tmux and the CLIs would mangle every
+# non-ASCII character. Late in the file so the cached tooling layers stay untouched.
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 EXPOSE 7681
 ENTRYPOINT ["dotnet", "Auxilia.Implementation.Workflow.dll"]
