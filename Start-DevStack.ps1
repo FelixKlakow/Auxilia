@@ -28,9 +28,17 @@ $runnerEnv = @{
 }
 
 # The bootstrap key seeds the dev admin principal idempotently (by hash) — without it a fresh
-# core-data store would have NO principal matching the scripts' bearer key.
+# core-data store would have NO principal matching the scripts' bearer key. The static workflow
+# type registers "implementation" as Active on a fresh store (EnsureSeededAsync — idempotent).
+$apiEnv = @{
+    ASPNETCORE_URLS                                  = "http://localhost:5280"
+    CoreSecurity__BootstrapApiKey                    = "auxilia-steering-dev-key"
+    CoreApi__StaticWorkflowTypes__0__WorkflowType    = "implementation"
+    CoreApi__StaticWorkflowTypes__0__PackageUri      = "docker://auxilia-implementation-workflow:system-test"
+}
+$apiSetup = ($apiEnv.GetEnumerator() | ForEach-Object { "`${env:$($_.Key)}='$($_.Value)'" }) -join "; "
 Start-Process pwsh -WorkingDirectory $repo -ArgumentList "-NoExit", "-Command",
-    "`$env:ASPNETCORE_URLS='http://localhost:5280'; `$env:CoreSecurity__BootstrapApiKey='auxilia-steering-dev-key'; dotnet run --project Source/Auxilia.Core.Api --no-build"
+    "$apiSetup; dotnet run --project Source/Auxilia.Core.Api --no-build"
 
 # ${env:...} braces are REQUIRED: several names carry hyphens (claude-code-cli), which the
 # plain $env:name syntax rejects as a parser error — silently killing the spawned window.
