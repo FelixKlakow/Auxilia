@@ -27,10 +27,14 @@ $runnerEnv = @{
     WorkflowDispatcher__ApprovedLongLivingWorkflowTypes__0        = "implementation"
 }
 
+# The bootstrap key seeds the dev admin principal idempotently (by hash) — without it a fresh
+# core-data store would have NO principal matching the scripts' bearer key.
 Start-Process pwsh -WorkingDirectory $repo -ArgumentList "-NoExit", "-Command",
-    "`$env:ASPNETCORE_URLS='http://localhost:5280'; dotnet run --project Source/Auxilia.Core.Api --no-build"
+    "`$env:ASPNETCORE_URLS='http://localhost:5280'; `$env:CoreSecurity__BootstrapApiKey='auxilia-steering-dev-key'; dotnet run --project Source/Auxilia.Core.Api --no-build"
 
-$envSetup = ($runnerEnv.GetEnumerator() | ForEach-Object { "`$env:$($_.Key)='$($_.Value)'" }) -join "; "
+# ${env:...} braces are REQUIRED: several names carry hyphens (claude-code-cli), which the
+# plain $env:name syntax rejects as a parser error — silently killing the spawned window.
+$envSetup = ($runnerEnv.GetEnumerator() | ForEach-Object { "`${env:$($_.Key)}='$($_.Value)'" }) -join "; "
 Start-Process pwsh -WorkingDirectory $repo -ArgumentList "-NoExit", "-Command",
     "$envSetup; dotnet run --project Source/Auxilia.Core.Runner --no-build"
 
