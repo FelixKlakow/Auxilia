@@ -9,4 +9,14 @@ namespace Auxilia.Workflows.AiAgent.CodingAgent;
 public interface IConsoleSessionPreparer
 {
     Task PrepareAsync(string workspaceDirectory, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Registers a workflow-hosted MCP server with the console CLI in the provider's native
+    /// config (Claude: workspace <c>.mcp.json</c>; Copilot: <c>~/.copilot/mcp-config.json</c>).
+    /// Providers without MCP support ignore it — the workflow's file contract still works.
+    /// </summary>
+    Task RegisterMcpServerAsync(
+        string serverName, string endpointUrl, string workspaceDirectory,
+        CancellationToken cancellationToken)
+        => Task.CompletedTask;
 }

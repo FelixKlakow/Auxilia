@@ -66,6 +66,30 @@ public sealed class CopilotConsoleBridge : IConsoleSessionEventSource, IConsoleS
             cancellationToken);
     }
 
+    /// <summary>Registers a workflow-hosted MCP server in the Copilot CLI's config (merged).</summary>
+    public async Task RegisterMcpServerAsync(
+        string serverName, string endpointUrl, string workspaceDirectory,
+        CancellationToken cancellationToken)
+    {
+        var configPath = Path.Combine(HomeDirectory, ".copilot", "mcp-config.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        var config = File.Exists(configPath)
+            ? System.Text.Json.Nodes.JsonNode.Parse(
+                  await File.ReadAllTextAsync(configPath, cancellationToken))
+                  as System.Text.Json.Nodes.JsonObject
+              ?? new System.Text.Json.Nodes.JsonObject()
+            : new System.Text.Json.Nodes.JsonObject();
+        var servers = config["mcpServers"] as System.Text.Json.Nodes.JsonObject
+                      ?? new System.Text.Json.Nodes.JsonObject();
+        servers[serverName] = new System.Text.Json.Nodes.JsonObject
+        {
+            ["type"] = "http",
+            ["url"] = endpointUrl,
+        };
+        config["mcpServers"] = servers;
+        await File.WriteAllTextAsync(configPath, config.ToJsonString(), cancellationToken);
+    }
+
     public ValueTask StopAsync()
     {
         _lifetime?.Cancel();

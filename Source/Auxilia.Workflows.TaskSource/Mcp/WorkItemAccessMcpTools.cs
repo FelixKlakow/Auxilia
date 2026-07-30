@@ -85,6 +85,56 @@ public sealed class WorkItemAccessMcpTools : CapabilityMcpToolsBase
                 Description = "Returns a JSON array of work items for the given JSON-encoded array of IDs."
             }));
 
+        options.ToolCollection.Add(McpServerTool.Create(
+            async (string id, CancellationToken ct) =>
+            {
+                try
+                {
+                    var relations = await access.GetRelationsAsync(id, ct);
+                    return JsonSerializer.Serialize(relations.Select(r => new
+                    {
+                        kind = r.Kind,
+                        targetId = r.TargetId,
+                        title = r.Title,
+                        url = r.Url
+                    }), jsonOptions);
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogError(ex, "Error in get_work_item_relations");
+                    return $"Error: {ex.Message}";
+                }
+            },
+            new McpServerToolCreateOptions
+            {
+                Name = SlotMcpPrefix.Format(slotName, "get_work_item_relations"),
+                Description = "Returns a work item's relations as JSON: parent/child/related "
+                              + "work items (kind, targetId, title) and hyperlinks (kind 'link', url). "
+                              + "Fetch a related item's full detail with get_work_item."
+            }));
+
+        options.ToolCollection.Add(McpServerTool.Create(
+            async (string id, CancellationToken ct) =>
+            {
+                try
+                {
+                    var states = await access.GetStatesAsync(id, ct);
+                    return states.Count == 0
+                        ? "This work item's source has no state model."
+                        : string.Join(", ", states);
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogError(ex, "Error in get_work_item_states");
+                    return $"Error: {ex.Message}";
+                }
+            },
+            new McpServerToolCreateOptions
+            {
+                Name = SlotMcpPrefix.Format(slotName, "get_work_item_states"),
+                Description = "Returns the state vocabulary of the work item's type at its source."
+            }));
+
         return options;
     }
 }

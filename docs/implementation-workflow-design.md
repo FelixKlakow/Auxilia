@@ -112,6 +112,19 @@ riding the session environment, never a log); providers without a system-prompt 
 (Copilot) get them prepended to the session's first prompt. The base prompt is instructions,
 not secrets — argv exposure is acceptable where a provider needs it.
 
+## Work-item MCP in the session (2026-07-30)
+
+The workflow HOSTS a `WorkItemAccessMcpTools` server (loopback HTTP, `CapabilityMcpToolsBase`)
+over the run's `work-items` binding and registers it with the console CLI through
+`IConsoleSessionPreparer.RegisterMcpServerAsync` — Claude: workspace `.mcp.json` (project
+servers auto-approved), Copilot: `~/.copilot/mcp-config.json`. The agent reads work-item
+detail itself — `get_work_item`, `get_work_items`, `get_work_item_relations` (parents,
+children, related items, hyperlinks — `IWorkItemAccess.GetRelationsAsync`), and
+`get_work_item_states` — instead of only the materialized story file. `.auxilia/` and
+`.mcp.json` are excluded via `.git/info/exclude`, so review bundles stay clean and the final
+commit never includes run mechanics. Externally CONFIGURED MCP servers (operator-supplied)
+are a separate, deferred topic.
+
 ## Gate rendering: markdown and mermaid
 
 Gate details carry `DetailFormat` (open vocabulary): `"markdown"` renders through the native

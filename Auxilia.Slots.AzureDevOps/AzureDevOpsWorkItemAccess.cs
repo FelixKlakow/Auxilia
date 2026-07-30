@@ -19,12 +19,13 @@ public sealed class AzureDevOpsWorkItemAccess : IWorkItemAccess, IDisposable
     private readonly HttpClient httpClient;
     private readonly Dictionary<string, CachedItem> cache = [];
 
-    /// <summary>Project, work-item type and attachment relations remembered per work item — comments and states need them.</summary>
+    /// <summary>Project, work-item type and relations remembered per work item — comments, states, and links need them.</summary>
     private sealed record CachedItem(
         WorkItem Item,
         string Project,
         string WorkItemType,
-        IReadOnlyList<(string Url, string FileName)> Attachments);
+        IReadOnlyList<(string Url, string FileName)> Attachments,
+        IReadOnlyList<(string Rel, string Url, string? Comment)> Relations);
 
     public AzureDevOpsWorkItemAccess(string orgUrl, string personalAccessToken, HttpMessageHandler? messageHandler = null)
     {
@@ -125,6 +126,54 @@ public sealed class AzureDevOpsWorkItemAccess : IWorkItemAccess, IDisposable
         cache.Remove(id);
     }
 
+    public async Task<IReadOnlyList<WorkItemRelation>> GetRelationsAsync(
+        string id, CancellationToken cancellationToken = default)
+    {
+        var cached = await ResolveAsync(id, cancellationToken);
+        if (cached is null)
+            return [];
+
+        var relations = new List<WorkItemRelation>();
+        foreach (var (rel, url, comment) in cached.Relations)
+        {
+            var kind = rel switch
+            {
+                "System.LinkTypes.Hierarchy-Reverse" => "parent",
+                "System.LinkTypes.Hierarchy-Forward" => "child",
+                "System.LinkTypes.Related" => "related",
+                "System.LinkTypes.Dependency-Forward" => "successor",
+                "System.LinkTypes.Dependency-Reverse" => "predecessor",
+                "Hyperlink" => "link",
+                "AttachedFile" => null, // attachments have their own read path
+                _ => rel
+            };
+            if (kind is null)
+                continue;
+            if (kind == "link")
+            {
+                relations.Add(new WorkItemRelation(kind, "", comment, url));
+                continue;
+            }
+
+            // Work-item relations end in /workItems/{id}; the title resolves best effort
+            // (and lands in the cache for any later direct read).
+            var targetId = url.Split('/').LastOrDefault() ?? "";
+            string? title = null;
+            if (targetId.Length > 0 && targetId.All(char.IsAsciiDigit))
+                try
+                {
+                    title = (await GetWorkItemAsync(targetId, cancellationToken))?.Title;
+                }
+                catch (InvalidOperationException)
+                {
+                    // The link target may be unreadable with this PAT — the id still helps.
+                }
+            relations.Add(new WorkItemRelation(kind, targetId, title, url));
+        }
+
+        return relations;
+    }
+
     public void Dispose() => httpClient.Dispose();
 
     private async Task<CachedItem?> ResolveAsync(string id, CancellationToken cancellationToken)
@@ -154,9 +203,32 @@ public sealed class AzureDevOpsWorkItemAccess : IWorkItemAccess, IDisposable
             item,
             Text(fields, "System.TeamProject") ?? "",
             Text(fields, "System.WorkItemType") ?? "",
-            AttachmentRelationsOf(root));
+            AttachmentRelationsOf(root),
+            RelationsOf(root));
         cache[id] = resolved;
         return resolved;
+    }
+
+    private static IReadOnlyList<(string Rel, string Url, string? Comment)> RelationsOf(JsonElement root)
+    {
+        if (!root.TryGetProperty("relations", out var relations) || relations.ValueKind != JsonValueKind.Array)
+            return [];
+
+        var result = new List<(string, string, string?)>();
+        foreach (var relation in relations.EnumerateArray())
+        {
+            var rel = relation.TryGetProperty("rel", out var r) ? r.GetString() : null;
+            var url = relation.TryGetProperty("url", out var u) ? u.GetString() : null;
+            if (rel is not { Length: > 0 } || url is not { Length: > 0 })
+                continue;
+            var comment = relation.TryGetProperty("attributes", out var attributes)
+                          && attributes.TryGetProperty("comment", out var c)
+                ? c.GetString()
+                : null;
+            result.Add((rel, url, comment));
+        }
+
+        return result;
     }
 
     private static string? Text(JsonElement fields, string name)

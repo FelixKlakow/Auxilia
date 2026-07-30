@@ -66,6 +66,35 @@ public sealed class ClaudeInteractiveLogin(
     }
 
     /// <summary>
+    /// Registers a workflow-hosted MCP server in the workspace's <c>.mcp.json</c> (merged —
+    /// several capabilities may each register one) and auto-approves project MCP servers in
+    /// the CLI settings, so the session starts with the tools available and no prompt.
+    /// </summary>
+    public async Task RegisterMcpServerAsync(
+        string serverName, string endpointUrl, string workspaceDirectory,
+        CancellationToken cancellationToken)
+    {
+        var mcpPath = Path.Combine(workspaceDirectory, ".mcp.json");
+        var config = File.Exists(mcpPath)
+            ? JsonNode.Parse(await File.ReadAllTextAsync(mcpPath, cancellationToken)) as JsonObject
+              ?? new JsonObject()
+            : new JsonObject();
+        var servers = config["mcpServers"] as JsonObject ?? new JsonObject();
+        servers[serverName] = new JsonObject { ["type"] = "http", ["url"] = endpointUrl };
+        config["mcpServers"] = servers;
+        await File.WriteAllTextAsync(mcpPath, config.ToJsonString(), cancellationToken);
+
+        var settingsPath = Path.Combine(HomeDirectory, ".claude", "settings.json");
+        Directory.CreateDirectory(Path.Combine(HomeDirectory, ".claude"));
+        var settings = File.Exists(settingsPath)
+            ? JsonNode.Parse(await File.ReadAllTextAsync(settingsPath, cancellationToken)) as JsonObject
+              ?? new JsonObject()
+            : new JsonObject();
+        settings["enableAllProjectMcpServers"] = true;
+        await File.WriteAllTextAsync(settingsPath, settings.ToJsonString(), cancellationToken);
+    }
+
+    /// <summary>
     /// Wires the CLI's hook system to the in-container listener: Notification, PreToolUse,
     /// PostToolUse, and Stop each POST their stdin payload to the loopback endpoint. The
     /// command swallows every failure and prints NOTHING — hook stdout feeds CLI decisions,

@@ -252,6 +252,23 @@ public static class ImplementationWorkflow
         AgentConsolePool consoles, ConsoleSessionEventHub? hub, TimeProvider time,
         CancellationToken cancellationToken)
     {
+        // The story source rides into the SESSION as MCP: the agent reads work-item detail
+        // (relations, parents, states) itself instead of only the materialized story file.
+        Auxilia.Workflows.TaskSource.Mcp.WorkItemAccessMcpTools? workItemTools = null;
+        if (provider.GetService<IConsoleSessionPreparer>() is { } preparer)
+        {
+            workItemTools = new Auxilia.Workflows.TaskSource.Mcp.WorkItemAccessMcpTools(
+                "work-items", provider.GetRequiredService<IWorkItemAccess>());
+            await workItemTools.StartAsync(
+                new Auxilia.Workflows.Mcp.HttpMcpTransportConfig(
+                    "http://127.0.0.1:0", "auxilia-work-items"),
+                cancellationToken);
+            if (workItemTools.CurrentTransport
+                is Auxilia.Workflows.Mcp.HttpMcpTransportConfig { EndpointUrl: { Length: > 0 } url })
+                await preparer.RegisterMcpServerAsync(
+                    "auxilia-work-items", url, context.WorkspaceDirectory, cancellationToken);
+        }
+
         try
         {
             await new ImplementationPipeline(
@@ -267,6 +284,8 @@ public static class ImplementationWorkflow
         }
         finally
         {
+            if (workItemTools is not null)
+                await workItemTools.StopAsync(CancellationToken.None);
             if (hub is not null)
                 await hub.DisposeAsync();
         }

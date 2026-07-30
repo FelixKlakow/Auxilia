@@ -4,6 +4,13 @@ namespace Auxilia.Workflows.TaskSource;
 public sealed record WorkItemAttachment(string FileName, byte[] Content);
 
 /// <summary>
+/// One relation of a work item: parent/child/related work items (with their id and, best
+/// effort, title) or plain hyperlinks (kind "link", the URL in <see cref="Url"/>). Kinds are
+/// an open, source-mapped vocabulary — never a compiled enum.
+/// </summary>
+public sealed record WorkItemRelation(string Kind, string TargetId, string? Title, string? Url);
+
+/// <summary>
 /// Behavioral contract for work-item access inside a workflow.
 /// Replaces the <see cref="ITaskSource"/> placeholder.
 /// </summary>
@@ -31,4 +38,12 @@ public interface IWorkItemAccess
     /// <summary>Sets the work item's state to one of <see cref="GetStatesAsync"/>'s values.</summary>
     Task SetStateAsync(string id, string state, CancellationToken cancellationToken = default)
         => throw new NotSupportedException("This work-item source has no state model.");
+
+    /// <summary>
+    /// The work item's relations — parents, children, related items, hyperlinks — in the
+    /// source's own link vocabulary. Providers without a link model return none.
+    /// </summary>
+    Task<IReadOnlyList<WorkItemRelation>> GetRelationsAsync(
+        string id, CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<WorkItemRelation>>([]);
 }

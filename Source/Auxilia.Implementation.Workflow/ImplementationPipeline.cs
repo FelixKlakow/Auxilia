@@ -49,6 +49,15 @@ public sealed class ImplementationPipeline(
         try
         {
             Directory.CreateDirectory(context.ExchangeDirectory);
+            // The exchange directory and MCP registration are RUN mechanics, not story
+            // content — repo-locally excluded so review bundles stay clean and the final
+            // commit never picks them up.
+            if (Directory.Exists(Path.Combine(context.WorkspaceDirectory, ".git")))
+            {
+                var exclude = Path.Combine(context.WorkspaceDirectory, ".git", "info", "exclude");
+                Directory.CreateDirectory(Path.GetDirectoryName(exclude)!);
+                await File.AppendAllTextAsync(exclude, "\n.auxilia/\n.mcp.json\n", ct);
+            }
             await PublishFlowAsync(activeStep: "workspace", ct);
             var branch = context.BranchNameFor(workItem.Title);
             await git.RunAsync(context.WorkspaceDirectory, $"checkout -b {branch}", ct);

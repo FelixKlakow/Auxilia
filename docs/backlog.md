@@ -40,10 +40,15 @@
 - ~~**Plan artifacts**~~ — **DONE 2026-07-30**: default plan instructions demand a mermaid
   `## Design` section; plan.md is copied to the run outputs the moment it exists (reviewable
   at the plan gate, not only after implementation).
-- **Work-item MCP** — the agent must reach `IWorkItemAccess`/task-source detail (links, parent
-  work items, relations) via MCP inside the session (the `CapabilityMcpToolsBase` pattern is the
-  planned road). Later, separately: externally configured MCP servers passed into sessions —
-  deferred, complicated.
+- ~~**Work-item MCP**~~ — **DONE 2026-07-30**: `IWorkItemAccess.GetRelationsAsync` (+
+  `WorkItemRelation`; AzDO maps Hierarchy/Related/Dependency/Hyperlink rels with best-effort
+  titles), `WorkItemAccessMcpTools` gained `get_work_item_relations` + `get_work_item_states`,
+  and the implementation workflow HOSTS the server (loopback HTTP) for the driven console:
+  `IConsoleSessionPreparer.RegisterMcpServerAsync` (Claude: workspace `.mcp.json` +
+  `enableAllProjectMcpServers`; Copilot: `~/.copilot/mcp-config.json`). `.auxilia/` and
+  `.mcp.json` are repo-locally git-excluded (clean bundles; the final commit never picks them
+  up). Real-CLI live verification pending. Later, separately: externally configured MCP
+  servers passed into sessions — deferred, complicated.
 
 ## steering client — feedback batch 2026-07-30 (steering client repo)
 - **Step click-through** — clicking a finished workflow step opens that step's data (the last
