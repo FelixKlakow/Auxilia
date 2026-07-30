@@ -2,7 +2,7 @@
 
 > **⚠️ SUPERSEDED (2026-07-26) by [`steering-client-integration.md`](../steering-client-integration.md).**
 > Read that document, not this one, for the current architecture. This draft's **spectrum** (S1–S5) remains valid, but three framing decisions here are **now wrong**:
-> 1. *"Auxilia is a reference/predecessor, not the target."* → **The Auxilia Core *is* the server**: it launches the egress-locked containers, over RabbitMQ, and deploys the whole thing. the steering client is only a **client**.
+> 1. *"Auxilia is a reference/predecessor, not the target."* → **The Auxilia Core *is* the server**: it launches the egress-locked containers, over RabbitMQ, and deploys the whole thing. The steering client is only a **client**.
 > 2. *"The the steering client implements P1–P3 behind seams."* → **The steering mechanism is workflow-bound, not product-hosted.** The Core is a dumb pipe that carries **opaque** input/output between a client and a running run and audits it; the workflow owns the decision logic and the hold; the steering client is a pure `Auxilia.Core.Client` consumer. There is **no** websocket, `SteeringSession`, mandate, or decision store in the product.
 > 3. *"Credentials never enter the sandbox; credentialed actions run in the Hub."* → **Not Auxilia's model.** A signature-trusted workflow **does** receive scoped, per-instance-encrypted credentials just-in-time and uses them inside the container under egress policy (only the initial repo-clone token is stripped Core-side). See §4 of the source of truth.
 >
