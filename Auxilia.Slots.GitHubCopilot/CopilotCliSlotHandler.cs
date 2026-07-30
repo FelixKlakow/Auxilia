@@ -35,6 +35,14 @@ public sealed class CopilotCliSlotHandler : ISlotHandler
                     },
                     UnattendedCliArguments = "--allow-all-tools",
                 });
+                // Driven-console seam (the implementation author): the CLI has no hook system,
+                // so turn completion arrives over the platform's hook wire — see
+                // CopilotConsoleBridge for who feeds it.
+                services.AddScoped<CopilotConsoleBridge>();
+                services.AddScoped<IConsoleSessionEventSource>(provider =>
+                    provider.GetRequiredService<CopilotConsoleBridge>());
+                services.AddScoped<IConsoleSessionPreparer>(provider =>
+                    provider.GetRequiredService<CopilotConsoleBridge>());
                 break;
 
             // The reviewer of the implementation workflow: a SECOND agent instance, keyed by

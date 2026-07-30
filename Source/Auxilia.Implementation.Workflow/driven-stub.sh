@@ -6,9 +6,12 @@
 # loopback hook listener whose port it reads from the settings ClaudeInteractiveLogin wrote
 # (~/.claude/settings.json). It produces the same .auxilia exchange files a real author
 # would (paths relative to the cwd the session was started in — the workspace) and never
-# exits on its own: the workflow ends the tmux session.
+# exits on its own: the workflow ends the tmux session. Providers without a hook system
+# (Copilot) announce the listener port in ~/.auxilia/console-hook-port instead — the same
+# wire, found via the fallback below.
 
 HOOK_PORT=$(sed -n 's/.*127\.0\.0\.1:\([0-9][0-9]*\).*/\1/p' "$HOME/.claude/settings.json" 2>/dev/null | head -n 1)
+[ -n "$HOOK_PORT" ] || HOOK_PORT=$(cat "$HOME/.auxilia/console-hook-port" 2>/dev/null)
 
 signal_stop() {
   [ -n "$HOOK_PORT" ] || return 0
