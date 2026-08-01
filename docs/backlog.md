@@ -59,12 +59,23 @@
   (device-code/OIDC) sign-in that mints a per-user bearer (per-user audit/SoD). Needs a Core
   non-browser token-issue path.
 
-## Config-store ownership (deferred as its own step)
-- **Move the persisted config store out of the Core.** The Core shouldn't own persisted
-  workflows. Today `/api/configurations*` + `RunConfigurationAsync` still live in Core
-  (tangled with the `CoreApiDispatch` acceptance test). Target: the product owns the config
-  store; the Core validates a submitted spec against its **schema registry** and runs it via
-  the Run API.
+## Config store — DECIDED 2026-08-01: stays in the Core
+The earlier "move the config store out of the Core" direction is reversed by decision, not
+inertia: the Core is the one shared authority every client reaches, so Core-resident
+configurations give cross-device/multi-client sharing (steering client on any machine, AdminConsole,
+MCP agents see the same list) without inventing a product-side persistence service. This does
+not violate semantics-blindness — a stored configuration is an opaque, schema-validated
+document: the Core validates it against its schema registry, stores it, dispatches it via the
+Run API, and never interprets what the workflow means (the same storage-vs-semantics division
+as artifacts). Follow-up now tracked instead:
+- **Per-configuration ownership + sharing.** Today visibility is gated only per workflow TYPE
+  (access-list entries per `(type, action)` granting a principal or role — exclusive when
+  present; no direct first-class-group entries). A saved configuration has no owner and no
+  grants: anyone passing the type gate sees every configuration. Mirror the connector model —
+  configurations get an owner and personal/shared scoping with principal / first-class-group /
+  directory-group grants, editable by the owner or a configuration manager.
+- **Group entries in workflow-type access lists** — allow granting a first-class group
+  directly instead of only via roles.
 
 ## Environment capabilities
 - **Windows-container runners** — windows-base layers are stored but never served to Linux
