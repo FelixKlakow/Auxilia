@@ -80,9 +80,9 @@
 - **AdminConsole editors on the generic model** — the Blazor editors still assume
   connector-only bindings and know nothing of provider-type narrowing, choice labels,
   environment slots, or the plan view.
-- **Connector-grants editor UI** — grants (principal / first-class group / directory
-  group, batch-replace via `SetConnectorGrants`) are API/MCP-only; neither the
-  AdminConsole nor the steering client has an editing surface for them yet.
+- **Connector-grants editor in the steering client** — grants (principal / first-class group /
+  directory group, batch-replace via `SetConnectorGrants`) are editable in the
+  AdminConsole; the steering client's Connections tab has no grants surface yet.
 
 ## CI validation — Docker system tests (not runnable locally)
 - Email slot **plugin-dependency loading** (highest risk — MailKit/MimeKit/BouncyCastle
