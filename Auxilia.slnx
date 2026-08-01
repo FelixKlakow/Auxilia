@@ -90,6 +90,8 @@
   <Project Path="Auxilia.Core.Api.Tests/Auxilia.Core.Api.Tests.csproj" />
   <Project Path="Auxilia.Core.Client/Auxilia.Core.Client.csproj" />
   <Project Path="Auxilia.Core.Contracts/Auxilia.Core.Contracts.csproj" />
+  <Project Path="Auxilia.Workflows.Client/Auxilia.Workflows.Client.csproj" />
+  <Project Path="Auxilia.Workflows.Client.Tests/Auxilia.Workflows.Client.Tests.csproj" />
   <Project Path="Auxilia.Implementation.Workflow.Tests/Auxilia.Implementation.Workflow.Tests.csproj" />
   <Project Path="Auxilia.SystemTestSuite\Auxilia.SystemTestSuite.csproj" />
   <Project Path="Auxilia.WorkflowStudio.Tests/Auxilia.WorkflowStudio.Tests.csproj" />
