@@ -47,6 +47,11 @@ builder.Services.AddPlatformEntity<SlotProviderRecord>(platformData);
 builder.Services.AddPlatformEntity<ProviderCatalogRecord>(platformData);
 // Admin-managed environment layers (Dockerfile fragments the runner composes onto workflow images).
 builder.Services.AddPlatformEntity<EnvironmentLayerRecord>(platformData);
+// Batched audit writes are an opt-in for high request rates (Audit:BatchedWrites); the
+// default keeps every append a completed store write.
+var auditSettings = new Auxilia.PlatformData.AuditLogSettings();
+builder.Configuration.GetSection("Audit").Bind(auditSettings);
+builder.Services.AddSingleton(auditSettings);
 builder.Services.AddSingleton<AuditLog>();
 
 // --- Governance: identity, RBAC, Policy Engine (the Core is the auth + audit authority) ---
