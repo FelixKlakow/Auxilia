@@ -19,7 +19,8 @@ Standalone deployable. Drives `Auxilia.Core.Runner` over the message bus; owns i
 
 ## REST surface (every route `.RequireAuthorization()` + policy-checked)
 - `POST /api/runs` (inline, "on the fly"), `GET /api/runs`, `GET /api/runs/{id}`, `POST /api/runs/{id}/cancel`
-- `POST /api/configurations`, `GET /api/configurations`, `GET /api/configurations/{id}`, `POST /api/configurations/{id}/run`
+- `POST /api/configurations` (personal = self-owned default; company needs `workflow-configuration.manage`), `GET /api/configurations` + `GET /api/configurations/{id}` (visibility-filtered: company + owned/granted personal; managers see all), `PUT /api/configurations/{id}` + `DELETE` + `PUT .../grants` (owner or manager), `POST /api/configurations/{id}/run` (visibility-gated)
+- `GET /api/roles` (role→permission matrix), `GET /api/directory/subjects` (sharing pickers: principal/group ids + display names only) — any authenticated principal
 - `POST /api/connectors` (personal = self-owned; company needs `slot-config.write`), `GET /api/connectors`, `GET /api/connectors/{id}`, `POST /api/connectors/{id}/grants` (owner or `slot-config.write`)
 - `POST /api/groups`, `GET /api/groups`, `POST /api/groups/{id}/members`, `POST /api/groups/{id}/roles` (all `principal.administer`)
 - `GET/POST /api/identity/group-mappings`, `DELETE /api/identity/group-mappings/{id}` (directory group→role mappings; all `identity-source.manage`)

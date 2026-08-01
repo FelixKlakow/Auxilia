@@ -912,7 +912,7 @@ An authorization check is the triple **(principal, action, resource)** evaluated
 
 - **Actions** are fine-grained verbs per resource type: `workflow.trigger`, `workflow.cancel`, `run.observe`, `run.provide-input`, `view.subscribe`, `artifact.consume`, `slot-config.write`, `bundle.manage`, `policy.administer`, `audit.read`, …
 - **Resources** carry a scope chain: `tenant → workflow-type → run/view/artifact`. A grant at an outer scope implies the inner ones unless explicitly narrowed
-- **Workflow-type access lists** are the primary day-to-day instrument: operators declare per workflow type which roles or individual principals may trigger, observe, and approve it
+- **Workflow-type access lists** are the primary day-to-day instrument: per workflow type, entries grant an action to a role, an individual principal, or every member of a first-class group; when entries exist for a (type, action) they are the exclusive grant source (administered via MCP, gated `policy.administer`)
 - v1 is **single-tenant**, but every resource and grant carries a `TenantId` (default tenant) so multi-tenancy is a data migration, not a schema break
 
 ### Policy Engine evaluation
@@ -929,6 +929,15 @@ flowchart LR
 ```
 
 Both outcomes are always audited. The Policy Engine is a library used at every enforcement point in the Core — every REST endpoint, the Core MCP, dispatch (the Run API's trigger check), and administration operations — and the Product authorizes through the Core, so UI and MCP cannot diverge.
+
+### Resource ownership and sharing
+
+Connectors and run configurations share one ownership model (`ResourceScope` + `AccessGrant` in the contracts, evaluated by the Core's `AccessGrantEvaluator`):
+
+- **Personal** (the default on creation) — owned by the creating principal; visible and usable only to the owner, granted subjects, and managers. Grants admit a **principal**, every member of a **first-class group**, or an **AD directory group** (matched against the groups captured at the principal's last federated sign-in). Invisible resources read as *not found*, and what a principal cannot see it cannot run or bind.
+- **Company** — shared platform-wide; creating one is the deliberate opt-in gated by the resource's management permission (`slot-config.write` for connectors, `workflow-configuration.manage` for configurations).
+- Editing, deleting, and re-sharing a personal resource is **owner-or-manager**; company resources are manager-only.
+- Clients gate what they display on `CurrentPrincipal.Permissions` (the role-derived effective action set from `GET /auth/me`); grant editors pick subjects from `GET /api/directory/subjects`, which exposes ids and display names only — sharing needs a people picker, not principal administration.
 
 ### Groups and group mapping
 
