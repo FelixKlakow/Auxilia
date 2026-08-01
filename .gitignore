@@ -438,3 +438,6 @@ FodyWeavers.xsd
 
 # Core.Api local runtime state (JSON store, package store)
 Source/Auxilia.Core.Api/core-data/
+
+# Start-DevStack.ps1 runtime state (service logs, PIDs)
+.devstack/

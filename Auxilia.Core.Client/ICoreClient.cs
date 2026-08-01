@@ -58,6 +58,20 @@ public interface ICoreClient
     /// <summary>Deletes all finished (terminal) runs and their persisted views; returns how many.</summary>
     Task<int> ClearFinishedRunsAsync(CancellationToken ct = default);
 
+    // --- Artifacts ---
+    /// <summary>Queries persisted-artifact metadata (newest first); requires the artifact.consume permission.</summary>
+    Task<PagedResult<ArtifactDto>> QueryArtifactsAsync(ArtifactQuery query, CancellationToken ct = default);
+    Task<ArtifactDto?> GetArtifactAsync(Guid id, CancellationToken ct = default);
+    /// <summary>Opens an artifact's payload; null when the artifact (or its payload) is unknown.</summary>
+    Task<Stream?> OpenArtifactContentAsync(Guid id, CancellationToken ct = default);
+    /// <summary>
+    /// Artifact events over Server-Sent Events, SERVER-SIDE FILTERED by artifact type and/or work
+    /// item — the client-surface way to chain on artifacts (no message-bus access required).
+    /// Runs until <paramref name="ct"/> is cancelled.
+    /// </summary>
+    IAsyncEnumerable<ArtifactStreamEvent> StreamArtifactEventsAsync(
+        string? artifactType = null, string? workItemId = null, CancellationToken ct = default);
+
     // --- Audit ---
     /// <summary>Queries the Core's centralized audit log (newest first); requires the audit-read permission.</summary>
     Task<PagedResult<AuditEntry>> QueryAuditAsync(AuditQuery query, CancellationToken ct = default);

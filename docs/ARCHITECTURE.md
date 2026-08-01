@@ -43,7 +43,7 @@ Auxilia is a **workflow-driven distributed system** where:
 - **Workflows** are stateful, signed programs that run to completion and communicate exclusively via the platform message bus.
 - **AI agents** are first-class citizens - they can trigger, steer, observe, and complete workflows via the same interfaces as human users (MCP protocol).
 - **Security is pluggable** - runs standalone out of the box, or integrates with corporate identity providers (AAD, LDAP, OIDC).
-- **The platform is three deployables** - a secure **Core** (`Core.Api` control plane + `Core.Runner` execution plane) that owns identity, secrets, and container execution, and a **Workflow Studio** product that owns the workflow domain and is a pure client of the Core Web API. Each has its own database; they meet only over the Core API and the message bus.
+- **The platform is four deployables** - a secure **Core** (`Core.Api` control plane + `Core.Runner` execution plane) that owns identity, secrets, and container execution, a **Workflow Studio** product that owns the workflow domain, and the **Admin Console** operator/admin UI — the latter two are pure clients of the Core Web API. Each service has its own database (the Admin Console none at all); they meet only over the Core API and the message bus.
 
 ---
 

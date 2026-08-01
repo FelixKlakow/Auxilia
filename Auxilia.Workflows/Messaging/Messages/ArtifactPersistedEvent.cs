@@ -13,6 +13,7 @@ public sealed record ArtifactPersistedEvent(
     Guid RunInstanceId,
     int Version,
     string ContentHash,
+    long SizeBytes,
     DateTimeOffset TimestampUtc)
 {
     public const string ExchangeName = "workflow.artifact-events";

@@ -37,6 +37,7 @@ builder.Services.AddPlatformEntity<CoreRunConfigurationRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreConnectorRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreRunRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreRunViewRecord>(platformData);
+builder.Services.AddPlatformEntity<CoreArtifactRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreRunResolutionRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreWorkflowTypeRecord>(platformData);
 builder.Services.AddPlatformEntity<DelegatedUserTokenRecord>(platformData);
@@ -103,6 +104,15 @@ builder.Services.AddSingleton<WorkflowSchemaReadService>();
 builder.Services.AddSingleton<PrincipalAdminService>();
 builder.Services.AddSingleton<SlotCredentialResolver>();
 builder.Services.AddSingleton<RunStreamBroker>();
+builder.Services.AddSingleton<ArtifactStreamBroker>();
+// Artifact payloads come from the shared payload backend (ArtifactStore:PayloadRoot points at
+// the same location the runner writes); metadata is mirrored from the bus, never read from
+// the runner's index.
+var artifactStoreSettings = new Auxilia.PlatformData.Artifacts.ArtifactStoreSettings();
+builder.Configuration.GetSection("ArtifactStore").Bind(artifactStoreSettings);
+builder.Services.AddSingleton(artifactStoreSettings);
+builder.Services.AddSingleton<Auxilia.PlatformData.Artifacts.IArtifactPayloadReader,
+    Auxilia.PlatformData.Artifacts.FileSystemArtifactPayloadReader>();
 builder.Services.AddSingleton<Auxilia.Workflows.Messaging.WorkflowStatusPublisher>();
 builder.Services.AddSingleton<RunnerLivenessTracker>();
 builder.Services.AddSingleton<TerminalTicketService>();
@@ -112,6 +122,8 @@ builder.Services.AddHostedService<RunTrackingService>();
 builder.Services.AddHostedService<RunViewTrackingService>();
 builder.Services.AddHostedService<WorkflowSchemaTrackingService>();
 builder.Services.AddHostedService<RunStreamPublisher>();
+builder.Services.AddHostedService<ArtifactTrackingService>();
+builder.Services.AddHostedService<ArtifactStreamPublisher>();
 // Resolve the same FailoverMonitor instance for the hosted lifecycle (so tests can drive ScanOnceAsync).
 builder.Services.AddHostedService(sp => sp.GetRequiredService<FailoverMonitor>());
 
@@ -553,6 +565,104 @@ app.MapGet("/api/runs/{id:guid}/views", async (
         .Select(v => new RunViewItem(v.ViewName, v.Sequence, v.PayloadJson, v.TimestampUtc))
         .ToList();
     return Results.Ok(new PagedResult<RunViewItem>(page, ordered.Count, skip, effectiveTake));
+}).RequireAuthorization();
+
+// --- Artifacts (client surface; metadata mirrored from the bus, payloads from the shared backend) ---
+
+app.MapGet("/api/artifacts", async (
+        string? artifactType, string? workItemId, Guid? runId, HttpContext http, IPolicyEngine policy,
+        Auxilia.UniversalDataAccess.IDataAccess<CoreArtifactRecord> artifacts,
+        CancellationToken ct, int skip = 0, int take = 50) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ArtifactConsume, ct) is { } fail)
+        return fail;
+    var all = (await artifacts.ReadAsync(ct)).AsEnumerable();
+    if (!string.IsNullOrWhiteSpace(artifactType))
+        all = all.Where(a => string.Equals(a.ArtifactType, artifactType, StringComparison.Ordinal));
+    if (!string.IsNullOrWhiteSpace(workItemId))
+        all = all.Where(a => string.Equals(a.WorkItemId, workItemId, StringComparison.Ordinal));
+    if (runId is { } run)
+        all = all.Where(a => a.RunInstanceId == run);
+    var ordered = all.OrderByDescending(a => a.CreatedUtc).ToList();
+    var effectiveTake = take <= 0 ? 50 : take;
+    var page = ordered.Skip(skip).Take(effectiveTake).Select(a => new ArtifactDto(
+        a.Id, a.ArtifactType, a.WorkflowType, a.WorkItemId, a.RunInstanceId,
+        a.Version, a.ContentHash, a.SizeBytes, a.CreatedUtc)).ToList();
+    return Results.Ok(new PagedResult<ArtifactDto>(page, ordered.Count, skip, effectiveTake));
+}).RequireAuthorization();
+
+app.MapGet("/api/artifacts/{id:guid}", async (
+        Guid id, HttpContext http, IPolicyEngine policy,
+        Auxilia.UniversalDataAccess.IDataAccess<CoreArtifactRecord> artifacts, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ArtifactConsume, ct) is { } fail)
+        return fail;
+    return await artifacts.ReadAsync(id, ct) is { } a
+        ? Results.Ok(new ArtifactDto(
+            a.Id, a.ArtifactType, a.WorkflowType, a.WorkItemId, a.RunInstanceId,
+            a.Version, a.ContentHash, a.SizeBytes, a.CreatedUtc))
+        : Results.NotFound();
+}).RequireAuthorization();
+
+// Payload download: metadata must be mirrored AND the payload present in the shared backend
+// (ArtifactStore:PayloadRoot); a missing payload is a deployment wiring gap, logged as such.
+app.MapGet("/api/artifacts/{id:guid}/content", async (
+        Guid id, HttpContext http, IPolicyEngine policy,
+        Auxilia.UniversalDataAccess.IDataAccess<CoreArtifactRecord> artifacts,
+        Auxilia.PlatformData.Artifacts.IArtifactPayloadReader payloads,
+        AuditLog audit, ILogger<Program> logger, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ArtifactConsume, ct) is { } fail)
+        return fail;
+    if (await artifacts.ReadAsync(id, ct) is not { } artifact)
+        return Results.NotFound();
+    if (await payloads.OpenReadAsync(id, ct) is not { } payload)
+    {
+        logger.LogWarning(
+            "Artifact {ArtifactId} is indexed but its payload is missing — is ArtifactStore:PayloadRoot shared with the runner?",
+            id);
+        return Results.NotFound(new { error = "the artifact payload is not available on this node" });
+    }
+    await audit.AppendAsync(CoreClaims.PrincipalIdOf(http.User)?.ToString() ?? "unknown",
+        PermissionActions.ArtifactConsume, id.ToString(), $"{artifact.ArtifactType} v{artifact.Version}", ct: ct);
+    return Results.Stream(payload, "application/octet-stream",
+        $"{artifact.ArtifactType}-v{artifact.Version}");
+}).RequireAuthorization();
+
+// Artifact SSE stream, SERVER-SIDE FILTERED (artifact type / work item): the client-surface
+// replacement for a bus subscription — chaining libraries react to artifacts through this.
+app.MapGet("/api/artifacts/stream", async (
+        string? artifactType, string? workItemId, HttpContext http, IPolicyEngine policy,
+        ArtifactStreamBroker broker, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ArtifactConsume, ct) is { } fail)
+    {
+        await fail.ExecuteAsync(http);
+        return;
+    }
+
+    http.Response.Headers.ContentType = "text/event-stream";
+    http.Response.Headers.CacheControl = "no-cache";
+    http.Response.Headers["X-Accel-Buffering"] = "no";
+
+    using var subscription = broker.Subscribe(artifactType, workItemId);
+    // Flush headers so the client's SendAsync completes with the subscription already registered —
+    // no live event published after this point is lost.
+    await http.Response.Body.FlushAsync(ct);
+
+    try
+    {
+        await foreach (var evt in subscription.Reader.ReadAllAsync(ct))
+        {
+            await http.Response.WriteAsync(
+                $"data: {System.Text.Json.JsonSerializer.Serialize(evt, System.Text.Json.JsonSerializerOptions.Web)}\n\n", ct);
+            await http.Response.Body.FlushAsync(ct);
+        }
+    }
+    catch (OperationCanceledException)
+    {
+        // Client disconnected — expected end of an SSE stream.
+    }
 }).RequireAuthorization();
 
 // --- Internal: runner <-> Core just-in-time slot-credential resolution ---

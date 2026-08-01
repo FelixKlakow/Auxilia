@@ -59,6 +59,38 @@
 - **Implementation run setup** — show the advanced settings inline (the settings count shrank;
   the extra fold/panel is no longer worth it).
 
+## Workflow Studio → client library (DECIDED 2026-08-01, Felix)
+**Remove the `Auxilia.WorkflowStudio` deployable; ship its workflow-domain capabilities as a
+.NET convenience library** on top of the raw `Auxilia.Core.Client`. Hosting is the adopter's
+choice — an always-on server service or embedded in a desktop app (triggers naturally fire
+only while a host runs). Division of responsibility: **artifact storage/management stays in
+the Core** (persistence at run completion, store backends, metadata, retention/access
+policy, event publication); **chaining and triggering are client/library tasks** (what
+follows what is workflow-domain policy; the Core validates and executes).
+
+- ~~**Core prerequisite — artifact events + reads on the client surface.**~~ — **DONE
+  2026-08-01**: `GET /api/artifacts` (+ `/{id}`, `/{id}/content`, `/stream`), all gated
+  `artifact.consume`; metadata mirrored bus→`CoreArtifactRecord` (`ArtifactTrackingService`),
+  SSE via `ArtifactStreamBroker` with SERVER-SIDE type/work-item filters; payloads from the
+  shared `ArtifactStore:PayloadRoot` backend (`IArtifactPayloadReader`; dev stack wires both
+  services to `.devstack\artifacts`); `ICoreClient` Query/Get/OpenContent/StreamArtifactEvents;
+  MCP `list_artifacts`/`get_artifact`; `ArtifactPersistedEvent` gained `SizeBytes`.
+- **Library scope** (working name `Auxilia.Workflows.Client` or similar): authoring/dispatch
+  helpers (fetch schema, validate bindings, resolve connectors, configure + run in one
+  call — today's `WorkflowAuthoringService`), the trigger engine (interval scheduler +
+  artifact-chaining, embeddable as hosted services or a manually pumped loop for desktop
+  hosts), and the email work-item intake adapter (moving its mailbox credential from the
+  legacy `SlotInstanceRecord` to a Core connector on the way). Studio's type catalog is NOT
+  carried over — the Core workflow-type registry is the only catalog.
+- **Retire with Studio:** the standalone Product MCP (Core MCP already covers runtime; an
+  authoring MCP can return as part of a host app later), `StudioWorkflowTypeRecord`,
+  `/api/configure` + `/api/workflow-types` REST, the Studio DB.
+- **Ties into:** client-library NuGet packaging (pack + publish `Auxilia.Core.Contracts`,
+  `Auxilia.Core.Client`, the steering codec, and the new library), the config-store-ownership
+  item below (the library becomes the natural home of "the product owns configs"), and the
+  Trigger-CRUD backlog item above (trigger storage becomes host-owned; the CRUD question
+  dissolves into the library's API).
+
 ## Config-store ownership (Felix's model — deferred as its own step)
 - **Move the persisted config store out of the Core.** "The Core doesn't own persisted workflows." Today `/api/configurations*` + `RunConfigurationAsync` still live in Core (tangled with the `CoreApiDispatch` acceptance test). Target: the product owns the config store; the Core validates a submitted spec against its **schema registry** and runs it via the Run API.
 
@@ -142,6 +174,26 @@ cards (answers route to the OWNING monitor).
 
 ## DevStand
 - `ScreenshotHarness` stubbed (targeted the retired dashboard) — rewire to boot `Auxilia.AdminConsole` in `EndToEndEnvironment`.
+
+## Core scalability — path to ~100k simultaneous clients (assessed 2026-08-01)
+The shape is right (stateless Core.Api, SSE per node, competing-consumer runners, clients
+never on the bus); the blockers are implementation-level:
+- **Selective event routing** — `RunStreamPublisher` consumes the status/view FANOUT on every
+  node (per-node ingest = global event volume). Move to topic routing keyed by run id with
+  dynamic bindings for runs that have open streams. The new artifact-event SSE (Studio→library
+  program) must be born filtered (artifact type + principal scope) for the same reason.
+- **Tracking mirrors → competing consumers** — `RunTrackingService`/`RunViewTrackingService`
+  are fanout subscribers; N API nodes process and write every event N times. They are bus→DB
+  mirrors and belong on queues (exactly-once processing), not fanouts.
+- **Auth caching** — bearer→principal→policy resolves against the store per request (no cache
+  in Core.Api). Add a short-TTL principal/policy cache invalidated on principal-admin writes.
+- **Terminal tickets are node-local** (`TerminalTicketService` ConcurrentDictionary) — breaks
+  behind a multi-node LB; needs a shared store or signed self-validating tickets.
+- **Audit appends are synchronous inline** — needs a batched async writer + time-partitioned
+  storage before high request rates.
+- Infra per the ARCHITECTURE §14.4 table (RabbitMQ cluster / ASB, MongoDB backend). Note:
+  100k clients ≠ 100k concurrent runs — the run axis is runner-fleet/container capacity plus
+  heartbeat/failover-monitor volume, tracked separately.
 
 ## Deeper platform consolidation (from the separation plan)
 - Core.Api + Core.Runner shared **Core DB tier** (currently separate DBs; several features bridge the split over the bus).

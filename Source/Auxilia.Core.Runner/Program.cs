@@ -73,6 +73,11 @@ try
     builder.Services.AddPlatformEntity<ArtifactRecord>(platformDataSettings);
     builder.Services.AddPlatformEntity<ViewDataRecord>(platformDataSettings);
     builder.Services.AddSingleton<ViewDataHandler>();
+    // Payload storage is a shared deployment location (ArtifactStore:PayloadRoot) so Core.Api
+    // can serve client downloads of what this runner persists; unset = local-only default.
+    var artifactStoreSettings = new Auxilia.PlatformData.Artifacts.ArtifactStoreSettings();
+    builder.Configuration.GetSection("ArtifactStore").Bind(artifactStoreSettings);
+    builder.Services.AddSingleton(artifactStoreSettings);
     builder.Services.AddSingleton<Auxilia.PlatformData.Artifacts.IArtifactStore,
         Auxilia.PlatformData.Artifacts.FileSystemArtifactStore>();
     builder.Services.AddSingleton<ArtifactPersister>();

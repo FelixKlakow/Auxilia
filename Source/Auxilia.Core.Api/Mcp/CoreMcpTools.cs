@@ -34,7 +34,8 @@ public sealed class CoreMcpTools(
     GroupMappingDirectory groupMappings,
     IdentityImportService identityImport,
     PrincipalDirectory principals,
-    PrincipalAdminService principalAdmin)
+    PrincipalAdminService principalAdmin,
+    Auxilia.UniversalDataAccess.IDataAccess<Data.CoreArtifactRecord> artifacts)
 {
     private static readonly JsonSerializerOptions JsonOptions = JsonSerializerOptions.Web;
 
@@ -225,6 +226,53 @@ public sealed class CoreMcpTools(
             return denial;
         await runs.CancelAsync(id, cancellationToken);
         return JsonResult(new { runId = id, cancelRequested = true });
+    }
+
+    [McpServerTool(Name = "list_artifacts")]
+    [Description("Lists persisted-artifact metadata, newest first. Optional exact-match filters on " +
+                 "artifact type and work item id — chaining decisions read this, payloads come via REST.")]
+    public async Task<CallToolResult> ListArtifactsAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Exact artifact type, e.g. \"code-review-result\".")] string? artifactType = null,
+        [Description("Exact work item id.")] string? workItemId = null,
+        [Description("Maximum artifacts to return (default 50, max 500).")] int limit = 50,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (await DenyAsync(principalId, PermissionActions.ArtifactConsume, artifactType, cancellationToken) is { } denial)
+            return denial;
+        var all = (await artifacts.ReadAsync(cancellationToken)).AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(artifactType))
+            all = all.Where(a => string.Equals(a.ArtifactType, artifactType, StringComparison.Ordinal));
+        if (!string.IsNullOrWhiteSpace(workItemId))
+            all = all.Where(a => string.Equals(a.WorkItemId, workItemId, StringComparison.Ordinal));
+        var page = all.OrderByDescending(a => a.CreatedUtc).Take(Math.Clamp(limit, 1, 500))
+            .Select(a => new ArtifactDto(
+                a.Id, a.ArtifactType, a.WorkflowType, a.WorkItemId, a.RunInstanceId,
+                a.Version, a.ContentHash, a.SizeBytes, a.CreatedUtc)).ToList();
+        return JsonResult(page);
+    }
+
+    [McpServerTool(Name = "get_artifact")]
+    [Description("Returns one persisted artifact's metadata by id.")]
+    public async Task<CallToolResult> GetArtifactAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Artifact id (GUID).")] string artifactId,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (!Guid.TryParse(artifactId, out var id))
+            return Error("artifactId must be a GUID.");
+        if (await DenyAsync(principalId, PermissionActions.ArtifactConsume, artifactId, cancellationToken) is { } denial)
+            return denial;
+        var a = await artifacts.ReadAsync(id, cancellationToken);
+        return a is null
+            ? Error("artifact not found.")
+            : JsonResult(new ArtifactDto(
+                a.Id, a.ArtifactType, a.WorkflowType, a.WorkItemId, a.RunInstanceId,
+                a.Version, a.ContentHash, a.SizeBytes, a.CreatedUtc));
     }
 
     [McpServerTool(Name = "read_audit")]

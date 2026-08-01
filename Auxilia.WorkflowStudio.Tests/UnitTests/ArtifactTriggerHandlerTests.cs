@@ -29,7 +29,7 @@ public sealed class ArtifactTriggerHandlerTests
     }
 
     private static ArtifactPersistedEvent Event(string artifactType = "design-doc") =>
-        new(Guid.NewGuid(), artifactType, "producer-wf", "WI-1", Guid.NewGuid(), 1, "hash", DateTimeOffset.UtcNow);
+        new(Guid.NewGuid(), artifactType, "producer-wf", "WI-1", Guid.NewGuid(), 1, "hash", 0, DateTimeOffset.UtcNow);
 
     [Test]
     public async Task MatchingConfigurationTrigger_DispatchesViaRunConfiguration_WithArtifactContext()

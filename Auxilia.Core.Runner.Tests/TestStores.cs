@@ -34,7 +34,8 @@ internal static class TestStores
             new PlatformDataSettings
             {
                 JsonDirectory = Path.Combine(Path.GetTempPath(), $"auxilia-artifacts-{Guid.NewGuid():N}")
-            });
+            },
+            new ArtifactStoreSettings());
 
     public static SlotProviderRegistry NewSlotProviderRegistry()
         => new(new InMemoryDataAccess<SlotProviderRecord>());
@@ -58,7 +59,8 @@ internal static class TestStores
 
     public static FileSystemArtifactStore NewArtifactStore(string jsonDirectory)
         => new(new InMemoryDataAccess<ArtifactRecord>(), TimeProvider.System,
-            new PlatformDataSettings { JsonDirectory = jsonDirectory });
+            new PlatformDataSettings { JsonDirectory = jsonDirectory },
+            new ArtifactStoreSettings());
 
     public static ArtifactPersister NewArtifactPersister(
         Auxilia.Messaging.IMessageBusClient bus, IArtifactStore artifactStore,

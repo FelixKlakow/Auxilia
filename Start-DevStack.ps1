@@ -2,10 +2,30 @@
 # Core.Runner wired for real Docker workflow runs (slot plugins, environment layers, dev mode).
 # State lives in Source/Auxilia.Core.Api/core-data (JSON backend) and survives restarts.
 # Requires: the auxilia-rabbitmq container running, Docker Desktop, a prior solution build
-# (pass -Build to build first). Each service opens in its own window; close them to stop.
-param([switch]$Build)
+# (pass -Build to build first).
+#
+# By default the services run HIDDEN, logging to .devstack\api.log / runner.log.
+# Stop them with -Stop; pass -Windowed to get the old one-visible-window-per-service behavior.
+param([switch]$Build, [switch]$Stop, [switch]$Windowed)
 
 $repo = $PSScriptRoot
+$stateDir = Join-Path $repo ".devstack"
+$pidFile = Join-Path $stateDir "pids.json"
+
+if ($Stop) {
+    if (Test-Path $pidFile) {
+        foreach ($procId in (Get-Content $pidFile | ConvertFrom-Json)) {
+            # /T kills the whole tree — `dotnet run` parents the actual app process.
+            taskkill /PID $procId /T /F 2>$null | Out-Null
+        }
+        Remove-Item $pidFile
+        Write-Host "Dev stack stopped."
+    } else {
+        Write-Host "No recorded dev-stack PIDs ($pidFile missing) - nothing to stop."
+    }
+    return
+}
+
 if ($Build) {
     dotnet build "$repo\Auxilia.slnx"
     if ($LASTEXITCODE -ne 0) { throw "Build failed." }
@@ -27,6 +47,9 @@ $runnerEnv = @{
     "WorkflowLauncher__EnvironmentLayers__node-22"                = "$repo\Source\Auxilia.Core.Runner\environment-layers\node-22.dockerfile"
     WorkflowLauncher__ExtraEnvironmentVariables__AUXILIA_DEVELOPER_MODE = "1"
     WorkflowDispatcher__ApprovedLongLivingWorkflowTypes__0        = "implementation"
+    # Shared with Core.Api below: the runner writes artifact payloads here, the API serves
+    # client downloads from the same location (ArtifactStore:PayloadRoot deployment contract).
+    ArtifactStore__PayloadRoot                                    = "$repo\.devstack\artifacts"
 }
 
 # The bootstrap key seeds the dev admin principal idempotently (by hash) — without it a fresh
@@ -37,18 +60,41 @@ $apiEnv = @{
     CoreSecurity__BootstrapApiKey                    = "auxilia-steering-dev-key"
     CoreApi__StaticWorkflowTypes__0__WorkflowType    = "implementation"
     CoreApi__StaticWorkflowTypes__0__PackageUri      = "docker://auxilia-implementation-workflow:system-test"
+    ArtifactStore__PayloadRoot                       = "$repo\.devstack\artifacts"
 }
-$apiSetup = ($apiEnv.GetEnumerator() | ForEach-Object { "`${env:$($_.Key)}='$($_.Value)'" }) -join "; "
-Start-Process pwsh -WorkingDirectory $repo -ArgumentList "-NoExit", "-Command",
-    "$apiSetup; dotnet run --project Source/Auxilia.Core.Api --no-build"
 
-# ${env:...} braces are REQUIRED: several names carry hyphens (claude-code-cli), which the
-# plain $env:name syntax rejects as a parser error — silently killing the spawned window.
-$envSetup = ($runnerEnv.GetEnumerator() | ForEach-Object { "`${env:$($_.Key)}='$($_.Value)'" }) -join "; "
-Start-Process pwsh -WorkingDirectory $repo -ArgumentList "-NoExit", "-Command",
-    "$envSetup; dotnet run --project Source/Auxilia.Core.Runner --no-build"
+New-Item -ItemType Directory -Force $stateDir | Out-Null
+
+# Spawns one service. Hidden mode sets the env on THIS process just for the spawn (children
+# inherit the environment snapshot) instead of round-tripping it through a pwsh -Command string.
+function Start-StackService([string]$Name, [string]$Project, [hashtable]$ServiceEnv) {
+    if ($Windowed) {
+        # ${env:...} braces are REQUIRED: several names carry hyphens (claude-code-cli), which
+        # the plain $env:name syntax rejects as a parser error — silently killing the window.
+        $setup = ($ServiceEnv.GetEnumerator() | ForEach-Object { "`${env:$($_.Key)}='$($_.Value)'" }) -join "; "
+        $proc = Start-Process pwsh -WorkingDirectory $repo -PassThru -ArgumentList "-NoExit", "-Command",
+            "$setup; dotnet run --project $Project --no-build"
+    } else {
+        foreach ($e in $ServiceEnv.GetEnumerator()) { Set-Item "env:$($e.Key)" $e.Value }
+        $proc = Start-Process dotnet -WorkingDirectory $repo -WindowStyle Hidden -PassThru `
+            -ArgumentList "run", "--project", $Project, "--no-build" `
+            -RedirectStandardOutput (Join-Path $stateDir "$Name.log") `
+            -RedirectStandardError  (Join-Path $stateDir "$Name.err.log")
+        foreach ($e in $ServiceEnv.GetEnumerator()) { Remove-Item "env:$($e.Key)" }
+    }
+    return $proc.Id
+}
+
+$pids = @(
+    (Start-StackService "api"    "Source/Auxilia.Core.Api"    $apiEnv),
+    (Start-StackService "runner" "Source/Auxilia.Core.Runner" $runnerEnv)
+)
+ConvertTo-Json $pids | Set-Content $pidFile
 
 Write-Host "Core.Api starting on http://localhost:5280; Core.Runner starting (Docker runs enabled)."
+if (-not $Windowed) {
+    Write-Host "Logs: $stateDir\api.log / runner.log (tail: Get-Content -Wait -Tail 20). Stop: ./Start-DevStack.ps1 -Stop"
+}
 
 # ---- Simulation seed (idempotent) ------------------------------------------------------------
 # The sim git server + the dummy pieces behind "[SIM] Implementation (driven stub)": provider

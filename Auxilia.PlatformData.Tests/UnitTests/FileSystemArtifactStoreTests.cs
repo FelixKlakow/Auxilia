@@ -20,7 +20,8 @@ public class FileSystemArtifactStoreTests
         _dir = Path.Combine(Path.GetTempPath(), $"auxilia-artifact-store-{Guid.NewGuid():N}");
         _index = new InMemoryDataAccess<ArtifactRecord>();
         _sut = new FileSystemArtifactStore(
-            _index, TimeProvider.System, new PlatformDataSettings { JsonDirectory = _dir });
+            _index, TimeProvider.System, new PlatformDataSettings { JsonDirectory = _dir },
+            new ArtifactStoreSettings());
     }
 
     [TearDown]

@@ -73,6 +73,14 @@ public sealed class FakeCoreClient : ICoreClient
         => Task.FromResult(new PagedResult<RunStatus>(new List<RunStatus>(), 0, query.Skip, query.Take));
     public Task<RunAccepted> RerunAsync(Guid id, CancellationToken ct = default)
         => throw new NotSupportedException("not used by the Studio");
+    public Task<PagedResult<ArtifactDto>> QueryArtifactsAsync(ArtifactQuery query, CancellationToken ct = default)
+        => throw new NotSupportedException("not used by the Studio");
+    public Task<ArtifactDto?> GetArtifactAsync(Guid id, CancellationToken ct = default)
+        => throw new NotSupportedException("not used by the Studio");
+    public Task<Stream?> OpenArtifactContentAsync(Guid id, CancellationToken ct = default)
+        => throw new NotSupportedException("not used by the Studio");
+    public IAsyncEnumerable<ArtifactStreamEvent> StreamArtifactEventsAsync(string? artifactType = null, string? workItemId = null, CancellationToken ct = default)
+        => throw new NotSupportedException("not used by the Studio");
 
     public Task CancelRunAsync(Guid id, CancellationToken ct = default) => Task.CompletedTask;
     public async IAsyncEnumerable<RunStreamEvent> StreamRunAsync(

@@ -11,9 +11,10 @@ namespace Auxilia.PlatformData.Artifacts;
 public sealed class FileSystemArtifactStore(
     IDataAccess<ArtifactRecord> index,
     TimeProvider timeProvider,
-    PlatformDataSettings settings) : IArtifactStore
+    PlatformDataSettings settings,
+    ArtifactStoreSettings storeSettings) : IArtifactStore
 {
-    private string Root => Path.Combine(settings.JsonDirectory, "Artifacts");
+    private string Root => storeSettings.ResolveRoot(settings);
 
     public async Task<ArtifactRecord> SaveAsync(
         string artifactType, string workflowType, string workItemId, Guid runInstanceId,

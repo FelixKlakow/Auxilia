@@ -82,7 +82,7 @@ public sealed class ArtifactPersister(
             await messageBus.PublishToExchangeAsync(ArtifactPersistedEvent.ExchangeName,
                 new ArtifactPersistedEvent(
                     record.Id, record.ArtifactType, record.WorkflowType, record.WorkItemId,
-                    record.RunInstanceId, record.Version, record.ContentHash,
+                    record.RunInstanceId, record.Version, record.ContentHash, record.SizeBytes,
                     timeProvider.GetUtcNow()), ct);
 
             logger.LogInformation(

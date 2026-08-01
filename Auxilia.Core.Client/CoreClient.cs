@@ -110,6 +110,55 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
 
     private sealed record ClearedRuns(int Deleted);
 
+    // --- Artifacts ---
+
+    public Task<PagedResult<ArtifactDto>> QueryArtifactsAsync(ArtifactQuery query, CancellationToken ct = default)
+        => GetAsync<PagedResult<ArtifactDto>>("/api/artifacts?" + Query(
+            ("artifactType", query.ArtifactType),
+            ("workItemId", query.WorkItemId),
+            ("runId", query.RunId?.ToString()),
+            ("skip", query.Skip.ToString()),
+            ("take", query.Take.ToString())), ct);
+
+    public Task<ArtifactDto?> GetArtifactAsync(Guid id, CancellationToken ct = default)
+        => GetOrNullAsync<ArtifactDto>($"/api/artifacts/{id}", ct);
+
+    public async Task<Stream?> OpenArtifactContentAsync(Guid id, CancellationToken ct = default)
+    {
+        var response = await http.GetAsync(
+            $"/api/artifacts/{id}/content", HttpCompletionOption.ResponseHeadersRead, ct);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            response.Dispose();
+            return null;
+        }
+        await EnsureSuccessAsync(response, ct);
+        return await response.Content.ReadAsStreamAsync(ct);
+    }
+
+    public async IAsyncEnumerable<ArtifactStreamEvent> StreamArtifactEventsAsync(
+        string? artifactType = null, string? workItemId = null,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/artifacts/stream?" + Query(
+            ("artifactType", artifactType),
+            ("workItemId", workItemId)));
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        await EnsureSuccessAsync(response, ct);
+
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        using var reader = new StreamReader(stream);
+        while (await reader.ReadLineAsync(ct) is { } line)
+        {
+            if (!line.StartsWith("data: ", StringComparison.Ordinal))
+                continue;
+            var evt = JsonSerializer.Deserialize<ArtifactStreamEvent>(line["data: ".Length..], JsonSerializerOptions.Web);
+            if (evt is not null)
+                yield return evt;
+        }
+    }
+
     // --- Audit ---
 
     public Task<PagedResult<AuditEntry>> QueryAuditAsync(AuditQuery query, CancellationToken ct = default)

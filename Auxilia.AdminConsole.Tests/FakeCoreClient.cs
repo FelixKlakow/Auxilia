@@ -349,6 +349,10 @@ internal sealed class FakeCoreClient : ICoreClient
     private static T Nope<T>() => throw new NotSupportedException("Not needed for these tests.");
 
     public Task<RunAccepted> RunAsync(RunRequest request, CancellationToken ct = default) => Nope<Task<RunAccepted>>();
+    public Task<PagedResult<ArtifactDto>> QueryArtifactsAsync(ArtifactQuery query, CancellationToken ct = default) => Nope<Task<PagedResult<ArtifactDto>>>();
+    public Task<ArtifactDto?> GetArtifactAsync(Guid id, CancellationToken ct = default) => Nope<Task<ArtifactDto?>>();
+    public Task<Stream?> OpenArtifactContentAsync(Guid id, CancellationToken ct = default) => Nope<Task<Stream?>>();
+    public IAsyncEnumerable<ArtifactStreamEvent> StreamArtifactEventsAsync(string? artifactType = null, string? workItemId = null, CancellationToken ct = default) => Nope<IAsyncEnumerable<ArtifactStreamEvent>>();
     public Task<GroupDto> CreateGroupAsync(CreateGroupRequest request, CancellationToken ct = default) => Nope<Task<GroupDto>>();
     public Task<IReadOnlyList<GroupDto>> ListGroupsAsync(CancellationToken ct = default) => Nope<Task<IReadOnlyList<GroupDto>>>();
     public Task AddGroupMemberAsync(Guid groupId, AddGroupMemberRequest request, CancellationToken ct = default) => Nope<Task>();

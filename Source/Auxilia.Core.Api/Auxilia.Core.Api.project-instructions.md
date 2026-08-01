@@ -23,6 +23,7 @@ Standalone deployable. Drives `Auxilia.Core.Runner` over the message bus; owns i
 - `POST /api/connectors` (personal = self-owned; company needs `slot-config.write`), `GET /api/connectors`, `GET /api/connectors/{id}`, `POST /api/connectors/{id}/grants` (owner or `slot-config.write`)
 - `POST /api/groups`, `GET /api/groups`, `POST /api/groups/{id}/members`, `POST /api/groups/{id}/roles` (all `principal.administer`)
 - `GET/POST /api/identity/group-mappings`, `DELETE /api/identity/group-mappings/{id}` (directory group→role mappings; all `identity-source.manage`)
+- `GET /api/artifacts` (+ `/{id}`, `/{id}/content`, `/stream` SSE) — artifact metadata mirrored from the bus (`ArtifactTrackingService`), payload downloads from the shared payload backend (`ArtifactStore:PayloadRoot` must point where the runner writes), and a SERVER-SIDE-FILTERED artifact-event stream (artifactType/workItemId) so chaining clients never need bus access; all gated `artifact.consume`
 - `GET /auth/login`, `GET /auth/callback` (anonymous — the OIDC sign-in flow), `POST /auth/logout`, `GET /auth/me` (authenticated)
 - `/mcp` (authenticated MCP twin of the above), `GET /health`
 
