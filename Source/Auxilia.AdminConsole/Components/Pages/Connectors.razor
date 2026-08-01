@@ -146,7 +146,10 @@ else
                         Scope
                         <select @bind="draft.Scope">
                             <option value="@ConnectorScope.Personal">Personal — you and granted principals</option>
-                            <option value="@ConnectorScope.Company">Company — any authenticated principal</option>
+                            @if (_canShareCompanyWide)
+                            {
+                                <option value="@ConnectorScope.Company">Company — any authenticated principal</option>
+                            }
                         </select>
                     </label>
                 </div>
@@ -198,6 +201,7 @@ else
                     <div class="card-row">
                         <select @bind="grant.Kind">
                             <option value="@ConnectorGrantKind.Principal">Principal</option>
+                            <option value="@ConnectorGrantKind.Group">Group</option>
                             <option value="@ConnectorGrantKind.DirectoryGroup">Directory group</option>
                         </select>
                         <input @bind="grant.Id" placeholder="principal id / group object id"/>
@@ -217,6 +221,9 @@ else
 @code {
 
     private const int PageSize = 50;
+
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    private bool _canShareCompanyWide;
 
     private bool _loaded;
     private bool _denied;
@@ -270,6 +277,9 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        if (AuthState is not null)
+            _canShareCompanyWide = ConsoleAuthenticationStateProvider.Can(
+                (await AuthState).User, PermissionActions.SlotConfigWrite);
         await LoadCatalogAsync();
         await LoadAsync(reset: true);
     }

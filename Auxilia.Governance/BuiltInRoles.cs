@@ -1,3 +1,5 @@
+using Auxilia.Core.Contracts;
+
 namespace Auxilia.Governance;
 
 /// <summary>

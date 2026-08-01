@@ -16,7 +16,9 @@ internal sealed class FakeCoreClient : ICoreClient
     public int QueryAuditCallCount { get; private set; }
 
     public CurrentPrincipal CurrentPrincipal { get; set; } =
-        new(Guid.NewGuid(), "Operator test user", ["Operator"]);
+        new(Guid.NewGuid(), "Operator test user", ["Operator"],
+            [PermissionActions.SlotConfigWrite, PermissionActions.WorkflowConfigurationManage,
+             PermissionActions.WorkflowTrigger, PermissionActions.RunObserve]);
     public bool Healthy { get; set; } = true;
     public CoreApiException? AuditError { get; set; }
 

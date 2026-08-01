@@ -1,6 +1,10 @@
-namespace Auxilia.Governance;
+namespace Auxilia.Core.Contracts;
 
-/// <summary>Machine-readable action identifiers checked by the Policy Engine.</summary>
+/// <summary>
+/// Machine-readable action identifiers checked by the Policy Engine. Part of the client
+/// contract: <c>CurrentPrincipal.Permissions</c> carries the caller's effective set so
+/// clients can gate displayed functionality on them.
+/// </summary>
 public static class PermissionActions
 {
     public const string WorkflowTrigger = "workflow.trigger";

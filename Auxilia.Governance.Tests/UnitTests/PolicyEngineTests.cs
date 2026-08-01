@@ -1,3 +1,4 @@
+using Auxilia.Core.Contracts;
 using Auxilia.Governance.Policy;
 
 namespace Auxilia.Governance.Tests.UnitTests;

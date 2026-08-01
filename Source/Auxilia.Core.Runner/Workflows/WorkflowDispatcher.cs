@@ -1,3 +1,4 @@
+using Auxilia.Core.Contracts;
 using System.IO.Compression;
 using System.Text.Json;
 using Auxilia.Governance;

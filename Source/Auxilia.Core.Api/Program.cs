@@ -241,12 +241,16 @@ app.MapPost("/auth/token", (HttpContext http, UserBearerTokenService tokens) =>
 }).RequireAuthorization(CoreAuthExtensions.CookieSessionPolicy);
 
 app.MapGet("/auth/me", (HttpContext http) =>
-    CoreClaims.PrincipalIdOf(http.User) is { } principalId
-        ? Results.Ok(new CurrentPrincipal(
-            principalId,
-            http.User.Identity?.Name,
-            http.User.FindAll(ClaimTypes.Role).Select(c => c.Value).ToArray()))
-        : Results.Unauthorized()).RequireAuthorization();
+{
+    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+        return Results.Unauthorized();
+    var roles = http.User.FindAll(ClaimTypes.Role).Select(c => c.Value).ToArray();
+    return Results.Ok(new CurrentPrincipal(
+        principalId,
+        http.User.Identity?.Name,
+        roles,
+        roles.SelectMany(BuiltInRoles.PermissionsOf).Distinct().Order().ToArray()));
+}).RequireAuthorization();
 
 // --- Runs ---
 app.MapPost("/api/runs", async (
