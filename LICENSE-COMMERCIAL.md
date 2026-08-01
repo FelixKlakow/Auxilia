@@ -48,13 +48,22 @@ A flat rate per legal entity and year, banded by company size:
 
 | Company size (employees) | Per year |
 |---|---|
-| up to 50 | EUR 5,000 |
+| individuals (personal use) | **free** |
+| up to 10 | EUR 1,200 |
+| 11 – 50 | EUR 5,000 |
 | 51 – 250 | EUR 15,000 |
 | 251 – 1,000 | EUR 35,000 |
 | above 1,000 | contact for a quote |
 
-Non-profits, academic institutions and individual developers: please get in
-touch, there is room to talk.
+**Personal use is free**, including production: a natural person using
+Auxilia for themselves — their own projects, their own agents, their own
+infrastructure — needs no commercial license and no paperwork. The line is
+drawn at working on behalf of a legal entity: the moment Auxilia runs for a
+company's benefit (including a one-person company's client work), the
+company bands apply.
+
+Non-profits and academic institutions: please get in touch, there is room
+to talk.
 
 ## How to obtain one
 
