@@ -347,6 +347,18 @@ internal sealed class FakeCoreClient : ICoreClient
         return Task.CompletedTask;
     }
 
+    public Task<RunConfiguration> SetConfigurationGrantsAsync(
+        Guid id, SetConfigurationGrants request, CancellationToken ct = default)
+    {
+        ConfigurationGrantCalls.Add((id, request));
+        var existing = Configurations.First(c => c.Id == id);
+        var updated = existing with { Grants = request.Grants };
+        Configurations[Configurations.IndexOf(existing)] = updated;
+        return Task.FromResult(updated);
+    }
+
+    public List<(Guid Id, SetConfigurationGrants Request)> ConfigurationGrantCalls { get; } = [];
+
     // --- Unused by the pages under test ---
     private static T Nope<T>() => throw new NotSupportedException("Not needed for these tests.");
 

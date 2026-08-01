@@ -19,7 +19,7 @@ public sealed class ConnectorAccessComponentTests : CoreApiComponentTestBase
 {
     private sealed record MeResponse(Guid PrincipalId, string? DisplayName, string[] Roles);
 
-    private async Task<Guid> SeedConnectorAsync(string scope, Guid? owner = null, params ConnectorGrant[] grants)
+    private async Task<Guid> SeedConnectorAsync(string scope, Guid? owner = null, params AccessGrant[] grants)
     {
         var id = Guid.NewGuid();
         await Factory.Services.GetRequiredService<IDataAccess<CoreConnectorRecord>>().SaveAsync(new CoreConnectorRecord
@@ -50,7 +50,7 @@ public sealed class ConnectorAccessComponentTests : CoreApiComponentTestBase
     public async Task Dispatch_IsDenied_ForAPersonalConnectorOfAnotherPrincipal()
     {
         var admin = CreateClient();
-        var strangersConnector = await SeedConnectorAsync(ConnectorScope.Personal, owner: Guid.NewGuid());
+        var strangersConnector = await SeedConnectorAsync(ResourceScope.Personal, owner: Guid.NewGuid());
 
         var response = await admin.PostAsJsonAsync("/api/runs", RunBinding(strangersConnector));
 
@@ -62,7 +62,7 @@ public sealed class ConnectorAccessComponentTests : CoreApiComponentTestBase
     public async Task Dispatch_IsAllowed_ForACompanyConnector()
     {
         var response = await CreateClient().PostAsJsonAsync(
-            "/api/runs", RunBinding(await SeedConnectorAsync(ConnectorScope.Company)));
+            "/api/runs", RunBinding(await SeedConnectorAsync(ResourceScope.Company)));
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
     }
 
@@ -70,7 +70,7 @@ public sealed class ConnectorAccessComponentTests : CoreApiComponentTestBase
     public async Task Dispatch_IsAllowed_ForTheConnectorsOwner()
     {
         var admin = CreateClient();
-        var mine = await SeedConnectorAsync(ConnectorScope.Personal, owner: await PrincipalIdAsync(admin));
+        var mine = await SeedConnectorAsync(ResourceScope.Personal, owner: await PrincipalIdAsync(admin));
 
         var response = await admin.PostAsJsonAsync("/api/runs", RunBinding(mine));
 
@@ -81,8 +81,8 @@ public sealed class ConnectorAccessComponentTests : CoreApiComponentTestBase
     public async Task Dispatch_IsAllowed_ViaADirectPrincipalGrant()
     {
         var admin = CreateClient();
-        var granted = await SeedConnectorAsync(ConnectorScope.Personal, owner: Guid.NewGuid(),
-            new ConnectorGrant(ConnectorGrantKind.Principal, (await PrincipalIdAsync(admin)).ToString("D")));
+        var granted = await SeedConnectorAsync(ResourceScope.Personal, owner: Guid.NewGuid(),
+            new AccessGrant(AccessGrantKind.Principal, (await PrincipalIdAsync(admin)).ToString("D")));
 
         var response = await admin.PostAsJsonAsync("/api/runs", RunBinding(granted));
 
@@ -119,7 +119,7 @@ public sealed class ConnectorAccessComponentTests : CoreApiComponentTestBase
         Assert.That(granted.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
 
         var fetched = await admin.GetFromJsonAsync<Connector>($"/api/connectors/{created.Id}");
-        Assert.That(fetched!.Grants, Has.One.Matches<ConnectorGrant>(
+        Assert.That(fetched!.Grants, Has.One.Matches<AccessGrant>(
             g => g is { Kind: "DirectoryGroup", Id: "group-devs" }));
     }
 }

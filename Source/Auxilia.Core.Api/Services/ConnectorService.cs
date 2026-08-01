@@ -17,20 +17,20 @@ public sealed class ConnectorService(
     TimeProvider clock)
 {
     /// <summary>
-    /// Creates a connector. A <see cref="ConnectorScope.Personal"/> connector is owned by
+    /// Creates a connector. A <see cref="ResourceScope.Personal"/> connector is owned by
     /// <paramref name="ownerPrincipalId"/> (identity-linked); company connectors carry no owner.
     /// </summary>
     public async Task<Connector> CreateAsync(CreateConnector request, Guid? ownerPrincipalId, CancellationToken ct)
     {
         var protectedSettings = request.Settings.ToDictionary(kv => kv.Key, kv => protector.Protect(kv.Value));
-        var personal = request.Scope == ConnectorScope.Personal;
+        var personal = request.Scope == ResourceScope.Personal;
         var record = new CoreConnectorRecord
         {
             Id = Guid.NewGuid(),
             Name = request.Name,
             ProviderType = request.ProviderType,
             ProtectedSettingsJson = JsonSerializer.Serialize(protectedSettings),
-            Scope = personal ? ConnectorScope.Personal : ConnectorScope.Company,
+            Scope = personal ? ResourceScope.Personal : ResourceScope.Company,
             OwnerPrincipalId = personal ? ownerPrincipalId : null,
             UpdatedUtc = clock.GetUtcNow()
         };
@@ -63,7 +63,7 @@ public sealed class ConnectorService(
     }
 
     /// <summary>Replaces a connector's access grants. Returns false when the connector is unknown.</summary>
-    public async Task<bool> SetGrantsAsync(Guid id, IReadOnlyList<ConnectorGrant> grants, CancellationToken ct)
+    public async Task<bool> SetGrantsAsync(Guid id, IReadOnlyList<AccessGrant> grants, CancellationToken ct)
     {
         if (await store.ReadAsync(id, ct) is not { } record)
             return false;
@@ -106,7 +106,7 @@ public sealed class ConnectorService(
     {
         var keys = (JsonSerializer.Deserialize<Dictionary<string, string>>(r.ProtectedSettingsJson)
                     ?? new Dictionary<string, string>()).Keys.ToList();
-        var grants = JsonSerializer.Deserialize<List<ConnectorGrant>>(r.GrantsJson) ?? [];
+        var grants = JsonSerializer.Deserialize<List<AccessGrant>>(r.GrantsJson) ?? [];
         return new Connector(r.Id, r.Name, r.ProviderType, keys, r.UpdatedUtc, r.Scope, r.OwnerPrincipalId, grants);
     }
 }

@@ -116,7 +116,7 @@ public sealed class WorkflowsPageTests
         core.WorkflowSchemas["code-review"] = Schema("code-review",
             new WorkflowSlotDto("source", "ISourceControlAccess", null, false, null));
         core.Connectors.Add(new Connector(
-            connectorId, "Team ADO", "azure-devops", ["token"], DateTimeOffset.UtcNow, ConnectorScope.Company));
+            connectorId, "Team ADO", "azure-devops", ["token"], DateTimeOffset.UtcNow, ResourceScope.Company));
         using var ctx = NewContext(core);
         var cut = ctx.Render<WorkflowEditor>();
 

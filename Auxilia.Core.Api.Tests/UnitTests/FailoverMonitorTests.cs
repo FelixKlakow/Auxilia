@@ -80,11 +80,17 @@ public sealed class FailoverMonitorTests
             new AuditLog(_audit, _time));
         var runService = new RunService(
             _bus,
-            new RunConfigurationService(new InMemoryDataAccess<CoreRunConfigurationRecord>(), _time),
+            new RunConfigurationService(
+                new InMemoryDataAccess<CoreRunConfigurationRecord>(),
+                new AccessGrantEvaluator(
+                    new InMemoryDataAccess<Auxilia.PlatformData.Entities.PrincipalRecord>(),
+                    new InMemoryDataAccess<Auxilia.PlatformData.Entities.GroupMembershipRecord>()),
+                _time),
             _registry, new WorkflowSchemaReadService(typeStore), providerCatalog, _resolver,
             new ConnectorAccessPolicy(connectorStore,
-                new InMemoryDataAccess<Auxilia.PlatformData.Entities.PrincipalRecord>(),
-                new InMemoryDataAccess<Auxilia.PlatformData.Entities.GroupMembershipRecord>()),
+                new AccessGrantEvaluator(
+                    new InMemoryDataAccess<Auxilia.PlatformData.Entities.PrincipalRecord>(),
+                    new InMemoryDataAccess<Auxilia.PlatformData.Entities.GroupMembershipRecord>())),
             connectors, new RunnerLivenessTracker(), _time,
             Options.Create(_settings), NullLogger<RunService>.Instance);
 

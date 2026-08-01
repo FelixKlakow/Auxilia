@@ -31,7 +31,7 @@ public sealed class ConnectorsPageTests
     public void Connectors_ListsConnectors()
     {
         var core = new FakeCoreClient();
-        core.Connectors.Add(Connector(Guid.NewGuid(), "Team ADO", "azure-devops", ConnectorScope.Company));
+        core.Connectors.Add(Connector(Guid.NewGuid(), "Team ADO", "azure-devops", ResourceScope.Company));
         using var ctx = NewContext(core);
 
         var cut = ctx.Render<Connectors>();
@@ -76,7 +76,7 @@ public sealed class ConnectorsPageTests
     {
         var id = Guid.NewGuid();
         var core = new FakeCoreClient();
-        core.Connectors.Add(Connector(id, "Personal ADO", "azure-devops", ConnectorScope.Personal));
+        core.Connectors.Add(Connector(id, "Personal ADO", "azure-devops", ResourceScope.Personal));
         using var ctx = NewContext(core);
         var cut = ctx.Render<Connectors>();
 

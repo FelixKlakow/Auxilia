@@ -97,6 +97,7 @@ builder.Services.AddSingleton<IWorkflowTypeApprovalHandler, EmailApprovalNotific
 builder.Services.AddSingleton<ConnectorService>();
 builder.Services.AddSingleton<ConnectorBrowseService>();
 builder.Services.AddSingleton<ConnectorTokenRefresher>();
+builder.Services.AddSingleton<AccessGrantEvaluator>();
 builder.Services.AddSingleton<ConnectorAccessPolicy>();
 builder.Services.AddSingleton<DelegatedTokenStore>();
 builder.Services.AddSingleton<RunConfigurationService>();
@@ -693,29 +694,43 @@ app.MapPost("/internal/runs/{runId:guid}/resolve-slot", async (
 }).RequireRateLimiting("resolve-slot");
 
 // --- Configurations ---
+// A Personal configuration (the default) is self-owned; sharing platform-wide (Company) is the
+// deliberate opt-in and needs the configuration-management permission — mirroring connectors.
 app.MapPost("/api/configurations", async (
-        CreateRunConfiguration request, RunConfigurationService svc, CancellationToken ct) =>
-    Results.Ok(await svc.CreateAsync(request, ct)))
-    .RequireAuthorization();
+        CreateRunConfiguration request, HttpContext http, IPolicyEngine policy,
+        RunConfigurationService svc, CancellationToken ct) =>
+{
+    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+        return Results.Unauthorized();
+    if (request.Scope != ResourceScope.Personal
+        && await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.WorkflowConfigurationManage, ct) is { } fail)
+        return fail;
+    return Results.Ok(await svc.CreateAsync(request, principalId, ct));
+}).RequireAuthorization();
 
+// Reads are visibility-filtered: managers see everything; everyone else sees company
+// configurations plus personal ones they own or were granted (principal/group/AD-group).
 app.MapGet("/api/configurations", async (
-        string? workflowType, bool? enabled,
+        string? workflowType, bool? enabled, HttpContext http,
         RunConfigurationService svc, CancellationToken ct, int skip = 0, int take = 50) =>
     Results.Ok(await svc.QueryAsync(
-        new ConfigurationQuery(workflowType, enabled, skip, take == 0 ? 50 : take), ct)))
+        new ConfigurationQuery(workflowType, enabled, skip, take == 0 ? 50 : take),
+        ViewerOf(http.User), ct)))
     .RequireAuthorization();
 
 app.MapGet("/api/configurations/{id:guid}", async (
-        Guid id, RunConfigurationService svc, CancellationToken ct) =>
-        await svc.GetAsync(id, ct) is { } config ? Results.Ok(config) : Results.NotFound())
+        Guid id, HttpContext http, RunConfigurationService svc, CancellationToken ct) =>
+        await svc.GetAsync(id, ViewerOf(http.User), ct) is { } config
+            ? Results.Ok(config) : Results.NotFound())
     .RequireAuthorization();
 
-// Update a stored configuration (config editors' permission). Null fields stay unchanged. Audited.
+// Update a stored configuration (its owner, or the config-management permission). Audited.
 app.MapPut("/api/configurations/{id:guid}", async (
         Guid id, UpdateRunConfiguration request, HttpContext http, IPolicyEngine policy,
         RunConfigurationService svc, AuditLog audit, CancellationToken ct) =>
 {
-    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.WorkflowConfigurationManage, ct) is { } fail)
+    if (!await svc.IsOwnerAsync(id, CoreClaims.PrincipalIdOf(http.User), ct)
+        && await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.WorkflowConfigurationManage, ct) is { } fail)
         return fail;
     if (await svc.UpdateAsync(id, request, ct) is not { } updated)
         return Results.NotFound();
@@ -725,12 +740,37 @@ app.MapPut("/api/configurations/{id:guid}", async (
     return Results.Ok(updated);
 }).RequireAuthorization();
 
-// Delete a stored configuration permanently (config editors' permission). Audited.
+// Replace a personal configuration's access grants (its owner, or a configuration manager). Audited.
+app.MapPut("/api/configurations/{id:guid}/grants", async (
+        Guid id, SetConfigurationGrants request, HttpContext http, IPolicyEngine policy,
+        RunConfigurationService svc, AuditLog audit, CancellationToken ct) =>
+{
+    if (!await svc.IsOwnerAsync(id, CoreClaims.PrincipalIdOf(http.User), ct)
+        && await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.WorkflowConfigurationManage, ct) is { } fail)
+        return fail;
+    try
+    {
+        if (await svc.SetGrantsAsync(id, request.Grants, ct) is not { } updated)
+            return Results.NotFound();
+        await audit.AppendAsync(
+            CoreClaims.PrincipalIdOf(http.User)!.Value.ToString("D"),
+            "workflow-configuration.grants-set", id.ToString(),
+            System.Text.Json.JsonSerializer.Serialize(request.Grants), ct: ct);
+        return Results.Ok(updated);
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+}).RequireAuthorization();
+
+// Delete a stored configuration permanently (its owner, or the config-management permission). Audited.
 app.MapDelete("/api/configurations/{id:guid}", async (
         Guid id, HttpContext http, IPolicyEngine policy, RunConfigurationService svc, AuditLog audit,
         CancellationToken ct) =>
 {
-    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.WorkflowConfigurationManage, ct) is { } fail)
+    if (!await svc.IsOwnerAsync(id, CoreClaims.PrincipalIdOf(http.User), ct)
+        && await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.WorkflowConfigurationManage, ct) is { } fail)
         return fail;
     if (await svc.GetAsync(id, ct) is not { } config)
         return Results.NotFound();
@@ -750,6 +790,14 @@ app.MapPost("/api/configurations/{id:guid}/run", async (
         return Results.Unauthorized();
     var config = await configurations.GetAsync(id, ct);
     if (config is null)
+        return Results.NotFound();
+
+    // A personal configuration is runnable only by whoever may SEE it: the triggering principal
+    // (owner/granted), or a caller holding the configuration-management permission.
+    var runViewer = new ConfigurationViewer(
+        onBehalfOf ?? principalId,
+        CoreClaims.HasRolePermission(http.User, PermissionActions.WorkflowConfigurationManage));
+    if (!await configurations.IsVisibleAsync(id, runViewer, ct))
         return Results.NotFound();
 
     // On-behalf-of: a service/automation caller (a trigger host's engines) may dispatch a stored
@@ -1072,7 +1120,7 @@ app.MapPost("/api/connectors", async (
         return Results.Unauthorized();
     // Any authenticated principal may connect their own personal (identity-linked) account; a shared
     // company connector requires the connector-management permission.
-    if (request.Scope != ConnectorScope.Personal
+    if (request.Scope != ResourceScope.Personal
         && await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.SlotConfigWrite, ct) is { } fail)
         return fail;
     return Results.Ok(await svc.CreateAsync(request, principalId, ct));
@@ -1442,6 +1490,12 @@ app.MapMcp("/mcp").RequireAuthorization();
 app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
 
 app.Run();
+
+// The caller a configuration read is filtered for: configuration managers see everything;
+// a pure claims check so list/get paths stay audit-quiet (mutations go through the Policy Engine).
+static ConfigurationViewer ViewerOf(System.Security.Claims.ClaimsPrincipal user) => new(
+    CoreClaims.PrincipalIdOf(user),
+    CoreClaims.HasRolePermission(user, PermissionActions.WorkflowConfigurationManage));
 
 // Exposed for WebApplicationFactory-based component tests.
 public partial class Program;

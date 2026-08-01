@@ -26,7 +26,8 @@ public sealed record CreateRunConfiguration(
     IReadOnlyDictionary<string, string>? Context = null,
     IReadOnlyList<SlotBinding>? SlotBindings = null,
     bool Enabled = true,
-    IReadOnlyList<string>? Tags = null);
+    IReadOnlyList<string>? Tags = null,
+    string Scope = ResourceScope.Personal);
 
 /// <summary>
 /// Update a stored run configuration: a null field stays unchanged, a provided one REPLACES the
@@ -40,7 +41,11 @@ public sealed record UpdateRunConfiguration(
     bool? Enabled = null,
     IReadOnlyList<string>? Tags = null);
 
-/// <summary>A stored run configuration the Core resolves into a run spec on dispatch.</summary>
+/// <summary>
+/// A stored run configuration the Core resolves into a run spec on dispatch. A
+/// <see cref="ResourceScope.Personal"/> configuration is visible/runnable only to its owner,
+/// its granted subjects, and configuration managers; Company configurations are shared.
+/// </summary>
 public sealed record RunConfiguration(
     Guid Id,
     string Name,
@@ -49,7 +54,13 @@ public sealed record RunConfiguration(
     IReadOnlyList<SlotBinding> SlotBindings,
     bool Enabled,
     DateTimeOffset UpdatedUtc,
-    IReadOnlyList<string>? Tags = null);
+    IReadOnlyList<string>? Tags = null,
+    string Scope = ResourceScope.Company,
+    Guid? OwnerPrincipalId = null,
+    IReadOnlyList<AccessGrant>? Grants = null);
+
+/// <summary>Replace a personal configuration's access grants (owner or a configuration manager).</summary>
+public sealed record SetConfigurationGrants(IReadOnlyList<AccessGrant> Grants);
 
 /// <summary>Filter for querying configurations.</summary>
 public sealed record ConfigurationQuery(

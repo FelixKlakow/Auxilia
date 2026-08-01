@@ -4,10 +4,6 @@
 > records live in `docs/delivered/` and the git history.
 
 ## Core.Api — client-surface follow-ups
-- **Failover re-dispatch credential alignment** — the failover monitor re-dispatches with the
-  ORIGINAL resolution token and a new command id, so credentialed slots would fail to resolve
-  on a failover redispatch. Align it with the rerun path (`POST /api/runs/{id}/rerun`), which
-  correctly mints a fresh token and re-stashes bindings.
 - **Dashboard stats/pins** — no stats endpoint (counts computed client-side from a query page)
   and no persisted pinned dashboards.
 - **Built-in role list endpoint** — the AdminConsole hard-codes the role list (no Core
@@ -67,13 +63,13 @@ MCP agents see the same list) without inventing a product-side persistence servi
 not violate semantics-blindness — a stored configuration is an opaque, schema-validated
 document: the Core validates it against its schema registry, stores it, dispatches it via the
 Run API, and never interprets what the workflow means (the same storage-vs-semantics division
-as artifacts). Follow-up now tracked instead:
-- **Per-configuration ownership + sharing.** Today visibility is gated only per workflow TYPE
-  (access-list entries per `(type, action)` granting a principal or role — exclusive when
-  present; no direct first-class-group entries). A saved configuration has no owner and no
-  grants: anyone passing the type gate sees every configuration. Mirror the connector model —
-  configurations get an owner and personal/shared scoping with principal / first-class-group /
-  directory-group grants, editable by the owner or a configuration manager.
+as artifacts). **Per-configuration ownership + sharing DELIVERED 2026-08-01**: configurations
+carry scope (Personal default, Company opt-in gated by `workflow-configuration.manage`), an
+owner, and `AccessGrant`s (principal / first-class group / directory group — the same shared
+model as connectors, evaluated by `AccessGrantEvaluator`); reads and the run path are
+visibility-filtered, editing/deleting/sharing is owner-or-manager; surfaced in the
+AdminConsole (scope column + Sharing editor) and the steering client (visibility choice in the
+configure wizard, Sharing… on the workflow row menu). Remaining follow-up:
 - **Group entries in workflow-type access lists** — allow granting a first-class group
   directly instead of only via roles.
 

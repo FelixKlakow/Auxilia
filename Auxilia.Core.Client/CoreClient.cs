@@ -32,6 +32,10 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
     public Task DeleteConfigurationAsync(Guid id, CancellationToken ct = default)
         => DeleteAsync($"/api/configurations/{id}", ct);
 
+    public Task<RunConfiguration> SetConfigurationGrantsAsync(
+        Guid id, SetConfigurationGrants request, CancellationToken ct = default)
+        => PutAsync<SetConfigurationGrants, RunConfiguration>($"/api/configurations/{id}/grants", request, ct);
+
     public Task<RunAccepted> RunConfigurationAsync(
         Guid id, Guid? onBehalfOf = null, IReadOnlyDictionary<string, string>? context = null,
         CancellationToken ct = default)

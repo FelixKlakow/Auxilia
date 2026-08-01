@@ -17,12 +17,12 @@ public sealed record CoreConnectorRecord : IEntity
     public string ProtectedSettingsJson { get; init; } = "{}";
 
     /// <summary>"Company" (shared) or "Personal" (identity-linked, owner + granted subjects only).</summary>
-    public string Scope { get; init; } = Core.Contracts.ConnectorScope.Company;
+    public string Scope { get; init; } = Core.Contracts.ResourceScope.Company;
 
     /// <summary>The principal who owns a personal connector; null for company connectors.</summary>
     public Guid? OwnerPrincipalId { get; init; }
 
-    /// <summary>JSON array of <c>ConnectorGrant</c> admitting subjects to a personal connector.</summary>
+    /// <summary>JSON array of <c>AccessGrant</c> admitting subjects to a personal connector.</summary>
     public string GrantsJson { get; init; } = "[]";
 
     public DateTimeOffset UpdatedUtc { get; init; }

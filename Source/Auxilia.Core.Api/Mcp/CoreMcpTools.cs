@@ -152,7 +152,7 @@ public sealed class CoreMcpTools(
         if (!Guid.TryParse(configurationId, out var id))
             return Error("configurationId must be a GUID.");
 
-        var config = await configurations.GetAsync(id, cancellationToken);
+        var config = await configurations.GetAsync(id, ViewerOf(context), cancellationToken);
         if (config is null)
             return Error("configuration not found.");
         if (await DenyAsync(principalId, PermissionActions.WorkflowTrigger, config.WorkflowType, cancellationToken) is { } denial)
@@ -174,14 +174,51 @@ public sealed class CoreMcpTools(
     }
 
     [McpServerTool(Name = "list_configurations")]
-    [Description("Lists stored run configurations.")]
+    [Description("Lists stored run configurations visible to you: company-scoped ones plus personal " +
+                 "ones you own or were granted.")]
     public async Task<CallToolResult> ListConfigurationsAsync(
         RequestContext<CallToolRequestParams> context, CancellationToken cancellationToken = default)
     {
         if (CoreClaims.PrincipalIdOf(context.User) is null)
             return NoPrincipal();
-        return JsonResult(await configurations.QueryAsync(new ConfigurationQuery(), cancellationToken));
+        return JsonResult(await configurations.QueryAsync(
+            new ConfigurationQuery(), ViewerOf(context), cancellationToken));
     }
+
+    [McpServerTool(Name = "set_configuration_grants")]
+    [Description("Replaces a personal configuration's access grants (owner or a configuration manager). " +
+                 "Grants is a JSON array of {kind,id}, kind = Principal, Group (first-class platform group) " +
+                 "or DirectoryGroup.")]
+    public async Task<CallToolResult> SetConfigurationGrantsAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Configuration id (GUID).")] string configurationId,
+        [Description("JSON array, e.g. [{\"kind\":\"Group\",\"id\":\"<group-id>\"}].")] string grantsJson,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (!Guid.TryParse(configurationId, out var id))
+            return Error("configurationId must be a GUID.");
+        if (!await configurations.IsOwnerAsync(id, principalId, cancellationToken)
+            && await DenyAsync(principalId, PermissionActions.WorkflowConfigurationManage, null, cancellationToken) is { } denial)
+            return denial;
+        try
+        {
+            var grantList = JsonSerializer.Deserialize<List<AccessGrant>>(grantsJson, JsonOptions) ?? [];
+            return await configurations.SetGrantsAsync(id, grantList, cancellationToken) is { } updated
+                ? JsonResult(updated)
+                : Error("configuration not found.");
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            return Error(ex.Message);
+        }
+    }
+
+    /// <summary>The visibility filter for the calling MCP principal (managers see everything).</summary>
+    private static ConfigurationViewer ViewerOf(RequestContext<CallToolRequestParams> context) => new(
+        CoreClaims.PrincipalIdOf(context.User),
+        context.User is { } user && CoreClaims.HasRolePermission(user, PermissionActions.WorkflowConfigurationManage));
 
     [McpServerTool(Name = "list_runs")]
     [Description("Lists runs, newest first.")]
@@ -316,13 +353,13 @@ public sealed class CoreMcpTools(
         [Description("Provider type.")] string providerType,
         [Description("JSON object of settings.")] string settingsJson,
         [Description("Scope: Personal (identity-linked, owned by you — the default) or Company (shared platform-wide; requires the connector-management permission).")]
-        string scope = ConnectorScope.Personal,
+        string scope = ResourceScope.Personal,
         CancellationToken cancellationToken = default)
     {
         if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
             return NoPrincipal();
         // Company connectors require the connector-management permission; personal ones are self-owned.
-        if (scope != ConnectorScope.Personal
+        if (scope != ResourceScope.Personal
             && await DenyAsync(principalId, PermissionActions.SlotConfigWrite, null, cancellationToken) is { } denial)
             return denial;
         var connector = await connectors.CreateAsync(
@@ -349,10 +386,10 @@ public sealed class CoreMcpTools(
             && await DenyAsync(principalId, PermissionActions.SlotConfigWrite, null, cancellationToken) is { } denial)
             return denial;
 
-        List<ConnectorGrant>? grants;
+        List<AccessGrant>? grants;
         try
         {
-            grants = JsonSerializer.Deserialize<List<ConnectorGrant>>(grantsJson);
+            grants = JsonSerializer.Deserialize<List<AccessGrant>>(grantsJson);
         }
         catch (JsonException)
         {

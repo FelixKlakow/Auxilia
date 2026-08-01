@@ -52,6 +52,7 @@ else
                     <th>Name</th>
                     <th>Workflow type</th>
                     <th>Slots</th>
+                    <th>Scope</th>
                     <th>State</th>
                     <th>Updated</th>
                     <th>Actions</th>
@@ -64,6 +65,7 @@ else
                         <td class="cell-strong">@configuration.Name</td>
                         <td>@configuration.WorkflowType</td>
                         <td>@configuration.SlotBindings.Count</td>
+                        <td><span class="badge badge-state">@configuration.Scope</span></td>
                         <td>
                             <span class="badge badge-state @(configuration.Enabled ? "badge-success" : "badge-cancelled")">
                                 @(configuration.Enabled ? "Enabled" : "Disabled")
@@ -75,6 +77,10 @@ else
                                     title="@(configuration.Enabled ? "Run this configuration as yourself" : "Enable the configuration first")"
                                     @onclick="() => RunAsync(configuration)">Run</button>
                             <a class="btn btn-secondary btn-sm" href="workflows/@configuration.Id/edit">Edit</a>
+                            @if (configuration.Scope == ResourceScope.Personal)
+                            {
+                                <button class="btn btn-secondary btn-sm" @onclick="() => StartGrants(configuration)">Sharing</button>
+                            }
                         </td>
                     </tr>
                 }
@@ -89,6 +95,35 @@ else
                 </div>
             }
         </div>
+    }
+
+    @if (_grants is { } panel)
+    {
+        <section class="card">
+            <div class="card-header">
+                <h2>Sharing — @panel.ConfigurationName</h2>
+                <p class="card-subtitle">Who besides the owner may see and run this personal configuration.</p>
+            </div>
+            <div class="card-body">
+                @foreach (var grant in panel.Grants)
+                {
+                    <div class="form-grid grant-row">
+                        <select @bind="grant.Kind">
+                            <option value="@AccessGrantKind.Principal">Principal</option>
+                            <option value="@AccessGrantKind.Group">Group</option>
+                            <option value="@AccessGrantKind.DirectoryGroup">Directory group</option>
+                        </select>
+                        <input @bind="grant.Id" placeholder="id (GUID / AD group object id)"/>
+                        <button class="btn btn-danger btn-sm" @onclick="() => panel.Grants.Remove(grant)">Remove</button>
+                    </div>
+                }
+                <div class="button-row editor-actions">
+                    <button class="btn btn-secondary btn-sm" @onclick="() => panel.Grants.Add(new GrantRow())">Add grant</button>
+                    <button class="btn btn-primary" disabled="@_busy" @onclick="SaveGrantsAsync">Save sharing</button>
+                    <button class="btn btn-secondary" disabled="@_busy" @onclick="() => _grants = null">Cancel</button>
+                </div>
+            </div>
+        </section>
     }
 }
 
@@ -156,6 +191,63 @@ else
         {
             var accepted = await Core.RunConfigurationAsync(configuration.Id, ct: _cts.Token);
             _notice = $"Run of \"{configuration.Name}\" dispatched ({accepted.RunId.ToString("N")[..8]}) — it appears under Runs shortly.";
+        }
+        catch (CoreApiException ex)
+        {
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private GrantsDraft? _grants;
+
+    private sealed class GrantsDraft
+    {
+        public Guid ConfigurationId;
+        public string ConfigurationName = "";
+        public List<GrantRow> Grants = [];
+    }
+
+    private sealed class GrantRow
+    {
+        public string Kind { get; set; } = AccessGrantKind.Principal;
+        public string Id { get; set; } = "";
+    }
+
+    private void StartGrants(RunConfiguration configuration)
+    {
+        _error = _notice = null;
+        _grants = new GrantsDraft
+        {
+            ConfigurationId = configuration.Id,
+            ConfigurationName = configuration.Name,
+            Grants = (configuration.Grants ?? [])
+                .Select(g => new GrantRow { Kind = g.Kind, Id = g.Id })
+                .ToList()
+        };
+    }
+
+    private async Task SaveGrantsAsync()
+    {
+        if (_grants is null)
+            return;
+        _busy = true;
+        try
+        {
+            var grants = _grants.Grants
+                .Where(g => !string.IsNullOrWhiteSpace(g.Id))
+                .Select(g => new AccessGrant(g.Kind, g.Id.Trim()))
+                .ToList();
+            var updated = await Core.SetConfigurationGrantsAsync(
+                _grants.ConfigurationId, new SetConfigurationGrants(grants), _cts.Token);
+            var index = _configurations.FindIndex(c => c.Id == updated.Id);
+            if (index >= 0)
+                _configurations[index] = updated;
+            _notice = $"Sharing for \"{_grants.ConfigurationName}\" saved.";
+            _grants = null;
         }
         catch (CoreApiException ex)
         {

@@ -58,6 +58,16 @@ else
                     <span class="field-hint">No workflow types are registered on this platform yet.</span>
                 }
             </label>
+            <label>
+                Scope
+                <select @bind="_scope">
+                    <option value="@ResourceScope.Personal">Personal — you and principals/groups you grant</option>
+                    @if (_canShareCompanyWide)
+                    {
+                        <option value="@ResourceScope.Company">Company — every authenticated principal</option>
+                    }
+                </select>
+            </label>
             <label class="check-label">
                 <input type="checkbox" @bind="_enabled"/> Enabled
                 <span class="field-hint">When disabled, every dispatch of this configuration is rejected.</span>
@@ -202,6 +212,10 @@ else
     private string _name = "";
     private string _selectedType = "";
     private bool _enabled = true;
+    private string _scope = ResourceScope.Personal;
+
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    private bool _canShareCompanyWide;
 
     private List<WorkflowTypeDto> _types = [];
     private List<Connector> _connectors = [];
@@ -227,6 +241,9 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        if (AuthState is not null)
+            _canShareCompanyWide = ConsoleAuthenticationStateProvider.Can(
+                (await AuthState).User, PermissionActions.WorkflowConfigurationManage);
         try
         {
             var types = await Core.ListWorkflowTypesAsync(new WorkflowTypeQuery(Take: 200), _cts.Token);
@@ -257,6 +274,7 @@ else
         _name = configuration.Name;
         _selectedType = configuration.WorkflowType;
         _enabled = configuration.Enabled;
+        _scope = configuration.Scope;
         foreach (var (key, value) in configuration.Context)
             _inputs[key] = value;
         foreach (var binding in configuration.SlotBindings)
@@ -327,7 +345,8 @@ else
                 WorkflowType: _selectedType.Trim(),
                 Context: context.Count == 0 ? null : context,
                 SlotBindings: slotBindings.Count == 0 ? null : slotBindings,
-                Enabled: _enabled);
+                Enabled: _enabled,
+                Scope: _scope);
 
             await Core.CreateConfigurationAsync(request, _cts.Token);
             Navigation.NavigateTo("workflows");

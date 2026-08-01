@@ -21,6 +21,15 @@ public sealed record CoreRunConfigurationRecord : IEntity
     /// <summary>Free-form tags for steering client filtering, serialized as JSON.</summary>
     public string TagsJson { get; init; } = "[]";
 
+    /// <summary>"Company" (shared) or "Personal" (owner + granted subjects + managers only).</summary>
+    public string Scope { get; init; } = Core.Contracts.ResourceScope.Company;
+
+    /// <summary>The principal who owns a personal configuration; null for company configurations.</summary>
+    public Guid? OwnerPrincipalId { get; init; }
+
+    /// <summary>JSON array of <c>AccessGrant</c> admitting subjects to a personal configuration.</summary>
+    public string GrantsJson { get; init; } = "[]";
+
     public bool Enabled { get; init; } = true;
     public DateTimeOffset UpdatedUtc { get; init; }
 }

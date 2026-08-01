@@ -71,7 +71,7 @@ else
                         <td>@TimeText.Relative(connector.UpdatedUtc)</td>
                         <td>
                             <button class="btn btn-secondary btn-sm" @onclick="() => ShowDetailAsync(connector.Id)">Details</button>
-                            @if (connector.Scope == ConnectorScope.Personal)
+                            @if (connector.Scope == ResourceScope.Personal)
                             {
                                 <button class="btn btn-secondary btn-sm" @onclick="() => StartGrants(connector)">Grants</button>
                             }
@@ -145,10 +145,10 @@ else
                     <label>
                         Scope
                         <select @bind="draft.Scope">
-                            <option value="@ConnectorScope.Personal">Personal — you and granted principals</option>
+                            <option value="@ResourceScope.Personal">Personal — you and granted principals</option>
                             @if (_canShareCompanyWide)
                             {
-                                <option value="@ConnectorScope.Company">Company — any authenticated principal</option>
+                                <option value="@ResourceScope.Company">Company — any authenticated principal</option>
                             }
                         </select>
                     </label>
@@ -200,9 +200,9 @@ else
                 {
                     <div class="card-row">
                         <select @bind="grant.Kind">
-                            <option value="@ConnectorGrantKind.Principal">Principal</option>
-                            <option value="@ConnectorGrantKind.Group">Group</option>
-                            <option value="@ConnectorGrantKind.DirectoryGroup">Directory group</option>
+                            <option value="@AccessGrantKind.Principal">Principal</option>
+                            <option value="@AccessGrantKind.Group">Group</option>
+                            <option value="@AccessGrantKind.DirectoryGroup">Directory group</option>
                         </select>
                         <input @bind="grant.Id" placeholder="principal id / group object id"/>
                         <button class="btn btn-danger btn-sm" @onclick="() => panel.Grants.Remove(grant)">Remove</button>
@@ -248,7 +248,7 @@ else
     {
         public string Name = "";
         public string ProviderType = "";
-        public string Scope = ConnectorScope.Personal;
+        public string Scope = ResourceScope.Personal;
         public List<SettingField> Fields = [];
     }
 
@@ -271,7 +271,7 @@ else
 
     private sealed class GrantRow
     {
-        public string Kind { get; set; } = ConnectorGrantKind.Principal;
+        public string Kind { get; set; } = AccessGrantKind.Principal;
         public string Id { get; set; } = "";
     }
 
@@ -431,7 +431,7 @@ else
         {
             var grants = _grants.Grants
                 .Where(g => g.Id.Length > 0)
-                .Select(g => new ConnectorGrant(g.Kind, g.Id))
+                .Select(g => new AccessGrant(g.Kind, g.Id))
                 .ToList();
             await Core.SetConnectorGrantsAsync(_grants.ConnectorId, new SetConnectorGrants(grants), _cts.Token);
             _notice = $"Grants for \"{_grants.ConnectorName}\" saved.";

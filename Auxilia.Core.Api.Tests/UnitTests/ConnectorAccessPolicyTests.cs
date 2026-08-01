@@ -22,7 +22,7 @@ public sealed class ConnectorAccessPolicyTests
         _connectors = new InMemoryDataAccess<CoreConnectorRecord>();
         _principals = new InMemoryDataAccess<PrincipalRecord>();
         _memberships = new InMemoryDataAccess<GroupMembershipRecord>();
-        _policy = new ConnectorAccessPolicy(_connectors, _principals, _memberships);
+        _policy = new ConnectorAccessPolicy(_connectors, new AccessGrantEvaluator(_principals, _memberships));
     }
 
     [TearDown]
@@ -33,7 +33,7 @@ public sealed class ConnectorAccessPolicyTests
         _memberships.Dispose();
     }
 
-    private async Task<Guid> AddConnectorAsync(string scope, Guid? owner = null, params ConnectorGrant[] grants)
+    private async Task<Guid> AddConnectorAsync(string scope, Guid? owner = null, params AccessGrant[] grants)
     {
         var id = Guid.NewGuid();
         await _connectors.SaveAsync(new CoreConnectorRecord
@@ -67,7 +67,7 @@ public sealed class ConnectorAccessPolicyTests
 
     [Test]
     public async Task CompanyConnector_IsUsableByAnyone()
-        => Assert.That(await CanUseAsync(await AddConnectorAsync(ConnectorScope.Company), Guid.NewGuid()), Is.True);
+        => Assert.That(await CanUseAsync(await AddConnectorAsync(ResourceScope.Company), Guid.NewGuid()), Is.True);
 
     [Test]
     public async Task MissingConnector_IsNotAnAccessFailure()
@@ -78,13 +78,13 @@ public sealed class ConnectorAccessPolicyTests
     public async Task PersonalConnector_IsUsableByItsOwner()
     {
         var owner = await AddPrincipalAsync();
-        Assert.That(await CanUseAsync(await AddConnectorAsync(ConnectorScope.Personal, owner), owner), Is.True);
+        Assert.That(await CanUseAsync(await AddConnectorAsync(ResourceScope.Personal, owner), owner), Is.True);
     }
 
     [Test]
     public async Task PersonalConnector_IsDeniedToAStranger()
     {
-        var connector = await AddConnectorAsync(ConnectorScope.Personal, await AddPrincipalAsync());
+        var connector = await AddConnectorAsync(ResourceScope.Personal, await AddPrincipalAsync());
         Assert.That(await CanUseAsync(connector, await AddPrincipalAsync()), Is.False);
     }
 
@@ -92,8 +92,8 @@ public sealed class ConnectorAccessPolicyTests
     public async Task PersonalConnector_IsUsableByADirectPrincipalGrant()
     {
         var friend = await AddPrincipalAsync();
-        var connector = await AddConnectorAsync(ConnectorScope.Personal, await AddPrincipalAsync(),
-            new ConnectorGrant(ConnectorGrantKind.Principal, friend.ToString("D")));
+        var connector = await AddConnectorAsync(ResourceScope.Personal, await AddPrincipalAsync(),
+            new AccessGrant(AccessGrantKind.Principal, friend.ToString("D")));
         Assert.That(await CanUseAsync(connector, friend), Is.True);
     }
 
@@ -101,8 +101,8 @@ public sealed class ConnectorAccessPolicyTests
     public async Task PersonalConnector_IsUsableByAMemberOfAGrantedDirectoryGroup()
     {
         var teammate = await AddPrincipalAsync("group-devs");
-        var connector = await AddConnectorAsync(ConnectorScope.Personal, await AddPrincipalAsync(),
-            new ConnectorGrant(ConnectorGrantKind.DirectoryGroup, "group-devs"));
+        var connector = await AddConnectorAsync(ResourceScope.Personal, await AddPrincipalAsync(),
+            new AccessGrant(AccessGrantKind.DirectoryGroup, "group-devs"));
         Assert.That(await CanUseAsync(connector, teammate), Is.True,
             "The AD cascade: directory-group membership from sign-in admits the principal.");
     }
@@ -111,8 +111,8 @@ public sealed class ConnectorAccessPolicyTests
     public async Task PersonalConnector_IsDeniedToANonMemberOfTheGrantedGroup()
     {
         var outsider = await AddPrincipalAsync("group-other");
-        var connector = await AddConnectorAsync(ConnectorScope.Personal, await AddPrincipalAsync(),
-            new ConnectorGrant(ConnectorGrantKind.DirectoryGroup, "group-devs"));
+        var connector = await AddConnectorAsync(ResourceScope.Personal, await AddPrincipalAsync(),
+            new AccessGrant(AccessGrantKind.DirectoryGroup, "group-devs"));
         Assert.That(await CanUseAsync(connector, outsider), Is.False);
     }
 
@@ -125,8 +125,8 @@ public sealed class ConnectorAccessPolicyTests
         {
             Id = GroupMembershipRecord.IdFor(groupId, member), GroupId = groupId, PrincipalId = member
         });
-        var connector = await AddConnectorAsync(ConnectorScope.Personal, await AddPrincipalAsync(),
-            new ConnectorGrant(ConnectorGrantKind.Group, groupId.ToString("D")));
+        var connector = await AddConnectorAsync(ResourceScope.Personal, await AddPrincipalAsync(),
+            new AccessGrant(AccessGrantKind.Group, groupId.ToString("D")));
         Assert.That(await CanUseAsync(connector, member), Is.True,
             "First-class group membership admits the principal.");
     }
@@ -134,13 +134,13 @@ public sealed class ConnectorAccessPolicyTests
     [Test]
     public async Task PersonalConnector_IsDeniedToANonMemberOfTheGrantedPlatformGroup()
     {
-        var connector = await AddConnectorAsync(ConnectorScope.Personal, await AddPrincipalAsync(),
-            new ConnectorGrant(ConnectorGrantKind.Group, Guid.NewGuid().ToString("D")));
+        var connector = await AddConnectorAsync(ResourceScope.Personal, await AddPrincipalAsync(),
+            new AccessGrant(AccessGrantKind.Group, Guid.NewGuid().ToString("D")));
         Assert.That(await CanUseAsync(connector, await AddPrincipalAsync()), Is.False);
     }
 
     [Test]
     public async Task PersonalConnector_WithoutAnIdentifiedPrincipal_IsDenied()
-        => Assert.That(await CanUseAsync(await AddConnectorAsync(ConnectorScope.Personal, await AddPrincipalAsync()), null),
+        => Assert.That(await CanUseAsync(await AddConnectorAsync(ResourceScope.Personal, await AddPrincipalAsync()), null),
             Is.False);
 }

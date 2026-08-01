@@ -26,7 +26,10 @@ public sealed class RunServiceTests
     {
         var bus = new FakeMessageBusClient();
         var configs = new RunConfigurationService(
-            new InMemoryDataAccess<CoreRunConfigurationRecord>(), TimeProvider.System);
+            new InMemoryDataAccess<CoreRunConfigurationRecord>(),
+            new AccessGrantEvaluator(
+                new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>()),
+            TimeProvider.System);
         var protector = new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32));
         var connectorStore = new InMemoryDataAccess<CoreConnectorRecord>();
         var connectors = new ConnectorService(connectorStore, protector, TimeProvider.System);
@@ -49,7 +52,8 @@ public sealed class RunServiceTests
             new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System),
             TimeProvider.System, Options.Create(new CoreApiSettings()));
         var accessPolicy = new ConnectorAccessPolicy(connectorStore,
-            new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>());
+            new AccessGrantEvaluator(
+                new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>()));
         var liveness = new RunnerLivenessTracker();
         var typeStore = new InMemoryDataAccess<CoreWorkflowTypeRecord>();
         var registry = new WorkflowTypeRegistryService(
@@ -220,8 +224,7 @@ public sealed class RunServiceTests
         await SeedActiveTypeAsync(registry, "wt", "docker://img");
         var config = await configs.CreateAsync(
             new CreateRunConfiguration("c", "wt",
-                new Dictionary<string, string> { ["WORKFLOW_NAME"] = "x" }),
-            CancellationToken.None);
+                new Dictionary<string, string> { ["WORKFLOW_NAME"] = "x" }), ownerPrincipalId: null, CancellationToken.None);
 
         await service.RunConfigurationAsync(config.Id, null, null, CancellationToken.None);
 

@@ -19,6 +19,8 @@ public interface ICoreClient
     Task<PagedResult<RunConfiguration>> QueryConfigurationsAsync(ConfigurationQuery query, CancellationToken ct = default);
     /// <summary>Deletes a stored configuration permanently.</summary>
     Task DeleteConfigurationAsync(Guid id, CancellationToken ct = default);
+    /// <summary>Replaces a personal configuration's access grants (owner or a configuration manager).</summary>
+    Task<RunConfiguration> SetConfigurationGrantsAsync(Guid id, SetConfigurationGrants request, CancellationToken ct = default);
     Task<RunAccepted> RunConfigurationAsync(
         Guid id, Guid? onBehalfOf = null, IReadOnlyDictionary<string, string>? context = null,
         CancellationToken ct = default);

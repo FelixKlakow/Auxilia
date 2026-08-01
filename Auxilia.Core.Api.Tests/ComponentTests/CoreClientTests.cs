@@ -69,16 +69,16 @@ public sealed class CoreClientTests : CoreApiComponentTestBase
         ICoreClient core = new CoreClient(CreateClient());
         var connector = await core.CreateConnectorAsync(new CreateConnector(
             "conn-" + Guid.NewGuid().ToString("N"), "github",
-            new Dictionary<string, string> { ["token"] = "x" }, ConnectorScope.Personal));
+            new Dictionary<string, string> { ["token"] = "x" }, ResourceScope.Personal));
 
         var fetched = await core.GetConnectorAsync(connector.Id);
-        Assert.That(fetched!.Scope, Is.EqualTo(ConnectorScope.Personal));
+        Assert.That(fetched!.Scope, Is.EqualTo(ResourceScope.Personal));
 
         await core.SetConnectorGrantsAsync(connector.Id,
-            new SetConnectorGrants([new ConnectorGrant(ConnectorGrantKind.DirectoryGroup, "group-devs")]));
+            new SetConnectorGrants([new AccessGrant(AccessGrantKind.DirectoryGroup, "group-devs")]));
 
         var afterGrant = await core.GetConnectorAsync(connector.Id);
-        Assert.That(afterGrant!.Grants, Has.One.Matches<ConnectorGrant>(g => g.Id == "group-devs"));
+        Assert.That(afterGrant!.Grants, Has.One.Matches<AccessGrant>(g => g.Id == "group-devs"));
     }
 
     [Test]

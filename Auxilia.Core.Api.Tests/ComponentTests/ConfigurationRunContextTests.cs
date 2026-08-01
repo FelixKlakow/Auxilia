@@ -28,7 +28,8 @@ public sealed class ConfigurationRunContextTests : CoreApiComponentTestBase
         var configurations = Factory.Services.GetRequiredService<RunConfigurationService>();
         var config = await configurations.CreateAsync(new CreateRunConfiguration(
             "cfg-" + Guid.NewGuid().ToString("N"), DummyType,
-            new Dictionary<string, string> { ["WORKFLOW_NAME"] = DummyType }), CancellationToken.None);
+            new Dictionary<string, string> { ["WORKFLOW_NAME"] = DummyType },
+            Scope: ResourceScope.Company), ownerPrincipalId: null, CancellationToken.None);
         return config.Id;
     }
 

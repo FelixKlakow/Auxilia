@@ -25,6 +25,16 @@ public static class CoreClaims
         => user is not null && Guid.TryParse(user.FindFirstValue(PrincipalIdClaim), out var id) ? id : null;
 
     /// <summary>
+    /// Whether the caller's ROLES grant the permission action — a pure claims check (no store
+    /// read, no audit entry), for read-path filtering and show/hide decisions. Enforcement of
+    /// mutations stays with the Policy Engine.
+    /// </summary>
+    public static bool HasRolePermission(ClaimsPrincipal user, string action)
+        => user.FindAll(ClaimTypes.Role)
+            .SelectMany(c => Governance.BuiltInRoles.PermissionsOf(c.Value))
+            .Contains(action);
+
+    /// <summary>
     /// Projects the claims of a validated external identity (OIDC/Entra) onto an
     /// <see cref="ExternalIdentity"/>. Prefers Entra's stable <c>oid</c> as the subject, falling
     /// back to the standard <c>sub</c>/name-identifier claims.

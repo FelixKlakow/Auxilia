@@ -56,7 +56,7 @@ public sealed class ClaudeCodeRepositoryScenarioTests : CoreApiComponentTestBase
         var auth = await core.CreateConnectorAsync(new CreateConnector(
             "tfs-auth", "azure-devops",
             new Dictionary<string, string> { ["username"] = "build", ["token"] = "the-pat" },
-            ConnectorScope.Personal));
+            ResourceScope.Personal));
 
         // 2. Start a Claude Code session against exactly two repos on that server, with a prompt
         //    from the app's configuration — one binding per repository on the SAME slot.
@@ -116,7 +116,7 @@ public sealed class ClaudeCodeRepositoryScenarioTests : CoreApiComponentTestBase
             Id = connectorId,
             Name = "not-mine",
             ProviderType = "azure-devops",
-            Scope = ConnectorScope.Personal,
+            Scope = ResourceScope.Personal,
             OwnerPrincipalId = Guid.NewGuid()
         }, CancellationToken.None);
 
