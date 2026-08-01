@@ -12,7 +12,7 @@ and never calls SetForegroundWindow.
 ./Snap-Window.ps1 -ProcessName "Auxilia Steering" -OutPath steering.png
 
 .EXAMPLE
-./Snap-Window.ps1 -ProcessName AgentView.Wpf.Demo -TitleLike "Demo" -OutPath demo.png
+./Snap-Window.ps1 -ProcessName MyApp.Demo -TitleLike "Demo" -OutPath demo.png
 #>
 param(
     [Parameter(Mandatory)] [string] $ProcessName,

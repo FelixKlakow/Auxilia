@@ -130,9 +130,9 @@ are a separate, deferred topic.
 Gate details carry `DetailFormat` (open vocabulary): `"markdown"` renders through the native
 markdown renderer in the steering client's decision cards (plans, review bundles); null/`"code"`
 stays monospace (permission tool inputs). ```mermaid fences inside any markdown surface
-(details, chat) render as REAL diagrams — AgentView.Wpf exposes a host-pluggable
-`MarkdownViewer.FenceRenderer`, and the steering client registers an offline WebView2+mermaid.js
-renderer. Plans should use mermaid for diagrams, per the repo convention.
+(details, chat) render as REAL diagrams — the steering client's chat renderer exposes a
+host-pluggable fence renderer and registers an offline mermaid.js implementation. Plans
+should use mermaid for diagrams, per the repo convention.
 
 ## The step flow (declared view data + runtime states)
 

@@ -2,7 +2,7 @@
 
 > **Status:** L4 delivered · 2026-07-25 · Full enterprise-login track live in Core.Api — Entra OIDC sign-in, JIT provisioning, directory-group→role mapping, AD-group-gated connectors, and session-lifetime OBO delegation (real-tenant verification remains manual)
 > **Owner:** Felix Klakow
-> **Scope:** Support the login scenarios Felix's company needs — **Microsoft/Entra ID (Azure AD) SSO**, and **"connected accounts"**: one Auxilia identity linked to the corporate directory (AD) that cascades authorized access to TFS / Azure DevOps / repositories.
+> **Scope:** Support enterprise login scenarios — **Microsoft/Entra ID (Azure AD) SSO**, and **"connected accounts"**: one Auxilia identity linked to a corporate directory (AD) that cascades authorized access to TFS / Azure DevOps / repositories.
 
 ---
 
