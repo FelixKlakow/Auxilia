@@ -13,6 +13,7 @@ public sealed class ConnectorAccessPolicyTests
 {
     private InMemoryDataAccess<CoreConnectorRecord> _connectors = null!;
     private InMemoryDataAccess<PrincipalRecord> _principals = null!;
+    private InMemoryDataAccess<GroupMembershipRecord> _memberships = null!;
     private ConnectorAccessPolicy _policy = null!;
 
     [SetUp]
@@ -20,7 +21,8 @@ public sealed class ConnectorAccessPolicyTests
     {
         _connectors = new InMemoryDataAccess<CoreConnectorRecord>();
         _principals = new InMemoryDataAccess<PrincipalRecord>();
-        _policy = new ConnectorAccessPolicy(_connectors, _principals);
+        _memberships = new InMemoryDataAccess<GroupMembershipRecord>();
+        _policy = new ConnectorAccessPolicy(_connectors, _principals, _memberships);
     }
 
     [TearDown]
@@ -28,6 +30,7 @@ public sealed class ConnectorAccessPolicyTests
     {
         _connectors.Dispose();
         _principals.Dispose();
+        _memberships.Dispose();
     }
 
     private async Task<Guid> AddConnectorAsync(string scope, Guid? owner = null, params ConnectorGrant[] grants)
@@ -111,6 +114,29 @@ public sealed class ConnectorAccessPolicyTests
         var connector = await AddConnectorAsync(ConnectorScope.Personal, await AddPrincipalAsync(),
             new ConnectorGrant(ConnectorGrantKind.DirectoryGroup, "group-devs"));
         Assert.That(await CanUseAsync(connector, outsider), Is.False);
+    }
+
+    [Test]
+    public async Task PersonalConnector_IsUsableByAMemberOfAGrantedPlatformGroup()
+    {
+        var groupId = Guid.NewGuid();
+        var member = await AddPrincipalAsync();
+        await _memberships.SaveAsync(new GroupMembershipRecord
+        {
+            Id = GroupMembershipRecord.IdFor(groupId, member), GroupId = groupId, PrincipalId = member
+        });
+        var connector = await AddConnectorAsync(ConnectorScope.Personal, await AddPrincipalAsync(),
+            new ConnectorGrant(ConnectorGrantKind.Group, groupId.ToString("D")));
+        Assert.That(await CanUseAsync(connector, member), Is.True,
+            "First-class group membership admits the principal.");
+    }
+
+    [Test]
+    public async Task PersonalConnector_IsDeniedToANonMemberOfTheGrantedPlatformGroup()
+    {
+        var connector = await AddConnectorAsync(ConnectorScope.Personal, await AddPrincipalAsync(),
+            new ConnectorGrant(ConnectorGrantKind.Group, Guid.NewGuid().ToString("D")));
+        Assert.That(await CanUseAsync(connector, await AddPrincipalAsync()), Is.False);
     }
 
     [Test]

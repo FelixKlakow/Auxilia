@@ -48,7 +48,8 @@ public sealed class RunServiceTests
             new NullDelegatedTokenExchange(),
             new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System),
             TimeProvider.System, Options.Create(new CoreApiSettings()));
-        var accessPolicy = new ConnectorAccessPolicy(connectorStore, new InMemoryDataAccess<PrincipalRecord>());
+        var accessPolicy = new ConnectorAccessPolicy(connectorStore,
+            new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>());
         var liveness = new RunnerLivenessTracker();
         var typeStore = new InMemoryDataAccess<CoreWorkflowTypeRecord>();
         var registry = new WorkflowTypeRegistryService(

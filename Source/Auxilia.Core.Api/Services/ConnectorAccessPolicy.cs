@@ -9,13 +9,15 @@ namespace Auxilia.Core.Api.Services;
 /// <summary>
 /// Decides whether a principal may bind a connector into a run. A <see cref="ConnectorScope.Company"/>
 /// connector is usable by anyone; a <see cref="ConnectorScope.Personal"/> (identity-linked) connector
-/// is usable only by its owner, principals it grants directly, and principals whose directory (AD)
-/// group membership includes a granted group. The directory groups come from the principal's last
-/// federated sign-in (<see cref="PrincipalRecord.DirectoryGroupsJson"/>) — this is the AD cascade.
+/// is usable only by its owner, principals it grants directly, members of granted first-class
+/// platform groups, and principals whose directory (AD) group membership includes a granted
+/// group. The directory groups come from the principal's last federated sign-in
+/// (<see cref="PrincipalRecord.DirectoryGroupsJson"/>) — this is the AD cascade.
 /// </summary>
 public sealed class ConnectorAccessPolicy(
     IDataAccess<CoreConnectorRecord> connectors,
-    IDataAccess<PrincipalRecord> principals)
+    IDataAccess<PrincipalRecord> principals,
+    IDataAccess<GroupMembershipRecord> groupMemberships)
 {
     public async Task<bool> CanUseAsync(Guid connectorId, Guid? principalId, CancellationToken ct)
     {
@@ -34,16 +36,26 @@ public sealed class ConnectorAccessPolicy(
                             && Guid.TryParse(g.Id, out var granted) && granted == pid))
             return true;
 
-        var groupGrants = grants
+        var grantedGroupIds = grants
+            .Where(g => g.Kind == ConnectorGrantKind.Group)
+            .Select(g => Guid.TryParse(g.Id, out var groupId) ? groupId : Guid.Empty)
+            .Where(id => id != Guid.Empty)
+            .ToHashSet();
+        if (grantedGroupIds.Count > 0
+            && (await groupMemberships.ReadAsync(ct))
+                .Any(m => m.PrincipalId == pid && grantedGroupIds.Contains(m.GroupId)))
+            return true;
+
+        var directoryGrants = grants
             .Where(g => g.Kind == ConnectorGrantKind.DirectoryGroup)
             .Select(g => g.Id)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (groupGrants.Count == 0)
+        if (directoryGrants.Count == 0)
             return false;
 
         var principal = await principals.ReadAsync(pid, ct);
         var principalGroups = JsonSerializer.Deserialize<List<string>>(principal?.DirectoryGroupsJson ?? "[]") ?? [];
-        return principalGroups.Any(groupGrants.Contains);
+        return principalGroups.Any(directoryGrants.Contains);
     }
 }
 

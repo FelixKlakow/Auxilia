@@ -14,13 +14,16 @@ public static class ConnectorGrantKind
 {
     /// <summary><see cref="ConnectorGrant.Id"/> is a principal id.</summary>
     public const string Principal = "Principal";
+    /// <summary><see cref="ConnectorGrant.Id"/> is a first-class platform group id.</summary>
+    public const string Group = "Group";
     /// <summary><see cref="ConnectorGrant.Id"/> is a directory (AD/Entra) group object id.</summary>
     public const string DirectoryGroup = "DirectoryGroup";
 }
 
 /// <summary>
-/// Admits a subject to use a personal connector: a specific principal, or every principal whose
-/// directory group membership includes the given AD group. Company connectors ignore grants.
+/// Admits a subject to use a personal connector: a specific principal, every member of a
+/// first-class platform group, or every principal whose directory group membership includes
+/// the given AD group. Company connectors ignore grants.
 /// </summary>
 public sealed record ConnectorGrant(string Kind, string Id);
 
@@ -28,12 +31,13 @@ public sealed record ConnectorGrant(string Kind, string Id);
 /// Create a connector (a credential-bearing configuration instance). Settings are stored
 /// encrypted at rest in the Core database and are never returned by any read endpoint. A
 /// <see cref="ConnectorScope.Personal"/> connector is owned by the creating principal.
+/// Sharing platform-wide (<see cref="ConnectorScope.Company"/>) is the deliberate opt-in.
 /// </summary>
 public sealed record CreateConnector(
     string Name,
     string ProviderType,
     IReadOnlyDictionary<string, string> Settings,
-    string Scope = ConnectorScope.Company);
+    string Scope = ConnectorScope.Personal);
 
 /// <summary>
 /// Update a connector in place: a null field stays unchanged; provided <see cref="Settings"/>
@@ -73,7 +77,7 @@ public sealed record Connector(
     string ProviderType,
     IReadOnlyList<string> SettingKeys,
     DateTimeOffset UpdatedUtc,
-    string Scope = ConnectorScope.Company,
+    string Scope = ConnectorScope.Personal,
     Guid? OwnerPrincipalId = null,
     IReadOnlyList<ConnectorGrant>? Grants = null);
 

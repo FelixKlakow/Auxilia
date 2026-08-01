@@ -82,7 +82,9 @@ public sealed class FailoverMonitorTests
             _bus,
             new RunConfigurationService(new InMemoryDataAccess<CoreRunConfigurationRecord>(), _time),
             _registry, new WorkflowSchemaReadService(typeStore), providerCatalog, _resolver,
-            new ConnectorAccessPolicy(connectorStore, new InMemoryDataAccess<Auxilia.PlatformData.Entities.PrincipalRecord>()),
+            new ConnectorAccessPolicy(connectorStore,
+                new InMemoryDataAccess<Auxilia.PlatformData.Entities.PrincipalRecord>(),
+                new InMemoryDataAccess<Auxilia.PlatformData.Entities.GroupMembershipRecord>()),
             connectors, new RunnerLivenessTracker(), _time,
             Options.Create(_settings), NullLogger<RunService>.Instance);
 

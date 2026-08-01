@@ -40,7 +40,7 @@ Source/Auxilia.Core.Api/
 │   └── DelegatedUserTokenRecord.cs    # Retained user access token (encrypted, principal-keyed, expiry) for OBO (L4)
 ├── Services/
 │   ├── ConnectorService.cs            # Protect on write; ResolveSettingsAsync (JIT); ToDto returns keys only; owner/scope/grants
-│   ├── ConnectorAccessPolicy.cs       # CanUseAsync gate (company/owner/principal-grant/AD-group-grant) + ConnectorAccessDeniedException
+│   ├── ConnectorAccessPolicy.cs       # CanUseAsync gate (company/owner/principal-grant/platform-group-grant/AD-group-grant) + ConnectorAccessDeniedException
 │   ├── DelegatedTokenStore.cs         # Retain/get the user's access token (encrypted, session-lifetime) for OBO
 │   ├── IDelegatedTokenExchange.cs     # OBO exchange seam + NullDelegatedTokenExchange (fails closed)
 │   ├── EntraOboTokenExchange.cs       # Real on-behalf-of grant to the Entra token endpoint (wired when EnableDelegation)

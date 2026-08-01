@@ -315,8 +315,8 @@ public sealed class CoreMcpTools(
         [Description("Connector name.")] string name,
         [Description("Provider type.")] string providerType,
         [Description("JSON object of settings.")] string settingsJson,
-        [Description("Scope: Company (shared) or Personal (identity-linked, owned by you).")]
-        string scope = ConnectorScope.Company,
+        [Description("Scope: Personal (identity-linked, owned by you — the default) or Company (shared platform-wide; requires the connector-management permission).")]
+        string scope = ConnectorScope.Personal,
         CancellationToken cancellationToken = default)
     {
         if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
@@ -332,7 +332,7 @@ public sealed class CoreMcpTools(
 
     [McpServerTool(Name = "set_connector_grants")]
     [Description("Replaces a personal connector's access grants (owner or a connector manager only). " +
-                 "Grants is a JSON array of {kind,id}, kind = Principal or DirectoryGroup.")]
+                 "Grants is a JSON array of {kind,id}, kind = Principal, Group (first-class platform group) or DirectoryGroup.")]
     public async Task<CallToolResult> SetConnectorGrantsAsync(
         RequestContext<CallToolRequestParams> context,
         [Description("Connector id (GUID).")] string connectorId,

@@ -145,8 +145,8 @@ else
                     <label>
                         Scope
                         <select @bind="draft.Scope">
-                            <option value="@ConnectorScope.Company">Company — any authenticated principal</option>
                             <option value="@ConnectorScope.Personal">Personal — you and granted principals</option>
+                            <option value="@ConnectorScope.Company">Company — any authenticated principal</option>
                         </select>
                     </label>
                 </div>
@@ -241,7 +241,7 @@ else
     {
         public string Name = "";
         public string ProviderType = "";
-        public string Scope = ConnectorScope.Company;
+        public string Scope = ConnectorScope.Personal;
         public List<SettingField> Fields = [];
     }
 
