@@ -14,6 +14,26 @@ your normal business operations, or in any environment that serves real
 users, real data, or real workloads. This includes internal tools used by
 your staff, not just customer-facing systems.
 
+**Clients count.** Auxilia is a client-server platform, and the clients are
+part of the Licensed Work: the client libraries (`Auxilia.Core.Contracts`,
+`Auxilia.Core.Client`, `Auxilia.Workflows.Client`), the Admin Console, the
+Trigger Host, and the MCP surface. Using an Auxilia deployment productively
+**through any of these — or through applications built on them — is
+production use of Auxilia**, regardless of which machine the server process
+runs on. A hundred people working productively against one Auxilia server is
+a hundred people using Auxilia in production; it is covered by (and priced
+through) the license of the legal entity those people work for — not
+side-stepped by pointing at a single licensed server box.
+
+**One license per using entity.** A commercial license covers production use
+by and for **the licensed legal entity** (its employees and contractors
+working on its behalf, at any scale — that is what the company-size bands
+price). It does **not** extend to other legal entities: if you operate an
+Auxilia deployment that other companies use productively (hosting, a managed
+service, a shared platform for your corporate group's separate entities),
+each using entity needs its own license, or you need a service-provider
+agreement — talk to me.
+
 If you are unsure which side of the line your use falls on, please just ask.
 
 ## What a commercial license gives you
