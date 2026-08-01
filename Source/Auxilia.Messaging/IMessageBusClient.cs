@@ -36,4 +36,20 @@ public interface IMessageBusClient
         string exchangeName,
         Func<T, CancellationToken, Task> handler,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    ///     Binds a durable NAMED queue to the fanout exchange and consumes it — competing
+    ///     consumers: across all subscribers sharing <paramref name="queueName"/> each message is
+    ///     processed once (at-least-once bus semantics apply), instead of once per subscriber.
+    ///     Use for bus→store mirrors so N service nodes don't multiply writes; per-node fan-outs
+    ///     (SSE brokers) keep <see cref="SubscribeToExchangeAsync{T}"/>. The default
+    ///     implementation degrades to a per-subscriber copy — identical semantics on a single
+    ///     node and for in-memory fakes; broker implementations override with a real shared queue.
+    /// </summary>
+    Task<IAsyncDisposable> SubscribeToExchangeSharedAsync<T>(
+        string exchangeName,
+        string queueName,
+        Func<T, CancellationToken, Task> handler,
+        CancellationToken cancellationToken = default)
+        => SubscribeToExchangeAsync(exchangeName, handler, cancellationToken);
 }

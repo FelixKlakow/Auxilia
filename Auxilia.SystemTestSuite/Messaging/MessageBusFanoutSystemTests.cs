@@ -103,6 +103,65 @@ public class MessageBusFanoutSystemTests
         }
     }
 
+    [Test]
+    public async Task SharedSubscription_CompetesForEachMessage_WhileFanoutStillCopies()
+    {
+        // The multi-node mirror pattern (IMessageBusClient.SubscribeToExchangeSharedAsync):
+        // two subscribers sharing one named queue = two Core.Api nodes; each event must be
+        // processed by exactly ONE of them, while an ordinary fanout subscriber (the SSE
+        // publisher) still receives every event. Only reproducible against a real broker —
+        // the in-memory fake degrades shared to per-subscriber copies.
+        var exchange = $"shared-subscription-{Guid.NewGuid():N}";
+        var sharedQueue = $"mirror-{Guid.NewGuid():N}";
+        await _client.DeclareExchangeAsync(exchange);
+
+        var gate = new object();
+        var nodeA = new List<AlphaCommand>();
+        var nodeB = new List<AlphaCommand>();
+        var fanout = new List<AlphaCommand>();
+
+        await _client.SubscribeToExchangeSharedAsync<AlphaCommand>(exchange, sharedQueue, (m, _) =>
+        {
+            lock (gate) { nodeA.Add(m); }
+            return Task.CompletedTask;
+        });
+        await _client.SubscribeToExchangeSharedAsync<AlphaCommand>(exchange, sharedQueue, (m, _) =>
+        {
+            lock (gate) { nodeB.Add(m); }
+            return Task.CompletedTask;
+        });
+        await _client.SubscribeToExchangeAsync<AlphaCommand>(exchange, (m, _) =>
+        {
+            lock (gate) { fanout.Add(m); }
+            return Task.CompletedTask;
+        });
+
+        const int published = 20;
+        for (var i = 0; i < published; i++)
+            await _client.PublishToExchangeAsync(exchange,
+                new AlphaCommand($"wf-{i}", "slot", "provider"));
+
+        await WaitUntilAsync(() =>
+        {
+            lock (gate) { return nodeA.Count + nodeB.Count >= published && fanout.Count >= published; }
+        }, TimeSpan.FromSeconds(15));
+        // Let any erroneous duplicate delivery arrive before asserting there is none.
+        await Task.Delay(500);
+
+        lock (gate)
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(nodeA.Count + nodeB.Count, Is.EqualTo(published),
+                    "shared-queue subscribers must process each event exactly once IN TOTAL");
+                Assert.That(nodeA.Concat(nodeB).Select(m => m.WorkflowType).Distinct().Count(),
+                    Is.EqualTo(published), "no event may be processed twice across the nodes");
+                Assert.That(fanout, Has.Count.EqualTo(published),
+                    "an ordinary fanout subscriber still receives every event");
+            });
+        }
+    }
+
     private static async Task WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;

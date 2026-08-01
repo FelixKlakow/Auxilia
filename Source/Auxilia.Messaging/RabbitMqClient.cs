@@ -190,6 +190,62 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
         return new SubscriptionHandle(channel, consumerTag);
     }
 
+    public async Task<IAsyncDisposable> SubscribeToExchangeSharedAsync<T>(
+        string exchangeName,
+        string queueName,
+        Func<T, CancellationToken, Task> handler,
+        CancellationToken cancellationToken = default)
+    {
+        // A durable named queue bound to the fanout: every subscriber sharing the name competes
+        // for the same deliveries — the multi-node mirror pattern (each event processed once).
+        var channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken);
+        await channel.QueueDeclareAsync(
+            queueName, durable: true, exclusive: false, autoDelete: false, arguments: null,
+            cancellationToken: cancellationToken);
+        await channel.QueueBindAsync(queueName, exchangeName, string.Empty, null, cancellationToken: cancellationToken);
+
+        var consumer = new AsyncEventingBasicConsumer(channel);
+        consumer.ReceivedAsync += async (_, ea) =>
+        {
+            var parentContext = Propagators.DefaultTextMapPropagator.Extract(
+                default,
+                ea.BasicProperties.Headers,
+                static (headers, key) =>
+                {
+                    if (headers == null || !headers.TryGetValue(key, out var val))
+                        return [];
+                    var str = val is byte[] bytes ? Encoding.UTF8.GetString(bytes) : val?.ToString();
+                    return str is null ? [] : [str];
+                });
+
+            using var activity = MessagingTelemetry.ActivitySource.StartActivity(
+                "rabbitmq.consume",
+                ActivityKind.Consumer,
+                parentContext.ActivityContext);
+            activity?.SetTag("messaging.system", "rabbitmq");
+            activity?.SetTag("messaging.destination", exchangeName);
+            activity?.SetTag("messaging.operation", "receive");
+
+            MessagingTelemetry.ReceiveCounter.Add(1, new TagList { { "messaging.queue", queueName } });
+
+            // Same type-tag guard as every other consumer: the fanout delivers everything.
+            var messageType = ea.BasicProperties.Type;
+            if (messageType is not null && messageType != typeof(T).FullName)
+            {
+                await channel.BasicAckAsync(ea.DeliveryTag, false);
+                return;
+            }
+
+            var body = Encoding.UTF8.GetString(ea.Body.ToArray());
+            var msg = JsonSerializer.Deserialize<T>(body);
+            if (msg is not null)
+                await handler(msg, CancellationToken.None);
+            await channel.BasicAckAsync(ea.DeliveryTag, false);
+        };
+        var consumerTag = await channel.BasicConsumeAsync(queueName, false, consumer, cancellationToken);
+        return new SubscriptionHandle(channel, consumerTag);
+    }
+
     public async Task<IAsyncDisposable> SubscribeAsync<T>(
         string queueName,
         Func<T, CancellationToken, Task> handler,

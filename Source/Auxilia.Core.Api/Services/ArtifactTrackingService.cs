@@ -22,8 +22,10 @@ public sealed class ArtifactTrackingService(
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         await bus.DeclareExchangeAsync(ArtifactPersistedEvent.ExchangeName, cancellationToken);
-        _subscription = await bus.SubscribeToExchangeAsync<ArtifactPersistedEvent>(
-            ArtifactPersistedEvent.ExchangeName, HandleAsync, cancellationToken);
+        // SHARED queue: with N Core.Api nodes, exactly one mirrors each artifact event; the
+        // live ArtifactStreamPublisher keeps its per-node copy for SSE.
+        _subscription = await bus.SubscribeToExchangeSharedAsync<ArtifactPersistedEvent>(
+            ArtifactPersistedEvent.ExchangeName, "core-api.artifact-tracking", HandleAsync, cancellationToken);
         logger.LogInformation("ArtifactTrackingService listening on {Exchange}.",
             ArtifactPersistedEvent.ExchangeName);
     }

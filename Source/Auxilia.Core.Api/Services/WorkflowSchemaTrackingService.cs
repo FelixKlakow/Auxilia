@@ -21,8 +21,9 @@ public sealed class WorkflowSchemaTrackingService(
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         await bus.DeclareExchangeAsync(WorkflowSchemaPublished.ExchangeName, cancellationToken);
-        _subscription = await bus.SubscribeToExchangeAsync<WorkflowSchemaPublished>(
-            WorkflowSchemaPublished.ExchangeName, HandleAsync, cancellationToken);
+        // SHARED queue: schema upserts are idempotent, but one write per event is enough.
+        _subscription = await bus.SubscribeToExchangeSharedAsync<WorkflowSchemaPublished>(
+            WorkflowSchemaPublished.ExchangeName, "core-api.schema-tracking", HandleAsync, cancellationToken);
         logger.LogInformation(
             "WorkflowSchemaTrackingService listening on {Exchange}.", WorkflowSchemaPublished.ExchangeName);
     }

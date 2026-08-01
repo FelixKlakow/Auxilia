@@ -26,8 +26,10 @@ public sealed class RunViewTrackingService(
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         await bus.DeclareExchangeAsync(ViewDataMessage.ExchangeName, cancellationToken);
-        _subscription = await bus.SubscribeToExchangeAsync<ViewDataMessage>(
-            ViewDataMessage.ExchangeName, HandleAsync, cancellationToken);
+        // SHARED queue: with N Core.Api nodes, exactly one mirrors each view item into the
+        // store — the live RunStreamPublisher keeps its per-node copy for SSE.
+        _subscription = await bus.SubscribeToExchangeSharedAsync<ViewDataMessage>(
+            ViewDataMessage.ExchangeName, "core-api.view-tracking", HandleAsync, cancellationToken);
         logger.LogInformation("RunViewTrackingService listening on {Exchange}.", ViewDataMessage.ExchangeName);
     }
 
