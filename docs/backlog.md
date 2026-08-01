@@ -51,6 +51,11 @@
   `Auxilia.Core.Client`, and `Auxilia.Workflows.Client` (v0.1.0, BUSL license file, snupkg);
   open: pick the feed (nuget.org vs private) and extract the steering codec into its own
   package so desktop clients don't need the full contracts surface.
+- **Go-public pre-flight** (repo is otherwise publish-ready: rewritten noreply-only history,
+  single `main`, licenses + pricing incl. free personal tier): final outside-eyes read of
+  README/CONTRIBUTING, verify or retire `Start-Presentation.bat` (stale header comment, a
+  "via Studio" help string in DevStand), optionally ask GitHub Support to GC the
+  pre-rewrite objects, then flip the repository public.
 - **steering client desktop per-user sign-in** — replace the API-key principal with interactive
   (device-code/OIDC) sign-in that mints a per-user bearer (per-user audit/SoD). Needs a Core
   non-browser token-issue path.
