@@ -3,7 +3,7 @@
 Workflow type `implementation` (long-living): takes a USER STORY (TFS/Azure DevOps or mail),
 plans, implements, reviews (AI + human), pushes, and closes the story — a full assisted
 delivery loop with the operator gating every consequential step from the steering client.
-Decided with Felix 2026-07-28.
+Decided 2026-07-28.
 
 ## Pipeline
 

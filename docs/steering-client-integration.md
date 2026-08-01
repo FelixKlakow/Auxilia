@@ -177,7 +177,7 @@ Matches what's shipped and needs no new proxy connectors. **Cost:** the LLM-driv
 
 **My lean:** Model A for the *AI-agent* steering workflow specifically — the whole point of the gate is that we don't fully trust the agent, so keeping the credential Core-side and executing the approved action through the proxy is the coherent choice. Building one real `IResourceConnector` (git push) is the price. **Your call — this is the key security decision.**
 
-> **DECIDED 2026-07-27 (Felix): Model B — scoped JIT push token — plus interception.** The
+> **DECIDED 2026-07-27: Model B — scoped JIT push token — plus interception.** The
 > token is injected like every other slot credential, but a `git push` is INTERCEPTED through
 > the agent's permission loop (the same `can_use_tool` gate that covers every tool): the
 > operator approves or denies it as a decision card. Per-action permission modes govern how

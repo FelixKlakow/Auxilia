@@ -12,7 +12,7 @@
 | **`Auxilia.WorkflowStudio`** | headless workflow product | owns the **persisted workflow configurations** (slot→connector refs, triggers), workflow **types/packages**, the **triggers** (scheduler + artifact-chaining) and **integration adapters** (email) — dispatching via the **Core Run API** (`ICoreClient`), not raw bus commands |
 | **`Auxilia.AdminConsole`** *(new — ex-BackendService UI)* | operator/admin UI | Blazor Server, thin client (Core.Api for connectors/identity/audit/runs/SSE; the product for persisted configs); hosts all pages; **no** hosted/backend services |
 
-### Model clarifications (2026-07-26, Felix)
+### Model clarifications (2026-07-26)
 - **Slots bind to connectors only** — the "slot instance" concept is **dropped**. A team mailbox = a **Mailbox connector granted to a group**. No slot-instance CRUD.
 - **The Core does not persist/own workflow configurations** — the product owns the config store; the Core validates a submitted spec against its **schema registry** and runs it via the Run API. (The existing Core.Api `/api/configurations` is a leftover to move/deprecate — the product becomes the config owner.)
 - **Provider catalog** and **identity sources** (with import for stand-alone / no-OIDC) are **Core admin** concerns → Core.Api.
@@ -85,7 +85,7 @@
 
 ### Phase 3a — Core.Api gap-fills (in progress)
 - **3a-i — principal administration ✅** `/api/principals` (list/create human+AI-key, assign/revoke Direct roles, enable/disable) + 6 MCP tools + client; `principal.administer`-gated; one-time API-key handling preserved. 203 Core.Api tests.
-- **Console auth = Option A (per-user bearer)** — on sign-in Core issues a short-lived signed per-user token; the console's `Core.Client` forwards it; Core.Api validates it. (Felix's call.)
+- **Console auth = Option A (per-user bearer)** — on sign-in Core issues a short-lived signed per-user token; the console's `Core.Client` forwards it; Core.Api validates it.
 - **3a-ii — per-user bearer auth ✅** DataProtection-signed `auxu_` tokens; `POST /auth/token` (cookie-gated); `UserBearer` scheme validating signature/expiry/still-Active; `Core.Client` per-caller handler. 217 Core.Api tests. Remaining 3a gap-fills (persisted view-read, rerun) folded in incrementally.
 - **Deployment:** AdminConsole + Core.Api run **same-origin (behind one gateway)** so the Core session cookie is shared and the console mints the bearer via `/auth/token` — 3a-ii works as-is. (Separate origins would need a redirect code-handoff; deferred.)
 
@@ -99,7 +99,7 @@
 **Phase 3b complete ✅** — `Auxilia.AdminConsole` is a full pure-Core-client Blazor app (11 pages, live SSE views, per-user bearer auth), all additive; BackendService still intact.
 
 ### Phase 4 — retarget system tests + DevStand (in progress)
-Decision (Felix): **retarget + delete now**; deferred gaps (config-update, trigger-CRUD API, OAuth connect-flows, dashboard stats/pins, session terminal, persisted view-read, rerun, `RunStatus` duration) become tracked follow-ups. Docker system tests validate in **CI** (not locally).
+Decision: **retarget + delete now**; deferred gaps (config-update, trigger-CRUD API, OAuth connect-flows, dashboard stats/pins, session terminal, persisted view-read, rerun, `RunStatus` duration) become tracked follow-ups. Docker system tests validate in **CI** (not locally).
 - **4 — retarget** *(in progress)* — delete BackendService-only envs (`SingleBackendService`, `DualBackend`); retarget `EndToEnd` (email path → Studio via Run API) + `Failover` (monitor → Core.Api) onto the new hosts; repoint DevStand. Keep `dotnet build` + unit/component green.
 - **4 — retarget ✅** deleted `SingleBackendService`/`DualBackend`; Failover → Core.Api monitor + 2 runners; EndToEnd → Studio + Core.Api (seeds via the real Core surface); added Studio Dockerfile; DevStand repointed; docs updated. Build + unit/component green. 6 Docker assumptions flagged for CI.
 

@@ -55,6 +55,8 @@ $runnerEnv = @{
 # The bootstrap key seeds the dev admin principal idempotently (by hash) — without it a fresh
 # core-data store would have NO principal matching the scripts' bearer key. The static workflow
 # type registers "implementation" as Active on a fresh store (EnsureSeededAsync — idempotent).
+# NOTE: "auxilia-steering-dev-key" is a well-known LOCAL DEV bootstrap key, not a secret —
+# never deploy a Core with it.
 $apiEnv = @{
     ASPNETCORE_URLS                                  = "http://localhost:5280"
     CoreSecurity__BootstrapApiKey                    = "auxilia-steering-dev-key"

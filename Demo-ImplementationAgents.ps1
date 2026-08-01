@@ -11,7 +11,7 @@
 param([switch]$SkipImageBuild)
 
 $repo = $PSScriptRoot
-$headers = @{ Authorization = "Bearer auxilia-steering-dev-key" }
+$headers = @{ Authorization = "Bearer auxilia-steering-dev-key" } # well-known local dev bootstrap key, not a secret
 
 function Test-CoreApi {
     try {

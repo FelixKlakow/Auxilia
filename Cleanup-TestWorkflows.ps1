@@ -6,7 +6,7 @@
 # (untagged, non-testing types) are never touched.
 param(
     [string]$CoreUrl = "http://localhost:5280",
-    [string]$ApiKey  = "auxilia-steering-dev-key",
+    [string]$ApiKey  = "auxilia-steering-dev-key", # well-known local dev bootstrap key, not a secret
     [string[]]$TestTypes = @(
         "echo-workflow", "echo-choice-workflow", "echo-decision-workflow",
         "sleeping-workflow", "crashing-workflow", "steering-sample")
