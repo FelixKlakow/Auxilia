@@ -78,6 +78,7 @@ public sealed class ProviderCatalogService(
             RequiredCredentialContract = request.RequiredCredentialContract,
             MountsIntoWorkspace = request.MountsIntoWorkspace,
             ComposesEnvironment = request.ComposesEnvironment,
+            EnvironmentBase = request.EnvironmentBase,
             OAuthRefreshJson = request.OAuthRefresh is null
                 ? null
                 : JsonSerializer.Serialize(request.OAuthRefresh),
@@ -213,7 +214,8 @@ public sealed class ProviderCatalogService(
             provider.ComposesEnvironment,
             provider.OAuthRefreshJson is { Length: > 0 } refreshJson
                 ? JsonSerializer.Deserialize<ProviderOAuthRefresh>(refreshJson)
-                : null);
+                : null,
+            provider.EnvironmentBase);
     }
 
     private static IReadOnlyList<string> ParseContracts(string? json)

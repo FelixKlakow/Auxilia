@@ -121,7 +121,8 @@ public sealed class EnvironmentLayerService(
             request.Description,
             Contracts: [EnvironmentContract],
             Settings: [],
-            ComposesEnvironment: true), ct);
+            ComposesEnvironment: true,
+            EnvironmentBase: record.BaseEnvironment), ct);
         await catalog.SetAvailabilityAsync(actorName, type, available: true, ct);
         await auditLog.AppendAsync(actorName, "environment-layer.upserted", type, "upserted", ct: ct);
         return ToDto(record);

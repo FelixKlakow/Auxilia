@@ -141,6 +141,7 @@ public sealed class RunService(
         // mount settings themselves are non-secret and ride the command.
         var mounts = new List<WorkspaceMountDispatch>();
         var environmentCapabilities = new List<string>();
+        var environmentBases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var pluginBindings = new List<SlotBinding>();
         var stashedBindings = new List<SlotBinding>();
         foreach (var binding in slotBindings)
@@ -152,6 +153,8 @@ public sealed class RunService(
             {
                 if (!environmentCapabilities.Contains(entry.ProviderType))
                     environmentCapabilities.Add(entry.ProviderType);
+                if (entry.EnvironmentBase is { Length: > 0 } envBase)
+                    environmentBases[entry.ProviderType] = envBase;
                 continue;
             }
             if (entry is not { MountsIntoWorkspace: true })
@@ -174,6 +177,16 @@ public sealed class RunService(
             }
             mounts.Add(new WorkspaceMountDispatch(mountId, entry.ProviderType, settingsByRole, authSlot));
         }
+
+        // One run composes ONE container image on ONE base — environment layers of different
+        // bases (linux vs windows) can never build into the same image, so a mixed selection
+        // must fail the dispatch, not the build. Layers without a declared base (runner-static
+        // overrides) cannot be checked here and are left to the runner's composition.
+        if (environmentBases.Values.Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
+            throw new InvalidOperationException(
+                "environment capabilities mix incompatible bases — "
+                + string.Join(", ", environmentBases.Select(b => $"'{b.Key}' ({b.Value})"))
+                + ". One run composes one image on one base; pick layers of a single base.");
 
         // Gate identity-linked connectors — including each repo's auth connector: the triggering
         // principal must be allowed to use every connector this run binds. Company connectors pass

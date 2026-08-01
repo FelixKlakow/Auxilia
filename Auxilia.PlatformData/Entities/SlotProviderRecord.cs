@@ -24,6 +24,9 @@ public sealed record SlotProviderRecord : IEntity
     /// <summary>Bindings of this provider compose the run's container environment (a capability layer).</summary>
     public bool ComposesEnvironment { get; init; }
 
+    /// <summary>The base an environment layer builds on ("linux"/"windows") — one run composes ONE base.</summary>
+    public string? EnvironmentBase { get; init; }
+
     /// <summary>Serialized <c>ProviderOAuthRefresh</c> — the data-driven token-refresh spec, when any.</summary>
     public string? OAuthRefreshJson { get; init; }
 

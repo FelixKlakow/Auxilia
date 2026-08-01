@@ -188,6 +188,56 @@ public sealed class RunServiceTests
     }
 
     [Test]
+    public async Task RunInline_EnvironmentLayersOfMixedBases_FailTheDispatch()
+    {
+        var (service, _, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
+            "dotnet-10", "environment", null, ["exec-env"], [],
+            ComposesEnvironment: true, EnvironmentBase: "linux"), CancellationToken.None);
+        await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
+            "msbuild-17", "environment", null, ["exec-env"], [],
+            ComposesEnvironment: true, EnvironmentBase: "windows"), CancellationToken.None);
+
+        var ex = Assert.ThrowsAsync<InvalidOperationException>(() => service.RunInlineAsync(
+            new RunRequest("wt", SlotBindings:
+            [
+                new SlotBinding("environment", ProviderType: "dotnet-10"),
+                new SlotBinding("environment", ProviderType: "msbuild-17"),
+            ]),
+            triggeredBy: null, CancellationToken.None));
+
+        Assert.That(ex!.Message, Does.Contain("mix incompatible bases")
+            .And.Contain("dotnet-10").And.Contain("msbuild-17"),
+            "One run composes one image on one base - a mixed selection fails fast at dispatch.");
+    }
+
+    [Test]
+    public async Task RunInline_EnvironmentLayersOfOneBase_Dispatch()
+    {
+        var (service, bus, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
+            "dotnet-10", "environment", null, ["exec-env"], [],
+            ComposesEnvironment: true, EnvironmentBase: "linux"), CancellationToken.None);
+        await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
+            "node-22", "environment", null, ["exec-env"], [],
+            ComposesEnvironment: true, EnvironmentBase: "Linux"), CancellationToken.None);
+
+        await service.RunInlineAsync(
+            new RunRequest("wt", SlotBindings:
+            [
+                new SlotBinding("environment", ProviderType: "dotnet-10"),
+                new SlotBinding("environment", ProviderType: "node-22"),
+            ]),
+            triggeredBy: null, CancellationToken.None);
+
+        var command = bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>().Single();
+        Assert.That(command.EnvironmentCapabilities, Is.EquivalentTo(new[] { "dotnet-10", "node-22" }),
+            "Same-base layers (case-insensitive) compose together.");
+    }
+
+    [Test]
     public async Task Rerun_RedispatchesWithFreshIdAndToken_AndRestashesTheBindings()
     {
         var (service, bus, _, registry, _) = New();
