@@ -5,7 +5,7 @@ using MailKit.Net.Imap;
 using MailKit.Security;
 
 // Interactive dev stand: boots the SAME environment as the EndToEnd acceptance test —
-// GreenMail, RabbitMQ, MongoDB, Core.Runner, Core.Api, and WorkflowStudio (email task source),
+// GreenMail, RabbitMQ, MongoDB, Core.Runner, Core.Api, and the TriggerHost (email task source),
 // with the mail-review configuration seeded — and keeps it running until you quit, so the mail
 // path can be exercised. F5-able from Visual Studio.
 //

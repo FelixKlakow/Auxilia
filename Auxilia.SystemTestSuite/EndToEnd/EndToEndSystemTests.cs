@@ -18,7 +18,7 @@ namespace Auxilia.SystemTestSuite.EndToEnd;
 /// <summary>
 /// Goal-v1 acceptance, retargeted for the BackendService retirement (Phase 4): one real, governed,
 /// fully observable Code Review run end to end — an incoming mail triggers the workflow through the
-/// split platform (WorkflowStudio email adapter → Core Run API on-behalf-of → runner dispatch →
+/// split platform (TriggerHost email adapter → Core Run API on-behalf-of → runner dispatch →
 /// registration handshake → JIT slot activation → live views → artifact persistence → mail reply
 /// write-back), every step audited; plus the RBAC negative: an unprivileged principal is denied at
 /// the Core Run API, visibly and audited.
@@ -51,7 +51,7 @@ public sealed class EndToEndSystemTests
             (msg, _) => { artifactEvents.Enqueue(msg); return Task.CompletedTask; },
             cancellationToken);
 
-        // 1. The external trigger: a human mails the watched mailbox. Studio's adapter polls it and
+        // 1. The external trigger: a human mails the watched mailbox. the TriggerHost's adapter polls it and
         //    dispatches the mail-review configuration through the Core Run API on-behalf-of the
         //    trigger's principal.
         await SendMailAsync(
@@ -98,7 +98,7 @@ public sealed class EndToEndSystemTests
                 statusEvents, cancellationToken);
 
         // 4. Durable platform state: artifact metadata, persisted views, and the audit trail written
-        //    by Studio (trigger.mail-dispatch) and the runner (registration/slot/artifact) into the
+        //    by the TriggerHost (trigger.mail-dispatch) and the runner (registration/slot/artifact) into the
         //    shared Mongo. The Core-side policy/on-behalf-of audit is read over /api/audit below.
         await using var provider = EndToEndEnvironment.BuildPlatformDataProvider();
 
@@ -130,7 +130,7 @@ public sealed class EndToEndSystemTests
         Assert.Multiple(() =>
         {
             Assert.That(auditRecords.Any(r => r.Action == "trigger.mail-dispatch"),
-                Is.True, "The mail trigger must be audited by the Studio adapter.");
+                Is.True, "The mail trigger must be audited by the trigger-host adapter.");
             Assert.That(auditRecords.Any(r =>
                     r.Action == "workflow.registration.accepted" &&
                     r.Subject == instanceId.ToString()),
@@ -300,7 +300,7 @@ public sealed class EndToEndSystemTests
         return condition();
     }
 
-    /// <summary>Fails with the observed status events plus Runner/Studio log tails.</summary>
+    /// <summary>Fails with the observed status events plus Runner/TriggerHost log tails.</summary>
     private static async Task FailWithDiagnosticsAsync(
         string message, ConcurrentQueue<WorkflowStatusEvent> statusEvents, CancellationToken ct)
     {
@@ -309,11 +309,11 @@ public sealed class EndToEndSystemTests
             : string.Join("\n", statusEvents.Select(e =>
                 $"  {e.TimestampUtc:HH:mm:ss} {e.WorkflowInstanceId} {e.WorkflowType} {e.State} {e.ErrorMessage}"));
         var siLogs = await EndToEndEnvironment.LogTailAsync(EndToEndEnvironment.Runner);
-        var studioLogs = await EndToEndEnvironment.LogTailAsync(EndToEndEnvironment.Studio);
+        var studioLogs = await EndToEndEnvironment.LogTailAsync(EndToEndEnvironment.TriggerHost);
         Assert.Fail(
             $"{message}\n" +
             $"Observed status events:\n{observed}\n\n" +
             $"--- Runner logs (tail) ---\n{siLogs}\n\n" +
-            $"--- WorkflowStudio logs (tail) ---\n{studioLogs}");
+            $"--- TriggerHost logs (tail) ---\n{studioLogs}");
     }
 }

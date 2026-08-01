@@ -743,7 +743,7 @@ app.MapPost("/api/configurations/{id:guid}/run", async (
     if (config is null)
         return Results.NotFound();
 
-    // On-behalf-of: a service/automation caller (WorkflowStudio's triggers) may dispatch a stored
+    // On-behalf-of: a service/automation caller (a trigger host's engines) may dispatch a stored
     // configuration AS a target principal. The caller must hold run.on-behalf-of, and the target must
     // itself pass workflow.trigger — the delegation grants no capability the target lacks. Absent a
     // distinct target the caller is both subject and triggering principal, exactly as a manual run.

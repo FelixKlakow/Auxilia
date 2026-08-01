@@ -84,7 +84,7 @@
   <Folder Name="/Source/">
     <Project Path="Source/Auxilia.AdminConsole/Auxilia.AdminConsole.csproj" />
     <Project Path="Source/Auxilia.Core.Api/Auxilia.Core.Api.csproj" />
-    <Project Path="Source/Auxilia.WorkflowStudio/Auxilia.WorkflowStudio.csproj" />
+    <Project Path="Source/Auxilia.TriggerHost/Auxilia.TriggerHost.csproj" />
   </Folder>
   <Project Path="Auxilia.AdminConsole.Tests/Auxilia.AdminConsole.Tests.csproj" />
   <Project Path="Auxilia.Core.Api.Tests/Auxilia.Core.Api.Tests.csproj" />
@@ -94,5 +94,4 @@
   <Project Path="Auxilia.Workflows.Client.Tests/Auxilia.Workflows.Client.Tests.csproj" />
   <Project Path="Auxilia.Implementation.Workflow.Tests/Auxilia.Implementation.Workflow.Tests.csproj" />
   <Project Path="Auxilia.SystemTestSuite\Auxilia.SystemTestSuite.csproj" />
-  <Project Path="Auxilia.WorkflowStudio.Tests/Auxilia.WorkflowStudio.Tests.csproj" />
 </Solution>

@@ -21,7 +21,7 @@ graph TB
         AI["AI agents (MCP)"]
         APPS["Your apps / CLIs<br/>(Auxilia.Core.Client)"]
     end
-    STUDIO["Workflow Studio<br/>workflow types & packages,<br/>triggers + integration adapters"]
+    HOSTS["Workflow-domain hosts<br/>(Auxilia.Workflows.Client library:<br/>triggers, chaining, authoring —<br/>e.g. the bundled Trigger Host)"]
     subgraph Core["The Core (security kernel)"]
         API["Core.Api — control plane<br/>REST + authenticated MCP,<br/>identity / RBAC / policy / audit,<br/>connectors (encrypted secrets),<br/>Run API, live-view SSE"]
         RUNNER["Core.Runner — execution plane<br/>container launch, workspaces,<br/>egress policy, JIT credentials,<br/>run lifecycle & failover"]
@@ -29,12 +29,12 @@ graph TB
     BUS["Message bus (RabbitMQ via IMessageBusClient)"]
     WF["Workflow containers<br/>(isolated, signed programs)"]
 
-    TASKS --> STUDIO
+    TASKS --> HOSTS
     IDP --> API
     ADMIN -->|REST + SSE| API
     AI -->|MCP| API
     APPS -->|REST + SSE| API
-    STUDIO -->|Run API| API
+    HOSTS -->|Run API + artifact SSE| API
     API <--> BUS
     BUS <--> RUNNER
     RUNNER -->|launch + JIT slot credentials| WF
@@ -42,24 +42,25 @@ graph TB
     RUNNER -->|default-deny egress| EXT
 ```
 
-The platform is **four deployables** sharing the `Auxilia.Core.Contracts` /
-`Auxilia.Core.Client` libraries; each service owns its own database, and **secrets live only
-in the Core**:
+The platform is **three deployables plus a client-library family**; each service owns its
+own database, and **secrets live only in the Core**:
 
 - **`Auxilia.Core.Api`** — control plane: REST + authenticated MCP, identity/RBAC/groups,
-  connector administration, audit, the Run API, live-view SSE stream, failover monitor,
-  workflow-type registry.
+  connector administration, audit, the Run API, live-view and artifact SSE streams,
+  failover monitor, workflow-type registry.
 - **`Auxilia.Core.Runner`** — execution plane: container launch, environment-image
   composition, workspace management, network-egress policy, just-in-time credential
   delivery, run lifecycle and failover heartbeats.
-- **`Auxilia.WorkflowStudio`** — headless workflow-domain host: trigger scheduling,
-  artifact-chaining triggers, and integration adapters (e.g. email work-item intake),
-  dispatching runs through the Core Run API; a pure Core client.
 - **`Auxilia.AdminConsole`** — operator/admin Blazor UI with live run views; a pure Core
   client with no database of its own.
 
-Anything else integrates the same way the bundled clients do: over the Core REST + SSE
-surface with `Auxilia.Core.Client`, or over MCP.
+The **workflow domain is a library, not a service**: `Auxilia.Workflows.Client` (on top of
+the raw `Auxilia.Core.Client`) provides schema-validated authoring, interval triggers, and
+artifact chaining over the Core's filtered artifact event stream — embed it in a server
+service or a desktop app; triggers fire while your host runs. `Auxilia.TriggerHost` is the
+bundled always-on reference host (it also carries the email work-item intake adapter).
+Anything else integrates the same way: over the Core REST + SSE surface with
+`Auxilia.Core.Client`, or over MCP.
 
 ## Trust and credential model
 

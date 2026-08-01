@@ -7,12 +7,13 @@ using Auxilia.UniversalDataAccess.Implementations;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
-namespace Auxilia.WorkflowStudio.Tests.UnitTests;
+namespace Auxilia.Adapters.Email.Tests.UnitTests;
 
 /// <summary>
-/// When Studio hosts the mailbox trigger adapter, a matched mail must reach the platform through the
-/// Core Run API (not the bus): a configured trigger runs its stored configuration on behalf of the
-/// trigger's principal, carrying the mail context.
+/// A matched mail must reach the platform through the host's run dispatcher (the Core Run API
+/// seam — never the bus): a configured trigger dispatches its stored configuration on behalf
+/// of the trigger's principal, carrying the mail context. Moved here from the retired
+/// WorkflowStudio test suite — the adapter is host-agnostic.
 /// </summary>
 [TestFixture]
 [Category("Unit")]
@@ -48,8 +49,23 @@ public class EmailAdapterCoreDispatchTests
         public IMailboxClient Create(EmailTaskSourceSettings settings) => client;
     }
 
+    private sealed class RecordingDispatcher : ITaskSourceRunDispatcher
+    {
+        public List<(Guid? ConfigurationId, string? WorkflowType,
+            IReadOnlyDictionary<string, string> Context, Guid? RunAs)> Dispatches { get; } = [];
+
+        public Task<Guid> DispatchAsync(
+            Guid? configurationId, string? workflowType,
+            IReadOnlyDictionary<string, string> context, Guid? runAsPrincipalId,
+            CancellationToken ct = default)
+        {
+            Dispatches.Add((configurationId, workflowType, context, runAsPrincipalId));
+            return Task.FromResult(Guid.NewGuid());
+        }
+    }
+
     [Test]
-    public async Task UnseenMail_DispatchesViaCoreRunConfiguration_WithOnBehalfOfAndMailContext()
+    public async Task UnseenMail_DispatchesTheStoredConfiguration_WithOnBehalfOfAndMailContext()
     {
         var time = new ManualTimeProvider();
         var protector = new NullSettingsProtector();
@@ -90,32 +106,28 @@ public class EmailAdapterCoreDispatchTests
         mailbox.Unseen.Add(new InboundMail(
             "<msg-1@example.com>", "Please triage", "alice@example.com", "Hello, please look at this.", 42));
 
-        var core = new FakeCoreClient();
+        var dispatcher = new RecordingDispatcher();
         using var adapter = new EmailTaskSourceAdapter(
             triggers, instances, health, protector, new SingleMailboxFactory(mailbox),
-            new CoreClientRunDispatcher(core), new AuditLog(audit, time), time,
+            dispatcher, new AuditLog(audit, time), time,
             Options.Create(new MailboxTriggerAdapterSettings()),
             NullLogger<EmailTaskSourceAdapter>.Instance);
 
         await adapter.PollDueTriggersAsync(CancellationToken.None);
 
+        var dispatch = dispatcher.Dispatches.Single();
         Assert.Multiple(() =>
         {
-            Assert.That(core.RunConfigurationIds, Is.EqualTo(new[] { configId }),
-                "a configured trigger dispatches its stored configuration via the Core Run API");
-            Assert.That(core.RunConfigurationOnBehalfOf, Is.EqualTo(new Guid?[] { runAs }),
+            Assert.That(dispatch.ConfigurationId, Is.EqualTo(configId),
+                "a configured trigger dispatches its stored configuration");
+            Assert.That(dispatch.WorkflowType, Is.Null, "the ad-hoc run path is not used");
+            Assert.That(dispatch.RunAs, Is.EqualTo(runAs),
                 "the run is dispatched on behalf of the trigger's principal");
-            Assert.That(core.RunRequests, Is.Empty, "the ad-hoc run path is not used for a configured trigger");
             Assert.That(mailbox.MarkedSeen, Is.EqualTo(new uint[] { 42 }));
-        });
-
-        var context = core.RunConfigurationContexts.Single()!;
-        Assert.Multiple(() =>
-        {
-            Assert.That(context["Title"], Is.EqualTo("Please triage"));
-            Assert.That(context["From"], Is.EqualTo("alice@example.com"));
-            Assert.That(context["MailUid"], Is.EqualTo("42"));
-            Assert.That(context["WorkItemId"],
+            Assert.That(dispatch.Context["Title"], Is.EqualTo("Please triage"));
+            Assert.That(dispatch.Context["From"], Is.EqualTo("alice@example.com"));
+            Assert.That(dispatch.Context["MailUid"], Is.EqualTo("42"));
+            Assert.That(dispatch.Context["WorkItemId"],
                 Is.EqualTo(EmailTaskSourceAdapter.WorkItemIdFor("<msg-1@example.com>")));
         });
     }

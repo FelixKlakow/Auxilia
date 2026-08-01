@@ -19,7 +19,7 @@ Auxilia uses a four-tier test pyramid. Each tier has a distinct scope, dependenc
 
 ## Level 1 – Unit Tests
 
-**Projects:** `Auxilia.Core.Api.Tests/UnitTests/`, `Auxilia.Core.Runner.Tests/`, `Auxilia.WorkflowStudio.Tests/UnitTests/`, `Auxilia.AdminConsole.Tests/`
+**Projects:** `Auxilia.Core.Api.Tests/UnitTests/`, `Auxilia.Core.Runner.Tests/`, `Auxilia.Workflows.Client.Tests/UnitTests/`, `Auxilia.AdminConsole.Tests/`
 
 **Scope:** A single class or function in isolation. All external dependencies are replaced with Moq mocks.
 
@@ -39,7 +39,7 @@ Auxilia uses a four-tier test pyramid. Each tier has a distinct scope, dependenc
 
 ## Level 2 – Component Tests
 
-**Projects:** `Auxilia.Core.Api.Tests/ComponentTests/`, `Auxilia.WorkflowStudio.Tests/`, `Auxilia.AdminConsole.Tests/` (bUnit)
+**Projects:** `Auxilia.Core.Api.Tests/ComponentTests/` (incl. the multi-client SSE concurrency fixtures), `Auxilia.AdminConsole.Tests/` (bUnit)
 
 **Scope:** Most of a single service executable is constructed using the real DI container, but external infrastructure (
 RabbitMQ, databases, HTTP endpoints) is replaced with in-memory fakes (`FakeMessageBusClient`, etc.).
@@ -87,13 +87,14 @@ are replaced with in-process abstractions / stubs.
 | `EmailAdapterEnvironment`     | GreenMail                                                        | `EmailAdapterSystemTests`                                                        |
 | `IdentityImportEnvironment`   | OpenLDAP + MongoDB                                               | `IdentityImportSystemTests`                                                      |
 | `FailoverEnvironment`         | RabbitMQ + Mongo + **Core.Api** (failover monitor) + two Core.Runners | `FailoverSystemTests`                                                       |
-| `EndToEndEnvironment`         | GreenMail + RabbitMQ + Mongo + Core.Runner + **Core.Api** + **WorkflowStudio** | `EndToEndSystemTests`, `ClaudeCodeWorkflowSystemTests`                 |
+| `EndToEndEnvironment`         | GreenMail + RabbitMQ + Mongo + Core.Runner + **Core.Api** + **TriggerHost** | `EndToEndSystemTests`, `ClaudeCodeWorkflowSystemTests`                 |
 
 > **BackendService retirement (Phase 4):** the BackendService-only environments (`SingleBackendService`,
 > `DualBackend`) were removed — they tested BackendService-local plumbing (queue declaration, identification
 > round-trip, dual-instance routing, OTEL telemetry) that no longer exists. `Failover` was retargeted onto
-> the Core.Api bus-based failover monitor; `EndToEnd` was retargeted so the mail path runs on WorkflowStudio
-> (email adapter → Core Run API on-behalf-of) with a Core.Api control plane instead of the BackendService host.
+> the Core.Api bus-based failover monitor; `EndToEnd` was retargeted so the mail path runs on the
+> TriggerHost (email adapter → Core Run API on-behalf-of; ex-WorkflowStudio, retired 2026-08-01)
+> with a Core.Api control plane instead of the BackendService host.
 
 **Rules:**
 

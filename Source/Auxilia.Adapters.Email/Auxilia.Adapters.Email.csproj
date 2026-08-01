@@ -24,9 +24,6 @@
         <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
             <_Parameter1>Auxilia.Adapters.Email.Tests</_Parameter1>
         </AssemblyAttribute>
-        <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
-            <_Parameter1>Auxilia.WorkflowStudio.Tests</_Parameter1>
-        </AssemblyAttribute>
     </ItemGroup>
 
 </Project>

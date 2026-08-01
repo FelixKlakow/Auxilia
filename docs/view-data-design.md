@@ -67,21 +67,23 @@ published to the **`workflow.view-data` exchange**. `Sequence` is a per-(instanc
 monotonic counter assigned by the SDK so consumers can order and de-duplicate. Payloads are
 view items only — large blobs belong in the Artifact Store, referenced from the payload.
 
-## 3. Persistence (Workflow Studio)
+## 3. Persistence (Core.Api)
 
-The Product consumes the exchange (`ViewDataFanOutHandler`). For views whose lifecycle includes Persisted
-(descriptor known from the manifest, cached per instance), each item is stored
-as a `ViewDataRecord(InstanceId, ViewName, Sequence, PayloadJson, TimestampUtc)` in the
-**Product database** — so finished runs replay through the identical rendering path.
-Live-only views are not stored. *(Core.Runner forwards workflow view-data onto the platform; persistence and rendering are the Product's concern — see docs/ARCHITECTURE.md §15.)*
+Core.Api mirrors the exchange (`RunViewTrackingService`): each item is stored as a
+`CoreRunViewRecord(RunId, ViewName, Sequence, PayloadJson, TimestampUtc)` in the **Core.Api
+database** (capped per run — large data belongs in the Artifact Store) and read back over
+`GET /api/runs/{id}/views` (`ICoreClient.GetRunViewsAsync`) — so finished runs replay through
+the identical rendering path.
 
-## 4. Live fan-out (Workflow Studio dashboards)
+## 4. Live fan-out (Core.Api SSE)
 
-The Product's dashboard backend consumes the same exchange and forwards items to subscribed SignalR
-circuits (group per `instanceId:viewName`). View-data persistence and fan-out are the **Workflow Studio** product's concern (the legacy `BackendService` host is being retired). Subscription requires a `view.subscribe` policy
-check; access to a view follows the workflow type it belongs to (workflow-type access lists).
-Replay of a finished run = read `ViewDataRecord`s ordered by Sequence and push them through
-the same client-side renderer.
+Core.Api's `RunStreamPublisher` consumes the same exchange and fans each item to the run's
+open `GET /api/runs/{id}/stream` SSE subscriptions (`RunStreamBroker`) — clients (AdminConsole,
+the steering client, any `Auxilia.Core.Client` app) hold ONE stream per observed run; there is no
+SignalR backplane. Observing requires the `run.observe` policy check. Replay of a finished
+run = read the persisted views ordered by Sequence and push them through the same
+client-side renderer. (Artifact events have the analogous, server-side-filtered
+`GET /api/artifacts/stream`.)
 
 ## 5. Frontend rendering (descriptor-driven)
 

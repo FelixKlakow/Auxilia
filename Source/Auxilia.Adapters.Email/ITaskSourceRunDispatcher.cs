@@ -2,7 +2,7 @@ namespace Auxilia.Adapters.Email;
 
 /// <summary>
 /// Dispatch seam for the mailbox trigger: turns a matched mail into a workflow run without the
-/// adapter knowing <em>how</em> the run reaches the platform. WorkflowStudio binds
+/// adapter knowing <em>how</em> the run reaches the platform. Hosts bind
 /// <see cref="CoreClientRunDispatcher"/> (drive the Core Run API).
 /// </summary>
 public interface ITaskSourceRunDispatcher

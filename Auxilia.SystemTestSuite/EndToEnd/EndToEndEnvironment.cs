@@ -22,10 +22,11 @@ namespace Auxilia.SystemTestSuite.EndToEnd;
 /// <list type="bullet">
 ///   <item><b>Core.Api</b> — the control plane + Run API. Owns the mail-review run configuration
 ///         (with full slot bindings so it resolves every slot JIT), identity/RBAC (the run-as
-///         principal + the Studio service key), and audit. Its own (in-memory) store, never shared.</item>
-///   <item><b>WorkflowStudio</b> — hosts the email task-source adapter (ex-BackendService). It reads
-///         the mailbox trigger + slot-instance credential from its own Mongo DB and dispatches runs
-///         through the Core Run API on behalf of the trigger's principal — never a raw bus command.</item>
+///         principal + the trigger-host service key), and audit. Its own (in-memory) store, never shared.</item>
+///   <item><b>TriggerHost</b> — the workflow-domain library's reference host (ex-WorkflowStudio):
+///         hosts the email task-source adapter, reads the mailbox trigger + slot-instance credential
+///         from its own Mongo DB, and dispatches runs through the Core Run API on behalf of the
+///         trigger's principal — never a raw bus command, no bus dependency at all.</item>
 ///   <item><b>Core.Runner</b> — Mongo-backed execution plane; consumes the run-command queue, resolves
 ///         every slot just-in-time from the Core (no local credential store), launches the workflow.</item>
 ///   <item>GreenMail (mail trigger + reply write-back), RabbitMQ, MongoDB — unchanged topology.</item>
@@ -66,8 +67,8 @@ public class EndToEndEnvironment
     public   const string GitUsername        = "builduser";
     public   const string GitPassword        = "the-pat";
 
-    internal const string CoreApiImageName = "auxilia-core-api:system-test";
-    internal const string StudioImageName  = "auxilia-workflow-studio:system-test";
+    internal const string CoreApiImageName     = "auxilia-core-api:system-test";
+    internal const string TriggerHostImageName = "auxilia-trigger-host:system-test";
     internal const string BootstrapApiKey  = "aux-system-test-key-e2e-0123456789abcd";
 
     public   const string CommandQueue        = "workflow.run-commands-e2e";
@@ -115,8 +116,8 @@ public class EndToEndEnvironment
     public static IContainer Runner  { get; private set; } = null!;
     /// <summary>Core.Api control plane (Run API + identity + audit + failover monitor).</summary>
     public static IContainer CoreApi { get; private set; } = null!;
-    /// <summary>WorkflowStudio host running the email task-source adapter (ex-BackendService).</summary>
-    public static IContainer Studio  { get; private set; } = null!;
+    /// <summary>TriggerHost running the email task-source adapter + the client-library engines.</summary>
+    public static IContainer TriggerHost { get; private set; } = null!;
     public static IMessageBusClient MessageBusClient { get; private set; } = null!;
     /// <summary>Authenticated (bootstrap Administrator) client for the Core Run/identity/audit API.</summary>
     public static HttpClient CoreApiClient { get; private set; } = null!;
@@ -155,7 +156,7 @@ public class EndToEndEnvironment
         await WorkflowDispatchEnvironment.BuildImageAsync(
             CoreApiImageName, "Source/Auxilia.Core.Api/Dockerfile");
         await WorkflowDispatchEnvironment.BuildImageAsync(
-            StudioImageName, "Source/Auxilia.WorkflowStudio/Dockerfile");
+            TriggerHostImageName, "Source/Auxilia.TriggerHost/Dockerfile");
         await WorkflowDispatchEnvironment.BuildImageAsync(
             WorkflowImageName, "Source/Auxilia.CodeReview.Workflow/Dockerfile");
         await WorkflowDispatchEnvironment.BuildImageAsync(
@@ -241,7 +242,7 @@ public class EndToEndEnvironment
 
         // Seed Core identity + the mail-review configuration over the REST API (bootstrap admin).
         RunAsPrincipalId = await CreateCorePrincipalAsync("E2E Mail Trigger", "User");
-        var studioApiKey = await CreateCoreServiceKeyAsync("E2E Workflow Studio", "Operator");
+        var triggerHostApiKey = await CreateCoreServiceKeyAsync("E2E Trigger Host", "Operator");
         MailReviewConfigurationId = await CreateMailReviewConfigurationAsync();
 
         // --- Runner: Mongo-backed execution plane. Resolves every slot JIT from the Core. ---
@@ -291,35 +292,32 @@ public class EndToEndEnvironment
             .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("WorkflowDispatcher started"))
             .Build();
 
-        // --- Studio: email adapter + triggers, dispatching via the Core Run API. ---
-        // Studio reads the mailbox trigger + slot instance from its own DB (this Mongo) and drives runs
-        // through the Core using the service API key granted run.on-behalf-of (Operator role).
-        var studioBuilder = new ContainerBuilder(StudioImageName)
+        // --- TriggerHost: email adapter + the client-library trigger engines, dispatching via the
+        // Core Run API. It reads the mailbox trigger + slot instance from its own DB (this Mongo)
+        // and drives runs through the Core using the service API key granted run.on-behalf-of
+        // (Operator role). Deliberately NO RabbitMq environment: the host is a pure Core client.
+        var triggerHostBuilder = new ContainerBuilder(TriggerHostImageName)
             .WithNetwork(_network)
-            .WithEnvironment("RabbitMq__Host",     RabbitMqAlias)
-            .WithEnvironment("RabbitMq__Port",     "5672")
-            .WithEnvironment("RabbitMq__UserName", "guest")
-            .WithEnvironment("RabbitMq__Password", "guest")
             .WithEnvironment("Core__BaseAddress", $"http://{CoreApiAlias}:8080")
-            .WithEnvironment("Core__ApiKey",      studioApiKey)
+            .WithEnvironment("Core__ApiKey",      triggerHostApiKey)
             .WithEnvironment("PlatformData__Backend",               "MongoDb")
             .WithEnvironment("PlatformData__MongoConnectionString", $"mongodb://{MongoAlias}:27017")
             // Adapter sweep tick; each trigger additionally honours its own poll interval.
             .WithEnvironment("MailboxTriggers__TickSeconds", "1")
             .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("Email task source started"));
-        Studio = studioBuilder.Build();
+        TriggerHost = triggerHostBuilder.Build();
 
-        await Task.WhenAll(Runner.StartAsync(), Studio.StartAsync());
+        await Task.WhenAll(Runner.StartAsync(), TriggerHost.StartAsync());
 
         MessageBusClient = await RabbitMqClient.CreateAsync(
             _rabbitMq.Hostname, _rabbitMq.GetMappedPublicPort(5672));
 
-        // Seed Studio's trigger data into its Mongo: a reusable mailbox slot instance (the credential)
-        // and the mailbox trigger that points at the Core mail-review configuration.
+        // Seed the trigger host's data into its Mongo: a reusable mailbox slot instance (the
+        // credential) and the mailbox trigger that points at the Core mail-review configuration.
         await using (var provider = BuildPlatformDataProvider())
         {
             var instances = provider.GetRequiredService<IDataAccess<SlotInstanceRecord>>();
-            // Studio runs without a protection key (NullSettingsProtector) — plain settings JSON is
+            // The trigger host runs without a protection key (NullSettingsProtector) — plain settings JSON is
             // the correct stored format here.
             await instances.SaveAsync(new SlotInstanceRecord
             {
@@ -414,7 +412,7 @@ public class EndToEndEnvironment
 
     /// <summary>
     /// Direct access to the shared Mongo state over the mapped port — the same database
-    /// (DatabaseName "Auxilia") Studio and the Runner use via AddPlatformEntity.
+    /// (DatabaseName "Auxilia") the TriggerHost and the Runner use via AddPlatformEntity.
     /// </summary>
     public static ServiceProvider BuildPlatformDataProvider()
     {
@@ -422,7 +420,7 @@ public class EndToEndEnvironment
         AddEntity<ArtifactRecord>(services);
         AddEntity<ViewDataRecord>(services);
         AddEntity<WorkflowInstanceRecord>(services);
-        // Studio (trigger.mail-dispatch) and the Runner (registration/slot/artifact) both write audit
+        // The TriggerHost (trigger.mail-dispatch) and the Runner (registration/slot/artifact) both write audit
         // records into this shared Mongo DB. Core.Api's policy/on-behalf-of audit is in its own store
         // and is read over the /api/audit REST endpoint instead.
         AddEntity<AuditRecord>(services);
@@ -454,7 +452,7 @@ public class EndToEndEnvironment
     {
         CoreApiClient?.Dispose();
         if (MessageBusClient is IAsyncDisposable d) await d.DisposeAsync();
-        if (Studio  is not null) await Studio.DisposeAsync();
+        if (TriggerHost is not null) await TriggerHost.DisposeAsync();
         if (CoreApi is not null) await CoreApi.DisposeAsync();
         if (Runner  is not null) await Runner.DisposeAsync();
         await _greenMail.DisposeAsync();

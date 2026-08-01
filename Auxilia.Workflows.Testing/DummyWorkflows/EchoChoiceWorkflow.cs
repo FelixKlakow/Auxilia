@@ -82,7 +82,7 @@ public static class EchoChoiceWorkflow
             [
                 new OptionWire("core-api", "Core API", null),
                 new OptionWire("core-runner", "Core Runner", null),
-                new OptionWire("workflow-studio", "Workflow Studio", null),
+                new OptionWire("workflow-library", "Workflow Library", null),
                 new OptionWire("admin-console", "Admin Console", null),
             ], MultiSelect: true, AllowFreeText: false),
             new QuestionWire("notes", "Anything to put into the release notes?",

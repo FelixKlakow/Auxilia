@@ -33,7 +33,7 @@ Auxilia.SystemTestSuite/
 ├── Failover/                                # Two runners on one command queue + Core.Api heartbeat-driven failover (RunnerHeartbeat + FailoverMonitor); dispatch via the Core Run API
 │   ├── FailoverEnvironment.cs
 │   └── FailoverSystemTests.cs
-├── EndToEnd/                                # goal-v1 whole-platform acceptance: GreenMail + RabbitMQ + Mongo + runner + Core.Api + WorkflowStudio; mail → Studio email adapter → Core Run API on-behalf-of → Code Review; plus the Claude Code workflow
+├── EndToEnd/                                # goal-v1 whole-platform acceptance: GreenMail + RabbitMQ + Mongo + runner + Core.Api + TriggerHost; mail → TriggerHost email adapter → Core Run API on-behalf-of → Code Review; plus the Claude Code workflow
 │   ├── EndToEndEnvironment.cs
 │   ├── EndToEndSystemTests.cs
 │   └── ClaudeCodeWorkflowSystemTests.cs

@@ -5,7 +5,7 @@
 ## Core.Api — client-surface follow-ups (surfaced during the retirement)
 - ~~**Config *update* endpoint**~~ — **DONE 2026-07-27**: `PUT /api/configurations/{id}` + `PUT /api/connectors/{id}` (rename + key-wise settings upsert — the credential-refresh path), `ICoreClient.UpdateConfigurationAsync`/`UpdateConnectorAsync`; the steering client edits configurations (prefilled wizard) and connections (edit-in-place form; empty = keep stored value). AdminConsole editor still "saves as new".
 - ~~**`PackageUri` per workflow type**~~ — **DONE 2026-07-26** with the workflow-type registry (ARCHITECTURE §7): types register permanently with their signed package; runs/configs are type-only, the Core resolves the coordinate, and `WorkflowTypeDto`/`WorkflowSchemaDto` carry `PackageUri` + `Status`. Follow-ups: Studio's authoring catalog should *register* its types into the Core instead of keeping its own `PackageUri`; AdminConsole has no registry-administration UI yet (register/approve/deny run via REST/MCP); the AI safety-check approval handler (static workflow over the submitted package) is a designed-but-unbuilt pipeline handler.
-- **Trigger-CRUD API** — triggers live in Studio (headless); the AdminConsole editor links out. Decide console↔Studio vs Core-proxied, then build trigger create/edit/enable/disable.
+- ~~**Trigger-CRUD API**~~ — **DISSOLVED 2026-08-01** by the Studio→library program: trigger definitions are host-owned (`Auxilia.Workflows.Client` `ITriggerStore`); a host exposes whatever admin surface it wants.
 - ~~**Persisted view-read**~~ — **DONE 2026-07-26**: `RunViewTrackingService` mirrors `ViewDataMessage` into Core-owned `CoreRunViewRecord` (capped per run), `GET /api/runs/{id}/views` + `ICoreClient.GetRunViewsAsync` read it back; the steering client backfills finished runs' outputs from it. AdminConsole RunDetail could now use the same read path (not yet wired there).
 - ~~**Rerun endpoint**~~ — **DONE 2026-07-27**: `POST /api/runs/{id}/rerun` + `ICoreClient.RerunAsync` re-dispatches from the stored dispatch command as a NEW run (fresh command id + resolution token, bindings re-stashed — reusing the old token could never resolve credentials — connector eligibility re-checked, audited). steering client history rows have Rerun. NOTE: the failover re-dispatch still reuses the OLD token with a new command id — credentialed slots would fail to resolve on a failover redispatch; align it with RerunAsync.
 - **Dashboard stats/pins** — no stats endpoint (counts computed client-side from a query page) and no persisted pinned dashboards.
@@ -59,11 +59,18 @@
 - **Implementation run setup** — show the advanced settings inline (the settings count shrank;
   the extra fold/panel is no longer worth it).
 
-## Workflow Studio → client library (DECIDED 2026-08-01, Felix)
-**Remove the `Auxilia.WorkflowStudio` deployable; ship its workflow-domain capabilities as a
-.NET convenience library** on top of the raw `Auxilia.Core.Client`. Hosting is the adopter's
-choice — an always-on server service or embedded in a desktop app (triggers naturally fire
-only while a host runs). Division of responsibility: **artifact storage/management stays in
+## Workflow Studio → client library (DECIDED + DELIVERED 2026-08-01)
+**DONE except packaging:** `Auxilia.WorkflowStudio` is deleted. `Auxilia.Workflows.Client`
+(authoring + interval scheduler + artifact chaining over the filtered artifact SSE, host-
+pluggable `ITriggerStore`) replaced it; `Source/Auxilia.TriggerHost` is the always-on
+reference host (+ email intake) and took Studio's place in the EndToEnd system test (no bus
+env at all). The Studio type catalog died — the Core registry is the only catalog; the
+Trigger-CRUD backlog item dissolved into the library's `ITriggerStore` API. NOTE: the
+"mailbox credential → Core connector" idea was DROPPED as impossible by design — connector
+secrets never leave the Core, so client-side intake credentials are host configuration.
+Original decision record follows; remaining slice = the NuGet packaging pass below.
+
+Division of responsibility (Felix confirmed): **artifact storage/management stays in
 the Core** (persistence at run completion, store backends, metadata, retention/access
 policy, event publication); **chaining and triggering are client/library tasks** (what
 follows what is workflow-domain policy; the Core validates and executes).

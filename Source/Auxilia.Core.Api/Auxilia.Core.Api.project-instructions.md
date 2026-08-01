@@ -1,6 +1,6 @@
 # Auxilia.Core.Api
 
-The **Core control plane**: a standalone web service that authorizes, configures, and dispatches workflow *runs*, administers connectors and identity/groups, and exposes all of it over REST **and** authenticated MCP. It is the secure container runner's front door — it knows how to run workload containers correctly, not what a workflow *means* (that lives in `Auxilia.WorkflowStudio`).
+The **Core control plane**: a standalone web service that authorizes, configures, and dispatches workflow *runs*, administers connectors and identity/groups, and exposes all of it over REST **and** authenticated MCP. It is the secure container runner's front door — it knows how to run workload containers correctly, not what a workflow *means* (that lives in the workflow packages and the `Auxilia.Workflows.Client` domain library).
 
 Standalone deployable. Drives `Auxilia.Core.Runner` over the message bus; owns its own database, isolated from every other service.
 

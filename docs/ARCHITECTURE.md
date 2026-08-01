@@ -1,16 +1,17 @@
 ﻿# Auxilia - Architecture Overview
 
-> **Status:** v1.0 — Current (three-deployable platform: Core.Api / Core.Runner / Workflow Studio)
+> **Status:** v1.1 — Current (Core.Api / Core.Runner / AdminConsole + the workflow-domain client library)
 > **Stack:** C# / ASP.NET Core / Blazor Server
 
 ---
 
-> **This document describes the three-deployable architecture** delivered by the Core platform separation (branch `feature/core-platform-separation`; migration plan and delivery status in **`docs/delivered/core-platform-separation-plan.md`**). The platform is:
-> - **`Auxilia.Core.Api`** — the secure **control plane**: REST + OpenAPI, authenticated MCP, the identity / RBAC / groups / policy / audit authority, connector administration (secrets encrypted at rest), and the Run API.
+> **This document describes the split architecture** delivered by the Core platform separation (**`docs/delivered/core-platform-separation-plan.md`**) and the Studio→library program (2026-08-01). The platform is:
+> - **`Auxilia.Core.Api`** — the secure **control plane**: REST + OpenAPI, authenticated MCP, the identity / RBAC / groups / policy / audit authority, connector administration (secrets encrypted at rest), the Run API, and the live-view + artifact SSE streams.
 > - **`Auxilia.Core.Runner`** — the **execution plane** (formerly the *Steering Instance*): container launch, the authenticated JIT-credential handshake, workspace / network / resource mediation, and run lifecycle.
-> - **`Auxilia.WorkflowStudio`** — the workflow-domain **product**: types, packages, the configuration editor, triggers, and view rendering — a pure `Auxilia.Core.Client` consumer that reads workflow **schemas from the Core registry**.
+> - **`Auxilia.AdminConsole`** — the operator/admin Blazor UI, a pure `Auxilia.Core.Client` consumer with no database.
+> - **`Auxilia.Workflows.Client`** — the workflow-domain **library** (successor of the retired `Auxilia.WorkflowStudio` deployable): schema-validated authoring against the Core registry, interval triggers, and artifact chaining over the Core's server-side-filtered artifact SSE stream. Hostable in any app; **`Auxilia.TriggerHost`** is the bundled always-on reference host and additionally carries the email work-item intake adapter.
 >
-> Each service owns its **own database**; secrets live only in the Core; audit is centralised in the Core. The original `Auxilia.BackendService` monolith has been **fully retired** (see `docs/backend-service-retirement-plan.md`): its backend services moved into Core.Api / Workflow Studio and its UI is rehomed as **`Auxilia.AdminConsole`** (a pure `Auxilia.Core.Client` app). A short list of tracked gap-fills remains as follow-ups (see the retirement plan), but the split platform is now the only path.
+> Each service owns its **own database**; secrets live only in the Core; audit is centralised in the Core. The original `Auxilia.BackendService` monolith has been **fully retired** (see `docs/backend-service-retirement-plan.md`), and `Auxilia.WorkflowStudio` followed on 2026-08-01 — the split platform plus the client-library family is now the only path.
 
 ---
 
@@ -43,7 +44,7 @@ Auxilia is a **workflow-driven distributed system** where:
 - **Workflows** are stateful, signed programs that run to completion and communicate exclusively via the platform message bus.
 - **AI agents** are first-class citizens - they can trigger, steer, observe, and complete workflows via the same interfaces as human users (MCP protocol).
 - **Security is pluggable** - runs standalone out of the box, or integrates with corporate identity providers (AAD, LDAP, OIDC).
-- **The platform is four deployables** - a secure **Core** (`Core.Api` control plane + `Core.Runner` execution plane) that owns identity, secrets, and container execution, a **Workflow Studio** product that owns the workflow domain, and the **Admin Console** operator/admin UI — the latter two are pure clients of the Core Web API. Each service has its own database (the Admin Console none at all); they meet only over the Core API and the message bus.
+- **The platform is three deployables plus a client-library family** - a secure **Core** (`Core.Api` control plane + `Core.Runner` execution plane) that owns identity, secrets, and container execution, and the **Admin Console** operator/admin UI (a pure client of the Core Web API, no database). The **workflow domain is a library** (`Auxilia.Workflows.Client`: authoring, triggers, artifact chaining — all over the Core client surface, never the bus), embeddable in any host; `Auxilia.TriggerHost` is the bundled always-on reference host. Each service has its own database; they meet only over the Core API and the message bus.
 
 ---
 
@@ -55,7 +56,7 @@ Auxilia is a **workflow-driven distributed system** where:
 | **Workflow** | A signed, stateful, isolated program that processes a work item through defined steps until completion or cancellation |
 | **Core.Api** | The secure control plane — REST + OpenAPI, authenticated MCP, the identity / RBAC / groups / policy / audit authority, connector administration, and the Run API |
 | **Core.Runner** | The execution plane (formerly the *Steering Instance*) — launches and configures workload containers, performs the just-in-time credential handshake, and owns run lifecycle, ownership, and failover heartbeats |
-| **Workflow Studio** | The workflow-domain product — types, packages, the configuration editor, triggers/adapters, and view rendering; a pure client of the Core API (reads workflow **schemas from the Core registry**) on its own database |
+| **Workflows.Client library** | The workflow-domain library — schema-validated authoring (against the Core registry), interval triggers, and artifact chaining over the Core's filtered artifact SSE stream; embeddable in any host app. `Auxilia.TriggerHost` is the bundled always-on reference host (+ email intake) |
 | **Connector** | A stored, named set of credentials/settings for an external system, administered in the Core and **encrypted at rest**. Workflow configurations reference connectors by ID and never carry secret material (this is the concrete mechanism behind the *Account Bundle* concept used below) |
 | **MCP Interface** | Model Context Protocol endpoint - gives AI agents full parity with the human UI; on the Core it is authenticated against the same policy authority as REST |
 | **Account Bundle** | A set of credentials grouped by purpose (e.g. user identity, AI service, source control) |
@@ -84,9 +85,8 @@ graph TB
         AI["AI Agents (MCP)"]
         CLI["CLI / external automation"]
     end
-    subgraph Product["WORKFLOW STUDIO (headless product · own DB)"]
-        PROD["Workflow types · packages\nTriggers + integration adapters\nDispatches via the Core Run API\n(reads schemas from the Core registry)"]
-        PRODMCP["Product MCP"]
+    subgraph Hosts["WORKFLOW-DOMAIN HOSTS (Auxilia.Workflows.Client · e.g. Auxilia.TriggerHost)"]
+        PROD["Authoring helpers (schemas from the Core registry)\nInterval triggers · artifact chaining (Core SSE)\nEmail work-item intake (TriggerHost)\nDispatch via the Core Run API"]
     end
     subgraph Core["CORE (security kernel)"]
         API["Core.Api — control plane\nREST + OpenAPI · authenticated MCP\nIdentity / RBAC / groups / policy / audit\nConnectors (secrets, encrypted)\nRun API + filtered queries\nLive-view SSE · failover monitor\naudit-read · provider catalog · identity import"]
@@ -96,15 +96,15 @@ graph TB
     BUS["Message Bus (IMessageBusClient — RabbitMQ default)"]
     COREDB[("Core.Api DB")]
     RUNDB[("Core.Runner DB")]
-    PRODDB[("Product DB")]
+    PRODDB[("Host-owned storage")]
 
     ADMIN -->|Core.Client REST| API
     API -.->|SSE live views| ADMIN
     CLI -->|REST| API
     AI -->|authenticated MCP| API
-    PROD -->|Core.Client REST: connectors, identity, runs| API
+    PROD -->|Core.Client REST: connectors, schemas, runs| API
     PROD -->|start run — Run API| API
-    PRODMCP -.->|authenticated via Core| API
+    API -.->|filtered artifact SSE| PROD
     TASKS -->|work-item events| PROD
     IDP -->|authenticate| API
 
@@ -122,7 +122,7 @@ graph TB
     PROD --> PRODDB
 ```
 
-<sub>\* The original `BackendService` monolith has been **retired** (`docs/backend-service-retirement-plan.md`). Its backend capabilities moved into Core.Api (live-view SSE, failover/heartbeat monitor, audit-read, provider catalog, identity import); its triggers (scheduler + artifact-chaining) and integration adapters moved to Workflow Studio; and its UI is rehomed as `Auxilia.AdminConsole` (a pure `Auxilia.Core.Client` app). Core.Api and Core.Runner currently keep **separate** databases; consolidating them into one shared Core DB tier is planned — see §12 and the migration plan.</sub>
+<sub>\* The original `BackendService` monolith has been **retired** (`docs/backend-service-retirement-plan.md`). Its backend capabilities moved into Core.Api (live-view SSE, failover/heartbeat monitor, audit-read, provider catalog, identity import); its UI is rehomed as `Auxilia.AdminConsole` (a pure `Auxilia.Core.Client` app). The interim `Auxilia.WorkflowStudio` deployable retired in turn on 2026-08-01: its triggers (scheduler + artifact-chaining, now over the Core's filtered artifact SSE) live in the `Auxilia.Workflows.Client` library, its email intake in `Auxilia.TriggerHost`, and its private type catalog died in favour of the Core workflow-type registry. Core.Api and Core.Runner currently keep **separate** databases; consolidating them into one shared Core DB tier is planned — see §12 and the migration plan.</sub>
 
 ---
 
@@ -147,10 +147,10 @@ graph TB
 - Scales via competing consumers on the run queue. Owns its own database.
 - **Transition state:** Core.Runner still resolves credentialed slots from its own slot-configuration stores (seeded via the `slot-configurations` exchange); moving that resolution onto **Core connectors** and folding the runner's lifecycle store into a shared Core DB tier are the remaining consolidation steps.
 
-### Workflow Studio — the Product
-- A **headless** product host owning the **workflow-domain**: workflow types, packages, **triggers** (scheduler + artifact-chaining) and **integration adapters** (e.g. email) — dispatching runs through the **Core Run API** (`RunConfigurationAsync`/`RunAsync`, with `run.on-behalf-of` for the configured principal). Workflow **schemas live in the Core registry** (`WorkflowSchemaStore`); Studio **reads** them from the Core. The **configuration-editor UI and view rendering live in `Auxilia.AdminConsole`**, not here.
-- A **client of the Core API** (`Auxilia.Core.Client`): it holds no credentials and touches no Core database. It keeps one **inbound bus subscription** (`workflow.artifact-events`, feeding artifact-chaining triggers) but publishes **no** dispatch commands to the bus — dispatch goes through the Run API.
-- Exposes its own **authenticated Product MCP** for the workflow-authoring surface, which authenticates via the Core. Owns its own database.
+### Workflows.Client — the workflow-domain library (+ Trigger Host)
+- `Auxilia.Workflows.Client` owns the **workflow domain as a library**, embeddable in a server service or a desktop app: **schema-validated authoring** (`WorkflowAuthoring` — validates slot bindings against the Core registry schema, resolves connectors, configure + run in one call), the **interval scheduler**, and **artifact-chaining triggers**. Every dispatch goes through the **Core Run API** (`RunConfigurationAsync`/`RunAsync`, with `run.on-behalf-of` for the configured principal). There is **no library-side type catalog** — the Core workflow-type registry is the only catalog.
+- A **pure client of the Core API** (`Auxilia.Core.Client`) with **zero bus access**: artifact chaining consumes the Core's **server-side-filtered artifact SSE stream** (`/api/artifacts/stream`, one consumer per distinct artifact type, reconnect with backoff). Trigger definitions are **host-owned** (`ITriggerStore`; in-memory default) — what-follows-what is workflow-domain policy, not Core state. Triggers fire only while some host embedding the library runs.
+- **`Auxilia.TriggerHost`** is the bundled always-on reference host: the library engines as hosted services plus the **email work-item intake adapter** (`Auxilia.Adapters.Email`). Intake credentials (e.g. the mailbox password) are **host configuration**, protected in the host's own storage — connector secrets never leave the Core, so a client-side intake credential cannot come from a connector by design.
 
 ### Admin Console — Operator/Admin UI
 - `Auxilia.AdminConsole` is the Blazor Server operator/admin UI and a **pure `Auxilia.Core.Client` consumer** (REST + SSE): dashboard, run surfaces, connectors, provider catalog, identity sources, audit, and **view rendering** for run outputs. It holds **no database** and no secrets — every read/write goes through the Core API. Live views arrive over the Core.Api SSE stream, so there is no view backplane.
@@ -235,12 +235,12 @@ graph TB
 - Not required — workflows function without it as long as the registry endpoints are declared and reachable
 
 ### MCP Server
-- MCP is a **first-class, authenticated** surface, split to match the two products: the **Core MCP** (on Core.Api) exposes runtime / connector / identity / group tools; the **Product MCP** (on Workflow Studio) exposes workflow-authoring tools and authenticates via the Core.
+- MCP is a **first-class, authenticated** surface: the **Core MCP** (on Core.Api) exposes runtime / connector / identity / group / artifact tools. (The separate Product MCP retired with the WorkflowStudio deployable — authoring is a library call now; an authoring MCP can return as part of a host app if one needs it.)
 - Every tool authenticates (API-key bearer, principal-bound) and is policy-checked against the **same authority as REST** — AI and service principals get UI parity with no hidden operations and no separately maintained mirror.
 - Representative Core tools: `run_workflow`, `run_configuration`, `list_runs`, `get_run`, `cancel_run`, `list_connectors`, `create_connector`, `create_group`, `assign_group_role`.
 
 ### Integration Adapters
-- Integration adapters live in **Workflow Studio** — the product owns *which* workflow a work item should run — and they start it by calling the Core **Run API**, never by publishing to the bus directly. Two adapter contracts:
+- Integration adapters live in **workflow-domain hosts** (the `Auxilia.Workflows.Client` family — e.g. the email intake in `Auxilia.TriggerHost`); the host owns *which* workflow a work item should run and starts it by calling the Core **Run API**, never by publishing to the bus directly. Two adapter contracts:
 - **ITaskSourceAdapter** — read work items (full detail including linked items, history, attachments), update status, create work items, create sub-tasks, attach artifact references (`AttachArtifact`)
 - **ISourceControlAdapter** — clone, diff, branch, commit, push, create PR; plus lightweight introspection: ListDirectory, GetFileContent, DetectFrameworks (no full clone required)
 
@@ -330,7 +330,7 @@ A dispatch originates from one of four trigger sources; all of them converge on 
 |---|---|
 | **Work item event** | Integration Adapters detect work item changes (created, moved to a configured state) and publish dispatch commands |
 | **Manual** | A human via the dashboard/Studio or an AI agent via the Core MCP `run_workflow` tool — both resolve to a Core Run API call |
-| **Schedule** | The platform scheduler (in Workflow Studio) for recurring runs, e.g. nightly security scans — dispatched through the Core Run API |
+| **Schedule** | The interval scheduler (in the `Auxilia.Workflows.Client` library, hosted e.g. by the TriggerHost) for recurring runs, e.g. nightly security scans — dispatched through the Core Run API |
 | **Artifact completion** | A finished run's persisted artifact triggers a configured follow-up workflow (e.g. CodeReviewResult → Selective Fixing) — workflow chaining without coupling the workflows to each other |
 
 Which triggers are active for a workflow is operator configuration, subject to the Policy Engine.
@@ -644,14 +644,14 @@ graph LR
 
 All modes share the same codebase. Runtime behaviour is driven entirely by configuration and pluggable interface implementations.
 
-**Deployment topology.** A deployment runs three platform services (each with its own database) plus the admin console UI:
+**Deployment topology.** A deployment runs the two Core services (each with its own database), the admin console UI, and — when triggers/intake should be always-on — a workflow-domain host:
 
 | Service | Role | Database | Scaling |
 |---|---|---|---|
-| `Auxilia.Core.Api` | Control plane (auth authority, connectors, Run API, Core MCP, live-view SSE, failover monitor, audit-read, provider catalog, identity import) | Core.Api DB | Stateless behind a load balancer |
+| `Auxilia.Core.Api` | Control plane (auth authority, connectors, Run API, Core MCP, live-view + artifact SSE, failover monitor, audit-read, provider catalog, identity import) | Core.Api DB | Stateless behind a load balancer |
 | `Auxilia.Core.Runner` | Execution plane (launch, JIT creds, lifecycle, heartbeat-emit) — needs the Docker socket / a container runtime | Core.Runner DB | Competing consumers on the run queue |
-| `Auxilia.WorkflowStudio` | Headless workflow product (types/packages, triggers + integration adapters, Product MCP) — dispatches via the Core Run API | Product DB | Stateless client of the Core |
 | `Auxilia.AdminConsole` | Operator/admin UI (Blazor Server) — a pure `Auxilia.Core.Client` consumer (REST + SSE); holds no database | — (pure Core client) | Sticky sessions (Blazor circuit); no view backplane |
+| `Auxilia.TriggerHost` (optional) | Reference host for the `Auxilia.Workflows.Client` engines + email intake — dispatches via the Core Run API, consumes the filtered artifact SSE; any app embedding the library serves the same role | Host-owned storage | Pure Core client; N hosts each own their own triggers |
 
 Platform services (RabbitMQ, MongoDB) are deployed by Compose / k8s as they are today — the Core runs **workload containers only**, it is not a platform supervisor. There is **no Redis/SignalR view backplane**: live views fan out over the Core.Api SSE stream (see §14–§15).
 
@@ -936,7 +936,7 @@ Roles reach a principal three ways, unioned deny-by-default: **direct** assignme
 
 ### Administration
 
-Identity administration (principals, role assignments, **groups**, group mappings, platform policy ceilings, retention, the audit-log viewer) is a **Core.Api** responsibility — surfaced through the Core admin console and the Core MCP. Workflow-domain configuration (workflow-type access lists, slot→connector bindings, operator clamps, triggers, shared dashboards) lives in **Workflow Studio**. Both authenticate against the one Core policy authority, so UI and MCP cannot diverge. These pages are surfaced by `Auxilia.AdminConsole`, a pure Core client.
+Identity administration (principals, role assignments, **groups**, group mappings, platform policy ceilings, retention, the audit-log viewer) is a **Core.Api** responsibility — surfaced through the Core admin console and the Core MCP. Workflow-domain configuration (slot→connector bindings, operator clamps) is administered against the Core's configuration store today; **trigger definitions are owned by whichever host embeds the `Auxilia.Workflows.Client` engines**. Everything authenticates against the one Core policy authority, so UI and MCP cannot diverge. The admin pages are surfaced by `Auxilia.AdminConsole`, a pure Core client.
 
 ---
 
