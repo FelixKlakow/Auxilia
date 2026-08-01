@@ -6,6 +6,24 @@
         <Nullable>enable</Nullable>
     </PropertyGroup>
 
+    <PropertyGroup Label="Packaging">
+        <PackageId>Auxilia.Core.Client</PackageId>
+        <Version>0.1.0</Version>
+        <Authors>Felix Klakow</Authors>
+        <Description>Typed HTTP client for the entire Auxilia Core API: dispatch and observe runs (SSE), manage configurations and connectors, consume artifacts (query, download, filtered event stream), administer identity — the supported way for any application to drive the Core.</Description>
+        <RepositoryUrl>https://github.com/FelixKlakow/Auxilia</RepositoryUrl>
+        <PackageProjectUrl>https://github.com/FelixKlakow/Auxilia</PackageProjectUrl>
+        <PackageLicenseFile>LICENSE</PackageLicenseFile>
+        <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <PackageTags>auxilia;workflow;client;sse</PackageTags>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="..\LICENSE" Pack="true" PackagePath="" Visible="false" />
+    </ItemGroup>
+
     <ItemGroup>
         <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.7" />
     </ItemGroup>

@@ -6,6 +6,24 @@
         <Nullable>enable</Nullable>
     </PropertyGroup>
 
+    <PropertyGroup Label="Packaging">
+        <PackageId>Auxilia.Workflows.Client</PackageId>
+        <Version>0.1.0</Version>
+        <Authors>Felix Klakow</Authors>
+        <Description>The Auxilia workflow-domain library on top of Auxilia.Core.Client: schema-validated authoring, interval triggers, and artifact chaining over the Core's filtered artifact event stream. Embed it in a server service or a desktop app — triggers fire while your host runs.</Description>
+        <RepositoryUrl>https://github.com/FelixKlakow/Auxilia</RepositoryUrl>
+        <PackageProjectUrl>https://github.com/FelixKlakow/Auxilia</PackageProjectUrl>
+        <PackageLicenseFile>LICENSE</PackageLicenseFile>
+        <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <PackageTags>auxilia;workflow;triggers;chaining;authoring</PackageTags>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="..\LICENSE" Pack="true" PackagePath="" Visible="false" />
+    </ItemGroup>
+
     <ItemGroup>
         <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.7" />
     </ItemGroup>
