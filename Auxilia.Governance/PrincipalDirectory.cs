@@ -14,7 +14,8 @@ public sealed class PrincipalDirectory(
     IDataAccess<PrincipalRecord> principals,
     IDataAccess<RoleAssignmentRecord> roleAssignments,
     IDataAccess<CredentialRecord> credentials,
-    AuditLog auditLog)
+    AuditLog auditLog,
+    PrincipalRoleCache? cache = null)
 {
     public async Task<PrincipalRecord> CreateHumanAsync(
         string displayName, string username, string password, CancellationToken ct = default)
@@ -83,6 +84,7 @@ public sealed class PrincipalDirectory(
             RoleName = roleName,
             Source = "Direct"
         }, ct);
+        cache?.Invalidate(principalId);
         await auditLog.AppendAsync("principal-directory", "role.assigned",
             principalId.ToString(), roleName, ct: ct);
     }
@@ -90,6 +92,7 @@ public sealed class PrincipalDirectory(
     public async Task<bool> RevokeRoleAsync(Guid principalId, string roleName, CancellationToken ct = default)
     {
         var removed = await roleAssignments.RemoveAsync(RoleAssignmentRecord.IdFor(principalId, roleName), ct);
+        cache?.Invalidate(principalId);
         if (removed)
             await auditLog.AppendAsync("principal-directory", "role.revoked",
                 principalId.ToString(), roleName, ct: ct);
@@ -108,6 +111,8 @@ public sealed class PrincipalDirectory(
 
         var status = enabled ? "Active" : "Disabled";
         await principals.SaveAsync(principal with { Status = status }, ct);
+        // A disabled principal must stop authenticating NOW, not at TTL expiry.
+        cache?.Invalidate(principalId);
         await auditLog.AppendAsync("principal-directory", enabled ? "principal.enabled" : "principal.disabled",
             principalId.ToString(), status.ToLowerInvariant(), ct: ct);
         return true;

@@ -37,6 +37,7 @@ public static class DependencyInjectionExtensions
         services.AddSingleton<GroupMappingDirectory>();
         services.AddSingleton<GroupRoleResolver>();
         services.AddSingleton<GroupDirectory>();
+        services.AddSingleton<PrincipalRoleCache>();
         services.AddSingleton<IIdentityProvider, LocalIdentityProvider>();
         services.AddSingleton<ExternalIdentityProvisioner>();
         services.AddSingleton<IPolicyEngine, PolicyEngine>();

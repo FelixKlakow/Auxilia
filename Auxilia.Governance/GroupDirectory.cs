@@ -13,7 +13,8 @@ public sealed class GroupDirectory(
     IDataAccess<GroupRecord> groups,
     IDataAccess<GroupMembershipRecord> memberships,
     IDataAccess<GroupRoleRecord> groupRoles,
-    AuditLog auditLog)
+    AuditLog auditLog,
+    Identity.PrincipalRoleCache? cache = null)
 {
     public async Task<GroupRecord> CreateAsync(string name, string? description = null, CancellationToken ct = default)
     {
@@ -43,6 +44,7 @@ public sealed class GroupDirectory(
             GroupId = groupId,
             PrincipalId = principalId
         }, ct);
+        cache?.Invalidate(principalId);
         await auditLog.AppendAsync("group-directory", "group.member-added",
             groupId.ToString(), principalId.ToString(), ct: ct);
     }
@@ -50,6 +52,7 @@ public sealed class GroupDirectory(
     public async Task<bool> RemoveMemberAsync(Guid groupId, Guid principalId, CancellationToken ct = default)
     {
         var removed = await memberships.RemoveAsync(GroupMembershipRecord.IdFor(groupId, principalId), ct);
+        cache?.Invalidate(principalId);
         if (removed)
             await auditLog.AppendAsync("group-directory", "group.member-removed",
                 groupId.ToString(), principalId.ToString(), ct: ct);
@@ -66,12 +69,15 @@ public sealed class GroupDirectory(
             GroupId = groupId,
             RoleName = roleName
         }, ct);
+        // A group-role change fans out to every member — clear rather than track membership here.
+        cache?.Clear();
         await auditLog.AppendAsync("group-directory", "group.role-assigned", groupId.ToString(), roleName, ct: ct);
     }
 
     public async Task<bool> RevokeRoleAsync(Guid groupId, string roleName, CancellationToken ct = default)
     {
         var removed = await groupRoles.RemoveAsync(GroupRoleRecord.IdFor(groupId, roleName), ct);
+        cache?.Clear();
         if (removed)
             await auditLog.AppendAsync("group-directory", "group.role-revoked", groupId.ToString(), roleName, ct: ct);
         return removed;

@@ -8,7 +8,8 @@ namespace Auxilia.Governance.Identity;
 public sealed class LocalIdentityProvider(
     IDataAccess<CredentialRecord> credentials,
     IDataAccess<PrincipalRecord> principals,
-    IDataAccess<RoleAssignmentRecord> roleAssignments) : IIdentityProvider
+    IDataAccess<RoleAssignmentRecord> roleAssignments,
+    PrincipalRoleCache? cache = null) : IIdentityProvider
 {
     public async Task<IdentitySession?> AuthenticatePasswordAsync(
         string username, string password, CancellationToken ct = default)
@@ -35,17 +36,23 @@ public sealed class LocalIdentityProvider(
 
     private async Task<IdentitySession?> SessionForAsync(Guid principalId, CancellationToken ct)
     {
-        var principal = await principals.ReadAsync(principalId, ct);
+        PrincipalRecord? principal;
+        IReadOnlyList<string> roles;
+        if (cache is null || !cache.TryGetPrincipal(principalId, out principal, out roles))
+        {
+            principal = await principals.ReadAsync(principalId, ct);
+            var assignmentsQuery = await roleAssignments.ReadAsync(ct);
+            roles = assignmentsQuery
+                .Where(a => a.PrincipalId == principalId)
+                .Select(a => a.RoleName)
+                .ToList();
+            cache?.SetPrincipal(principalId, principal, roles);
+        }
+
         if (principal is null || principal.Status != "Active")
             return null;
 
-        var assignmentsQuery = await roleAssignments.ReadAsync(ct);
-        var roles = assignmentsQuery
-            .Where(a => a.PrincipalId == principalId)
-            .Select(a => a.RoleName)
-            .ToList();
-
-        return new IdentitySession(principal.Id, principal.Kind, principal.DisplayName, roles);
+        return new IdentitySession(principal.Id, principal.Kind, principal.DisplayName, roles.ToList());
     }
 
     public static string HashApiKey(string apiKey)

@@ -9,7 +9,8 @@ public sealed class PolicyEngine(
     IDataAccess<RoleAssignmentRecord> roleAssignments,
     WorkflowTypeAccessStore accessStore,
     AuditLog auditLog,
-    GroupRoleResolver? groupRoleResolver = null) : IPolicyEngine
+    GroupRoleResolver? groupRoleResolver = null,
+    Identity.PrincipalRoleCache? cache = null) : IPolicyEngine
 {
     public async Task<PolicyDecision> EvaluateAsync(PolicyContext context, CancellationToken ct = default)
     {
@@ -27,24 +28,36 @@ public sealed class PolicyEngine(
 
     private async Task<PolicyDecision> DecideAsync(PolicyContext context, CancellationToken ct)
     {
-        var principal = await principals.ReadAsync(context.PrincipalId, ct);
+        PrincipalRecord? principal;
+        IReadOnlyList<string> directRoles;
+        if (cache is null || !cache.TryGetPrincipal(context.PrincipalId, out principal, out directRoles))
+        {
+            principal = await principals.ReadAsync(context.PrincipalId, ct);
+            var assignmentsQuery = await roleAssignments.ReadAsync(ct);
+            directRoles = assignmentsQuery
+                .Where(a => a.PrincipalId == context.PrincipalId)
+                .Select(a => a.RoleName)
+                .ToList();
+            cache?.SetPrincipal(context.PrincipalId, principal, directRoles);
+        }
+
         if (principal is null)
             return PolicyDecision.Deny("unknown-principal");
         if (principal.Status != "Active")
             return PolicyDecision.Deny("principal-disabled");
 
-        var assignmentsQuery = await roleAssignments.ReadAsync(ct);
-        var roles = assignmentsQuery
-            .Where(a => a.PrincipalId == context.PrincipalId)
-            .Select(a => a.RoleName)
-            .ToList();
+        var roles = directRoles.ToList();
 
         // Union in roles the principal holds through first-class group memberships.
         if (groupRoleResolver is not null)
-            roles = roles
-                .Concat(await groupRoleResolver.RolesForAsync(context.PrincipalId, ct))
-                .Distinct()
-                .ToList();
+        {
+            if (cache is null || !cache.TryGetGroupRoles(context.PrincipalId, out var groupRoles))
+            {
+                groupRoles = (await groupRoleResolver.RolesForAsync(context.PrincipalId, ct)).ToList();
+                cache?.SetGroupRoles(context.PrincipalId, groupRoles);
+            }
+            roles = roles.Concat(groupRoles).Distinct().ToList();
+        }
 
         // Workflow-type access lists take precedence: when entries exist for this
         // (workflow type, action), they are the exclusive grant source.

@@ -17,7 +17,8 @@ public sealed class ExternalIdentityProvisioner(
     IDataAccess<PrincipalRecord> principals,
     IDataAccess<RoleAssignmentRecord> roleAssignments,
     GroupMappingResolver groupMappingResolver,
-    AuditLog auditLog)
+    AuditLog auditLog,
+    PrincipalRoleCache? cache = null)
 {
     /// <summary>Source tag for role assignments derived from IdP group claims (see <see cref="RoleAssignmentRecord.Source"/>).</summary>
     private const string DirectorySource = "GroupMapping";
@@ -68,6 +69,7 @@ public sealed class ExternalIdentityProvisioner(
             principal.Id.ToString(), identity.Provider, ct: ct);
 
         await ReconcileDirectoryRolesAsync(principal.Id, identity, ct);
+        cache?.Invalidate(principal.Id);
 
         var assignments = await roleAssignments.ReadAsync(ct);
         var roles = assignments
