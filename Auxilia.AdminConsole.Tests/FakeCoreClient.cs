@@ -359,6 +359,19 @@ internal sealed class FakeCoreClient : ICoreClient
 
     public List<(Guid Id, SetConfigurationGrants Request)> ConfigurationGrantCalls { get; } = [];
 
+    public List<RoleDto> Roles { get; } =
+    [
+        new("Administrator", []), new("Operator", []), new("User", []), new("Auditor", [])
+    ];
+
+    public SharingSubjects SharingSubjects { get; set; } = new([], []);
+
+    public Task<IReadOnlyList<RoleDto>> ListRolesAsync(CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<RoleDto>>(Roles);
+
+    public Task<SharingSubjects> GetSharingSubjectsAsync(CancellationToken ct = default)
+        => Task.FromResult(SharingSubjects);
+
     // --- Unused by the pages under test ---
     private static T Nope<T>() => throw new NotSupportedException("Not needed for these tests.");
 

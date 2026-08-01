@@ -60,7 +60,8 @@ public sealed class PolicyEngine(
         }
 
         // Workflow-type access lists take precedence: when entries exist for this
-        // (workflow type, action), they are the exclusive grant source.
+        // (workflow type, action), they are the exclusive grant source. An entry admits a
+        // principal directly, via a role it holds, or via a first-class group it belongs to.
         if (context.WorkflowType is not null)
         {
             var entries = await accessStore.GetEntriesAsync(context.WorkflowType, context.Action, ct);
@@ -69,6 +70,12 @@ public sealed class PolicyEngine(
                 var matched = entries.Any(e =>
                     e.PrincipalId == context.PrincipalId ||
                     (e.RoleName is not null && roles.Contains(e.RoleName)));
+                if (!matched && groupRoleResolver is not null
+                    && entries.Any(e => e.GroupId is not null))
+                {
+                    var memberOf = await groupRoleResolver.GroupsForAsync(context.PrincipalId, ct);
+                    matched = entries.Any(e => e.GroupId is { } groupId && memberOf.Contains(groupId));
+                }
                 return matched
                     ? PolicyDecision.Allow("workflow-type-access")
                     : PolicyDecision.Deny("workflow-type-access-list-excludes-principal");

@@ -122,8 +122,8 @@ public sealed class WorkflowsPageTests
 
         cut.Find("input[placeholder='e.g. Nightly code review']").Change("My review");
         cut.FindAll("select")[0].Change("code-review");        // workflow type → fetches schema
-        // the slot's connector picker is the second <select> (first is the workflow-type picker)
-        cut.FindAll("select")[1].Change(connectorId.ToString());
+        // selects: [0] workflow type, [1] scope, [2] the slot's connector picker
+        cut.FindAll("select")[2].Change(connectorId.ToString());
         cut.FindAll("button").First(b => b.TextContent.Trim() == "Create configuration").Click();
 
         Assert.Multiple(() =>

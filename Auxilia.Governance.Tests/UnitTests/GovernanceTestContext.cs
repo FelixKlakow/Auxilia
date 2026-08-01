@@ -17,6 +17,8 @@ internal sealed class GovernanceTestContext
     public IDataAccess<GroupMappingRecord> GroupMappings { get; } = new InMemoryDataAccess<GroupMappingRecord>();
     public IDataAccess<WorkflowTypeAccessRecord> AccessRecords { get; } = new InMemoryDataAccess<WorkflowTypeAccessRecord>();
     public IDataAccess<AuditRecord> AuditRecords { get; } = new InMemoryDataAccess<AuditRecord>();
+    public IDataAccess<GroupMembershipRecord> GroupMemberships { get; } = new InMemoryDataAccess<GroupMembershipRecord>();
+    public IDataAccess<GroupRoleRecord> GroupRoles { get; } = new InMemoryDataAccess<GroupRoleRecord>();
 
     public AuditLog AuditLog { get; }
     public PrincipalDirectory Directory { get; }
@@ -32,7 +34,9 @@ internal sealed class GovernanceTestContext
         AuditLog = new AuditLog(AuditRecords, TimeProvider.System);
         Directory = new PrincipalDirectory(Principals, RoleAssignments, Credentials, AuditLog);
         AccessStore = new WorkflowTypeAccessStore(AccessRecords);
-        PolicyEngine = new PolicyEngine(Principals, RoleAssignments, AccessStore, AuditLog);
+        PolicyEngine = new PolicyEngine(
+            Principals, RoleAssignments, AccessStore, AuditLog,
+            new GroupRoleResolver(GroupMemberships, GroupRoles));
         IdentityProvider = new LocalIdentityProvider(Credentials, Principals, RoleAssignments);
         GroupMappingResolver = new GroupMappingResolver(GroupMappings);
         GroupMappingDirectory = new GroupMappingDirectory(GroupMappings, AuditLog);
@@ -45,6 +49,14 @@ internal sealed class GovernanceTestContext
         await Directory.AssignRoleAsync(principal.Id, role);
         return principal.Id;
     }
+
+    public Task AddGroupMemberAsync(Guid groupId, Guid principalId)
+        => GroupMemberships.SaveAsync(new GroupMembershipRecord
+        {
+            Id = GroupMembershipRecord.IdFor(groupId, principalId),
+            GroupId = groupId,
+            PrincipalId = principalId
+        });
 
     public async Task<int> AuditCountAsync(string action)
     {

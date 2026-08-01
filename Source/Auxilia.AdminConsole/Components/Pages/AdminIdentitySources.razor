@@ -227,7 +227,8 @@ else
 
 @code {
 
-    private static readonly string[] BuiltInRoles = ["Administrator", "Operator", "User", "Auditor"];
+    // Served by the Core (GET /api/roles) — no client-side role knowledge.
+    private string[] BuiltInRoles = [];
 
     private bool _loaded;
     private bool _denied;
@@ -271,6 +272,7 @@ else
     {
         try
         {
+            BuiltInRoles = (await Core.ListRolesAsync()).Select(r => r.Name).ToArray();
             _connectors = await Core.ListIdentityConnectorsAsync();
             await LoadAsync();
             _denied = false;

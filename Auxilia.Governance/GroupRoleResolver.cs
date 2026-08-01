@@ -11,6 +11,14 @@ public sealed class GroupRoleResolver(
     IDataAccess<GroupMembershipRecord> memberships,
     IDataAccess<GroupRoleRecord> groupRoles)
 {
+    /// <summary>The first-class groups the principal is a member of.</summary>
+    public async Task<IReadOnlyList<Guid>> GroupsForAsync(Guid principalId, CancellationToken ct = default)
+        => (await memberships.ReadAsync(ct))
+            .Where(m => m.PrincipalId == principalId)
+            .Select(m => m.GroupId)
+            .Distinct()
+            .ToList();
+
     public async Task<IReadOnlyList<string>> RolesForAsync(Guid principalId, CancellationToken ct = default)
     {
         var membershipQuery = await memberships.ReadAsync(ct);

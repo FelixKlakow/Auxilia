@@ -6,8 +6,8 @@
 ## Core.Api — client-surface follow-ups
 - **Dashboard stats/pins** — no stats endpoint (counts computed client-side from a query page)
   and no persisted pinned dashboards.
-- **Built-in role list endpoint** — the AdminConsole hard-codes the role list (no Core
-  list-roles); actor→display-name resolution in Audit ties to a principals lookup.
+- **Audit actor display names** — actor→display-name resolution in the Audit view ties to a
+  principals lookup (the role-list endpoint itself shipped 2026-08-01: `GET /api/roles`).
 - **Legacy `ConnectorRecord` cleanup** — superseded by `CoreConnectorRecord`; verify no
   consumer, then remove.
 - **Per-user bearer hardening** — the short-lived bearer is embedded in the prerendered page
@@ -69,9 +69,10 @@ owner, and `AccessGrant`s (principal / first-class group / directory group — t
 model as connectors, evaluated by `AccessGrantEvaluator`); reads and the run path are
 visibility-filtered, editing/deleting/sharing is owner-or-manager; surfaced in the
 AdminConsole (scope column + Sharing editor) and the steering client (visibility choice in the
-configure wizard, Sharing… on the workflow row menu). Remaining follow-up:
-- **Group entries in workflow-type access lists** — allow granting a first-class group
-  directly instead of only via roles.
+configure wizard, Sharing… on the workflow row menu). Group entries in workflow-type
+access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing directory
+(pickers in both grant editors) shipped 2026-08-01; access lists are administered over MCP
+(`list/grant/revoke_workflow_type_access`, gated `policy.administer`).
 
 ## Environment capabilities
 - **Windows-container runners** — windows-base layers are stored but never served to Linux

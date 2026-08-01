@@ -192,7 +192,8 @@ else
 
     // The four built-in RBAC roles. The Core exposes no "list roles" endpoint (these are fixed platform
     // roles), so they are enumerated here for the assign dropdown.
-    private static readonly string[] BuiltInRoles = ["Administrator", "Operator", "User", "Auditor"];
+    // Served by the Core (GET /api/roles) — no client-side role knowledge.
+    private string[] BuiltInRoles = [];
 
     private const int PageSize = 50;
 
@@ -219,7 +220,18 @@ else
 
     private static bool IsActive(PrincipalDto p) => p.Status == "Active";
 
-    protected override Task OnInitializedAsync() => LoadAsync(reset: true);
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            BuiltInRoles = (await Core.ListRolesAsync()).Select(r => r.Name).ToArray();
+        }
+        catch (CoreApiException)
+        {
+            // The page's own load reports errors; an empty role list only hides the assign menu.
+        }
+        await LoadAsync(reset: true);
+    }
 
     private Task ApplyAsync() => LoadAsync(reset: true);
 

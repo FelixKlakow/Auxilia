@@ -31,6 +31,7 @@ public sealed class CoreMcpTools(
     WorkflowTypeRegistryService workflowRegistry,
     WorkflowTypeApprovalPipeline approvalPipeline,
     GroupDirectory groups,
+    WorkflowTypeAccessStore workflowTypeAccess,
     GroupMappingDirectory groupMappings,
     IdentityImportService identityImport,
     PrincipalDirectory principals,
@@ -213,6 +214,94 @@ public sealed class CoreMcpTools(
         {
             return Error(ex.Message);
         }
+    }
+
+    [McpServerTool(Name = "list_roles")]
+    [Description("Lists the built-in roles and the permission actions each grants.")]
+    public Task<CallToolResult> ListRolesAsync(RequestContext<CallToolRequestParams> context)
+        => Task.FromResult(CoreClaims.PrincipalIdOf(context.User) is null
+            ? NoPrincipal()
+            : JsonResult(Governance.BuiltInRoles.AllRoleNames
+                .Select(r => new RoleDto(r, Governance.BuiltInRoles.PermissionsOf(r).Order().ToList()))
+                .ToList()));
+
+    [McpServerTool(Name = "list_workflow_type_access")]
+    [Description("Lists a workflow type's access-list entries. When entries exist for an action, they are " +
+                 "the EXCLUSIVE grant source for that (type, action).")]
+    public async Task<CallToolResult> ListWorkflowTypeAccessAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Workflow type name.")] string workflowType,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (await DenyAsync(principalId, PermissionActions.PolicyAdminister, workflowType, cancellationToken) is { } denial)
+            return denial;
+        return JsonResult((await workflowTypeAccess.ListAsync(workflowType, cancellationToken))
+            .Select(e => new { e.Action, e.RoleName, e.PrincipalId, e.GroupId }).ToList());
+    }
+
+    [McpServerTool(Name = "grant_workflow_type_access")]
+    [Description("Adds a workflow-type access-list entry granting an action to EXACTLY ONE subject: a role " +
+                 "name, a principal id, or a first-class group id. The first entry for a (type, action) makes " +
+                 "the list exclusive for that action.")]
+    public Task<CallToolResult> GrantWorkflowTypeAccessAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Workflow type name.")] string workflowType,
+        [Description("Permission action, e.g. \"workflow.trigger\".")] string action,
+        [Description("Role name (Administrator/Operator/User/Auditor).")] string? roleName = null,
+        [Description("Principal id (GUID).")] string? principalId = null,
+        [Description("First-class group id (GUID).")] string? groupId = null,
+        CancellationToken cancellationToken = default)
+        => MutateWorkflowTypeAccessAsync(context, workflowType, action, roleName, principalId, groupId,
+            revoke: false, cancellationToken);
+
+    [McpServerTool(Name = "revoke_workflow_type_access")]
+    [Description("Removes a workflow-type access-list entry (same subject addressing as the grant).")]
+    public Task<CallToolResult> RevokeWorkflowTypeAccessAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Workflow type name.")] string workflowType,
+        [Description("Permission action, e.g. \"workflow.trigger\".")] string action,
+        [Description("Role name.")] string? roleName = null,
+        [Description("Principal id (GUID).")] string? principalId = null,
+        [Description("First-class group id (GUID).")] string? groupId = null,
+        CancellationToken cancellationToken = default)
+        => MutateWorkflowTypeAccessAsync(context, workflowType, action, roleName, principalId, groupId,
+            revoke: true, cancellationToken);
+
+    private async Task<CallToolResult> MutateWorkflowTypeAccessAsync(
+        RequestContext<CallToolRequestParams> context, string workflowType, string action,
+        string? roleName, string? principalId, string? groupId, bool revoke, CancellationToken ct)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } caller)
+            return NoPrincipal();
+        if (await DenyAsync(caller, PermissionActions.PolicyAdminister, workflowType, ct) is { } denial)
+            return denial;
+        var subjects = new[] { roleName, principalId, groupId }.Count(s => !string.IsNullOrWhiteSpace(s));
+        if (subjects != 1)
+            return Error("provide exactly one subject: roleName, principalId, or groupId.");
+        if (roleName is { Length: > 0 })
+        {
+            if (!Governance.BuiltInRoles.Exists(roleName))
+                return Error($"unknown role '{roleName}'.");
+            if (revoke) await workflowTypeAccess.RevokeRoleAsync(workflowType, action, roleName, ct);
+            else await workflowTypeAccess.GrantRoleAsync(workflowType, action, roleName, ct);
+        }
+        else if (principalId is { Length: > 0 })
+        {
+            if (!Guid.TryParse(principalId, out var pid))
+                return Error("principalId must be a GUID.");
+            if (revoke) await workflowTypeAccess.RevokePrincipalAsync(workflowType, action, pid, ct);
+            else await workflowTypeAccess.GrantPrincipalAsync(workflowType, action, pid, ct);
+        }
+        else
+        {
+            if (!Guid.TryParse(groupId, out var gid))
+                return Error("groupId must be a GUID.");
+            if (revoke) await workflowTypeAccess.RevokeGroupAsync(workflowType, action, gid, ct);
+            else await workflowTypeAccess.GrantGroupAsync(workflowType, action, gid, ct);
+        }
+        return JsonResult(new { workflowType, action, changed = true, revoked = revoke });
     }
 
     /// <summary>The visibility filter for the calling MCP principal (managers see everything).</summary>

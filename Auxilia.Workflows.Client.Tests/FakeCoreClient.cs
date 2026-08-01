@@ -119,6 +119,8 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task<PagedResult<Connector>> QueryConnectorsAsync(ConnectorQuery query, CancellationToken ct = default) => Nope<Task<PagedResult<Connector>>>();
     public Task SetConnectorGrantsAsync(Guid id, SetConnectorGrants request, CancellationToken ct = default) => Nope<Task>();
     public Task<RunConfiguration> SetConfigurationGrantsAsync(Guid id, SetConfigurationGrants request, CancellationToken ct = default) => Nope<Task<RunConfiguration>>();
+    public Task<IReadOnlyList<RoleDto>> ListRolesAsync(CancellationToken ct = default) => Nope<Task<IReadOnlyList<RoleDto>>>();
+    public Task<SharingSubjects> GetSharingSubjectsAsync(CancellationToken ct = default) => Nope<Task<SharingSubjects>>();
     public Task<ConnectorBrowseResult> BrowseConnectorAsync(Guid id, BrowseConnector request, CancellationToken ct = default) => Nope<Task<ConnectorBrowseResult>>();
     public Task<PagedResult<ProviderCatalogEntry>> QueryProviderCatalogAsync(ProviderCatalogQuery query, CancellationToken ct = default) => Nope<Task<PagedResult<ProviderCatalogEntry>>>();
     public Task<ProviderCatalogEntry> RegisterProviderAsync(RegisterSlotProvider request, CancellationToken ct = default) => Nope<Task<ProviderCatalogEntry>>();

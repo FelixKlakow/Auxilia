@@ -253,6 +253,30 @@ app.MapGet("/auth/me", (HttpContext http) =>
         roles.SelectMany(BuiltInRoles.PermissionsOf).Distinct().Order().ToArray()));
 }).RequireAuthorization();
 
+// --- Roles & sharing directory: read-only vocabulary for every authenticated client ---
+app.MapGet("/api/roles", () => Results.Ok(
+        BuiltInRoles.AllRoleNames
+            .Select(r => new RoleDto(r, BuiltInRoles.PermissionsOf(r).Order().ToList()))
+            .ToList()))
+    .RequireAuthorization();
+
+// Sharing needs a people/group PICKER, not principal administration — any authenticated
+// principal may list ids + display names (nothing else) to address a grant.
+app.MapGet("/api/directory/subjects", async (
+        Auxilia.UniversalDataAccess.IDataAccess<PrincipalRecord> principals,
+        GroupDirectory groups, CancellationToken ct) =>
+{
+    var principalList = (await principals.ReadAsync(ct))
+        .Where(p => p.Status == "Active")
+        .OrderBy(p => p.DisplayName, StringComparer.OrdinalIgnoreCase)
+        .Select(p => new SharingPrincipal(p.Id, p.DisplayName, p.Kind))
+        .ToList();
+    var groupList = (await groups.ListAsync(ct))
+        .Select(g => new SharingGroup(g.Id, g.Name))
+        .ToList();
+    return Results.Ok(new SharingSubjects(principalList, groupList));
+}).RequireAuthorization();
+
 // --- Runs ---
 app.MapPost("/api/runs", async (
         RunRequest request, HttpContext http, IPolicyEngine policy, RunService runs, AuditLog audit,

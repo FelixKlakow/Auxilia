@@ -204,7 +204,30 @@ else
                             <option value="@AccessGrantKind.Group">Group</option>
                             <option value="@AccessGrantKind.DirectoryGroup">Directory group</option>
                         </select>
-                        <input @bind="grant.Id" placeholder="principal id / group object id"/>
+                        @if (grant.Kind == AccessGrantKind.Principal && _subjects is { Principals.Count: > 0 } sp)
+                        {
+                            <select @bind="grant.Id">
+                                <option value="">Pick a principal…</option>
+                                @foreach (var principal in sp.Principals)
+                                {
+                                    <option value="@principal.Id">@principal.DisplayName (@principal.Kind)</option>
+                                }
+                            </select>
+                        }
+                        else if (grant.Kind == AccessGrantKind.Group && _subjects is { Groups.Count: > 0 } sg)
+                        {
+                            <select @bind="grant.Id">
+                                <option value="">Pick a group…</option>
+                                @foreach (var group in sg.Groups)
+                                {
+                                    <option value="@group.Id">@group.Name</option>
+                                }
+                            </select>
+                        }
+                        else
+                        {
+                            <input @bind="grant.Id" placeholder="subject id (AD group object id / GUID)"/>
+                        }
                         <button class="btn btn-danger btn-sm" @onclick="() => panel.Grants.Remove(grant)">Remove</button>
                     </div>
                 }
@@ -406,8 +429,26 @@ else
         }
     }
 
+    private SharingSubjects? _subjects;
+
+    private async Task EnsureSubjectsAsync()
+    {
+        if (_subjects is not null)
+            return;
+        try
+        {
+            _subjects = await Core.GetSharingSubjectsAsync(_cts.Token);
+        }
+        catch (CoreApiException)
+        {
+            // Picker degrades to the raw-id input; the save path still works.
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
     private void StartGrants(Connector connector)
     {
+        _ = EnsureSubjectsAsync();
         _error = _notice = null;
         _detail = null;
         _draft = null;

@@ -357,6 +357,12 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
     public Task<CurrentPrincipal> GetCurrentPrincipalAsync(CancellationToken ct = default)
         => GetAsync<CurrentPrincipal>("/auth/me", ct);
 
+    public Task<IReadOnlyList<RoleDto>> ListRolesAsync(CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<RoleDto>>("/api/roles", ct);
+
+    public Task<SharingSubjects> GetSharingSubjectsAsync(CancellationToken ct = default)
+        => GetAsync<SharingSubjects>("/api/directory/subjects", ct);
+
     public async Task<bool> CheckHealthAsync(CancellationToken ct = default)
     {
         using var response = await http.GetAsync("/health", ct);

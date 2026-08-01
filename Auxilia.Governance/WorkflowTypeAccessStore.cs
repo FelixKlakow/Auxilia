@@ -33,9 +33,29 @@ public sealed class WorkflowTypeAccessStore(IDataAccess<WorkflowTypeAccessRecord
             PrincipalId = principalId
         }, ct);
 
+    public Task GrantGroupAsync(string workflowType, string action, Guid groupId, CancellationToken ct = default)
+        => dataAccess.SaveAsync(new WorkflowTypeAccessRecord
+        {
+            Id = WorkflowTypeAccessRecord.IdFor(workflowType, action, $"group:{groupId:D}"),
+            WorkflowType = workflowType,
+            Action = action,
+            GroupId = groupId
+        }, ct);
+
     public Task<bool> RevokeRoleAsync(string workflowType, string action, string roleName, CancellationToken ct = default)
         => dataAccess.RemoveAsync(WorkflowTypeAccessRecord.IdFor(workflowType, action, $"role:{roleName}"), ct);
 
     public Task<bool> RevokePrincipalAsync(string workflowType, string action, Guid principalId, CancellationToken ct = default)
         => dataAccess.RemoveAsync(WorkflowTypeAccessRecord.IdFor(workflowType, action, $"principal:{principalId:D}"), ct);
+
+    public Task<bool> RevokeGroupAsync(string workflowType, string action, Guid groupId, CancellationToken ct = default)
+        => dataAccess.RemoveAsync(WorkflowTypeAccessRecord.IdFor(workflowType, action, $"group:{groupId:D}"), ct);
+
+    /// <summary>Every entry of one workflow type, across actions (the admin read).</summary>
+    public async Task<IReadOnlyList<WorkflowTypeAccessRecord>> ListAsync(
+        string workflowType, CancellationToken ct = default)
+        => (await dataAccess.ReadAsync(ct))
+            .Where(e => e.WorkflowType == workflowType)
+            .OrderBy(e => e.Action, StringComparer.Ordinal)
+            .ToList();
 }

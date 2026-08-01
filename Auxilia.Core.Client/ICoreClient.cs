@@ -158,6 +158,10 @@ public interface ICoreClient
     // --- Identity / diagnostics ---
     /// <summary>The principal the client is authenticated as, with its resolved roles.</summary>
     Task<CurrentPrincipal> GetCurrentPrincipalAsync(CancellationToken ct = default);
+    /// <summary>The built-in roles and the permission actions each grants.</summary>
+    Task<IReadOnlyList<RoleDto>> ListRolesAsync(CancellationToken ct = default);
+    /// <summary>Principals + first-class groups for sharing pickers (ids and display names only).</summary>
+    Task<SharingSubjects> GetSharingSubjectsAsync(CancellationToken ct = default);
     /// <summary>True when the Core reports healthy; never throws (for connectivity checks).</summary>
     Task<bool> CheckHealthAsync(CancellationToken ct = default);
 }

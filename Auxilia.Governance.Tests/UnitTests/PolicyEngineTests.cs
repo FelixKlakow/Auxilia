@@ -118,6 +118,29 @@ public class PolicyEngineTests
     }
 
     [Test]
+    public async Task WorkflowTypeAccessList_GrantsByFirstClassGroup()
+    {
+        var member = await _ctx.NewPrincipalWithRoleAsync(BuiltInRoles.User);
+        var outsider = await _ctx.NewPrincipalWithRoleAsync(BuiltInRoles.User);
+        var groupId = Guid.NewGuid();
+        await _ctx.AddGroupMemberAsync(groupId, member);
+        await _ctx.AccessStore.GrantGroupAsync("team-wf", PermissionActions.WorkflowTrigger, groupId);
+
+        var memberDecision = await _ctx.PolicyEngine.EvaluateAsync(
+            new PolicyContext(member, PermissionActions.WorkflowTrigger, "run") { WorkflowType = "team-wf" });
+        var outsiderDecision = await _ctx.PolicyEngine.EvaluateAsync(
+            new PolicyContext(outsider, PermissionActions.WorkflowTrigger, "run") { WorkflowType = "team-wf" });
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(memberDecision.Allowed, Is.True,
+                "A group entry admits every member of the first-class group.");
+            Assert.That(outsiderDecision.Allowed, Is.False,
+                "The access list stays exclusive for non-members.");
+        });
+    }
+
+    [Test]
     public async Task WorkflowTypeWithoutAccessList_FallsBackToRolePermissions()
     {
         var user = await _ctx.NewPrincipalWithRoleAsync(BuiltInRoles.User);

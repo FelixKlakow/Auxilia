@@ -100,6 +100,125 @@ public sealed class AuthorizationBoundaryTests : CoreApiComponentTestBase
             "Connecting your own personal account needs no elevated role.");
     }
 
+    // --- Configuration sharing: personal is self-owned; company + management need the permission ---
+
+    private static object NewConfiguration(string scope) =>
+        new { name = $"cfg-{Guid.NewGuid():N}", workflowType = "wt", scope };
+
+    [TestCase(BuiltInRoles.Administrator, HttpStatusCode.OK)]
+    [TestCase(BuiltInRoles.Operator, HttpStatusCode.OK)]
+    [TestCase(BuiltInRoles.User, HttpStatusCode.Forbidden)]
+    [TestCase(BuiltInRoles.Auditor, HttpStatusCode.Forbidden)]
+    public async Task CreateCompanyConfiguration_RequiresConfigurationManage(string role, HttpStatusCode expected)
+    {
+        var client = await ClientForRolesAsync(role);
+        var response = await client.PostAsJsonAsync("/api/configurations", NewConfiguration("Company"));
+        Assert.That(response.StatusCode, Is.EqualTo(expected));
+    }
+
+    [TestCase(BuiltInRoles.User)]
+    [TestCase(BuiltInRoles.Auditor)]
+    public async Task CreatePersonalConfiguration_IsAllowedForAnyAuthenticatedPrincipal(string role)
+    {
+        var client = await ClientForRolesAsync(role);
+        var response = await client.PostAsJsonAsync("/api/configurations", NewConfiguration("Personal"));
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK),
+            "Saving a personal workflow needs no elevated role.");
+    }
+
+    [Test]
+    public async Task PersonalConfiguration_IsInvisibleToOtherUsers_EverywhereItReads()
+    {
+        var owner = await ClientForRolesAsync(BuiltInRoles.User);
+        var stranger = await ClientForRolesAsync(BuiltInRoles.User);
+        var manager = await ClientForRolesAsync(BuiltInRoles.Operator);
+        var created = await (await owner.PostAsJsonAsync("/api/configurations", NewConfiguration("Personal")))
+            .Content.ReadFromJsonAsync<RunConfiguration>();
+
+        var strangerGet = await stranger.GetAsync($"/api/configurations/{created!.Id}");
+        var strangerList = await stranger.GetFromJsonAsync<PagedResult<RunConfiguration>>("/api/configurations");
+        var strangerRun = await stranger.PostAsJsonAsync(
+            $"/api/configurations/{created.Id}/run", (IReadOnlyDictionary<string, string>?)null);
+        var managerList = await manager.GetFromJsonAsync<PagedResult<RunConfiguration>>("/api/configurations");
+        var ownerGet = await owner.GetAsync($"/api/configurations/{created.Id}");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(strangerGet.StatusCode, Is.EqualTo(HttpStatusCode.NotFound),
+                "An invisible personal configuration reads as not-found, not as forbidden.");
+            Assert.That(strangerList!.Items.Any(c => c.Id == created.Id), Is.False,
+                "Query filters other users' personal configurations out.");
+            Assert.That(strangerRun.StatusCode, Is.EqualTo(HttpStatusCode.NotFound),
+                "What you cannot see you cannot run.");
+            Assert.That(managerList!.Items.Any(c => c.Id == created.Id), Is.True,
+                "A configuration manager sees every configuration.");
+            Assert.That(ownerGet.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        });
+    }
+
+    [Test]
+    public async Task PersonalConfiguration_OwnerManagesIt_AStrangerCannot_AGrantAdmits()
+    {
+        var owner = await ClientForRolesAsync(BuiltInRoles.User);
+        var other = await ClientForRolesAsync(BuiltInRoles.User);
+        var otherId = (await other.GetFromJsonAsync<CurrentPrincipal>("/auth/me"))!.PrincipalId;
+        var created = await (await owner.PostAsJsonAsync("/api/configurations", NewConfiguration("Personal")))
+            .Content.ReadFromJsonAsync<RunConfiguration>();
+
+        var strangerUpdate = await other.PutAsJsonAsync(
+            $"/api/configurations/{created!.Id}", new { name = "hijacked" });
+        var strangerGrants = await other.PutAsJsonAsync(
+            $"/api/configurations/{created.Id}/grants",
+            new { grants = new[] { new { kind = "Principal", id = otherId.ToString("D") } } });
+        var strangerDelete = await other.DeleteAsync($"/api/configurations/{created.Id}");
+
+        var ownerUpdate = await owner.PutAsJsonAsync(
+            $"/api/configurations/{created.Id}", new { name = "renamed by owner" });
+        var ownerGrant = await owner.PutAsJsonAsync(
+            $"/api/configurations/{created.Id}/grants",
+            new { grants = new[] { new { kind = "Principal", id = otherId.ToString("D") } } });
+        var grantedGet = await other.GetAsync($"/api/configurations/{created.Id}");
+        var grantedRun = await other.PostAsJsonAsync(
+            $"/api/configurations/{created.Id}/run", (IReadOnlyDictionary<string, string>?)null);
+        var ownerDelete = await owner.DeleteAsync($"/api/configurations/{created.Id}");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(strangerUpdate.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+            Assert.That(strangerGrants.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+            Assert.That(strangerDelete.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+            Assert.That(ownerUpdate.StatusCode, Is.EqualTo(HttpStatusCode.OK),
+                "The owner edits without workflow-configuration.manage.");
+            Assert.That(ownerGrant.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            Assert.That(grantedGet.StatusCode, Is.EqualTo(HttpStatusCode.OK),
+                "A principal grant makes the configuration visible.");
+            Assert.That(grantedRun.StatusCode, Is.EqualTo(HttpStatusCode.OK),
+                "A granted principal may run the shared workflow.");
+            Assert.That(ownerDelete.StatusCode, Is.EqualTo(HttpStatusCode.NoContent));
+        });
+    }
+
+    // --- Roles + sharing directory: read-only vocabulary for every authenticated principal ---
+
+    [Test]
+    public async Task RolesAndSharingDirectory_AreReadableByAPlainUser()
+    {
+        var client = await ClientForRolesAsync(BuiltInRoles.User);
+
+        var roles = await client.GetFromJsonAsync<List<RoleDto>>("/api/roles");
+        var subjects = await client.GetFromJsonAsync<SharingSubjects>("/api/directory/subjects");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(roles!.Select(r => r.Name), Is.EquivalentTo(
+                new[] { "Administrator", "Operator", "User", "Auditor" }));
+            Assert.That(roles.Single(r => r.Name == "Operator").Permissions,
+                Does.Contain("workflow-configuration.manage"));
+            Assert.That(subjects!.Principals, Is.Not.Empty,
+                "The picker directory lists principals (ids + display names only).");
+        });
+    }
+
     // --- Triggering: workflow.trigger → User and above, never Auditor ---
 
     [TestCase(BuiltInRoles.Administrator, HttpStatusCode.OK)]
