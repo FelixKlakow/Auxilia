@@ -182,22 +182,32 @@ cards (answers route to the OWNING monitor).
 ## DevStand
 - `ScreenshotHarness` stubbed (targeted the retired dashboard) — rewire to boot `Auxilia.AdminConsole` in `EndToEndEnvironment`.
 
-## Core scalability — path to ~100k simultaneous clients (assessed 2026-08-01)
+## Core scalability — path to ~100k simultaneous clients (assessed + largely DELIVERED 2026-08-01)
 The shape is right (stateless Core.Api, SSE per node, competing-consumer runners, clients
-never on the bus); the blockers are implementation-level:
-- **Selective event routing** — `RunStreamPublisher` consumes the status/view FANOUT on every
-  node (per-node ingest = global event volume). Move to topic routing keyed by run id with
-  dynamic bindings for runs that have open streams. The new artifact-event SSE (Studio→library
-  program) must be born filtered (artifact type + principal scope) for the same reason.
-- **Tracking mirrors → competing consumers** — `RunTrackingService`/`RunViewTrackingService`
-  are fanout subscribers; N API nodes process and write every event N times. They are bus→DB
-  mirrors and belong on queues (exactly-once processing), not fanouts.
-- **Auth caching** — bearer→principal→policy resolves against the store per request (no cache
-  in Core.Api). Add a short-TTL principal/policy cache invalidated on principal-admin writes.
-- **Terminal tickets are node-local** (`TerminalTicketService` ConcurrentDictionary) — breaks
-  behind a multi-node LB; needs a shared store or signed self-validating tickets.
-- **Audit appends are synchronous inline** — needs a batched async writer + time-partitioned
-  storage before high request rates.
+never on the bus). Status of the implementation-level blockers:
+- **Selective event routing — THE ONE OPEN ITEM.** `RunStreamPublisher`/`ArtifactStreamPublisher`
+  consume their FANOUTs on every node (per-node ingest = global event volume; server-side
+  per-subscriber filtering already exists for artifacts). Design for the dedicated session:
+  topic exchanges under NEW names (fanout→topic cannot be redeclared in place), routing key =
+  run id (status/view) / artifact type (artifacts) stamped at publish (runner + workflow SDK —
+  **every workflow image must be rebuilt**), per-node dynamic bindings for runs with open SSE
+  streams (subscriptions gain Add/RemoveBinding), tracking mirrors bind `#`, ASB mapping =
+  topic subscription rules. Deferred deliberately: doing it mid-session would have broken the
+  dev stack's built images.
+- ~~**Tracking mirrors → competing consumers**~~ — **DONE 2026-08-01**:
+  `IMessageBusClient.SubscribeToExchangeSharedAsync` (durable named queue on the fanout;
+  default interface method degrades to per-subscriber copy for fakes/single node); all four
+  Core.Api mirrors moved onto `core-api.*-tracking` queues; verified against real RabbitMQ
+  (MessageBusFanoutSystemTests: exactly-once across two nodes, fanout copies intact).
+- ~~**Auth caching**~~ — **DONE 2026-08-01**: `PrincipalRoleCache` (Governance), off by
+  default, `Governance:PrincipalCacheSeconds` (Core.Api ships 5s); eager invalidation on
+  disable/role/group writes; cross-node staleness bounded by TTL.
+- ~~**Terminal tickets node-local**~~ — **DONE 2026-08-01**: signed self-validating tickets
+  (HMAC over run+expiry keyed off the shared settings-protection key) — stateless, any node
+  validates, tamper-evident.
+- ~~**Audit appends synchronous**~~ — **DONE 2026-08-01**: opt-in batched writer
+  (`Audit:BatchedWrites`; bounded channel, backpressure-never-drop, FlushAsync barrier,
+  draining shutdown). Time-partitioned audit storage remains a later backend concern.
 - Infra per the ARCHITECTURE §14.4 table (RabbitMQ cluster / ASB, MongoDB backend). Note:
   100k clients ≠ 100k concurrent runs — the run axis is runner-fleet/container capacity plus
   heartbeat/failover-monitor volume, tracked separately.
