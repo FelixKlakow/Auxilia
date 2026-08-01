@@ -54,9 +54,41 @@ public sealed class WorkflowAuthoring(ICoreClient core)
         if (missing.Count > 0)
             throw new ArgumentException($"required slots not bound: {string.Join(", ", missing)}.");
 
+        await ValidateEnvironmentBasesAsync(request.SlotBindings, ct);
+
         return await core.CreateConfigurationAsync(new CreateRunConfiguration(
             request.Name, schema.WorkflowType, request.Context, request.SlotBindings,
             Tags: request.Tags), ct);
+    }
+
+    /// <summary>
+    /// One run composes ONE container image on ONE base: environment-composing bindings whose
+    /// catalog entries declare different bases (linux vs windows) can never build together, so
+    /// the mismatch fails here instead of at dispatch. The lookup runs only when the bindings
+    /// name at least two distinct inline provider types.
+    /// </summary>
+    private async Task ValidateEnvironmentBasesAsync(
+        IReadOnlyList<SlotBinding> bindings, CancellationToken ct)
+    {
+        var providerTypes = bindings
+            .Where(b => b.ProviderType is { Length: > 0 })
+            .Select(b => b.ProviderType!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (providerTypes.Count < 2)
+            return;
+
+        var catalog = (await core.QueryProviderCatalogAsync(new ProviderCatalogQuery(Take: 500), ct)).Items;
+        var bases = catalog
+            .Where(e => e.ComposesEnvironment
+                        && e.EnvironmentBase is { Length: > 0 }
+                        && providerTypes.Contains(e.ProviderType, StringComparer.OrdinalIgnoreCase))
+            .ToDictionary(e => e.ProviderType, e => e.EnvironmentBase!, StringComparer.OrdinalIgnoreCase);
+        if (bases.Values.Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
+            throw new ArgumentException(
+                "environment capabilities mix incompatible bases — "
+                + string.Join(", ", bases.Select(b => $"'{b.Key}' ({b.Value})"))
+                + ". One run composes one image on one base; pick layers of a single base.");
     }
 
     /// <summary>Validates, creates, and immediately dispatches the configuration.</summary>

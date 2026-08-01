@@ -122,7 +122,9 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task<IReadOnlyList<RoleDto>> ListRolesAsync(CancellationToken ct = default) => Nope<Task<IReadOnlyList<RoleDto>>>();
     public Task<SharingSubjects> GetSharingSubjectsAsync(CancellationToken ct = default) => Nope<Task<SharingSubjects>>();
     public Task<ConnectorBrowseResult> BrowseConnectorAsync(Guid id, BrowseConnector request, CancellationToken ct = default) => Nope<Task<ConnectorBrowseResult>>();
-    public Task<PagedResult<ProviderCatalogEntry>> QueryProviderCatalogAsync(ProviderCatalogQuery query, CancellationToken ct = default) => Nope<Task<PagedResult<ProviderCatalogEntry>>>();
+    public List<ProviderCatalogEntry> ProviderCatalog { get; } = [];
+    public Task<PagedResult<ProviderCatalogEntry>> QueryProviderCatalogAsync(ProviderCatalogQuery query, CancellationToken ct = default)
+        => Task.FromResult(new PagedResult<ProviderCatalogEntry>(ProviderCatalog, ProviderCatalog.Count, 0, ProviderCatalog.Count));
     public Task<ProviderCatalogEntry> RegisterProviderAsync(RegisterSlotProvider request, CancellationToken ct = default) => Nope<Task<ProviderCatalogEntry>>();
     public Task<ProviderCatalogEntry> SetProviderAvailabilityAsync(string providerType, bool available, CancellationToken ct = default) => Nope<Task<ProviderCatalogEntry>>();
     public Task<ProviderCatalogEntry> SetProviderSettingDisabledAsync(string providerType, string settingKey, bool disabled, CancellationToken ct = default) => Nope<Task<ProviderCatalogEntry>>();

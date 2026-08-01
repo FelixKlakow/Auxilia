@@ -78,6 +78,45 @@ public sealed class WorkflowAuthoringTests
     }
 
     [Test]
+    public void EnvironmentLayersOfMixedBases_AreRejectedBeforeSubmit()
+    {
+        _core.Schemas["implementation"] = Schema(
+            new WorkflowSlotDto("environment", null, null, Optional: true, null, AllowMultiple: true));
+        _core.ProviderCatalog.Add(new ProviderCatalogEntry(
+            "dotnet-10", true, "environment", [], [], null,
+            ComposesEnvironment: true, EnvironmentBase: "linux"));
+        _core.ProviderCatalog.Add(new ProviderCatalogEntry(
+            "msbuild-17", true, "environment", [], [], null,
+            ComposesEnvironment: true, EnvironmentBase: "windows"));
+
+        var ex = Assert.ThrowsAsync<ArgumentException>(() => _authoring.ConfigureAsync(Request(
+            new SlotBinding("environment", ProviderType: "dotnet-10"),
+            new SlotBinding("environment", ProviderType: "msbuild-17"))));
+        Assert.That(ex!.Message, Does.Contain("mix incompatible bases")
+            .And.Contain("dotnet-10").And.Contain("msbuild-17"));
+    }
+
+    [Test]
+    public async Task EnvironmentLayersOfOneBase_Pass()
+    {
+        _core.Schemas["implementation"] = Schema(
+            new WorkflowSlotDto("environment", null, null, Optional: true, null, AllowMultiple: true));
+        _core.ProviderCatalog.Add(new ProviderCatalogEntry(
+            "dotnet-10", true, "environment", [], [], null,
+            ComposesEnvironment: true, EnvironmentBase: "linux"));
+        _core.ProviderCatalog.Add(new ProviderCatalogEntry(
+            "node-22", true, "environment", [], [], null,
+            ComposesEnvironment: true, EnvironmentBase: "Linux"));
+
+        var configuration = await _authoring.ConfigureAsync(Request(
+            new SlotBinding("environment", ProviderType: "dotnet-10"),
+            new SlotBinding("environment", ProviderType: "node-22")));
+
+        Assert.That(configuration.WorkflowType, Is.EqualTo("implementation"),
+            "Same-base layers (case-insensitive) validate cleanly.");
+    }
+
+    [Test]
     public async Task ConfigureAndRun_DispatchesTheFreshConfiguration_OnBehalfOf()
     {
         var principal = Guid.NewGuid();
