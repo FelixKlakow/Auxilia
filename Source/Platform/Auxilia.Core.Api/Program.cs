@@ -1354,14 +1354,14 @@ app.MapPost("/api/groups/{id:guid}/roles", async (
 
 // --- Principals (identity administration; principal.administer, mirrors the groups admin) ---
 app.MapGet("/api/principals", async (
-        string? kind, bool? enabled, string? search,
+        string? kind, bool? enabled, string? search, string? tag,
         HttpContext http, IPolicyEngine policy, PrincipalAdminService svc,
         CancellationToken ct, int skip = 0, int take = 50) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PrincipalAdminister, ct) is { } fail)
         return fail;
     return Results.Ok(await svc.QueryAsync(
-        new PrincipalQuery(kind, enabled, search, skip, take == 0 ? 50 : take), ct));
+        new PrincipalQuery(kind, enabled, search, skip, take == 0 ? 50 : take, tag), ct));
 }).RequireAuthorization();
 
 app.MapGet("/api/principals/{id:guid}", async (
@@ -1384,22 +1384,27 @@ app.MapPost("/api/principals", async (
     return Results.Ok(PrincipalAdminService.ToDto(principal, []));
 }).RequireAuthorization();
 
-// Create an AI/service principal; the generated API key is returned exactly once (write-only after).
+// Create a service principal; the generated API key is returned exactly once (write-only after).
 app.MapPost("/api/principals/ai", async (
         CreateApiKeyPrincipalRequest request, HttpContext http, IPolicyEngine policy,
         PrincipalDirectory directory, CancellationToken ct) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PrincipalAdminister, ct) is { } fail)
         return fail;
-    try
-    {
-        var (principal, apiKey) = await directory.CreateApiKeyPrincipalAsync(request.DisplayName, request.Kind, ct);
-        return Results.Ok(new CreatedApiKeyPrincipal(PrincipalAdminService.ToDto(principal, []), apiKey));
-    }
-    catch (ArgumentException ex)
-    {
-        return Results.BadRequest(new { error = ex.Message });
-    }
+    var (principal, apiKey) = await directory.CreateApiKeyPrincipalAsync(request.DisplayName, ct);
+    return Results.Ok(new CreatedApiKeyPrincipal(PrincipalAdminService.ToDto(principal, []), apiKey));
+}).RequireAuthorization();
+
+// Replace a principal's free-form tags — the admin-managed classification axis.
+app.MapPost("/api/principals/{id:guid}/tags", async (
+        Guid id, SetPrincipalTagsRequest request, HttpContext http, IPolicyEngine policy,
+        PrincipalDirectory directory, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PrincipalAdminister, ct) is { } fail)
+        return fail;
+    return await directory.SetTagsAsync(id, request.Tags, ct)
+        ? Results.Accepted($"/api/principals/{id}")
+        : Results.NotFound();
 }).RequireAuthorization();
 
 // Assign a Direct role (idempotent). Never touches Group-/GroupMapping-sourced roles.
@@ -1428,8 +1433,16 @@ app.MapDelete("/api/principals/{id:guid}/roles/{role}", async (
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PrincipalAdminister, ct) is { } fail)
         return fail;
-    await directory.RevokeRoleAsync(id, role, ct);
-    return Results.NoContent();
+    try
+    {
+        await directory.RevokeRoleAsync(id, role, ct);
+        return Results.NoContent();
+    }
+    catch (InvalidOperationException ex)
+    {
+        // The last-administrator lock-out guard.
+        return Results.Conflict(new { error = ex.Message });
+    }
 }).RequireAuthorization();
 
 app.MapPost("/api/principals/{id:guid}/enabled", async (
@@ -1438,9 +1451,17 @@ app.MapPost("/api/principals/{id:guid}/enabled", async (
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PrincipalAdminister, ct) is { } fail)
         return fail;
-    return await directory.SetEnabledAsync(id, request.Enabled, ct)
-        ? Results.Accepted($"/api/principals/{id}")
-        : Results.NotFound();
+    try
+    {
+        return await directory.SetEnabledAsync(id, request.Enabled, ct)
+            ? Results.Accepted($"/api/principals/{id}")
+            : Results.NotFound();
+    }
+    catch (InvalidOperationException ex)
+    {
+        // The last-administrator lock-out guard.
+        return Results.Conflict(new { error = ex.Message });
+    }
 }).RequireAuthorization();
 
 // --- Identity: directory group → role mappings (consumed at federated sign-in) ---

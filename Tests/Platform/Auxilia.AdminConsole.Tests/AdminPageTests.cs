@@ -25,7 +25,7 @@ public sealed class AdminPageTests
     }
 
     private static PrincipalDto Human(string name, params PrincipalRoleDto[] roles)
-        => new(Guid.NewGuid(), "Human", name, "Active", "jane@corp", roles);
+        => new(Guid.NewGuid(), "Human", name, "Active", "jane@corp", roles, []);
 
     [Test]
     public void Admin_DisplaysPrincipals_AndRevokesOnlyDirectRoles()

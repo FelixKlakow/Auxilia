@@ -22,7 +22,7 @@ public sealed class PrincipalApiTests : CoreApiComponentTestBase
     private async Task<HttpClient> ClientForRolesAsync(params string[] roles)
     {
         var directory = Factory.Services.GetRequiredService<PrincipalDirectory>();
-        var (principal, apiKey) = await directory.CreateApiKeyPrincipalAsync($"svc-{Guid.NewGuid():N}", "Service");
+        var (principal, apiKey) = await directory.CreateApiKeyPrincipalAsync($"svc-{Guid.NewGuid():N}");
         foreach (var role in roles.Where(BuiltInRoles.Exists))
             await directory.AssignRoleAsync(principal.Id, role);
         var client = Factory.CreateClient();
@@ -56,7 +56,7 @@ public sealed class PrincipalApiTests : CoreApiComponentTestBase
 
         Assert.Multiple(() =>
         {
-            Assert.That(result.Principal.Kind, Is.EqualTo("AiAgent"));
+            Assert.That(result.Principal.Kind, Is.EqualTo("Service"));
             Assert.That(result.ApiKey, Is.Not.Empty);
             Assert.That(result.ApiKey, Does.StartWith("aux_"));
         });
@@ -78,7 +78,7 @@ public sealed class PrincipalApiTests : CoreApiComponentTestBase
         var directory = Factory.Services.GetRequiredService<PrincipalDirectory>();
         var groups = Factory.Services.GetRequiredService<GroupDirectory>();
 
-        var (principal, _) = await directory.CreateApiKeyPrincipalAsync($"svc-{Guid.NewGuid():N}", "Service");
+        var (principal, _) = await directory.CreateApiKeyPrincipalAsync($"svc-{Guid.NewGuid():N}");
         var group = await groups.CreateAsync($"ops-{Guid.NewGuid():N}");
         await groups.AddMemberAsync(group.Id, principal.Id);
         await groups.AssignRoleAsync(group.Id, BuiltInRoles.Operator);

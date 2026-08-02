@@ -150,6 +150,8 @@ public interface ICoreClient
     Task AssignPrincipalRoleAsync(Guid id, AssignRoleRequest request, CancellationToken ct = default);
     Task RevokePrincipalRoleAsync(Guid id, string roleName, CancellationToken ct = default);
     Task SetPrincipalEnabledAsync(Guid id, SetPrincipalEnabledRequest request, CancellationToken ct = default);
+    /// <summary>Replaces a principal's free-form tags (the classification axis); empty clears them.</summary>
+    Task SetPrincipalTagsAsync(Guid id, SetPrincipalTagsRequest request, CancellationToken ct = default);
 
     // --- Directory group → role mappings (federated sign-in) ---
     Task<IReadOnlyList<GroupMappingDto>> ListGroupMappingsAsync(CancellationToken ct = default);

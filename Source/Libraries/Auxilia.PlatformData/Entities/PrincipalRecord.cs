@@ -2,12 +2,12 @@ using Auxilia.UniversalDataAccess;
 
 namespace Auxilia.PlatformData.Entities;
 
-/// <summary>An authenticated identity: human user, AI agent, or service principal.</summary>
+/// <summary>An authenticated identity: human user or service principal.</summary>
 public sealed record PrincipalRecord : IEntity
 {
     public Guid Id { get; init; } = Guid.NewGuid();
     public Guid TenantId { get; init; }
-    /// <summary>"Human", "AiAgent", or "Service".</summary>
+    /// <summary>"Human" or "Service". Finer classification (e.g. "ai-agent") lives in tags.</summary>
     public required string Kind { get; init; }
     public required string DisplayName { get; init; }
     /// <summary>Subject identifier at an external identity provider; null for local principals.</summary>
@@ -19,4 +19,6 @@ public sealed record PrincipalRecord : IEntity
     /// at each federated sign-in. Drives AD-group-gated connector access; empty for local principals.
     /// </summary>
     public string DirectoryGroupsJson { get; init; } = "[]";
+    /// <summary>JSON array of free-form admin-managed tags — the classification/grouping axis.</summary>
+    public string TagsJson { get; init; } = "[]";
 }

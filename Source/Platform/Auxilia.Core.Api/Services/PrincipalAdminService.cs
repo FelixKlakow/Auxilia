@@ -51,7 +51,20 @@ public sealed class PrincipalAdminService(
     /// <summary>Maps a principal record to its DTO with the given roles (a fresh principal has none).</summary>
     public static PrincipalDto ToDto(PrincipalRecord principal, IReadOnlyList<PrincipalRoleDto> roles)
         => new(principal.Id, principal.Kind, principal.DisplayName, principal.Status,
-            principal.ExternalSubject, roles);
+            principal.ExternalSubject, roles, TagsOf(principal));
+
+    /// <summary>The record's JSON tag array, defensively parsed (malformed → no tags).</summary>
+    public static IReadOnlyList<string> TagsOf(PrincipalRecord principal)
+    {
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<List<string>>(principal.TagsJson) ?? [];
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return [];
+        }
+    }
 }
 
 /// <summary>Pure, unit-testable filter + ordering for the principal query (kind, enabled, name/subject search).</summary>
@@ -68,6 +81,9 @@ public static class PrincipalQueryFilter
             result = result.Where(p =>
                 p.DisplayName.Contains(query.Search, StringComparison.OrdinalIgnoreCase) ||
                 (p.ExternalSubject?.Contains(query.Search, StringComparison.OrdinalIgnoreCase) ?? false));
+        if (!string.IsNullOrWhiteSpace(query.Tag))
+            result = result.Where(p => PrincipalAdminService.TagsOf(p)
+                .Contains(query.Tag, StringComparer.OrdinalIgnoreCase));
         return result.OrderBy(p => p.DisplayName, StringComparer.OrdinalIgnoreCase);
     }
 }

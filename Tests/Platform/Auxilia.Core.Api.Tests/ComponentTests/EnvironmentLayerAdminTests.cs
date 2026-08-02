@@ -133,7 +133,7 @@ public sealed class EnvironmentLayerAdminTests : CoreApiComponentTestBase
     private async Task<HttpClient> ClientWithRolesAsync(params string[] roles)
     {
         var directory = Factory.Services.GetRequiredService<PrincipalDirectory>();
-        var (principal, apiKey) = await directory.CreateApiKeyPrincipalAsync($"svc-{Guid.NewGuid():N}", "Service");
+        var (principal, apiKey) = await directory.CreateApiKeyPrincipalAsync($"svc-{Guid.NewGuid():N}");
         foreach (var role in roles)
             await directory.AssignRoleAsync(principal.Id, role);
         var client = Factory.CreateClient();

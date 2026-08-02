@@ -29,7 +29,7 @@ public sealed class RunOnBehalfOfTests : CoreApiComponentTestBase
     private async Task<(HttpClient Client, Guid PrincipalId)> PrincipalWithRolesAsync(params string[] roles)
     {
         var directory = Factory.Services.GetRequiredService<PrincipalDirectory>();
-        var (principal, apiKey) = await directory.CreateApiKeyPrincipalAsync($"svc-{Guid.NewGuid():N}", "Service");
+        var (principal, apiKey) = await directory.CreateApiKeyPrincipalAsync($"svc-{Guid.NewGuid():N}");
         foreach (var role in roles.Where(BuiltInRoles.Exists))
             await directory.AssignRoleAsync(principal.Id, role);
         var client = Factory.CreateClient();

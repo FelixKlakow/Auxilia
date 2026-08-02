@@ -63,7 +63,7 @@ public sealed class PrincipalRoleCacheTests
 
     private async Task<(Guid PrincipalId, string ApiKey)> SeedOperatorAsync(PrincipalDirectory directory)
     {
-        var (principal, apiKey) = await directory.CreateApiKeyPrincipalAsync("svc", "Service");
+        var (principal, apiKey) = await directory.CreateApiKeyPrincipalAsync("svc");
         await directory.AssignRoleAsync(principal.Id, BuiltInRoles.Operator);
         return (principal.Id, apiKey);
     }
@@ -145,7 +145,7 @@ public sealed class PrincipalRoleCacheTests
             groups, memberships, groupRoles, new AuditLog(_audit, _time), cache);
         var engine = Engine(cache, new GroupRoleResolver(memberships, groupRoles));
 
-        var (principal, _) = await directory.CreateApiKeyPrincipalAsync("svc", "Service");
+        var (principal, _) = await directory.CreateApiKeyPrincipalAsync("svc");
         var group = await groupDirectory.CreateAsync("ops");
         await groupDirectory.AddMemberAsync(group.Id, principal.Id);
 

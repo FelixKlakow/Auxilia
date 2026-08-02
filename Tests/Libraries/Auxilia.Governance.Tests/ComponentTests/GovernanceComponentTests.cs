@@ -67,7 +67,7 @@ public class GovernanceComponentTests
         var identity = _host.Services.GetRequiredService<IIdentityProvider>();
         var policy = _host.Services.GetRequiredService<IPolicyEngine>();
 
-        var (ai, apiKey) = await directory.CreateApiKeyPrincipalAsync("Review Agent", "AiAgent");
+        var (ai, apiKey) = await directory.CreateApiKeyPrincipalAsync("Review Agent");
         await directory.AssignRoleAsync(ai.Id, BuiltInRoles.User);
 
         var session = await identity.AuthenticateApiKeyAsync(apiKey);

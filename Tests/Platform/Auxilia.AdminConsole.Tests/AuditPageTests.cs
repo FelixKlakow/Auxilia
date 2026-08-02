@@ -73,7 +73,7 @@ public sealed class AuditPageTests
     {
         var principalId = Guid.NewGuid();
         var core = new FakeCoreClient();
-        core.Principals.Add(new PrincipalDto(principalId, "Human", "Ada Lovelace", "Active", null, []));
+        core.Principals.Add(new PrincipalDto(principalId, "Human", "Ada Lovelace", "Active", null, [], []));
         core.AuditEntries.Add(Entry(principalId.ToString(), "connector.created", "github-bot", DateTimeOffset.UtcNow));
         core.AuditEntries.Add(Entry(Guid.NewGuid().ToString(), "policy.allowed", "audit-log", DateTimeOffset.UtcNow.AddMinutes(-1)));
         using var ctx = NewContext(core);

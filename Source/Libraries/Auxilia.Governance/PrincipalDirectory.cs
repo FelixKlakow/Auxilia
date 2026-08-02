@@ -15,7 +15,8 @@ public sealed class PrincipalDirectory(
     IDataAccess<RoleAssignmentRecord> roleAssignments,
     IDataAccess<CredentialRecord> credentials,
     AuditLog auditLog,
-    PrincipalRoleCache? cache = null)
+    PrincipalRoleCache? cache = null,
+    GroupRoleResolver? groupRoles = null)
 {
     public async Task<PrincipalRecord> CreateHumanAsync(
         string displayName, string username, string password, CancellationToken ct = default)
@@ -41,17 +42,14 @@ public sealed class PrincipalDirectory(
         return principal;
     }
 
-    /// <summary>Creates an AI or service principal and returns it with its generated API key.</summary>
+    /// <summary>Creates a service principal (tags classify it further) with its generated API key.</summary>
     public async Task<(PrincipalRecord Principal, string ApiKey)> CreateApiKeyPrincipalAsync(
-        string displayName, string kind, CancellationToken ct = default)
+        string displayName, CancellationToken ct = default)
     {
-        if (kind is not ("AiAgent" or "Service"))
-            throw new ArgumentException("API-key principals must be of kind AiAgent or Service.", nameof(kind));
-
         var principal = new PrincipalRecord
         {
             TenantId = Tenants.DefaultTenantId,
-            Kind = kind,
+            Kind = "Service",
             DisplayName = displayName,
             Status = "Active"
         };
@@ -68,8 +66,31 @@ public sealed class PrincipalDirectory(
             SecretHash = LocalIdentityProvider.HashApiKey(apiKey)
         }, ct);
         await auditLog.AppendAsync("principal-directory", "principal.created",
-            principal.Id.ToString(), kind, ct: ct);
+            principal.Id.ToString(), "service", ct: ct);
         return (principal, apiKey);
+    }
+
+    /// <summary>Replaces a principal's tags (trimmed, de-duplicated; empty clears them).</summary>
+    public async Task<bool> SetTagsAsync(
+        Guid principalId, IReadOnlyList<string> tags, CancellationToken ct = default)
+    {
+        var principal = await principals.ReadAsync(principalId, ct);
+        if (principal is null)
+            return false;
+
+        var cleaned = tags
+            .Select(t => t.Trim())
+            .Where(t => t.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        await principals.SaveAsync(principal with
+        {
+            TagsJson = System.Text.Json.JsonSerializer.Serialize(cleaned)
+        }, ct);
+        await auditLog.AppendAsync("principal-directory", "principal.tags-set",
+            principalId.ToString(), string.Join(",", cleaned), ct: ct);
+        return true;
     }
 
     public async Task AssignRoleAsync(Guid principalId, string roleName, CancellationToken ct = default)
@@ -91,6 +112,15 @@ public sealed class PrincipalDirectory(
 
     public async Task<bool> RevokeRoleAsync(Guid principalId, string roleName, CancellationToken ct = default)
     {
+        // Lock-out guard: the platform must never end up without an enabled administrator. The
+        // revoke is refused only when it would remove the target's LAST admin source and no other
+        // enabled administrator remains.
+        if (roleName == BuiltInRoles.Administrator
+            && !await HoldsAdminViaGroupAsync(principalId, ct)
+            && await IsLastEnabledAdministratorAsync(principalId, ct))
+            throw new InvalidOperationException(
+                "This is the last enabled administrator — assign the Administrator role to someone else first.");
+
         var removed = await roleAssignments.RemoveAsync(RoleAssignmentRecord.IdFor(principalId, roleName), ct);
         cache?.Invalidate(principalId);
         if (removed)
@@ -109,6 +139,14 @@ public sealed class PrincipalDirectory(
         if (principal is null)
             return false;
 
+        // Lock-out guard: disabling the last enabled administrator would leave no one able to
+        // administer principals (including re-enabling anyone).
+        if (!enabled
+            && await IsAdministratorAsync(principalId, ct)
+            && await IsLastEnabledAdministratorAsync(principalId, ct))
+            throw new InvalidOperationException(
+                "This is the last enabled administrator — it cannot be disabled.");
+
         var status = enabled ? "Active" : "Disabled";
         await principals.SaveAsync(principal with { Status = status }, ct);
         // A disabled principal must stop authenticating NOW, not at TTL expiry.
@@ -122,5 +160,33 @@ public sealed class PrincipalDirectory(
     {
         var assignmentsQuery = await roleAssignments.ReadAsync(ct);
         return assignmentsQuery.Any(a => a.RoleName == BuiltInRoles.Administrator);
+    }
+
+    private async Task<bool> IsAdministratorAsync(Guid principalId, CancellationToken ct)
+    {
+        var assignments = await roleAssignments.ReadAsync(ct);
+        return assignments.Any(a => a.PrincipalId == principalId && a.RoleName == BuiltInRoles.Administrator)
+               || await HoldsAdminViaGroupAsync(principalId, ct);
+    }
+
+    private async Task<bool> HoldsAdminViaGroupAsync(Guid principalId, CancellationToken ct)
+        => groupRoles is not null
+           && (await groupRoles.RolesForAsync(principalId, ct)).Contains(BuiltInRoles.Administrator);
+
+    /// <summary>True when no OTHER enabled principal holds Administrator (direct or via groups).</summary>
+    private async Task<bool> IsLastEnabledAdministratorAsync(Guid principalId, CancellationToken ct)
+    {
+        var assignments = await roleAssignments.ReadAsync(ct);
+        var directAdmins = assignments
+            .Where(a => a.RoleName == BuiltInRoles.Administrator)
+            .Select(a => a.PrincipalId)
+            .ToHashSet();
+        var all = await principals.ReadAsync(ct);
+        foreach (var other in all.Where(p => p.Id != principalId && p.Status == "Active"))
+        {
+            if (directAdmins.Contains(other.Id) || await HoldsAdminViaGroupAsync(other.Id, ct))
+                return false;
+        }
+        return true;
     }
 }

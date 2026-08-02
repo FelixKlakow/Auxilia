@@ -194,7 +194,7 @@ public sealed class EndToEndSystemTests
         // A fresh Core AI/service principal with NO role — deny-by-default.
         var createResp = await EndToEndEnvironment.CoreApiClient.PostAsJsonAsync(
             "/api/principals/ai",
-            new CreateApiKeyPrincipalRequest("E2E Unprivileged", "Service"), cancellationToken);
+            new CreateApiKeyPrincipalRequest("E2E Unprivileged"), cancellationToken);
         createResp.EnsureSuccessStatusCode();
         var nobody = (await createResp.Content.ReadFromJsonAsync<CreatedApiKeyPrincipal>(cancellationToken))!;
 

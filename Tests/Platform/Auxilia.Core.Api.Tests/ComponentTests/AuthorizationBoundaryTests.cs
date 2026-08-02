@@ -23,7 +23,7 @@ public sealed class AuthorizationBoundaryTests : CoreApiComponentTestBase
     private async Task<HttpClient> ClientForRolesAsync(params string[] roles)
     {
         var directory = Factory.Services.GetRequiredService<PrincipalDirectory>();
-        var (principal, apiKey) = await directory.CreateApiKeyPrincipalAsync($"svc-{Guid.NewGuid():N}", "Service");
+        var (principal, apiKey) = await directory.CreateApiKeyPrincipalAsync($"svc-{Guid.NewGuid():N}");
         foreach (var role in roles.Where(BuiltInRoles.Exists))
             await directory.AssignRoleAsync(principal.Id, role);
         var client = Factory.CreateClient();
@@ -262,7 +262,7 @@ public sealed class AuthorizationBoundaryTests : CoreApiComponentTestBase
     {
         var directory = Factory.Services.GetRequiredService<PrincipalDirectory>();
         var groups = Factory.Services.GetRequiredService<GroupDirectory>();
-        var (principal, apiKey) = await directory.CreateApiKeyPrincipalAsync($"svc-{Guid.NewGuid():N}", "Service");
+        var (principal, apiKey) = await directory.CreateApiKeyPrincipalAsync($"svc-{Guid.NewGuid():N}");
 
         var group = await groups.CreateAsync($"ops-{Guid.NewGuid():N}");
         await groups.AddMemberAsync(group.Id, principal.Id);

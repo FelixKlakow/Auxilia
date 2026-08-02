@@ -75,7 +75,7 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task<PrincipalDto> CreateHumanPrincipalAsync(CreateHumanPrincipalRequest request, CancellationToken ct = default)
     {
         LastCreatedHuman = request;
-        var created = new PrincipalDto(Guid.NewGuid(), "Human", request.DisplayName, "Active", request.Username, []);
+        var created = new PrincipalDto(Guid.NewGuid(), "Human", request.DisplayName, "Active", request.Username, [], []);
         Principals.Add(created);
         return Task.FromResult(created);
     }
@@ -83,7 +83,7 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task<CreatedApiKeyPrincipal> CreateApiKeyPrincipalAsync(CreateApiKeyPrincipalRequest request, CancellationToken ct = default)
     {
         LastCreatedApiKey = request;
-        var principal = new PrincipalDto(Guid.NewGuid(), request.Kind, request.DisplayName, "Active", null, []);
+        var principal = new PrincipalDto(Guid.NewGuid(), "Service", request.DisplayName, "Active", null, [], []);
         Principals.Add(principal);
         return Task.FromResult(new CreatedApiKeyPrincipal(principal, CreatedApiKeyValue));
     }
@@ -105,6 +105,9 @@ internal sealed class FakeCoreClient : ICoreClient
         EnabledChanges.Add((id, request.Enabled));
         return Task.CompletedTask;
     }
+
+    public Task SetPrincipalTagsAsync(Guid id, SetPrincipalTagsRequest request, CancellationToken ct = default)
+        => Task.CompletedTask;
 
     // --- Identity sources ---
     public List<IdentityConnectorDescriptorDto> IdentityConnectors { get; } = [];

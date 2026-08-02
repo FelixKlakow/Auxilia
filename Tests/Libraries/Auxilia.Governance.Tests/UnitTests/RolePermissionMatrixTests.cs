@@ -80,6 +80,8 @@ public class RolePermissionMatrixTests
     [Test]
     public async Task DisabledPrincipal_IsDenied_EvenWithAdministratorRole()
     {
+        // A second admin exists so the last-administrator lock-out guard lets the disable through.
+        await _ctx.NewPrincipalWithRoleAsync(BuiltInRoles.Administrator);
         var principalId = await _ctx.NewPrincipalWithRoleAsync(BuiltInRoles.Administrator);
         await _ctx.Directory.DisableAsync(principalId);
 

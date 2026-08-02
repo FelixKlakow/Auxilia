@@ -336,6 +336,9 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
     public Task SetPrincipalEnabledAsync(Guid id, SetPrincipalEnabledRequest request, CancellationToken ct = default)
         => PostAsync($"/api/principals/{id}/enabled", request, ct);
 
+    public Task SetPrincipalTagsAsync(Guid id, SetPrincipalTagsRequest request, CancellationToken ct = default)
+        => PostAsync($"/api/principals/{id}/tags", request, ct);
+
     // --- Directory group → role mappings ---
 
     public async Task<IReadOnlyList<GroupMappingDto>> ListGroupMappingsAsync(CancellationToken ct = default)

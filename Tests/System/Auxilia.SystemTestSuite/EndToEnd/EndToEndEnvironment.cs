@@ -364,7 +364,7 @@ public class EndToEndEnvironment
     private static async Task<Guid> CreateCorePrincipalAsync(string displayName, string role)
     {
         var resp = await CoreApiClient.PostAsJsonAsync(
-            "/api/principals/ai", new CreateApiKeyPrincipalRequest(displayName, "Service"));
+            "/api/principals/ai", new CreateApiKeyPrincipalRequest(displayName));
         resp.EnsureSuccessStatusCode();
         var created = (await resp.Content.ReadFromJsonAsync<CreatedApiKeyPrincipal>())!;
         await AssignRoleAsync(created.Principal.Id, role);
@@ -375,7 +375,7 @@ public class EndToEndEnvironment
     private static async Task<string> CreateCoreServiceKeyAsync(string displayName, string role)
     {
         var resp = await CoreApiClient.PostAsJsonAsync(
-            "/api/principals/ai", new CreateApiKeyPrincipalRequest(displayName, "Service"));
+            "/api/principals/ai", new CreateApiKeyPrincipalRequest(displayName));
         resp.EnsureSuccessStatusCode();
         var created = (await resp.Content.ReadFromJsonAsync<CreatedApiKeyPrincipal>())!;
         await AssignRoleAsync(created.Principal.Id, role);

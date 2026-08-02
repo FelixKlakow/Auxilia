@@ -592,14 +592,15 @@ public sealed class CoreMcpTools(
     }
 
     [McpServerTool(Name = "list_principals")]
-    [Description("Lists principals (humans, AI agents, services) with their resolved roles. Optional filters: " +
-                 "kind (Human/AiAgent/Service), enabled, and a name/subject substring search.")]
+    [Description("Lists principals (humans and services) with their resolved roles and tags. Optional filters: " +
+                 "kind (Human/Service), enabled, a name/subject substring search, and an exact tag.")]
     public async Task<CallToolResult> ListPrincipalsAsync(
         RequestContext<CallToolRequestParams> context,
         [Description("Maximum principals to return (default 50, max 500).")] int limit = 50,
-        [Description("Optional filter on kind: Human, AiAgent, or Service.")] string? kind = null,
+        [Description("Optional filter on kind: Human or Service.")] string? kind = null,
         [Description("Optional filter: true = only enabled, false = only disabled.")] bool? enabled = null,
         [Description("Optional case-insensitive substring match on display name or external subject.")] string? search = null,
+        [Description("Optional exact (case-insensitive) tag the principal must carry.")] string? tag = null,
         CancellationToken cancellationToken = default)
     {
         if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
@@ -607,7 +608,7 @@ public sealed class CoreMcpTools(
         if (await DenyAsync(principalId, PermissionActions.PrincipalAdminister, null, cancellationToken) is { } denial)
             return denial;
         return JsonResult(await principalAdmin.QueryAsync(
-            new PrincipalQuery(kind, enabled, search, Take: Math.Clamp(limit, 1, 500)), cancellationToken));
+            new PrincipalQuery(kind, enabled, search, Take: Math.Clamp(limit, 1, 500), Tag: tag), cancellationToken));
     }
 
     [McpServerTool(Name = "create_principal")]
@@ -629,27 +630,40 @@ public sealed class CoreMcpTools(
     }
 
     [McpServerTool(Name = "create_ai_principal")]
-    [Description("Creates an AI or service principal that authenticates with an API key. The API key is " +
-                 "returned exactly once here and is never retrievable again — capture it now.")]
+    [Description("Creates a service principal (classify it further with tags, e.g. \"ai-agent\") that " +
+                 "authenticates with an API key. The API key is returned exactly once here and is never " +
+                 "retrievable again — capture it now.")]
     public async Task<CallToolResult> CreateAiPrincipalAsync(
         RequestContext<CallToolRequestParams> context,
         [Description("Display name.")] string displayName,
-        [Description("Kind: AiAgent or Service.")] string kind = "AiAgent",
         CancellationToken cancellationToken = default)
     {
         if (CoreClaims.PrincipalIdOf(context.User) is not { } actor)
             return NoPrincipal();
         if (await DenyAsync(actor, PermissionActions.PrincipalAdminister, null, cancellationToken) is { } denial)
             return denial;
-        try
-        {
-            var (principal, apiKey) = await principals.CreateApiKeyPrincipalAsync(displayName, kind, cancellationToken);
-            return JsonResult(new CreatedApiKeyPrincipal(PrincipalAdminService.ToDto(principal, []), apiKey));
-        }
-        catch (ArgumentException ex)
-        {
-            return Error(ex.Message);
-        }
+        var (principal, apiKey) = await principals.CreateApiKeyPrincipalAsync(displayName, cancellationToken);
+        return JsonResult(new CreatedApiKeyPrincipal(PrincipalAdminService.ToDto(principal, []), apiKey));
+    }
+
+    [McpServerTool(Name = "set_principal_tags")]
+    [Description("Replaces a principal's free-form tags — the admin-managed classification axis " +
+                 "(e.g. \"ai-agent\", a team, an environment). An empty list clears them.")]
+    public async Task<CallToolResult> SetPrincipalTagsAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Principal id (GUID).")] string principalId,
+        [Description("The complete new tag list (replaces the existing tags).")] string[] tags,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } actor)
+            return NoPrincipal();
+        if (await DenyAsync(actor, PermissionActions.PrincipalAdminister, null, cancellationToken) is { } denial)
+            return denial;
+        if (!Guid.TryParse(principalId, out var id))
+            return Error("principalId must be a GUID.");
+        return await principals.SetTagsAsync(id, tags, cancellationToken)
+            ? JsonResult(new { ok = true })
+            : Error("principal not found.");
     }
 
     [McpServerTool(Name = "assign_principal_role")]
@@ -693,8 +707,16 @@ public sealed class CoreMcpTools(
             return denial;
         if (!Guid.TryParse(principalId, out var pid))
             return Error("principalId must be a GUID.");
-        var removed = await principals.RevokeRoleAsync(pid, roleName, cancellationToken);
-        return JsonResult(new { principalId = pid, roleName, revoked = removed });
+        try
+        {
+            var removed = await principals.RevokeRoleAsync(pid, roleName, cancellationToken);
+            return JsonResult(new { principalId = pid, roleName, revoked = removed });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // The last-administrator lock-out guard.
+            return Error(ex.Message);
+        }
     }
 
     [McpServerTool(Name = "set_principal_enabled")]
@@ -711,9 +733,17 @@ public sealed class CoreMcpTools(
             return denial;
         if (!Guid.TryParse(principalId, out var pid))
             return Error("principalId must be a GUID.");
-        return await principals.SetEnabledAsync(pid, enabled, cancellationToken)
-            ? JsonResult(new { principalId = pid, enabled })
-            : Error("principal not found.");
+        try
+        {
+            return await principals.SetEnabledAsync(pid, enabled, cancellationToken)
+                ? JsonResult(new { principalId = pid, enabled })
+                : Error("principal not found.");
+        }
+        catch (InvalidOperationException ex)
+        {
+            // The last-administrator lock-out guard.
+            return Error(ex.Message);
+        }
     }
 
     [McpServerTool(Name = "create_group")]

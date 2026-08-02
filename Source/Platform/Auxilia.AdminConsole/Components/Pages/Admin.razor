@@ -166,20 +166,14 @@ else
 
         <section class="card">
             <div class="card-header">
-                <h2>Create AI / service principal</h2>
+                <h2>Create service principal</h2>
                 <p class="card-subtitle">
-                    A service or AI agent that authenticates with an API key — the key is shown once after creation.
+                    A service (or AI agent — classify with tags) that authenticates with an API key;
+                    the key is shown once after creation.
                 </p>
             </div>
             <div class="card-body form-grid">
                 <label>Display name <input @bind="_aiDisplayName" placeholder="e.g. ci-bot"/></label>
-                <label>
-                    Kind
-                    <select @bind="_aiKind">
-                        <option value="AiAgent">AiAgent</option>
-                        <option value="Service">Service</option>
-                    </select>
-                </label>
                 <div class="button-row">
                     <button class="btn btn-primary" @onclick="CreateAiAsync" disabled="@_busy">Create principal</button>
                 </div>
@@ -311,7 +305,7 @@ else
         await MutateAsync(async () =>
         {
             var created = await Core.CreateApiKeyPrincipalAsync(
-                new CreateApiKeyPrincipalRequest(_aiDisplayName.Trim(), _aiKind));
+                new CreateApiKeyPrincipalRequest(_aiDisplayName.Trim()));
             _createdApiKey = created.ApiKey;
             _aiDisplayName = "";
         });

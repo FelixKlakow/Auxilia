@@ -163,6 +163,7 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task AssignPrincipalRoleAsync(Guid id, AssignRoleRequest request, CancellationToken ct = default) => Nope<Task>();
     public Task RevokePrincipalRoleAsync(Guid id, string roleName, CancellationToken ct = default) => Nope<Task>();
     public Task SetPrincipalEnabledAsync(Guid id, SetPrincipalEnabledRequest request, CancellationToken ct = default) => Nope<Task>();
+    public Task SetPrincipalTagsAsync(Guid id, SetPrincipalTagsRequest request, CancellationToken ct = default) => Nope<Task>();
     public Task DeleteConfigurationAsync(Guid id, CancellationToken ct = default) => Nope<Task>();
     public Task DeleteConnectorAsync(Guid id, CancellationToken ct = default) => Nope<Task>();
     public Task DeleteProviderAsync(string providerType, CancellationToken ct = default) => Nope<Task>();
