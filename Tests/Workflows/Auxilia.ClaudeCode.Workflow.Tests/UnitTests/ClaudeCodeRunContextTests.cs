@@ -1,3 +1,4 @@
+using Auxilia.Workflows;
 using Auxilia.Workflows.AiAgent.CodingAgent;
 
 namespace Auxilia.ClaudeCode.Workflow.Tests.UnitTests;
@@ -120,6 +121,30 @@ public sealed class AgentSessionContextTests
             Assert.That(context.PermissionMode, Is.EqualTo(AgentPermissionModes.AskOperator));
             Assert.That(context.PushPolicy, Is.EqualTo(AgentPermissionModes.AskOperator));
         });
+    }
+
+    [Test]
+    [NonParallelizable] // process environment variables are global state
+    public void FromEnvironment_SingleWorkspaceMount_WinsOverTheWorkspaceRoot()
+    {
+        var mountVariable = WorkflowEnvironmentVariables.WorkspaceMountPrefix + "WORKSPACE-REPO";
+        Environment.SetEnvironmentVariable("WORKFLOW_CONTEXT__TITLE", "Do something");
+        Environment.SetEnvironmentVariable(WorkflowEnvironmentVariables.WorkspaceDirectory, "/workspace");
+        Environment.SetEnvironmentVariable(mountVariable, "/workspace/repos/workspace-repo/src");
+        try
+        {
+            var context = AgentSessionContext.FromEnvironment();
+
+            // The mount root carries the mount's declared working directory — the plain
+            // workspace root does not, so the mount must win.
+            Assert.That(context.WorkspaceDirectory, Is.EqualTo("/workspace/repos/workspace-repo/src"));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("WORKFLOW_CONTEXT__TITLE", null);
+            Environment.SetEnvironmentVariable(WorkflowEnvironmentVariables.WorkspaceDirectory, null);
+            Environment.SetEnvironmentVariable(mountVariable, null);
+        }
     }
 
     [Test]

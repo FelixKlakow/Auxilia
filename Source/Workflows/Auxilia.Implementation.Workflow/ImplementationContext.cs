@@ -91,7 +91,10 @@ public sealed record ImplementationContext(
     public static ImplementationContext FromEnvironment()
         => FromValues(
             Get("WORKFLOW_CONTEXT__WORK-ITEM-ID"),
-            System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.WorkspaceDirectory),
+            // A single workspace mount's root wins: it carries the mount's declared
+            // working-directory subpath, which the plain workspace root does not.
+            WorkflowEnvironmentVariables.SingleMountRoot()
+                ?? System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.WorkspaceDirectory),
             System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.OutputDirectory),
             Get("WORKFLOW_CONTEXT__REFINEMENT-CHECK"),
             Get("WORKFLOW_CONTEXT__AI-PLAN-REVIEW"),

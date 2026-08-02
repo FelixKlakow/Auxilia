@@ -41,7 +41,11 @@ public sealed record AgentSessionContext(
             System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__TITLE"),
             System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__BODY")
                 ?? System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__INSTRUCTION"),
-            System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.WorkspaceDirectory),
+            // A single workspace mount's root is the authoritative working directory — it
+            // includes the mount's declared working-directory subpath, which the plain
+            // workspace root does not.
+            WorkflowEnvironmentVariables.SingleMountRoot()
+                ?? System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.WorkspaceDirectory),
             System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.OutputDirectory),
             System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__PERMISSION-MODE"),
             System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__PUSH-POLICY"),

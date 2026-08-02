@@ -115,9 +115,11 @@ public static class CopilotWorkflow
     private static Task ExecuteAsync(IServiceProvider provider, CancellationToken cancellationToken)
     {
         var context = AgentSessionContext.FromEnvironment();
-        // A bound repository slot with a local working copy (the Workspace Manager's per-run
-        // clone) becomes the agent's working directory; without one the run keeps its default.
-        if (provider.GetService<ISourceControlAccess>()?.WorkingPath is { Length: > 0 } workingPath)
+        // The per-mount variables are authoritative (a single mount's root already includes its
+        // declared working directory). The repository slot's WorkingPath remains the seam for
+        // mount-less providers (e.g. the coding-session workspace).
+        if (WorkflowEnvironmentVariables.SingleMountRoot() is null
+            && provider.GetService<ISourceControlAccess>()?.WorkingPath is { Length: > 0 } workingPath)
             context = context with { WorkspaceDirectory = workingPath };
 
         // Console mode drives the REAL interactive CLI in tmux+ttyd. NOTE: the Copilot CLI has

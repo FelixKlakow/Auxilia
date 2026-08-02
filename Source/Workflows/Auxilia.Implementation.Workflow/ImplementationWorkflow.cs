@@ -222,7 +222,11 @@ public static class ImplementationWorkflow
     private static Task ExecuteAsync(IServiceProvider provider, CancellationToken cancellationToken)
     {
         var context = ImplementationContext.FromEnvironment();
-        if (provider.GetService<ISourceControlAccess>()?.WorkingPath is { Length: > 0 } workingPath)
+        // The per-mount variables are authoritative (a single mount's root already includes its
+        // declared working directory). The repository slot's WorkingPath remains the seam for
+        // mount-less providers (e.g. the coding-session workspace).
+        if (WorkflowEnvironmentVariables.SingleMountRoot() is null
+            && provider.GetService<ISourceControlAccess>()?.WorkingPath is { Length: > 0 } workingPath)
             context = context with { WorkspaceDirectory = workingPath };
 
         var views = provider.GetService<IViewPublisher>();

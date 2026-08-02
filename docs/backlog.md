@@ -42,9 +42,10 @@
   real-CLI push interception (unit/component-verified; needs a push-enabled repo binding).
 - **Push-scoped token** — push currently uses the connector's token as-is; a token scoped to
   push (e.g. fine-grained PATs) would narrow the blast radius.
-- **Per-mount working directory in the agent context** — the coding-agent context still uses
-  `ISourceControlAccess.WorkingPath`/`Workflow__WorkspaceDirectory` for its cwd; consume the
-  per-mount `Workflow__WorkspaceMount__<ID>` variables instead.
+- ~~Per-mount working directory in the agent context~~ — DONE 2026-08-02: a single mount's
+  `Workflow__WorkspaceMount__<ID>` root (working-directory subpath included) is now the
+  authoritative cwd in all three agent workflows; the repository slot's `WorkingPath` remains
+  the seam for mount-less providers, and multi-mount runs fall back to the workspace root.
 
 ## Client libraries & packaging
 - **Publish the NuGet packages** — pack metadata is done for `Auxilia.Core.Contracts`,

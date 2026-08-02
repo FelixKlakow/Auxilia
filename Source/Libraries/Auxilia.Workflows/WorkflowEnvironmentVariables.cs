@@ -22,4 +22,25 @@ public static class WorkflowEnvironmentVariables
     /// value is the mount's effective root inside the container, working directory included.
     /// </summary>
     public const string WorkspaceMountPrefix = "Workflow__WorkspaceMount__";
+
+    /// <summary>
+    /// The single workspace mount's effective root (per-mount working directory included), or
+    /// null when the run carries no mount — or more than one, where no single directory can be
+    /// the obvious working root and callers fall back to the workspace root.
+    /// </summary>
+    public static string? SingleMountRoot()
+    {
+        string? single = null;
+        foreach (System.Collections.DictionaryEntry entry in System.Environment.GetEnvironmentVariables())
+        {
+            if (entry.Key is not string key
+                || !key.StartsWith(WorkspaceMountPrefix, StringComparison.Ordinal)
+                || entry.Value is not string { Length: > 0 } root)
+                continue;
+            if (single is not null && single != root)
+                return null;
+            single = root;
+        }
+        return single;
+    }
 }
