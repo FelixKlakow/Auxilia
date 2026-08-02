@@ -73,17 +73,13 @@ else
         </dl>
     </div>
 
-    <p class="muted view-live-hint">
-        Showing live updates streamed from the Core. History before you opened this page is not
-        backfilled yet — items appear as the workflow publishes them.
-    </p>
-
-    @if (_buffers.Count == 0)
+    var views = ViewsSnapshot();
+    @if (views.Count == 0)
     {
         <EmptyState Title="No view items yet"
                     Description="Views appear here the moment the workflow publishes progress, results, or an agent conversation."/>
     }
-    @foreach (var (viewName, buffer) in _buffers)
+    @foreach (var (viewName, buffer) in views)
     {
         var items = buffer.Items;
         var descriptor = DescriptorFor(viewName, items);
@@ -148,7 +144,52 @@ else
             return;
         _streamStarted = true;
         _ = ConsumeStreamAsync();
+        _ = LoadPersistedViewsAsync();
     }
+
+    /// <summary>
+    /// Backfills history from the persisted view store (paged). Runs concurrently with the live
+    /// stream — the sequence-keyed buffers merge both sources without duplicates.
+    /// </summary>
+    private async Task LoadPersistedViewsAsync()
+    {
+        try
+        {
+            const int pageSize = 200;
+            var skip = 0;
+            while (true)
+            {
+                var page = await Core.GetRunViewsAsync(Id, skip: skip, take: pageSize, ct: _cts.Token);
+                var changed = false;
+                foreach (var group in page.Items.GroupBy(i => i.ViewName, StringComparer.Ordinal))
+                    changed |= BufferOf(group.Key).Merge(group.Select(ToRecord));
+                if (changed)
+                    await InvokeAsync(StateHasChanged);
+                skip += page.Items.Count;
+                if (page.Items.Count == 0 || skip >= page.Total)
+                    break;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Circuit disposed — the backfill ends with it.
+        }
+        catch (CoreApiException ex)
+        {
+            _error = ex.ErrorDetail ?? ex.Message;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private ViewDataRecord ToRecord(RunViewItem item) => new()
+    {
+        Id = Guid.NewGuid(),
+        WorkflowInstanceId = Id,
+        ViewName = item.ViewName,
+        Sequence = item.Sequence,
+        PayloadJson = item.PayloadJson,
+        TimestampUtc = item.TimestampUtc
+    };
 
     private async Task ConsumeStreamAsync()
     {
@@ -205,9 +246,18 @@ else
 
     private ViewItemBuffer BufferOf(string viewName)
     {
-        if (!_buffers.TryGetValue(viewName, out var buffer))
-            _buffers[viewName] = buffer = new ViewItemBuffer();
-        return buffer;
+        lock (_buffers)
+        {
+            if (!_buffers.TryGetValue(viewName, out var buffer))
+                _buffers[viewName] = buffer = new ViewItemBuffer();
+            return buffer;
+        }
+    }
+
+    private List<KeyValuePair<string, ViewItemBuffer>> ViewsSnapshot()
+    {
+        lock (_buffers)
+            return _buffers.ToList();
     }
 
     /// <summary>

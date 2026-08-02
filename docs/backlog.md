@@ -13,8 +13,6 @@
 - **Workflow-type registry administration** — register/approve/deny run via REST/MCP only;
   the AdminConsole has no registry-administration UI. The AI safety-check approval handler
   (static workflow over the submitted package) is designed but unbuilt.
-- **AdminConsole persisted view-read** — RunDetail still streams only; wire it to
-  `GET /api/runs/{id}/views` like the other clients.
 - **Session terminal remainders** — a console-mode Docker system test (stub CLI under tmux)
   and an AdminConsole terminal surface.
 

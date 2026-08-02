@@ -407,9 +407,15 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task<WorkflowSchemaDto?> GetWorkflowSchemaAsync(string workflowType, CancellationToken ct = default)
         => Task.FromResult(WorkflowSchemas.GetValueOrDefault(workflowType));
 
+    public List<RunViewItem> RunViews { get; } = [];
+
     public Task<PagedResult<RunViewItem>> GetRunViewsAsync(
         Guid runId, string? view = null, int skip = 0, int take = 200, CancellationToken ct = default)
-        => Task.FromResult(new PagedResult<RunViewItem>([], 0, skip, take));
+    {
+        var matching = RunViews.Where(v => view is null || v.ViewName == view).ToList();
+        var page = matching.Skip(skip).Take(take).ToList();
+        return Task.FromResult(new PagedResult<RunViewItem>(page, matching.Count, skip, take));
+    }
 
     public Task<ProviderCatalogEntry> RegisterProviderAsync(RegisterSlotProvider request, CancellationToken ct = default)
         => Task.FromResult(new ProviderCatalogEntry(request.ProviderType, false, request.Category, [], request.Contracts, request.Description));

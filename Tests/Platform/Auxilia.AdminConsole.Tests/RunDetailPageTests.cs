@@ -60,6 +60,50 @@ public sealed class RunDetailPageTests
     }
 
     [Test]
+    public void RunDetail_BackfillsPersistedViews_AndDeduplicatesAgainstStream()
+    {
+        var runId = Guid.NewGuid();
+        var core = new FakeCoreClient();
+        core.Runs.Add(new RunStatus(runId, "code-review", "Running", null, DateTimeOffset.UtcNow, null, null));
+        // History published before the page was opened — only reachable via the persisted read.
+        core.RunViews.Add(new RunViewItem("progress", 1, "{\"message\":\"from-the-store\"}", DateTimeOffset.UtcNow));
+        // The same item also arrives over the stream (overlap) plus one genuinely new item.
+        core.StreamEvents.Add(View(runId, "progress", 1, "{\"message\":\"from-the-store\"}"));
+        core.StreamEvents.Add(View(runId, "progress", 2, "{\"message\":\"live-only\"}"));
+        using var ctx = NewContext(core);
+
+        var cut = ctx.Render<RunDetail>(p => p.Add(c => c.Id, runId));
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(cut.Markup, Does.Contain("from-the-store"), "persisted history is backfilled");
+                Assert.That(cut.Markup, Does.Contain("live-only"), "live items still stream in");
+                var first = cut.Markup.IndexOf("from-the-store", StringComparison.Ordinal);
+                Assert.That(cut.Markup.IndexOf("from-the-store", first + 1, StringComparison.Ordinal),
+                    Is.EqualTo(-1), "an item present in both sources renders exactly once");
+            });
+        });
+    }
+
+    [Test]
+    public void RunDetail_FinishedRun_RendersHistoryFromTheStore()
+    {
+        var runId = Guid.NewGuid();
+        var core = new FakeCoreClient();
+        core.Runs.Add(new RunStatus(runId, "impl", "Success", null, DateTimeOffset.UtcNow, null, null));
+        core.RunViews.Add(new RunViewItem("summary", 1, "{\"message\":\"replayed-history\"}", DateTimeOffset.UtcNow));
+        using var ctx = NewContext(core);
+
+        var cut = ctx.Render<RunDetail>(p => p.Add(c => c.Id, runId));
+
+        cut.WaitForAssertion(() =>
+            Assert.That(cut.Markup, Does.Contain("replayed-history"),
+                "a finished run replays its persisted views without any stream events"));
+    }
+
+    [Test]
     public void RunDetail_TerminalStatus_EndsLiveBadge()
     {
         var runId = Guid.NewGuid();
