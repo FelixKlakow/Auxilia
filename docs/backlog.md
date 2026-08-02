@@ -92,9 +92,6 @@ access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing di
 - **Windows-container runners** — windows-base layers are stored but never served to Linux
   composition. (Mixed-base selections now fail fast at dispatch — 2026-08-01 — and each
   layer's base rides its catalog entry.)
-- **Base-aware environment picker (steering client)** — the AdminConsole editor constrains to one base
-  since 2026-08-02; the steering client's environment selection still allows mixing (the Core rejects
-  a mixed dispatch with a clear error, `ProviderCatalogEntry.EnvironmentBase` carries the data).
 - **Trust keys in real deployments** — `WorkflowDispatcher__TrustedEnvironmentSigningKeys`
   is empty (permissive) in dev; any real deployment needs the key material story.
 - **Build-time hardening (context, 2026-08-02).** Environment composition runs `docker build`
@@ -107,9 +104,6 @@ access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing di
   memory/CPU caps in `ImageBuildParameters`.
 
 ## Generic binding pipeline
-- **Connector-grants editor in the steering client** — grants (principal / first-class group /
-  directory group, batch-replace via `SetConnectorGrants`) are editable in the
-  AdminConsole; the steering client's Connections tab has no grants surface yet.
 
 ## CI validation — Docker system tests (not runnable locally)
 - Email slot **plugin-dependency loading** (highest risk — MailKit/MimeKit/BouncyCastle
