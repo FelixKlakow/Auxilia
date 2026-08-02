@@ -126,6 +126,10 @@ access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing di
 ## DevStand
 - `ScreenshotHarness` stubbed (targeted the retired dashboard) — rewire to boot
   `Auxilia.AdminConsole` in `EndToEndEnvironment`.
+- **AdminConsole under `dotnet run` serves broken static assets** — the Debug static-asset
+  manifest's runtime-patching handler 500s on the packaged BlazorAgentView css and serves
+  0-byte compressed bodies for `app.css` (page renders unstyled). The published build
+  (`dotnet publish`) is correct — visual checks must run the published output.
 
 ## Core scalability — path to ~100k simultaneous clients
 The shape is right (stateless Core.Api, SSE per node, competing-consumer runners, clients

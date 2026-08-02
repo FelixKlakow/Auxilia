@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Auxilia.Core.Client;
+using Auxilia.Core.Contracts;
 using Microsoft.AspNetCore.Components.Authorization;
 
 namespace Auxilia.AdminConsole.Auth;
@@ -21,21 +22,26 @@ public sealed class ConsoleAuthenticationStateProvider(ICoreClient core) : Authe
     public static bool Can(ClaimsPrincipal user, string action)
         => user.HasClaim(PermissionClaimType, action);
 
+    /// <summary>The console's claims identity for a Core-reported principal (shared with the
+    /// endpoint-level <see cref="CoreBackedAuthenticationHandler"/>).</summary>
+    public static ClaimsIdentity IdentityOf(CurrentPrincipal principal)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, principal.PrincipalId.ToString()),
+            new(ClaimTypes.Name, principal.DisplayName ?? principal.PrincipalId.ToString())
+        };
+        claims.AddRange(principal.Roles.Select(role => new Claim(ClaimTypes.Role, role)));
+        claims.AddRange(principal.Permissions.Select(p => new Claim(PermissionClaimType, p)));
+        return new ClaimsIdentity(claims, AuthenticationType, ClaimTypes.Name, ClaimTypes.Role);
+    }
+
     public override async Task<AuthenticationState> GetAuthenticationStateAsync()
     {
         try
         {
             var principal = await core.GetCurrentPrincipalAsync();
-            var claims = new List<Claim>
-            {
-                new(ClaimTypes.NameIdentifier, principal.PrincipalId.ToString()),
-                new(ClaimTypes.Name, principal.DisplayName ?? principal.PrincipalId.ToString())
-            };
-            claims.AddRange(principal.Roles.Select(role => new Claim(ClaimTypes.Role, role)));
-            claims.AddRange(principal.Permissions.Select(p => new Claim(PermissionClaimType, p)));
-
-            var identity = new ClaimsIdentity(claims, AuthenticationType, ClaimTypes.Name, ClaimTypes.Role);
-            return new AuthenticationState(new ClaimsPrincipal(identity));
+            return new AuthenticationState(new ClaimsPrincipal(IdentityOf(principal)));
         }
         catch (CoreApiException)
         {

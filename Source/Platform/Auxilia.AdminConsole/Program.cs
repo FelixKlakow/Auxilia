@@ -62,7 +62,14 @@ builder.Services.AddScoped<ICoreClient>(sp =>
 });
 
 // --- Authentication state derived from the Core (no local identity store) ---
+// The circuit-level provider AND the endpoint-level scheme both ask the Core who the caller
+// is; without the scheme, the initial HTTP request of any [Authorize] page has no
+// IAuthenticationService and throws before Blazor ever renders.
+builder.Services.AddSingleton(coreOptions);
 builder.Services.AddScoped<AuthenticationStateProvider, ConsoleAuthenticationStateProvider>();
+builder.Services.AddAuthentication(CoreBackedAuthenticationHandler.Scheme)
+    .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, CoreBackedAuthenticationHandler>(
+        CoreBackedAuthenticationHandler.Scheme, null);
 builder.Services.AddAuthorization();
 builder.Services.AddCascadingAuthenticationState();
 
@@ -77,6 +84,8 @@ var app = builder.Build();
 // Fingerprinted static assets (resolved via @Assets[...]) — a changed stylesheet gets a new
 // URL, so browser caches can never serve a stale one.
 app.MapStaticAssets();
+app.UseAuthentication();
+app.UseAuthorization();
 app.UseAntiforgery();
 
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
