@@ -6,9 +6,11 @@
 ## Core.Api — client-surface follow-ups
 - **Per-user bearer hardening** — the short-lived bearer is embedded in the prerendered page
   (same-origin TLS); consider a server-side opaque-handle store keyed by principal.
-- **Workflow-type registry administration** — register/approve/deny run via REST/MCP only;
-  the AdminConsole has no registry-administration UI. The AI safety-check approval handler
-  (static workflow over the submitted package) is designed but unbuilt.
+- **Workflow-type registry administration** — full client surface exists on `ICoreClient`
+  (register/approve/deny/unregister), and the steering client ships a registry-administration panel
+  (2026-08-02, permission-gated on `workflow-type.manage`/`workflow-type.sign`); the
+  AdminConsole still has no registry UI. The AI safety-check approval handler (static
+  workflow over the submitted package) is designed but unbuilt.
 - **Session terminal remainders** — a console-mode Docker system test (stub CLI under tmux)
   and an AdminConsole terminal surface.
 
