@@ -1,0 +1,65 @@
+[
+  {
+    "Id": "42897e12-64bf-5490-b61d-6327bb04d7a2",
+    "ProviderType": "claude-code-cli",
+    "Available": true,
+    "Category": "",
+    "DescriptorOverridesJson": "[]"
+  },
+  {
+    "Id": "3329c794-3da5-5503-8b05-00b4ac0bd599",
+    "ProviderType": "github-account",
+    "Available": true,
+    "Category": "",
+    "DescriptorOverridesJson": "[]"
+  },
+  {
+    "Id": "929bb761-5368-5397-a92c-fdd93ed55dbd",
+    "ProviderType": "tfs-account",
+    "Available": true,
+    "Category": "",
+    "DescriptorOverridesJson": "[]"
+  },
+  {
+    "Id": "e5887d5f-28c5-5c43-b1b4-0718e3df82ed",
+    "ProviderType": "git-repository",
+    "Available": true,
+    "Category": "",
+    "DescriptorOverridesJson": "[]"
+  },
+  {
+    "Id": "e835d07b-2470-508e-9827-fb451fe8433f",
+    "ProviderType": "github-copilot-cli",
+    "Available": true,
+    "Category": "",
+    "DescriptorOverridesJson": "[]"
+  },
+  {
+    "Id": "6b8d1fae-0a7f-52c0-b7c3-81de530670c4",
+    "ProviderType": "dotnet-10",
+    "Available": true,
+    "Category": "",
+    "DescriptorOverridesJson": "[]"
+  },
+  {
+    "Id": "72bb1c35-3ab4-5501-ab11-cd034fccdf2c",
+    "ProviderType": "node-22",
+    "Available": true,
+    "Category": "",
+    "DescriptorOverridesJson": "[]"
+  },
+  {
+    "Id": "be1e1a7f-5796-5e92-8762-253c2a5c7113",
+    "ProviderType": "simulated-work-items",
+    "Available": true,
+    "Category": "",
+    "DescriptorOverridesJson": "[]"
+  },
+  {
+    "Id": "93abab56-d755-5ee5-b60e-7b0a3d9df6f4",
+    "ProviderType": "coding-session-workspace",
+    "Available": true,
+    "Category": "",
+    "DescriptorOverridesJson": "[]"
+  }
+]

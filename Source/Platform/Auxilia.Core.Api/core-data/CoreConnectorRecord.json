@@ -1,0 +1,52 @@
+[
+  {
+    "Id": "ed1199d1-c5cf-468e-9258-435c2ce34381",
+    "Name": "Felix",
+    "ProviderType": "claude-code-cli",
+    "ProtectedSettingsJson": "{\u0022OAuthToken\u0022:\u0022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\u0022,\u0022CliPath\u0022:\u0022claude\u0022,\u0022OAuthRefreshToken\u0022:\u0022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\u0022,\u0022OAuthExpiresAt\u0022:\u00221785380636106\u0022}",
+    "Scope": "Personal",
+    "OwnerPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "GrantsJson": "[]",
+    "UpdatedUtc": "2026-07-29T19:03:56.1080873+00:00"
+  },
+  {
+    "Id": "af52175d-4d6a-462a-947e-15e45e37c867",
+    "Name": "Felix",
+    "ProviderType": "github-account",
+    "ProtectedSettingsJson": "{\u0022token\u0022:\u0022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\u0022}",
+    "Scope": "Personal",
+    "OwnerPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "GrantsJson": "[]",
+    "UpdatedUtc": "2026-07-27T05:56:43.8775307+00:00"
+  },
+  {
+    "Id": "fae1b9e2-3c42-48c6-989c-858acc26e5bd",
+    "Name": "Claude (stub CLI)",
+    "ProviderType": "claude-code-cli",
+    "ProtectedSettingsJson": "{\u0022ApiKey\u0022:\u0022stub-key\u0022,\u0022CliPath\u0022:\u0022/usr/local/bin/claude-stub\u0022}",
+    "Scope": "Company",
+    "OwnerPrincipalId": null,
+    "GrantsJson": "[]",
+    "UpdatedUtc": "2026-07-27T06:42:16.5396076+00:00"
+  },
+  {
+    "Id": "14117157-8133-492f-9e59-a8a05312f647",
+    "Name": "Copilot (stub CLI)",
+    "ProviderType": "github-copilot-cli",
+    "ProtectedSettingsJson": "{\u0022token\u0022:\u0022stub-token\u0022,\u0022CliPath\u0022:\u0022/usr/local/bin/copilot-stub\u0022}",
+    "Scope": "Company",
+    "OwnerPrincipalId": null,
+    "GrantsJson": "[]",
+    "UpdatedUtc": "2026-07-26T23:53:35.2861568+00:00"
+  },
+  {
+    "Id": "d6c2d7d2-ee7c-4080-9c59-ab00666572f6",
+    "Name": "SIM git server (builduser)",
+    "ProviderType": "azure-devops",
+    "ProtectedSettingsJson": "{\u0022token\u0022:\u0022the-pat\u0022,\u0022username\u0022:\u0022builduser\u0022}",
+    "Scope": "Company",
+    "OwnerPrincipalId": null,
+    "GrantsJson": "[]",
+    "UpdatedUtc": "2026-07-29T20:02:07.5598412+00:00"
+  }
+]

@@ -27,9 +27,9 @@ jobs:
 
       - name: Pack the client libraries
         run: |
-          dotnet pack Auxilia.Core.Contracts/Auxilia.Core.Contracts.csproj  -c Release -o packages
-          dotnet pack Auxilia.Core.Client/Auxilia.Core.Client.csproj        -c Release -o packages
-          dotnet pack Auxilia.Workflows.Client/Auxilia.Workflows.Client.csproj -c Release -o packages
+          dotnet pack Source/Libraries/Auxilia.Core.Contracts/Auxilia.Core.Contracts.csproj  -c Release -o packages
+          dotnet pack Source/Libraries/Auxilia.Core.Client/Auxilia.Core.Client.csproj        -c Release -o packages
+          dotnet pack Source/Libraries/Auxilia.Workflows.Client/Auxilia.Workflows.Client.csproj -c Release -o packages
 
       - name: NuGet login (Trusted Publishing)
         uses: NuGet/login@v1

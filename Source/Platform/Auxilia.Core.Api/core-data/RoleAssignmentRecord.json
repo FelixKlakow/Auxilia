@@ -1,0 +1,26 @@
+[
+  {
+    "Id": "3076aa48-8680-520b-ab12-ffa1d31a8694",
+    "PrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "RoleName": "Administrator",
+    "Source": "Direct"
+  },
+  {
+    "Id": "923e67bb-0e8c-5c69-a866-39bda6e0d97b",
+    "PrincipalId": "fb2427ca-42aa-4cbb-bccd-cc681c1c9735",
+    "RoleName": "Administrator",
+    "Source": "Direct"
+  },
+  {
+    "Id": "4ef564b4-b06a-568c-aaa5-4ef8a08e2860",
+    "PrincipalId": "144a1084-be63-4cb4-99a2-8ece2f21ffbd",
+    "RoleName": "User",
+    "Source": "Direct"
+  },
+  {
+    "Id": "f920cd0a-60a4-5730-87ba-624852fdefad",
+    "PrincipalId": "05912de4-c3bc-404b-af49-d178aecfd579",
+    "RoleName": "User",
+    "Source": "Direct"
+  }
+]

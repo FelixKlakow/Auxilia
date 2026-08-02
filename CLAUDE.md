@@ -30,20 +30,28 @@ dotnet build Auxilia.slnx                                              # build e
 dotnet test Auxilia.slnx                                               # full suite (run after a feature/fix)
 dotnet test --filter "Category=Unit"                                   # unit (also the pre-commit hook)
 dotnet test --filter "Category=Component"                              # component
-dotnet test Auxilia.SystemTestSuite/ --filter "Category=System"        # system (Docker required)
+dotnet test Tests/System/Auxilia.SystemTestSuite/ --filter "Category=System"        # system (Docker required)
 dotnet test <Project>.Tests/ --filter "FullyQualifiedName~<TestName>"  # single test
 ```
 
+## Layout
+
+`Source/Platform` (the deployables: Core.Api, Core.Runner, AdminConsole, TriggerHost) ·
+`Source/Libraries` (contracts, clients, workflow SDK, messaging, data, governance) ·
+`Source/Slots` (provider plugins) · `Source/Workflows` (the shipped workflow images) ·
+`Tests/{Platform,Libraries,Slots,Workflows}` (mirroring test projects) · `Tests/System`
+(SystemTestSuite, testing utilities, fake slots, DevStand) · `Scripts/` (dev stack & tooling).
+
 ## Architecture (see `docs/ARCHITECTURE.md`)
 
-Work items from external task sources trigger **signed, stateful workflow programs** that run in isolated containers and communicate **exclusively via the message bus** (`IMessageBusClient`). AI agents have full UI parity via an MCP server. The platform is three deployables plus a client-library family, sharing `Auxilia.Core.Contracts`/`Auxilia.Core.Client`: **`Auxilia.Core.Api`** (control plane — REST + authenticated MCP, identity/RBAC/groups, connector admin, audit, Run API, live-view + artifact SSE, failover monitor, workflow-type registry), **`Auxilia.Core.Runner`** (execution plane — container launch, egress policy, JIT credential delivery), and **`Auxilia.AdminConsole`** (operator/admin Blazor UI, a pure Core client with no database). The **workflow domain is a library**: `Auxilia.Workflows.Client` (authoring, interval triggers, artifact chaining over the Core's filtered artifact SSE — never the bus), hostable in any app; `Source/Auxilia.TriggerHost` is the bundled always-on reference host (+ email intake). The Core services each own their own database; **secrets live only in the Core**. (The `Auxilia.BackendService` monolith and the `Auxilia.WorkflowStudio` deployable have both been retired — see `docs/backend-service-retirement-plan.md` and the backlog's Studio→library program.)
+Work items from external task sources trigger **signed, stateful workflow programs** that run in isolated containers and communicate **exclusively via the message bus** (`IMessageBusClient`). AI agents have full UI parity via an MCP server. The platform is three deployables plus a client-library family, sharing `Auxilia.Core.Contracts`/`Auxilia.Core.Client`: **`Auxilia.Core.Api`** (control plane — REST + authenticated MCP, identity/RBAC/groups, connector admin, audit, Run API, live-view + artifact SSE, failover monitor, workflow-type registry), **`Auxilia.Core.Runner`** (execution plane — container launch, egress policy, JIT credential delivery), and **`Auxilia.AdminConsole`** (operator/admin Blazor UI, a pure Core client with no database). The **workflow domain is a library**: `Auxilia.Workflows.Client` (authoring, interval triggers, artifact chaining over the Core's filtered artifact SSE — never the bus), hostable in any app; `Source/Platform/Auxilia.TriggerHost` is the bundled always-on reference host (+ email intake). The Core services each own their own database; **secrets live only in the Core**. (The `Auxilia.BackendService` monolith and the `Auxilia.WorkflowStudio` deployable have both been retired — see `docs/backend-service-retirement-plan.md` and the backlog's Studio→library program.)
 
 **Credential/trust model** (details in `docs/ARCHITECTURE.md`): a workflow is **signature-trusted** and receives **scoped** credentials **just-in-time, per slot, encrypted for that instance**, decrypted and used inside the container under a default-deny **egress policy**. The protection is *who gets a credential and when*, not hiding it from the workflow. (Exception: the initial repo clone is done Core-side and its token stripped before the workspace is mounted.)
 
 ## Rules
 
 - **The Core has NO custom/vendor logic.** Core.Api and Core.Runner are semantics-blind brokers: no provider-, vendor-, or workflow-specific code (no Anthropic/GitHub/etc. API calls, no special-cased provider types). Anything provider-specific lives in dynamically registered pieces — slot-handler plugins, provider-catalog descriptors, connect flows, data-driven specs like `ProviderOAuthRefresh` — or in the workflow itself. If a feature seems to need Core code that knows a vendor, invent a registration mechanism instead.
-- All RabbitMQ interaction goes through `IMessageBusClient` (`Source/Auxilia.Messaging`) so tests can inject `FakeMessageBusClient`.
+- All RabbitMQ interaction goes through `IMessageBusClient` (`Source/Libraries/Auxilia.Messaging`) so tests can inject `FakeMessageBusClient`.
 - Retry/resilience logic belongs inside the service implementation — never in a decorator or caller-side retry loop.
 - AI: never instruct the model to emit structured text ("Respond with JSON"). Collect structured output via typed tool calls on a result-sink `ICapabilityMcpTools` in `AiSessionOptions.CapabilityTools`.
 - XML doc comments (`///`) only when purpose isn't obvious from name and signature; one sentence.

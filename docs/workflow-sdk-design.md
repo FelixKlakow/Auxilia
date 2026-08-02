@@ -389,7 +389,7 @@ The Core.Runner operates purely on the communication contract – it never knows
 
 ```
 Source/
-  Auxilia.Workflows/                       ← core SDK, no slot-specific knowledge
+  Source/Libraries/Auxilia.Workflows/                       ← core SDK, no slot-specific knowledge
     WorkflowBuilder.cs
     IWorkflowBuilder.cs
     WorkflowManifest.cs

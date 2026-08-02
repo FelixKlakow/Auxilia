@@ -1,0 +1,38 @@
+[
+  {
+    "Id": "cf486163-06a5-4515-8389-197be1f6a142",
+    "TenantId": "d3fa017e-0000-4000-8000-000000000001",
+    "Kind": "Service",
+    "DisplayName": "core-bootstrap",
+    "ExternalSubject": null,
+    "Status": "Active",
+    "DirectoryGroupsJson": "[]"
+  },
+  {
+    "Id": "fb2427ca-42aa-4cbb-bccd-cc681c1c9735",
+    "TenantId": "d3fa017e-0000-4000-8000-000000000001",
+    "Kind": "Service",
+    "DisplayName": "core-bootstrap",
+    "ExternalSubject": null,
+    "Status": "Active",
+    "DirectoryGroupsJson": "[]"
+  },
+  {
+    "Id": "144a1084-be63-4cb4-99a2-8ece2f21ffbd",
+    "TenantId": "d3fa017e-0000-4000-8000-000000000001",
+    "Kind": "Service",
+    "DisplayName": "perm-check-user #test",
+    "ExternalSubject": null,
+    "Status": "Disabled",
+    "DirectoryGroupsJson": "[]"
+  },
+  {
+    "Id": "05912de4-c3bc-404b-af49-d178aecfd579",
+    "TenantId": "d3fa017e-0000-4000-8000-000000000001",
+    "Kind": "Service",
+    "DisplayName": "perm-check-user2 #test",
+    "ExternalSubject": null,
+    "Status": "Disabled",
+    "DirectoryGroupsJson": "[]"
+  }
+]

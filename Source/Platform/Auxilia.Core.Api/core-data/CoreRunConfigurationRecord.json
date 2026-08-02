@@ -1,0 +1,93 @@
+[
+  {
+    "Id": "0857c260-ed6a-4f5e-ae04-497dcf19d893",
+    "Name": "Claude Code (stub)",
+    "WorkflowType": "claude-code",
+    "ContextJson": "{}",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u00224a15f2ee-bf58-4fd7-b187-77d31a497bb3\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TagsJson": "[]",
+    "Scope": "Company",
+    "OwnerPrincipalId": null,
+    "GrantsJson": "[]",
+    "Enabled": true,
+    "UpdatedUtc": "2026-07-26T20:11:45.6291797+00:00"
+  },
+  {
+    "Id": "c5eebec4-980d-43e3-8c88-f234e683e94b",
+    "Name": "Claude coding session (stub)",
+    "WorkflowType": "claude-code",
+    "ContextJson": "{}",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022fae1b9e2-3c42-48c6-989c-858acc26e5bd\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TagsJson": "[\u0022demo\u0022,\u0022claude\u0022]",
+    "Scope": "Company",
+    "OwnerPrincipalId": null,
+    "GrantsJson": "[]",
+    "Enabled": true,
+    "UpdatedUtc": "2026-07-27T06:42:16.5887649+00:00"
+  },
+  {
+    "Id": "6fee23a3-8151-4cae-8719-5765103ef2f5",
+    "Name": "Copilot coding session (stub)",
+    "WorkflowType": "github-copilot",
+    "ContextJson": "{}",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u002214117157-8133-492f-9e59-a8a05312f647\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TagsJson": "[\u0022demo\u0022,\u0022copilot\u0022]",
+    "Scope": "Company",
+    "OwnerPrincipalId": null,
+    "GrantsJson": "[]",
+    "Enabled": true,
+    "UpdatedUtc": "2026-07-26T23:53:35.303244+00:00"
+  },
+  {
+    "Id": "3cadff94-b5b1-410b-bead-4ce48249bc1b",
+    "Name": "Praetorium.Bridge",
+    "WorkflowType": "claude-code",
+    "ContextJson": "{\u0022view-mode\u0022:\u0022console\u0022,\u0022multi-turn\u0022:\u0022true\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022}",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:{\u0022CloneUrl\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022Branch\u0022:\u0022master\u0022,\u0022AllowPush\u0022:\u0022true\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022environment\u0022,\u0022ProviderType\u0022:\u0022dotnet-10\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{},\u0022DelegatedResource\u0022:null}]",
+    "TagsJson": "[]",
+    "Scope": "Company",
+    "OwnerPrincipalId": null,
+    "GrantsJson": "[]",
+    "Enabled": true,
+    "UpdatedUtc": "2026-07-28T18:02:41.7942001+00:00"
+  },
+  {
+    "Id": "a971df31-e6d5-484b-b5dd-c4e6de42b8ec",
+    "Name": "[SIM] Implementation (driven stub)",
+    "WorkflowType": "implementation",
+    "ContextJson": "{\u0022push-mode\u0022:\u0022prompt\u0022,\u0022user-code-gate\u0022:\u0022true\u0022,\u0022user-plan-gate\u0022:\u0022true\u0022,\u0022ai-plan-review\u0022:\u0022false\u0022,\u0022ai-code-review\u0022:\u0022false\u0022,\u0022gate-idle-compaction\u0022:\u00220\u0022,\u0022refinement-check\u0022:\u0022true\u0022}",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022work-items\u0022,\u0022ProviderType\u0022:\u0022simulated-work-items\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022Title\u0022:\u0022Simulated story: add the implemented marker\u0022,\u0022DelaySeconds\u0022:\u00223\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:\u0022claude-code-cli\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022OAuthToken\u0022:\u0022sim-fake-oauth-token\u0022,\u0022CliPath\u0022:\u0022/usr/local/bin/driven-stub\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022workspace-repo\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022ConnectorId\u0022:\u0022d6c2d7d2-ee7c-4080-9c59-ab00666572f6\u0022,\u0022Settings\u0022:{\u0022AllowPush\u0022:\u0022true\u0022,\u0022CloneUrl\u0022:\u0022http://host.docker.internal:8418/git/test.git\u0022,\u0022NoCache\u0022:\u0022true\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022coding-session-workspace\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022WorkingPath\u0022:\u0022/workspace/repos/workspace-repo\u0022},\u0022DelegatedResource\u0022:null}]",
+    "TagsJson": "[\u0022sim\u0022]",
+    "Scope": "Company",
+    "OwnerPrincipalId": null,
+    "GrantsJson": "[]",
+    "Enabled": true,
+    "UpdatedUtc": "2026-07-30T20:16:04.5580827+00:00"
+  },
+  {
+    "Id": "82e1396f-14eb-42d6-9f0f-c29d3bd8473d",
+    "Name": "test",
+    "WorkflowType": "implementation",
+    "ContextJson": "{\u0022completeness-check\u0022:\u0022true\u0022,\u0022ai-plan-review\u0022:\u0022true\u0022,\u0022ai-code-review\u0022:\u0022true\u0022,\u0022max-ai-review-rounds\u0022:\u00222\u0022,\u0022user-plan-gate\u0022:\u0022true\u0022,\u0022user-code-gate\u0022:\u0022true\u0022,\u0022artifact-review\u0022:\u0022true\u0022,\u0022push-mode\u0022:\u0022prompt\u0022,\u0022reviewer-mode\u0022:\u0022headless\u0022,\u0022gate-idle-compaction\u0022:\u002210\u0022,\u0022author-base-prompt\u0022:\u0022Base\u0022,\u0022reviewer-base-prompt\u0022:\u0022Base\u0022,\u0022target-state\u0022:\u0022done\u0022}",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022work-items\u0022,\u0022ProviderType\u0022:\u0022simulated-work-items\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022Title\u0022:\u0022Something\u0022,\u0022Description\u0022:\u0022No description\u0022,\u0022DelaySeconds\u0022:\u00225\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022fae1b9e2-3c42-48c6-989c-858acc26e5bd\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022review-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022fae1b9e2-3c42-48c6-989c-858acc26e5bd\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022coding-session-workspace\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022WorkingPath\u0022:\u0022D:\\\\Tmp\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022environment\u0022,\u0022ProviderType\u0022:\u0022dotnet-10\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{},\u0022DelegatedResource\u0022:null}]",
+    "TagsJson": "[]",
+    "Scope": "Company",
+    "OwnerPrincipalId": null,
+    "GrantsJson": "[]",
+    "Enabled": true,
+    "UpdatedUtc": "2026-07-29T21:13:09.6011884+00:00"
+  },
+  {
+    "Id": "92846e75-7035-437c-a201-7574895a0226",
+    "Name": "[SIM] Implementation (GitHub Copilot)",
+    "WorkflowType": "implementation",
+    "ContextJson": "{\u0022push-mode\u0022:\u0022prompt\u0022,\u0022ai-plan-review\u0022:\u0022false\u0022,\u0022user-code-gate\u0022:\u0022true\u0022,\u0022user-plan-gate\u0022:\u0022true\u0022,\u0022gate-idle-compaction\u0022:\u00220\u0022,\u0022ai-code-review\u0022:\u0022false\u0022,\u0022refinement-check\u0022:\u0022true\u0022}",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022work-items\u0022,\u0022ProviderType\u0022:\u0022simulated-work-items\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022DelaySeconds\u0022:\u00223\u0022,\u0022Title\u0022:\u0022Simulated story: Copilot adds the implemented marker\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:\u0022github-copilot-cli\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022CliPath\u0022:\u0022/usr/local/bin/driven-stub\u0022,\u0022token\u0022:\u0022sim-fake-gh-token\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022workspace-repo\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022ConnectorId\u0022:\u0022d6c2d7d2-ee7c-4080-9c59-ab00666572f6\u0022,\u0022Settings\u0022:{\u0022NoCache\u0022:\u0022true\u0022,\u0022AllowPush\u0022:\u0022true\u0022,\u0022CloneUrl\u0022:\u0022http://host.docker.internal:8418/git/test.git\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022coding-session-workspace\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022WorkingPath\u0022:\u0022/workspace/repos/workspace-repo\u0022},\u0022DelegatedResource\u0022:null}]",
+    "TagsJson": "[\u0022sim\u0022]",
+    "Scope": "Company",
+    "OwnerPrincipalId": null,
+    "GrantsJson": "[]",
+    "Enabled": true,
+    "UpdatedUtc": "2026-07-30T20:16:04.5780631+00:00"
+  }
+]

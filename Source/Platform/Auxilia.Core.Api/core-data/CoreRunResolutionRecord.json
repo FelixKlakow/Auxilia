@@ -1,0 +1,810 @@
+[
+  {
+    "Id": "cdfcf79f-40f8-4dd2-b817-1bbf47d65bde",
+    "ResolutionToken": "09d13c9f6323424eb2d666a45d8be5f8",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022cdfcf79f-40f8-4dd2-b817-1bbf47d65bde\u0022,\u0022WorkflowType\u0022:\u0022steering-sample\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022Instruction\u0022:\u0022say hello\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u002209d13c9f6323424eb2d666a45d8be5f8\u0022,\u0022SlotProviderTypes\u0022:[],\u0022Repositories\u0022:null}",
+    "CreatedUtc": "2026-07-26T17:47:49.0119067+00:00"
+  },
+  {
+    "Id": "0a6a58d7-e386-42a2-9272-6728bdf11e0f",
+    "ResolutionToken": "8cc18f3bc79f4c72a23d2111fe1b4c92",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00220a6a58d7-e386-42a2-9272-6728bdf11e0f\u0022,\u0022WorkflowType\u0022:\u0022steering-sample\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022Instruction\u0022:\u0022Test\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00228cc18f3bc79f4c72a23d2111fe1b4c92\u0022,\u0022SlotProviderTypes\u0022:[],\u0022Repositories\u0022:null}",
+    "CreatedUtc": "2026-07-26T17:54:45.6645351+00:00"
+  },
+  {
+    "Id": "fb59301e-fe72-4fd0-9eb0-5024a5f0d01c",
+    "ResolutionToken": "c9f758b7468b4062ac71eece6fe1f5e7",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022fb59301e-fe72-4fd0-9eb0-5024a5f0d01c\u0022,\u0022WorkflowType\u0022:\u0022sleeping-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022WORKFLOW_NAME\u0022:\u0022sleeping-workflow\u0022,\u0022SLEEP_SECONDS\u0022:\u00225\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022c9f758b7468b4062ac71eece6fe1f5e7\u0022,\u0022SlotProviderTypes\u0022:[],\u0022Repositories\u0022:null}",
+    "CreatedUtc": "2026-07-26T18:09:00.2008523+00:00"
+  },
+  {
+    "Id": "493ecbf3-665e-4177-8ec9-74c0bfc54d19",
+    "ResolutionToken": "e09d95f5e19c474ea76f3994da007a48",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022493ecbf3-665e-4177-8ec9-74c0bfc54d19\u0022,\u0022WorkflowType\u0022:\u0022sleeping-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022WORKFLOW_NAME\u0022:\u0022sleeping-workflow\u0022,\u0022SLEEP_SECONDS\u0022:\u00225\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022e09d95f5e19c474ea76f3994da007a48\u0022,\u0022SlotProviderTypes\u0022:[],\u0022Repositories\u0022:null}",
+    "CreatedUtc": "2026-07-26T18:14:21.4193857+00:00"
+  },
+  {
+    "Id": "62950593-4937-4919-bfb9-e6d07de197d6",
+    "ResolutionToken": "730f86cedd884c7896b3054549d5415c",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u002262950593-4937-4919-bfb9-e6d07de197d6\u0022,\u0022WorkflowType\u0022:\u0022sleeping-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022WORKFLOW_NAME\u0022:\u0022sleeping-workflow\u0022,\u0022SLEEP_SECONDS\u0022:\u00225\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022730f86cedd884c7896b3054549d5415c\u0022,\u0022SlotProviderTypes\u0022:[],\u0022Repositories\u0022:null}",
+    "CreatedUtc": "2026-07-26T18:15:06.4259615+00:00"
+  },
+  {
+    "Id": "76dbf024-b805-40ed-a426-c514c9002778",
+    "ResolutionToken": "2f2d40e53d0e4168838a44cd51e8cfeb",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u002276dbf024-b805-40ed-a426-c514c9002778\u0022,\u0022WorkflowType\u0022:\u0022sleeping-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00222f2d40e53d0e4168838a44cd51e8cfeb\u0022,\u0022SlotProviderTypes\u0022:[],\u0022Repositories\u0022:null}",
+    "CreatedUtc": "2026-07-26T18:19:49.567694+00:00"
+  },
+  {
+    "Id": "de810d2b-d8b8-45aa-b755-89404049a3ea",
+    "ResolutionToken": "a3f9f530c055442680cd8bcdcdf76f17",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022de810d2b-d8b8-45aa-b755-89404049a3ea\u0022,\u0022WorkflowType\u0022:\u0022crashing-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022WORKFLOW_NAME\u0022:\u0022does-not-exist\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022a3f9f530c055442680cd8bcdcdf76f17\u0022,\u0022SlotProviderTypes\u0022:[],\u0022Repositories\u0022:null}",
+    "CreatedUtc": "2026-07-26T18:31:52.3687306+00:00"
+  },
+  {
+    "Id": "56ea7896-6a10-483a-aa92-fc545488876d",
+    "ResolutionToken": "04ad36f925c346cd98a6b44505c8bbe7",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u002256ea7896-6a10-483a-aa92-fc545488876d\u0022,\u0022WorkflowType\u0022:\u0022sleeping-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022WORKFLOW_NAME\u0022:\u0022sleeping-workflow\u0022,\u0022SLEEP_SECONDS\u0022:\u00225\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u002204ad36f925c346cd98a6b44505c8bbe7\u0022,\u0022SlotProviderTypes\u0022:[],\u0022Repositories\u0022:null}",
+    "CreatedUtc": "2026-07-26T18:32:32.7278936+00:00"
+  },
+  {
+    "Id": "dac25e30-bbb5-4427-b73e-c9070b98b555",
+    "ResolutionToken": "85ec882238d84640b39a48eb6bb7cf55",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022dac25e30-bbb5-4427-b73e-c9070b98b555\u0022,\u0022WorkflowType\u0022:\u0022sleeping-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022WORKFLOW_NAME\u0022:\u0022sleeping-workflow\u0022,\u0022SLEEP_SECONDS\u0022:\u00225\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u002285ec882238d84640b39a48eb6bb7cf55\u0022,\u0022SlotProviderTypes\u0022:[],\u0022Repositories\u0022:null}",
+    "CreatedUtc": "2026-07-26T18:34:39.9771837+00:00"
+  },
+  {
+    "Id": "660f1e68-ffa9-41a9-9d73-7f43dbc1641c",
+    "ResolutionToken": "98af742acf914fcd91e043f605549e07",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022660f1e68-ffa9-41a9-9d73-7f43dbc1641c\u0022,\u0022WorkflowType\u0022:\u0022echo-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022WORKFLOW_NAME\u0022:\u0022echo-workflow\u0022,\u0022Message\u0022:\u0022Hello Felix, outputs work!\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u002298af742acf914fcd91e043f605549e07\u0022,\u0022SlotProviderTypes\u0022:[],\u0022Repositories\u0022:null}",
+    "CreatedUtc": "2026-07-26T18:46:31.9878363+00:00"
+  },
+  {
+    "Id": "b271e32f-d97b-43d0-bf79-7c9afefd54d7",
+    "ResolutionToken": "fda5d661fe18400c9e26063def057738",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022b271e32f-d97b-43d0-bf79-7c9afefd54d7\u0022,\u0022WorkflowType\u0022:\u0022echo-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022WORKFLOW_NAME\u0022:\u0022echo-workflow\u0022,\u0022Message\u0022:\u0022Test\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022fda5d661fe18400c9e26063def057738\u0022,\u0022SlotProviderTypes\u0022:[],\u0022Repositories\u0022:null}",
+    "CreatedUtc": "2026-07-26T18:56:20.4117306+00:00"
+  },
+  {
+    "Id": "2ba466f4-5039-4449-85a9-4046db9b1d63",
+    "ResolutionToken": "51b2930769334a4ab1a3c730329c1d91",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00222ba466f4-5039-4449-85a9-4046db9b1d63\u0022,\u0022WorkflowType\u0022:\u0022echo-decision-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022WORKFLOW_NAME\u0022:\u0022echo-decision-workflow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u002251b2930769334a4ab1a3c730329c1d91\u0022,\u0022SlotProviderTypes\u0022:[],\u0022Repositories\u0022:null}",
+    "CreatedUtc": "2026-07-26T19:11:29.4316336+00:00"
+  },
+  {
+    "Id": "478b5363-eef5-40bb-89dd-2425d6e3939a",
+    "ResolutionToken": "20cac90690094dcfabda8576d55d5e31",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022478b5363-eef5-40bb-89dd-2425d6e3939a\u0022,\u0022WorkflowType\u0022:\u0022echo-decision-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022WORKFLOW_NAME\u0022:\u0022echo-decision-workflow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u002220cac90690094dcfabda8576d55d5e31\u0022,\u0022SlotProviderTypes\u0022:[],\u0022Repositories\u0022:null}",
+    "CreatedUtc": "2026-07-26T19:22:20.3467798+00:00"
+  },
+  {
+    "Id": "24790de4-3554-4608-8208-6ef9f6dec7b6",
+    "ResolutionToken": "5ff28d3c4df143c3a79b294ff1dd45e0",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u002224790de4-3554-4608-8208-6ef9f6dec7b6\u0022,\u0022WorkflowType\u0022:\u0022echo-choice-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022WORKFLOW_NAME\u0022:\u0022echo-choice-workflow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00225ff28d3c4df143c3a79b294ff1dd45e0\u0022,\u0022SlotProviderTypes\u0022:[],\u0022Repositories\u0022:null}",
+    "CreatedUtc": "2026-07-26T19:27:43.5398447+00:00"
+  },
+  {
+    "Id": "ce206a75-4bc4-462f-80a3-a63f5ef8fed3",
+    "ResolutionToken": "1ee4d8e2cc434ab08ed7edf0b1f56ea5",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022ce206a75-4bc4-462f-80a3-a63f5ef8fed3\u0022,\u0022WorkflowType\u0022:\u0022echo-choice-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022WORKFLOW_NAME\u0022:\u0022echo-choice-workflow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00221ee4d8e2cc434ab08ed7edf0b1f56ea5\u0022,\u0022SlotProviderTypes\u0022:[],\u0022Repositories\u0022:null}",
+    "CreatedUtc": "2026-07-26T19:34:36.7587805+00:00"
+  },
+  {
+    "Id": "a0535198-91b7-4b76-9bdf-9abd17209625",
+    "ResolutionToken": "8aadd884228f43c09d0a7f1b17f8ad4c",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022a0535198-91b7-4b76-9bdf-9abd17209625\u0022,\u0022WorkflowType\u0022:\u0022echo-choice-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022WORKFLOW_NAME\u0022:\u0022echo-choice-workflow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00228aadd884228f43c09d0a7f1b17f8ad4c\u0022,\u0022SlotProviderTypes\u0022:[],\u0022Repositories\u0022:null}",
+    "CreatedUtc": "2026-07-26T19:34:56.3287093+00:00"
+  },
+  {
+    "Id": "882a0f80-22af-4523-a966-311823c627c5",
+    "ResolutionToken": "b8a43e7ba5a04e5eac0dbe8af4dd8974",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022882a0f80-22af-4523-a966-311823c627c5\u0022,\u0022WorkflowType\u0022:\u0022echo-choice-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022WORKFLOW_NAME\u0022:\u0022echo-choice-workflow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022b8a43e7ba5a04e5eac0dbe8af4dd8974\u0022,\u0022SlotProviderTypes\u0022:[],\u0022Repositories\u0022:null}",
+    "CreatedUtc": "2026-07-26T19:40:59.7230386+00:00"
+  },
+  {
+    "Id": "4505c1af-63ff-460e-8fe9-99e517387f50",
+    "ResolutionToken": "a0a1d5b6b96947e8a18cd0127aa6cb79",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00224505c1af-63ff-460e-8fe9-99e517387f50\u0022,\u0022WorkflowType\u0022:\u0022echo-decision-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022WORKFLOW_NAME\u0022:\u0022echo-decision-workflow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022a0a1d5b6b96947e8a18cd0127aa6cb79\u0022,\u0022SlotProviderTypes\u0022:[],\u0022Repositories\u0022:null}",
+    "CreatedUtc": "2026-07-26T19:41:21.89093+00:00"
+  },
+  {
+    "Id": "572d0a0f-f9f2-4891-b081-f832bdfb4c03",
+    "ResolutionToken": "60e23e8932374c1e83dbae8a4d2b4a5e",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022572d0a0f-f9f2-4891-b081-f832bdfb4c03\u0022,\u0022WorkflowType\u0022:\u0022echo-decision-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022WORKFLOW_NAME\u0022:\u0022echo-decision-workflow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u002260e23e8932374c1e83dbae8a4d2b4a5e\u0022,\u0022SlotProviderTypes\u0022:[],\u0022Repositories\u0022:null}",
+    "CreatedUtc": "2026-07-26T19:46:39.7598328+00:00"
+  },
+  {
+    "Id": "df991190-b469-4948-967b-c2db154d8976",
+    "ResolutionToken": "30c4ca7fca1841ceb7885b5bd5f4e87e",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022df991190-b469-4948-967b-c2db154d8976\u0022,\u0022WorkflowType\u0022:\u0022crashing-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u002230c4ca7fca1841ceb7885b5bd5f4e87e\u0022,\u0022SlotProviderTypes\u0022:[],\u0022Repositories\u0022:null}",
+    "CreatedUtc": "2026-07-26T19:54:04.6486671+00:00"
+  },
+  {
+    "Id": "3ba20ef1-29ab-4a53-ab3b-a7bb44e68363",
+    "ResolutionToken": "62b8dc7882234d58a27556dc20b33f9f",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00223ba20ef1-29ab-4a53-ab3b-a7bb44e68363\u0022,\u0022WorkflowType\u0022:\u0022echo-choice-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022WORKFLOW_NAME\u0022:\u0022echo-choice-workflow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u002262b8dc7882234d58a27556dc20b33f9f\u0022,\u0022SlotProviderTypes\u0022:[],\u0022Repositories\u0022:null}",
+    "CreatedUtc": "2026-07-26T20:06:54.1073549+00:00"
+  },
+  {
+    "Id": "7639cfea-55ba-4b3b-b871-2652a6e4a7c8",
+    "ResolutionToken": "914cfdd76c364e05b88c7f9f229c2066",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u00224a15f2ee-bf58-4fd7-b187-77d31a497bb3\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00227639cfea-55ba-4b3b-b871-2652a6e4a7c8\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Look around the repository and summarize what it contains.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022914cfdd76c364e05b88c7f9f229c2066\u0022,\u0022SlotProviderTypes\u0022:[],\u0022Repositories\u0022:[{\u0022Id\u0022:\u0022repo\u0022,\u0022CloneUrl\u0022:\u0022https://github.com/octocat/Hello-World.git\u0022,\u0022Branch\u0022:null,\u0022AuthSlotName\u0022:null,\u0022NoCache\u0022:true}]}",
+    "CreatedUtc": "2026-07-26T20:12:42.296868+00:00"
+  },
+  {
+    "Id": "a349aab3-d5bb-42c8-8587-3e31eacf7304",
+    "ResolutionToken": "7a669735c7b54de18d04456448b6ece0",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u00224a15f2ee-bf58-4fd7-b187-77d31a497bb3\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022a349aab3-d5bb-42c8-8587-3e31eacf7304\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Look around the repository and summarize what it contains.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00227a669735c7b54de18d04456448b6ece0\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022Repositories\u0022:[{\u0022Id\u0022:\u0022repo\u0022,\u0022CloneUrl\u0022:\u0022https://github.com/octocat/Hello-World.git\u0022,\u0022Branch\u0022:null,\u0022AuthSlotName\u0022:null,\u0022NoCache\u0022:true}]}",
+    "CreatedUtc": "2026-07-26T20:15:03.4001862+00:00"
+  },
+  {
+    "Id": "70891c28-abd5-4ac2-ba49-05c585da98e2",
+    "ResolutionToken": "7a97b233d803463ea5009bf10d56bca0",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u00224a15f2ee-bf58-4fd7-b187-77d31a497bb3\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u002270891c28-abd5-4ac2-ba49-05c585da98e2\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Look around the repository and summarize what it contains.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00227a97b233d803463ea5009bf10d56bca0\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022Repositories\u0022:[{\u0022Id\u0022:\u0022repo\u0022,\u0022CloneUrl\u0022:\u0022https://github.com/octocat/Hello-World.git\u0022,\u0022Branch\u0022:null,\u0022AuthSlotName\u0022:null,\u0022NoCache\u0022:true}]}",
+    "CreatedUtc": "2026-07-26T20:15:58.0813715+00:00"
+  },
+  {
+    "Id": "891d56d7-3455-4705-b947-8f6bcb09d798",
+    "ResolutionToken": "4908aeb4429a473c92b6c090925db900",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u00224a15f2ee-bf58-4fd7-b187-77d31a497bb3\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022891d56d7-3455-4705-b947-8f6bcb09d798\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022Title\u0022:\u0022Look around the repository and summarize what it contains.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00224908aeb4429a473c92b6c090925db900\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022Repositories\u0022:[{\u0022Id\u0022:\u0022repo\u0022,\u0022CloneUrl\u0022:\u0022https://github.com/octocat/Hello-World.git\u0022,\u0022Branch\u0022:null,\u0022AuthSlotName\u0022:null,\u0022NoCache\u0022:true}]}",
+    "CreatedUtc": "2026-07-26T20:16:24.4940386+00:00"
+  },
+  {
+    "Id": "dcae67ec-c6ec-45ec-bfff-2b801e44ee71",
+    "ResolutionToken": "76017a2208b74c028b273794f5c682cc",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022184931b3-a23c-4e5c-b399-1e5c7fd13b40\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022dcae67ec-c6ec-45ec-bfff-2b801e44ee71\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Please inspect the workspace and write a note.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u002276017a2208b74c028b273794f5c682cc\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null}",
+    "CreatedUtc": "2026-07-26T23:14:16.6392377+00:00"
+  },
+  {
+    "Id": "a6d6c82c-83dd-4d65-a0a9-3d41ebeb5590",
+    "ResolutionToken": "24ad6b48d36a4f99a562afdafc11e948",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022a6d6c82c-83dd-4d65-a0a9-3d41ebeb5590\u0022,\u0022WorkflowType\u0022:\u0022echo-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022Message\u0022:\u0022ping\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u002224ad6b48d36a4f99a562afdafc11e948\u0022,\u0022SlotProviderTypes\u0022:[],\u0022WorkspaceMounts\u0022:null}",
+    "CreatedUtc": "2026-07-26T23:17:42.7273979+00:00"
+  },
+  {
+    "Id": "cdbdb751-cc3b-4d73-8336-6965e4f67f00",
+    "ResolutionToken": "7ae66fd3f20045fb9004a4fe8f78fc66",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022cdbdb751-cc3b-4d73-8336-6965e4f67f00\u0022,\u0022WorkflowType\u0022:\u0022echo-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022Message\u0022:\u0022ping-after-fix\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00227ae66fd3f20045fb9004a4fe8f78fc66\u0022,\u0022SlotProviderTypes\u0022:[],\u0022WorkspaceMounts\u0022:null}",
+    "CreatedUtc": "2026-07-26T23:28:03.8965841+00:00"
+  },
+  {
+    "Id": "f22c9948-80e3-49cf-bd26-9359a35e0da6",
+    "ResolutionToken": "0c31624161b846b4ac73c3d06efea4a7",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022f22c9948-80e3-49cf-bd26-9359a35e0da6\u0022,\u0022WorkflowType\u0022:\u0022echo-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022WORKFLOW_NAME\u0022:\u0022echo-workflow\u0022,\u0022Message\u0022:\u0022ping-after-broker-fix\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00220c31624161b846b4ac73c3d06efea4a7\u0022,\u0022SlotProviderTypes\u0022:[],\u0022WorkspaceMounts\u0022:null}",
+    "CreatedUtc": "2026-07-26T23:30:42.3075312+00:00"
+  },
+  {
+    "Id": "619c529f-62ea-4290-9e62-4cdc994bb5be",
+    "ResolutionToken": "330b85014e84452299904ec464bc4a9c",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022619c529f-62ea-4290-9e62-4cdc994bb5be\u0022,\u0022WorkflowType\u0022:\u0022echo-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022WORKFLOW_NAME\u0022:\u0022echo-workflow\u0022,\u0022Message\u0022:\u0022ping-final\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022330b85014e84452299904ec464bc4a9c\u0022,\u0022SlotProviderTypes\u0022:[],\u0022WorkspaceMounts\u0022:null}",
+    "CreatedUtc": "2026-07-26T23:32:49.8401821+00:00"
+  },
+  {
+    "Id": "f2debd91-5358-4d12-83b3-6c1c3da5d50d",
+    "ResolutionToken": "a90460f5485141daa95d058c5873817a",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u00228974147c-d289-4f9a-bef8-a7cec5259b25\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022f2debd91-5358-4d12-83b3-6c1c3da5d50d\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Please inspect the workspace and write a note.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022a90460f5485141daa95d058c5873817a\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null}",
+    "CreatedUtc": "2026-07-26T23:35:54.992732+00:00"
+  },
+  {
+    "Id": "75aaea95-d504-483a-90e2-f733da64319d",
+    "ResolutionToken": "f2b4d8572d07479b91817f45a0746541",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u002275aaea95-d504-483a-90e2-f733da64319d\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Inspect the workspace and write a note.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022f2b4d8572d07479b91817f45a0746541\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null}",
+    "CreatedUtc": "2026-07-26T23:39:20.1751033+00:00"
+  },
+  {
+    "Id": "4dffa013-64fb-4a0b-93d3-7ba3487d3361",
+    "ResolutionToken": "8ef0fc3a235143c29f16d46d669d6567",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00224dffa013-64fb-4a0b-93d3-7ba3487d3361\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Diagnose run.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00228ef0fc3a235143c29f16d46d669d6567\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null}",
+    "CreatedUtc": "2026-07-26T23:41:31.1539929+00:00"
+  },
+  {
+    "Id": "c1520e75-5792-4fcf-b7f2-8bb7189768e4",
+    "ResolutionToken": "a6a2624d3e364d359d9f55d0cdf34b2f",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022c1520e75-5792-4fcf-b7f2-8bb7189768e4\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Diagnose run 2.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022a6a2624d3e364d359d9f55d0cdf34b2f\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null}",
+    "CreatedUtc": "2026-07-26T23:42:19.1803271+00:00"
+  },
+  {
+    "Id": "9f29187f-3e77-441d-aff4-ddef916f2408",
+    "ResolutionToken": "3e32b23542534f62910b7bcf33730b45",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u002246c14104-21b8-41e9-b1e6-b3553d930aad\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00229f29187f-3e77-441d-aff4-ddef916f2408\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Please inspect the workspace and write a note.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00223e32b23542534f62910b7bcf33730b45\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null}",
+    "CreatedUtc": "2026-07-26T23:47:37.0565854+00:00"
+  },
+  {
+    "Id": "9287da70-38ca-468b-a324-d8da330fc4e9",
+    "ResolutionToken": "6de5c86169d14b9cb63488f9a6264f76",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022dfa327d7-f3af-4c90-9630-a91f3cff6835\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00229287da70-38ca-468b-a324-d8da330fc4e9\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Please inspect the workspace and write a note.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00226de5c86169d14b9cb63488f9a6264f76\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null}",
+    "CreatedUtc": "2026-07-26T23:50:25.471163+00:00"
+  },
+  {
+    "Id": "2ee9ae4d-5dbf-4882-b457-177910608295",
+    "ResolutionToken": "3b6e3b79c0bb4c38a5364f038d3948b7",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022fae1b9e2-3c42-48c6-989c-858acc26e5bd\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00222ee9ae4d-5dbf-4882-b457-177910608295\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Please inspect the workspace and write a note.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00223b6e3b79c0bb4c38a5364f038d3948b7\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null}",
+    "CreatedUtc": "2026-07-26T23:53:35.3469748+00:00"
+  },
+  {
+    "Id": "dec01d44-56e3-4dae-b9af-9d96f10c20ab",
+    "ResolutionToken": "8d8c85c0bb234ceb9dcd7f0936ad0bf6",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u002214117157-8133-492f-9e59-a8a05312f647\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022dec01d44-56e3-4dae-b9af-9d96f10c20ab\u0022,\u0022WorkflowType\u0022:\u0022github-copilot\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-copilot-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Please inspect the workspace and write a note.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00228d8c85c0bb234ceb9dcd7f0936ad0bf6\u0022,\u0022SlotProviderTypes\u0022:[\u0022github-copilot-cli\u0022],\u0022WorkspaceMounts\u0022:null}",
+    "CreatedUtc": "2026-07-26T23:53:41.4556526+00:00"
+  },
+  {
+    "Id": "10529cb6-2e92-48d1-8651-3286d80a2e78",
+    "ResolutionToken": "db0981ba133b4269be2d84d255dd38a0",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022fae1b9e2-3c42-48c6-989c-858acc26e5bd\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u002210529cb6-2e92-48d1-8651-3286d80a2e78\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Look around the mounted repository.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022db0981ba133b4269be2d84d255dd38a0\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/octocat/Hello-World.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022no-cache\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:null}]}",
+    "CreatedUtc": "2026-07-26T23:53:43.4743744+00:00"
+  },
+  {
+    "Id": "f4958b6e-66cc-44d6-9c9b-e861f80f9157",
+    "ResolutionToken": "76f73d6d93a048d89fa883eba0f0a3ec",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022f4958b6e-66cc-44d6-9c9b-e861f80f9157\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Say hello and end the session.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u002276f73d6d93a048d89fa883eba0f0a3ec\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null}",
+    "CreatedUtc": "2026-07-27T06:14:18.1438739+00:00"
+  },
+  {
+    "Id": "b4a6b83b-d206-4734-8aff-8810c7b8b975",
+    "ResolutionToken": "44f0e5ca008548e6bec5177c4c5e0c91",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022fae1b9e2-3c42-48c6-989c-858acc26e5bd\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022b4a6b83b-d206-4734-8aff-8810c7b8b975\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Say hello and end the session.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u002244f0e5ca008548e6bec5177c4c5e0c91\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null}",
+    "CreatedUtc": "2026-07-27T06:15:40.6798774+00:00"
+  },
+  {
+    "Id": "a95d3ef1-a3c9-427c-90b5-51193f74f3b6",
+    "ResolutionToken": "d7a91d1b4c554acaaa7200090a5c3a26",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022a95d3ef1-a3c9-427c-90b5-51193f74f3b6\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Can you tell me what needs to be done in order to get this working again? I think Copilot must be updated.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022d7a91d1b4c554acaaa7200090a5c3a26\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}]}",
+    "CreatedUtc": "2026-07-27T06:30:18.1081776+00:00"
+  },
+  {
+    "Id": "4ac3281b-f6a3-413f-9332-73f0f84c5255",
+    "ResolutionToken": "7c97086a6b7e4298b7a6b7b58321062e",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00224ac3281b-f6a3-413f-9332-73f0f84c5255\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022What needs to be done in order to update this to work again?\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00227c97086a6b7e4298b7a6b7b58321062e\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}]}",
+    "CreatedUtc": "2026-07-27T06:43:58.9037441+00:00"
+  },
+  {
+    "Id": "cdd45ff7-4f4c-41d5-b0ab-3f83efdd3fb7",
+    "ResolutionToken": "1c1005f5108e4568b7a6cd767ee029dd",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022fae1b9e2-3c42-48c6-989c-858acc26e5bd\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022cdd45ff7-4f4c-41d5-b0ab-3f83efdd3fb7\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Inspect and note.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00221c1005f5108e4568b7a6cd767ee029dd\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null}",
+    "CreatedUtc": "2026-07-27T06:56:56.5800628+00:00"
+  },
+  {
+    "Id": "b12323ea-9611-4cda-b2be-d0f35df8c8dc",
+    "ResolutionToken": "a184984420d64a488f66a6b22e20d5f0",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022fae1b9e2-3c42-48c6-989c-858acc26e5bd\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022b12323ea-9611-4cda-b2be-d0f35df8c8dc\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Inspect and note.\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022a184984420d64a488f66a6b22e20d5f0\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null}",
+    "CreatedUtc": "2026-07-27T06:57:02.6831085+00:00"
+  },
+  {
+    "Id": "2b7730f6-744d-4a58-b516-7f2028150211",
+    "ResolutionToken": "be3481f8d97e464dba31c14d27cb9a79",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00222b7730f6-744d-4a58-b516-7f2028150211\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Update the Copilot SDK to the newest version and fix errors. Then push.\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022be3481f8d97e464dba31c14d27cb9a79\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}]}",
+    "CreatedUtc": "2026-07-27T07:04:03.6968133+00:00"
+  },
+  {
+    "Id": "083ff74d-e5bc-458f-9f9f-0e48a48d2d8e",
+    "ResolutionToken": "a24efb8bba704d95affe0a8e892548f7",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022fae1b9e2-3c42-48c6-989c-858acc26e5bd\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022083ff74d-e5bc-458f-9f9f-0e48a48d2d8e\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Inspect and note. AWAIT_GUIDANCE\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022a24efb8bba704d95affe0a8e892548f7\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null}",
+    "CreatedUtc": "2026-07-27T07:21:38.3368298+00:00"
+  },
+  {
+    "Id": "3eabdb73-3f3c-4ae0-9957-5385bd260864",
+    "ResolutionToken": "2fcfc8d267d748d7a675c4e1e8ccbb55",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022fae1b9e2-3c42-48c6-989c-858acc26e5bd\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00223eabdb73-3f3c-4ae0-9957-5385bd260864\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Inspect and note.\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00222fcfc8d267d748d7a675c4e1e8ccbb55\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null,\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-27T07:48:13.8247222+00:00"
+  },
+  {
+    "Id": "f8788457-3909-4f00-a501-27d5d95eac71",
+    "ResolutionToken": "4fe070c542d440c5889a8514cfbf1044",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022f8788457-3909-4f00-a501-27d5d95eac71\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022,\u0022instruction\u0022:\u0022Update the Github Copilot SDK to the latest version, then go ahead and and fix all errors occuring afterwards. When done push to main.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00224fe070c542d440c5889a8514cfbf1044\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-27T08:12:57.6367233+00:00"
+  },
+  {
+    "Id": "195353bc-c56d-4ee4-9090-2af57445f757",
+    "ResolutionToken": "bfdd550909284e8a914bc3959c2e7e57",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022fae1b9e2-3c42-48c6-989c-858acc26e5bd\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022195353bc-c56d-4ee4-9090-2af57445f757\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Sanity run.\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022bfdd550909284e8a914bc3959c2e7e57\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null,\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-27T08:16:20.0748311+00:00"
+  },
+  {
+    "Id": "ba4f563e-21e7-4fd1-885e-d1053d83a658",
+    "ResolutionToken": "7775a458701a43e7a7b07452d165f4d3",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022fae1b9e2-3c42-48c6-989c-858acc26e5bd\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022ba4f563e-21e7-4fd1-885e-d1053d83a658\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Compat-check sanity run.\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00227775a458701a43e7a7b07452d165f4d3\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null,\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-27T08:24:56.7001006+00:00"
+  },
+  {
+    "Id": "228ecd9a-c979-4cdf-8b95-a230b7eda1ae",
+    "ResolutionToken": "64014d86aa7c4b59a88f3735098e9968",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022fae1b9e2-3c42-48c6-989c-858acc26e5bd\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022228ecd9a-c979-4cdf-8b95-a230b7eda1ae\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Compat-check sanity run.\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u002264014d86aa7c4b59a88f3735098e9968\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null,\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-27T08:26:26.6798598+00:00"
+  },
+  {
+    "Id": "622f3643-cb09-481d-8802-9503b512a0ba",
+    "ResolutionToken": "5f4fa6156fd64e3fb77cd3e0c316a90b",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022fae1b9e2-3c42-48c6-989c-858acc26e5bd\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022622f3643-cb09-481d-8802-9503b512a0ba\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Plan smoke.\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00225f4fa6156fd64e3fb77cd3e0c316a90b\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null,\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-27T09:06:17.0762837+00:00"
+  },
+  {
+    "Id": "d163052b-991e-4d23-bf8b-b41b2eb5ca93",
+    "ResolutionToken": "204a7e5fc94a4b40b339c7a2624f9919",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u002214117157-8133-492f-9e59-a8a05312f647\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022d163052b-991e-4d23-bf8b-b41b2eb5ca93\u0022,\u0022WorkflowType\u0022:\u0022github-copilot\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-copilot-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Plan smoke.\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022204a7e5fc94a4b40b339c7a2624f9919\u0022,\u0022SlotProviderTypes\u0022:[\u0022github-copilot-cli\u0022],\u0022WorkspaceMounts\u0022:null,\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-27T09:06:21.1340811+00:00"
+  },
+  {
+    "Id": "449bd788-8c89-455d-9e3b-1b30274dcfc6",
+    "ResolutionToken": "297cf0e1731243f78cbfd6700570e78b",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022fae1b9e2-3c42-48c6-989c-858acc26e5bd\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022449bd788-8c89-455d-9e3b-1b30274dcfc6\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Show off the new chat view. AWAIT_GUIDANCE\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022297cf0e1731243f78cbfd6700570e78b\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null,\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-27T09:07:15.0561797+00:00"
+  },
+  {
+    "Id": "95a6e7ad-ac95-4450-984c-4d915d264c0e",
+    "ResolutionToken": "94ea3190cdf04d4886ae862f86d6e68d",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022fae1b9e2-3c42-48c6-989c-858acc26e5bd\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u002295a6e7ad-ac95-4450-984c-4d915d264c0e\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Interrupt me. AWAIT_GUIDANCE\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u002294ea3190cdf04d4886ae862f86d6e68d\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null,\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-27T10:15:48.6259785+00:00"
+  },
+  {
+    "Id": "c0ecb44c-aab9-4b24-9c9a-230743c6a550",
+    "ResolutionToken": "1314708739334ff0bb6c8e15d7a06803",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022fae1b9e2-3c42-48c6-989c-858acc26e5bd\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022c0ecb44c-aab9-4b24-9c9a-230743c6a550\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Zombie test. AWAIT_GUIDANCE\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00221314708739334ff0bb6c8e15d7a06803\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null,\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-27T10:27:00.3112436+00:00"
+  },
+  {
+    "Id": "f2c07497-10f2-4d4c-9831-2c5f04a770a8",
+    "ResolutionToken": "b3eb0ad9722f424383f147235229de34",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022f2c07497-10f2-4d4c-9831-2c5f04a770a8\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Do exactly this, in order: 1) Use TodoWrite to plan your work as two todos. 2) Use AskUserQuestion to ask me one question: \\u0027Which language for the note file?\\u0027 with options \\u0027English\\u0027 and \\u0027German\\u0027. 3) Run \\u0060ls -la\\u0060 with Bash. 4) Write a 2-line NOTES.md in the language I picked. Then stop.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022b3eb0ad9722f424383f147235229de34\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null,\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-27T10:32:32.7836874+00:00"
+  },
+  {
+    "Id": "47f23097-aa31-4654-891f-d83887f98ec3",
+    "ResolutionToken": "c5ac93b577534398bf33a5b94f5a179f",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u002247f23097-aa31-4654-891f-d83887f98ec3\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Do exactly this, in order: 1) Use TodoWrite to plan your work as two todos. 2) Use AskUserQuestion to ask me one question: \\u0027Which language for the note file?\\u0027 with options \\u0027English\\u0027 and \\u0027German\\u0027. 3) Run \\u0060ls -la\\u0060 with Bash. 4) Write a 2-line NOTES.md in the language I picked. Then stop.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022c5ac93b577534398bf33a5b94f5a179f\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null,\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-27T10:42:46.5221193+00:00"
+  },
+  {
+    "Id": "9069e8a4-21a2-425d-a9e2-0001638f7d87",
+    "ResolutionToken": "5f8ab50b7bdd4bc4a9a85d367054c1dc",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00229069e8a4-21a2-425d-a9e2-0001638f7d87\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Plan your work as two tasks using your task tools, then write a one-line PLAN_OK.md and finish. No questions.\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00225f8ab50b7bdd4bc4a9a85d367054c1dc\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null,\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-27T10:51:21.5021493+00:00"
+  },
+  {
+    "Id": "8c281b89-59b2-403a-9dc8-f67331616d04",
+    "ResolutionToken": "c289047deb5b4fde94969a4b7792b047",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u002214117157-8133-492f-9e59-a8a05312f647\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00228c281b89-59b2-403a-9dc8-f67331616d04\u0022,\u0022WorkflowType\u0022:\u0022github-copilot\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-copilot-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Line-mode regression check.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022c289047deb5b4fde94969a4b7792b047\u0022,\u0022SlotProviderTypes\u0022:[\u0022github-copilot-cli\u0022],\u0022WorkspaceMounts\u0022:null,\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-27T11:48:48.7492717+00:00"
+  },
+  {
+    "Id": "741d7aa9-7697-4633-94e6-17e8532b92d8",
+    "ResolutionToken": "8b3af02d1b404e569e9812c88dc8e6e2",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u002214117157-8133-492f-9e59-a8a05312f647\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022741d7aa9-7697-4633-94e6-17e8532b92d8\u0022,\u0022WorkflowType\u0022:\u0022github-copilot\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-copilot-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Line-mode regression check.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00228b3af02d1b404e569e9812c88dc8e6e2\u0022,\u0022SlotProviderTypes\u0022:[\u0022github-copilot-cli\u0022],\u0022WorkspaceMounts\u0022:null,\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-27T11:49:33.9754492+00:00"
+  },
+  {
+    "Id": "99825920-2b30-4de5-ab99-4405c89bd605",
+    "ResolutionToken": "72aa4bde1cd14ba9a44353c4c6892e8a",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022fae1b9e2-3c42-48c6-989c-858acc26e5bd\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u002299825920-2b30-4de5-ab99-4405c89bd605\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Duration probe.\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u002272aa4bde1cd14ba9a44353c4c6892e8a\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null,\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-27T12:22:30.3675702+00:00"
+  },
+  {
+    "Id": "6304de6e-c571-431a-9e8e-92973eaad24f",
+    "ResolutionToken": "df5b2ec6b50142008810a1cdf492ac7a",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022fae1b9e2-3c42-48c6-989c-858acc26e5bd\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00226304de6e-c571-431a-9e8e-92973eaad24f\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022instruction\u0022:\u0022Duration probe.\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022df5b2ec6b50142008810a1cdf492ac7a\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null,\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-27T12:22:36.4166806+00:00"
+  },
+  {
+    "Id": "962c5004-f908-4c7c-82e9-81ee411333bf",
+    "ResolutionToken": "4867c6af8b904c6fae1e2a67c89e7b30",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022962c5004-f908-4c7c-82e9-81ee411333bf\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022,\u0022instruction\u0022:\u0022Updgrade to the newest github copilot sdk.\\r\\nIf you encounter errors fix them.\\r\\nPush to main directly.\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00224867c6af8b904c6fae1e2a67c89e7b30\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-27T17:27:33.9977997+00:00"
+  },
+  {
+    "Id": "6ee24e70-0716-484c-ab7c-9e385f4be748",
+    "ResolutionToken": "1205a63ac7c444229902cd784c48935d",
+    "SlotBindingsJson": "[]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00226ee24e70-0716-484c-ab7c-9e385f4be748\u0022,\u0022WorkflowType\u0022:\u0022echo-workflow\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-dummy-workflows:system-test\u0022,\u0022Context\u0022:{\u0022WORKFLOW_NAME\u0022:\u0022echo-workflow\u0022,\u0022Message\u0022:\u0022Test\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00221205a63ac7c444229902cd784c48935d\u0022,\u0022SlotProviderTypes\u0022:[],\u0022WorkspaceMounts\u0022:null,\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-27T17:40:12.4333249+00:00"
+  },
+  {
+    "Id": "d550754e-18b1-4c5f-9218-5ab6b3bdd120",
+    "ResolutionToken": "3f26d2a38b2145d4ac26f292a6222d64",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022d550754e-18b1-4c5f-9218-5ab6b3bdd120\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022,\u0022multi-turn\u0022:\u0022true\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00223f26d2a38b2145d4ac26f292a6222d64\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-27T20:01:32.562396+00:00"
+  },
+  {
+    "Id": "dc1efade-ea2c-4d67-b117-ab15c36a5af0",
+    "ResolutionToken": "31e4a1cf4c514eaeb6163e5a5c1f37ec",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022dc1efade-ea2c-4d67-b117-ab15c36a5af0\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022,\u0022multi-turn\u0022:\u0022true\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u002231e4a1cf4c514eaeb6163e5a5c1f37ec\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-27T20:37:37.7823786+00:00"
+  },
+  {
+    "Id": "0249bdc9-af8f-4418-b0c3-2c98f8efd8e8",
+    "ResolutionToken": "3259b0d07fef42b1af617f70da3dc530",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00220249bdc9-af8f-4418-b0c3-2c98f8efd8e8\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022,\u0022multi-turn\u0022:\u0022true\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00223259b0d07fef42b1af617f70da3dc530\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-27T20:57:27.9688224+00:00"
+  },
+  {
+    "Id": "f5b09250-bc30-4437-bd95-67c3d79c18d8",
+    "ResolutionToken": "e5c8f3d12a8c4a02b8e33db954103cf7",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022f5b09250-bc30-4437-bd95-67c3d79c18d8\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022,\u0022multi-turn\u0022:\u0022true\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022e5c8f3d12a8c4a02b8e33db954103cf7\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-27T20:57:40.2568787+00:00"
+  },
+  {
+    "Id": "0a9adc6c-ad15-4992-aef4-78e9ed448f7b",
+    "ResolutionToken": "c69d385f553c42c5b2337e1b77ea7a1f",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00220a9adc6c-ad15-4992-aef4-78e9ed448f7b\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022,\u0022multi-turn\u0022:\u0022false\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022c69d385f553c42c5b2337e1b77ea7a1f\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-27T20:57:46.0439273+00:00"
+  },
+  {
+    "Id": "e8ae9ce0-54bf-4ed7-af29-70b8bd6e277c",
+    "ResolutionToken": "f2f92ced1023410f860def29aa384d32",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022e8ae9ce0-54bf-4ed7-af29-70b8bd6e277c\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022multi-turn\u0022:\u0022true\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022f2f92ced1023410f860def29aa384d32\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-27T21:33:50.2963319+00:00"
+  },
+  {
+    "Id": "108d53c3-cc9c-4de1-b7c0-3e1749a9aca7",
+    "ResolutionToken": "2da6a23d65cf40d48108c99f964467d7",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022108d53c3-cc9c-4de1-b7c0-3e1749a9aca7\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022multi-turn\u0022:\u0022true\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00222da6a23d65cf40d48108c99f964467d7\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-27T21:33:53.8159293+00:00"
+  },
+  {
+    "Id": "dc1c6aa6-6e2c-4f68-bf51-4e7f8b94cacf",
+    "ResolutionToken": "1fee3644bc054137b85e643fe6f25760",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022dc1c6aa6-6e2c-4f68-bf51-4e7f8b94cacf\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022multi-turn\u0022:\u0022true\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00221fee3644bc054137b85e643fe6f25760\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-27T21:33:56.4939136+00:00"
+  },
+  {
+    "Id": "5f057d12-5835-4dd3-9ea1-7c3eee903cb4",
+    "ResolutionToken": "43e5b57eb9d3443eb4b93d72b5548b4a",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00225f057d12-5835-4dd3-9ea1-7c3eee903cb4\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022multi-turn\u0022:\u0022true\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u002243e5b57eb9d3443eb4b93d72b5548b4a\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-27T21:51:49.6553757+00:00"
+  },
+  {
+    "Id": "c55ffeac-df3f-4eaa-a0f5-fec102fbbc7c",
+    "ResolutionToken": "5aabc668fa2c4545a5f8118e7b3d166a",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022c55ffeac-df3f-4eaa-a0f5-fec102fbbc7c\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022multi-turn\u0022:\u0022true\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00225aabc668fa2c4545a5f8118e7b3d166a\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-28T05:36:56.3420261+00:00"
+  },
+  {
+    "Id": "37321a2e-b5f8-47f5-b3fc-d423b64aa0ee",
+    "ResolutionToken": "8e27818f08d84371a8090a608d7f8e59",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u002237321a2e-b5f8-47f5-b3fc-d423b64aa0ee\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022multi-turn\u0022:\u0022true\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00228e27818f08d84371a8090a608d7f8e59\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-28T17:54:01.4351054+00:00"
+  },
+  {
+    "Id": "02a8284d-28e1-421a-ac1c-cb8054084597",
+    "ResolutionToken": "f7476700cc3845ec846f151795d8ab0f",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u002202a8284d-28e1-421a-ac1c-cb8054084597\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022view-mode\u0022:\u0022console\u0022,\u0022multi-turn\u0022:\u0022true\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022f7476700cc3845ec846f151795d8ab0f\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-28T18:02:45.9903828+00:00"
+  },
+  {
+    "Id": "cd5fc2cb-feb7-4f7f-937c-d1860663ec5e",
+    "ResolutionToken": "1b96de93ed0644bc96a43602b607994d",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022cd5fc2cb-feb7-4f7f-937c-d1860663ec5e\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022view-mode\u0022:\u0022console\u0022,\u0022multi-turn\u0022:\u0022true\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00221b96de93ed0644bc96a43602b607994d\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-28T18:22:14.594105+00:00"
+  },
+  {
+    "Id": "f26e227f-245d-42d9-9724-8de81de687f7",
+    "ResolutionToken": "6008edf056b849d08cdc038788885de2",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022f26e227f-245d-42d9-9724-8de81de687f7\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022view-mode\u0022:\u0022console\u0022,\u0022multi-turn\u0022:\u0022true\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00226008edf056b849d08cdc038788885de2\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-28T18:29:55.0880785+00:00"
+  },
+  {
+    "Id": "d3e58ce3-fa33-491a-96f1-c7c9996dddbb",
+    "ResolutionToken": "c6ad3360e238476b8bb9445df231eeb9",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022d3e58ce3-fa33-491a-96f1-c7c9996dddbb\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022view-mode\u0022:\u0022console\u0022,\u0022multi-turn\u0022:\u0022true\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022c6ad3360e238476b8bb9445df231eeb9\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-28T18:40:45.2246594+00:00"
+  },
+  {
+    "Id": "703ba9f3-7ae6-43fb-8577-15bf050b203a",
+    "ResolutionToken": "6c67f700d718457f94c8e0d797c510b9",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022703ba9f3-7ae6-43fb-8577-15bf050b203a\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022view-mode\u0022:\u0022console\u0022,\u0022multi-turn\u0022:\u0022true\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00226c67f700d718457f94c8e0d797c510b9\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-28T18:43:03.8203435+00:00"
+  },
+  {
+    "Id": "a415d3ff-6656-47af-b2eb-8399257c4a48",
+    "ResolutionToken": "e2d50bd46e7b44ad8cec084544dcdefd",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022a415d3ff-6656-47af-b2eb-8399257c4a48\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022view-mode\u0022:\u0022console\u0022,\u0022multi-turn\u0022:\u0022true\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022e2d50bd46e7b44ad8cec084544dcdefd\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-28T18:44:55.4812973+00:00"
+  },
+  {
+    "Id": "3900328e-1dcf-4ed0-a2ac-1921fcd5d2d5",
+    "ResolutionToken": "712de83f1a114cacbd62468be3ff8b1e",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00223900328e-1dcf-4ed0-a2ac-1921fcd5d2d5\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022view-mode\u0022:\u0022console\u0022,\u0022multi-turn\u0022:\u0022true\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022712de83f1a114cacbd62468be3ff8b1e\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-28T18:50:32.1948607+00:00"
+  },
+  {
+    "Id": "64d39bfc-97fa-47f4-b6cf-f87615e4beff",
+    "ResolutionToken": "a4b135f72a18443ca99194ad33212e08",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u002264d39bfc-97fa-47f4-b6cf-f87615e4beff\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022view-mode\u0022:\u0022console\u0022,\u0022multi-turn\u0022:\u0022true\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022a4b135f72a18443ca99194ad33212e08\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-28T19:35:03.7302142+00:00"
+  },
+  {
+    "Id": "5be7aa80-aa56-46e1-b3a9-f2118c7a25c1",
+    "ResolutionToken": "35b544925ea64e4fb21bc9abbe3497ca",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00225be7aa80-aa56-46e1-b3a9-f2118c7a25c1\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022view-mode\u0022:\u0022console\u0022,\u0022multi-turn\u0022:\u0022true\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u002235b544925ea64e4fb21bc9abbe3497ca\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-28T20:08:47.2945044+00:00"
+  },
+  {
+    "Id": "8da97984-6470-4b0e-93f2-0239cde4e033",
+    "ResolutionToken": "db8610a1469f4668998eac75afdff51a",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022ed1199d1-c5cf-468e-9258-435c2ce34381\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:repository\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022af52175d-4d6a-462a-947e-15e45e37c867\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00228da97984-6470-4b0e-93f2-0239cde4e033\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022view-mode\u0022:\u0022console\u0022,\u0022multi-turn\u0022:\u0022true\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022db8610a1469f4668998eac75afdff51a\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-28T20:12:37.4435124+00:00"
+  },
+  {
+    "Id": "6c973cc4-08eb-4340-b3ab-5a52f85c41ad",
+    "ResolutionToken": "7665d1f1764842cb97f94e12914c01e7",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022work-items\u0022,\u0022ProviderType\u0022:\u0022simulated-work-items\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022Title\u0022:\u0022Simulated story: add the implemented marker\u0022,\u0022DelaySeconds\u0022:\u00223\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:\u0022claude-code-cli\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022OAuthToken\u0022:\u0022sim-fake-oauth-token\u0022,\u0022CliPath\u0022:\u0022/usr/local/bin/driven-stub\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:workspace-repo\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022d6c2d7d2-ee7c-4080-9c59-ab00666572f6\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022coding-session-workspace\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022WorkingPath\u0022:\u0022/workspace/repos/workspace-repo\u0022},\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00226c973cc4-08eb-4340-b3ab-5a52f85c41ad\u0022,\u0022WorkflowType\u0022:\u0022implementation\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-implementation-workflow:system-test\u0022,\u0022Context\u0022:{\u0022push-mode\u0022:\u0022skip\u0022,\u0022user-code-gate\u0022:\u0022false\u0022,\u0022user-plan-gate\u0022:\u0022false\u0022,\u0022ai-plan-review\u0022:\u0022false\u0022,\u0022ai-code-review\u0022:\u0022false\u0022,\u0022completeness-check\u0022:\u0022true\u0022,\u0022gate-idle-compaction\u0022:\u00220\u0022,\u0022work-item-id\u0022:\u0022SIM-1\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00227665d1f1764842cb97f94e12914c01e7\u0022,\u0022SlotProviderTypes\u0022:[\u0022simulated-work-items\u0022,\u0022claude-code-cli\u0022,\u0022coding-session-workspace\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022workspace-repo\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022http://host.docker.internal:8418/git/test.git\u0022,\u0022no-cache\u0022:\u0022true\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:workspace-repo\u0022}],\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-29T20:03:53.0548935+00:00"
+  },
+  {
+    "Id": "5ed55041-c01a-4265-9c58-3e6ae44df491",
+    "ResolutionToken": "72f2d9ef8d3e4e88a9a13f4d763cf6ea",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022work-items\u0022,\u0022ProviderType\u0022:\u0022simulated-work-items\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022Title\u0022:\u0022Simulated story: add the implemented marker\u0022,\u0022DelaySeconds\u0022:\u00223\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:\u0022claude-code-cli\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022OAuthToken\u0022:\u0022sim-fake-oauth-token\u0022,\u0022CliPath\u0022:\u0022/usr/local/bin/driven-stub\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:workspace-repo\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022d6c2d7d2-ee7c-4080-9c59-ab00666572f6\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022coding-session-workspace\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022WorkingPath\u0022:\u0022/workspace/repos/workspace-repo\u0022},\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00225ed55041-c01a-4265-9c58-3e6ae44df491\u0022,\u0022WorkflowType\u0022:\u0022implementation\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-implementation-workflow:system-test\u0022,\u0022Context\u0022:{\u0022push-mode\u0022:\u0022skip\u0022,\u0022user-code-gate\u0022:\u0022false\u0022,\u0022user-plan-gate\u0022:\u0022false\u0022,\u0022ai-plan-review\u0022:\u0022false\u0022,\u0022ai-code-review\u0022:\u0022false\u0022,\u0022completeness-check\u0022:\u0022true\u0022,\u0022gate-idle-compaction\u0022:\u00220\u0022,\u0022work-item-id\u0022:\u0022SIM-1\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u002272f2d9ef8d3e4e88a9a13f4d763cf6ea\u0022,\u0022SlotProviderTypes\u0022:[\u0022simulated-work-items\u0022,\u0022claude-code-cli\u0022,\u0022coding-session-workspace\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022workspace-repo\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022http://host.docker.internal:8418/git/test.git\u0022,\u0022no-cache\u0022:\u0022true\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:workspace-repo\u0022}],\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-29T20:09:53.8632466+00:00"
+  },
+  {
+    "Id": "af98bd8d-e993-4fe1-b85d-81cdb33bdfb1",
+    "ResolutionToken": "1a7910934229432a8dde5d61e8c3bbd0",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022work-items\u0022,\u0022ProviderType\u0022:\u0022simulated-work-items\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022Title\u0022:\u0022Simulated story: add the implemented marker\u0022,\u0022DelaySeconds\u0022:\u00223\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:\u0022claude-code-cli\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022OAuthToken\u0022:\u0022sim-fake-oauth-token\u0022,\u0022CliPath\u0022:\u0022/usr/local/bin/driven-stub\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:workspace-repo\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022d6c2d7d2-ee7c-4080-9c59-ab00666572f6\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022coding-session-workspace\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022WorkingPath\u0022:\u0022/workspace/repos/workspace-repo\u0022},\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022af98bd8d-e993-4fe1-b85d-81cdb33bdfb1\u0022,\u0022WorkflowType\u0022:\u0022implementation\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-implementation-workflow:system-test\u0022,\u0022Context\u0022:{\u0022push-mode\u0022:\u0022skip\u0022,\u0022user-code-gate\u0022:\u0022false\u0022,\u0022user-plan-gate\u0022:\u0022false\u0022,\u0022ai-plan-review\u0022:\u0022false\u0022,\u0022ai-code-review\u0022:\u0022false\u0022,\u0022completeness-check\u0022:\u0022true\u0022,\u0022gate-idle-compaction\u0022:\u00220\u0022,\u0022work-item-id\u0022:\u0022SIM-1\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00221a7910934229432a8dde5d61e8c3bbd0\u0022,\u0022SlotProviderTypes\u0022:[\u0022simulated-work-items\u0022,\u0022claude-code-cli\u0022,\u0022coding-session-workspace\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022workspace-repo\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022http://host.docker.internal:8418/git/test.git\u0022,\u0022no-cache\u0022:\u0022true\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:workspace-repo\u0022}],\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-29T20:11:02.6522112+00:00"
+  },
+  {
+    "Id": "a3b0e3b1-946f-48a7-a744-614286593515",
+    "ResolutionToken": "cb1ec8a46db145c1bd0f1d16d16c64c9",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022work-items\u0022,\u0022ProviderType\u0022:\u0022simulated-work-items\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022Title\u0022:\u0022Something\u0022,\u0022Description\u0022:\u0022No description\u0022,\u0022DelaySeconds\u0022:\u00225\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022fae1b9e2-3c42-48c6-989c-858acc26e5bd\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022review-agent\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022fae1b9e2-3c42-48c6-989c-858acc26e5bd\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022coding-session-workspace\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022WorkingPath\u0022:\u0022D:\\\\Tmp\u0022},\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022a3b0e3b1-946f-48a7-a744-614286593515\u0022,\u0022WorkflowType\u0022:\u0022implementation\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-implementation-workflow:system-test\u0022,\u0022Context\u0022:{\u0022completeness-check\u0022:\u0022true\u0022,\u0022ai-plan-review\u0022:\u0022true\u0022,\u0022ai-code-review\u0022:\u0022true\u0022,\u0022max-ai-review-rounds\u0022:\u00222\u0022,\u0022user-plan-gate\u0022:\u0022true\u0022,\u0022user-code-gate\u0022:\u0022true\u0022,\u0022artifact-review\u0022:\u0022true\u0022,\u0022push-mode\u0022:\u0022prompt\u0022,\u0022reviewer-mode\u0022:\u0022headless\u0022,\u0022gate-idle-compaction\u0022:\u002210\u0022,\u0022author-base-prompt\u0022:\u0022Base\u0022,\u0022reviewer-base-prompt\u0022:\u0022Base\u0022,\u0022target-state\u0022:\u0022done\u0022,\u0022work-item-id\u0022:\u0022134521\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022cb1ec8a46db145c1bd0f1d16d16c64c9\u0022,\u0022SlotProviderTypes\u0022:[\u0022simulated-work-items\u0022,\u0022coding-session-workspace\u0022,\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:null,\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
+    "CreatedUtc": "2026-07-29T21:13:40.375637+00:00"
+  },
+  {
+    "Id": "5b3c40f5-824f-45b2-8471-f9ddf3257488",
+    "ResolutionToken": "cce5d6dc98ad46aeba668d5c6e6bfe4d",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022work-items\u0022,\u0022ProviderType\u0022:\u0022simulated-work-items\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022Title\u0022:\u0022Simulated story: add the implemented marker\u0022,\u0022DelaySeconds\u0022:\u00223\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:\u0022claude-code-cli\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022OAuthToken\u0022:\u0022sim-fake-oauth-token\u0022,\u0022CliPath\u0022:\u0022/usr/local/bin/driven-stub\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:workspace-repo\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022d6c2d7d2-ee7c-4080-9c59-ab00666572f6\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022coding-session-workspace\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022WorkingPath\u0022:\u0022/workspace/repos/workspace-repo\u0022},\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "cf486163-06a5-4515-8389-197be1f6a142",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00225b3c40f5-824f-45b2-8471-f9ddf3257488\u0022,\u0022WorkflowType\u0022:\u0022implementation\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-implementation-workflow:system-test\u0022,\u0022Context\u0022:{\u0022push-mode\u0022:\u0022prompt\u0022,\u0022user-code-gate\u0022:\u0022true\u0022,\u0022user-plan-gate\u0022:\u0022true\u0022,\u0022ai-plan-review\u0022:\u0022false\u0022,\u0022ai-code-review\u0022:\u0022false\u0022,\u0022completeness-check\u0022:\u0022true\u0022,\u0022gate-idle-compaction\u0022:\u00220\u0022,\u0022work-item-id\u0022:\u00223412231\u0022,\u0022max-ai-review-rounds\u0022:\u00222\u0022,\u0022artifact-review\u0022:\u0022false\u0022,\u0022reviewer-mode\u0022:\u0022headless\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022cce5d6dc98ad46aeba668d5c6e6bfe4d\u0022,\u0022SlotProviderTypes\u0022:[\u0022simulated-work-items\u0022,\u0022claude-code-cli\u0022,\u0022coding-session-workspace\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022workspace-repo\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022http://host.docker.internal:8418/git/test.git\u0022,\u0022no-cache\u0022:\u0022true\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:workspace-repo\u0022}],\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-30T05:14:15.5689934+00:00"
+  },
+  {
+    "Id": "e83edbcf-4aa4-46e8-92ea-bbab3bade291",
+    "ResolutionToken": "25de60cfde9d4f669c4d61db361fb60c",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022work-items\u0022,\u0022ProviderType\u0022:\u0022simulated-work-items\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022Title\u0022:\u0022Copilot verify story\u0022,\u0022DelaySeconds\u0022:\u00220\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:\u0022github-copilot-cli\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022CliPath\u0022:\u0022/usr/local/bin/driven-stub\u0022,\u0022token\u0022:\u0022sim-fake-gh-token\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:workspace-repo\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022d6c2d7d2-ee7c-4080-9c59-ab00666572f6\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022coding-session-workspace\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022WorkingPath\u0022:\u0022/workspace/repos/workspace-repo\u0022},\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "fb2427ca-42aa-4cbb-bccd-cc681c1c9735",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022e83edbcf-4aa4-46e8-92ea-bbab3bade291\u0022,\u0022WorkflowType\u0022:\u0022implementation\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-implementation-workflow:system-test\u0022,\u0022Context\u0022:{\u0022completeness-check\u0022:\u0022true\u0022,\u0022gate-idle-compaction\u0022:\u00220\u0022,\u0022user-code-gate\u0022:\u0022false\u0022,\u0022user-plan-gate\u0022:\u0022false\u0022,\u0022work-item-id\u0022:\u0022SIM-COPILOT-VERIFY\u0022,\u0022ai-code-review\u0022:\u0022false\u0022,\u0022ai-plan-review\u0022:\u0022false\u0022,\u0022push-mode\u0022:\u0022skip\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u002225de60cfde9d4f669c4d61db361fb60c\u0022,\u0022SlotProviderTypes\u0022:[\u0022simulated-work-items\u0022,\u0022github-copilot-cli\u0022,\u0022coding-session-workspace\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022workspace-repo\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022http://host.docker.internal:8418/git/test.git\u0022,\u0022no-cache\u0022:\u0022true\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:workspace-repo\u0022}],\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-30T12:48:58.7056363+00:00"
+  },
+  {
+    "Id": "2c9f2af6-54a5-49f2-9257-f796675d663e",
+    "ResolutionToken": "6b252b1a44244788a0d36abda0c72526",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022work-items\u0022,\u0022ProviderType\u0022:\u0022simulated-work-items\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022DelaySeconds\u0022:\u00220\u0022,\u0022Title\u0022:\u0022Copilot verify story\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:\u0022github-copilot-cli\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022CliPath\u0022:\u0022/usr/local/bin/driven-stub\u0022,\u0022token\u0022:\u0022sim-fake-gh-token\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:workspace-repo\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022d6c2d7d2-ee7c-4080-9c59-ab00666572f6\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022coding-session-workspace\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022WorkingPath\u0022:\u0022/workspace/repos/workspace-repo\u0022},\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "fb2427ca-42aa-4cbb-bccd-cc681c1c9735",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00222c9f2af6-54a5-49f2-9257-f796675d663e\u0022,\u0022WorkflowType\u0022:\u0022implementation\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-implementation-workflow:system-test\u0022,\u0022Context\u0022:{\u0022ai-code-review\u0022:\u0022false\u0022,\u0022completeness-check\u0022:\u0022true\u0022,\u0022user-plan-gate\u0022:\u0022false\u0022,\u0022push-mode\u0022:\u0022skip\u0022,\u0022gate-idle-compaction\u0022:\u00220\u0022,\u0022work-item-id\u0022:\u0022SIM-COPILOT-VERIFY\u0022,\u0022ai-plan-review\u0022:\u0022false\u0022,\u0022user-code-gate\u0022:\u0022false\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00226b252b1a44244788a0d36abda0c72526\u0022,\u0022SlotProviderTypes\u0022:[\u0022simulated-work-items\u0022,\u0022github-copilot-cli\u0022,\u0022coding-session-workspace\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022workspace-repo\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022http://host.docker.internal:8418/git/test.git\u0022,\u0022no-cache\u0022:\u0022true\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:workspace-repo\u0022}],\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-30T13:00:18.1739945+00:00"
+  },
+  {
+    "Id": "c11f7656-675e-46ab-915b-79feaa73695d",
+    "ResolutionToken": "acbe12388630459cbb36c70e7436e26b",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022work-items\u0022,\u0022ProviderType\u0022:\u0022simulated-work-items\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022Title\u0022:\u0022Copilot verify story\u0022,\u0022DelaySeconds\u0022:\u00220\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:\u0022github-copilot-cli\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022token\u0022:\u0022sim-fake-gh-token\u0022,\u0022CliPath\u0022:\u0022/usr/local/bin/driven-stub\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:workspace-repo\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022d6c2d7d2-ee7c-4080-9c59-ab00666572f6\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022coding-session-workspace\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022WorkingPath\u0022:\u0022/workspace/repos/workspace-repo\u0022},\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "fb2427ca-42aa-4cbb-bccd-cc681c1c9735",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022c11f7656-675e-46ab-915b-79feaa73695d\u0022,\u0022WorkflowType\u0022:\u0022implementation\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-implementation-workflow:system-test\u0022,\u0022Context\u0022:{\u0022user-code-gate\u0022:\u0022false\u0022,\u0022ai-code-review\u0022:\u0022false\u0022,\u0022ai-plan-review\u0022:\u0022false\u0022,\u0022completeness-check\u0022:\u0022true\u0022,\u0022gate-idle-compaction\u0022:\u00220\u0022,\u0022user-plan-gate\u0022:\u0022false\u0022,\u0022work-item-id\u0022:\u0022SIM-COPILOT-VERIFY\u0022,\u0022push-mode\u0022:\u0022skip\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022acbe12388630459cbb36c70e7436e26b\u0022,\u0022SlotProviderTypes\u0022:[\u0022simulated-work-items\u0022,\u0022github-copilot-cli\u0022,\u0022coding-session-workspace\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022workspace-repo\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022http://host.docker.internal:8418/git/test.git\u0022,\u0022no-cache\u0022:\u0022true\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:workspace-repo\u0022}],\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-30T13:59:10.1613344+00:00"
+  },
+  {
+    "Id": "80d34eb6-863a-47a7-8d39-11a62a8d5d33",
+    "ResolutionToken": "bbf7c8500a6d402ba1df431ad50a3f1e",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022work-items\u0022,\u0022ProviderType\u0022:\u0022simulated-work-items\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022Title\u0022:\u0022Simulated story: add the implemented marker\u0022,\u0022DelaySeconds\u0022:\u00223\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:\u0022claude-code-cli\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022OAuthToken\u0022:\u0022sim-fake-oauth-token\u0022,\u0022CliPath\u0022:\u0022/usr/local/bin/driven-stub\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:workspace-repo\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022d6c2d7d2-ee7c-4080-9c59-ab00666572f6\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022coding-session-workspace\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022WorkingPath\u0022:\u0022/workspace/repos/workspace-repo\u0022},\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "fb2427ca-42aa-4cbb-bccd-cc681c1c9735",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u002280d34eb6-863a-47a7-8d39-11a62a8d5d33\u0022,\u0022WorkflowType\u0022:\u0022implementation\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-implementation-workflow:system-test\u0022,\u0022Context\u0022:{\u0022push-mode\u0022:\u0022prompt\u0022,\u0022user-code-gate\u0022:\u0022true\u0022,\u0022user-plan-gate\u0022:\u0022true\u0022,\u0022ai-plan-review\u0022:\u0022false\u0022,\u0022ai-code-review\u0022:\u0022false\u0022,\u0022completeness-check\u0022:\u0022true\u0022,\u0022gate-idle-compaction\u0022:\u00220\u0022,\u0022work-item-id\u0022:\u00226562265\u0022,\u0022max-ai-review-rounds\u0022:\u00222\u0022,\u0022artifact-review\u0022:\u0022false\u0022,\u0022reviewer-mode\u0022:\u0022headless\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022bbf7c8500a6d402ba1df431ad50a3f1e\u0022,\u0022SlotProviderTypes\u0022:[\u0022simulated-work-items\u0022,\u0022claude-code-cli\u0022,\u0022coding-session-workspace\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022workspace-repo\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022http://host.docker.internal:8418/git/test.git\u0022,\u0022no-cache\u0022:\u0022true\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:workspace-repo\u0022}],\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-30T17:30:20.771665+00:00"
+  },
+  {
+    "Id": "2c97a44f-7699-47bb-805a-9b77b2ae724f",
+    "ResolutionToken": "ea6ef3f78b9b4a678943b4c9b32d3361",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022work-items\u0022,\u0022ProviderType\u0022:\u0022simulated-work-items\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022Title\u0022:\u0022Simulated story: add the implemented marker\u0022,\u0022DelaySeconds\u0022:\u00223\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:\u0022claude-code-cli\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022OAuthToken\u0022:\u0022sim-fake-oauth-token\u0022,\u0022CliPath\u0022:\u0022/usr/local/bin/driven-stub\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:workspace-repo\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022d6c2d7d2-ee7c-4080-9c59-ab00666572f6\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022coding-session-workspace\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022WorkingPath\u0022:\u0022/workspace/repos/workspace-repo\u0022},\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "fb2427ca-42aa-4cbb-bccd-cc681c1c9735",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00222c97a44f-7699-47bb-805a-9b77b2ae724f\u0022,\u0022WorkflowType\u0022:\u0022implementation\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-implementation-workflow:system-test\u0022,\u0022Context\u0022:{\u0022push-mode\u0022:\u0022prompt\u0022,\u0022user-code-gate\u0022:\u0022true\u0022,\u0022user-plan-gate\u0022:\u0022true\u0022,\u0022ai-plan-review\u0022:\u0022false\u0022,\u0022ai-code-review\u0022:\u0022false\u0022,\u0022completeness-check\u0022:\u0022true\u0022,\u0022gate-idle-compaction\u0022:\u00220\u0022,\u0022work-item-id\u0022:\u0022SIM-42\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022ea6ef3f78b9b4a678943b4c9b32d3361\u0022,\u0022SlotProviderTypes\u0022:[\u0022simulated-work-items\u0022,\u0022claude-code-cli\u0022,\u0022coding-session-workspace\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022workspace-repo\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022http://host.docker.internal:8418/git/test.git\u0022,\u0022no-cache\u0022:\u0022true\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:workspace-repo\u0022}],\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-30T19:17:40.4278723+00:00"
+  },
+  {
+    "Id": "4229cdd6-acfb-4656-8c89-d3378f80d82b",
+    "ResolutionToken": "e781af23110b4a579f42b2bd99bf0259",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022work-items\u0022,\u0022ProviderType\u0022:\u0022simulated-work-items\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022Title\u0022:\u0022Simulated story: add the implemented marker\u0022,\u0022DelaySeconds\u0022:\u00223\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:\u0022claude-code-cli\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022OAuthToken\u0022:\u0022sim-fake-oauth-token\u0022,\u0022CliPath\u0022:\u0022/usr/local/bin/driven-stub\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:workspace-repo\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022d6c2d7d2-ee7c-4080-9c59-ab00666572f6\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022coding-session-workspace\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022WorkingPath\u0022:\u0022/workspace/repos/workspace-repo\u0022},\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "fb2427ca-42aa-4cbb-bccd-cc681c1c9735",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u00224229cdd6-acfb-4656-8c89-d3378f80d82b\u0022,\u0022WorkflowType\u0022:\u0022implementation\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-implementation-workflow:system-test\u0022,\u0022Context\u0022:{\u0022push-mode\u0022:\u0022prompt\u0022,\u0022user-code-gate\u0022:\u0022true\u0022,\u0022user-plan-gate\u0022:\u0022true\u0022,\u0022ai-plan-review\u0022:\u0022false\u0022,\u0022ai-code-review\u0022:\u0022false\u0022,\u0022completeness-check\u0022:\u0022true\u0022,\u0022gate-idle-compaction\u0022:\u00220\u0022,\u0022work-item-id\u0022:\u002225115\u0022,\u0022max-ai-review-rounds\u0022:\u00222\u0022,\u0022artifact-review\u0022:\u0022false\u0022,\u0022reviewer-mode\u0022:\u0022headless\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022e781af23110b4a579f42b2bd99bf0259\u0022,\u0022SlotProviderTypes\u0022:[\u0022simulated-work-items\u0022,\u0022claude-code-cli\u0022,\u0022coding-session-workspace\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022workspace-repo\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022http://host.docker.internal:8418/git/test.git\u0022,\u0022no-cache\u0022:\u0022true\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:workspace-repo\u0022}],\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-30T19:26:53.1048171+00:00"
+  },
+  {
+    "Id": "47dfd97c-1f5b-437f-b1c1-996beb9fe0c5",
+    "ResolutionToken": "03e9a6d7539943e6a6f758d4b1127807",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022work-items\u0022,\u0022ProviderType\u0022:\u0022simulated-work-items\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022Title\u0022:\u0022Simulated story: add the implemented marker\u0022,\u0022DelaySeconds\u0022:\u00223\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:\u0022claude-code-cli\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022OAuthToken\u0022:\u0022sim-fake-oauth-token\u0022,\u0022CliPath\u0022:\u0022/usr/local/bin/driven-stub\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:workspace-repo\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022d6c2d7d2-ee7c-4080-9c59-ab00666572f6\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022coding-session-workspace\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022WorkingPath\u0022:\u0022/workspace/repos/workspace-repo\u0022},\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "fb2427ca-42aa-4cbb-bccd-cc681c1c9735",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u002247dfd97c-1f5b-437f-b1c1-996beb9fe0c5\u0022,\u0022WorkflowType\u0022:\u0022implementation\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-implementation-workflow:system-test\u0022,\u0022Context\u0022:{\u0022push-mode\u0022:\u0022skip\u0022,\u0022user-code-gate\u0022:\u0022false\u0022,\u0022user-plan-gate\u0022:\u0022false\u0022,\u0022ai-plan-review\u0022:\u0022false\u0022,\u0022ai-code-review\u0022:\u0022false\u0022,\u0022gate-idle-compaction\u0022:\u00220\u0022,\u0022refinement-check\u0022:\u0022true\u0022,\u0022work-item-id\u0022:\u0022SIM-77\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u002203e9a6d7539943e6a6f758d4b1127807\u0022,\u0022SlotProviderTypes\u0022:[\u0022simulated-work-items\u0022,\u0022claude-code-cli\u0022,\u0022coding-session-workspace\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022workspace-repo\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022http://host.docker.internal:8418/git/test.git\u0022,\u0022no-cache\u0022:\u0022true\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:workspace-repo\u0022}],\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-30T20:16:16.8952095+00:00"
+  },
+  {
+    "Id": "225de9d4-412e-45de-830c-ca89fbeb8bd1",
+    "ResolutionToken": "f6a001dfbca8483fa878c2747e3462da",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022work-items\u0022,\u0022ProviderType\u0022:\u0022simulated-work-items\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022Title\u0022:\u0022Simulated story: add the implemented marker\u0022,\u0022DelaySeconds\u0022:\u00223\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:\u0022claude-code-cli\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022OAuthToken\u0022:\u0022sim-fake-oauth-token\u0022,\u0022CliPath\u0022:\u0022/usr/local/bin/driven-stub\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:workspace-repo\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022d6c2d7d2-ee7c-4080-9c59-ab00666572f6\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022coding-session-workspace\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022WorkingPath\u0022:\u0022/workspace/repos/workspace-repo\u0022},\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "fb2427ca-42aa-4cbb-bccd-cc681c1c9735",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022225de9d4-412e-45de-830c-ca89fbeb8bd1\u0022,\u0022WorkflowType\u0022:\u0022implementation\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-implementation-workflow:system-test\u0022,\u0022Context\u0022:{\u0022push-mode\u0022:\u0022skip\u0022,\u0022user-code-gate\u0022:\u0022false\u0022,\u0022user-plan-gate\u0022:\u0022false\u0022,\u0022ai-plan-review\u0022:\u0022false\u0022,\u0022ai-code-review\u0022:\u0022false\u0022,\u0022gate-idle-compaction\u0022:\u00220\u0022,\u0022refinement-check\u0022:\u0022true\u0022,\u0022work-item-id\u0022:\u0022SIM-88\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u0022f6a001dfbca8483fa878c2747e3462da\u0022,\u0022SlotProviderTypes\u0022:[\u0022simulated-work-items\u0022,\u0022claude-code-cli\u0022,\u0022coding-session-workspace\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022workspace-repo\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022http://host.docker.internal:8418/git/test.git\u0022,\u0022no-cache\u0022:\u0022true\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:workspace-repo\u0022}],\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-30T20:36:57.328368+00:00"
+  },
+  {
+    "Id": "f4fc9713-741a-4d00-b94e-514a604dd6ef",
+    "ResolutionToken": "1b0cfb805f5548aaab14ace7ce7cb2e9",
+    "SlotBindingsJson": "[{\u0022SlotName\u0022:\u0022work-items\u0022,\u0022ProviderType\u0022:\u0022simulated-work-items\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022Title\u0022:\u0022Simulated story: add the implemented marker\u0022,\u0022DelaySeconds\u0022:\u00223\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022coding-agent\u0022,\u0022ProviderType\u0022:\u0022claude-code-cli\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022OAuthToken\u0022:\u0022sim-fake-oauth-token\u0022,\u0022CliPath\u0022:\u0022/usr/local/bin/driven-stub\u0022},\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022mount-auth:workspace-repo\u0022,\u0022ProviderType\u0022:null,\u0022ConnectorId\u0022:\u0022d6c2d7d2-ee7c-4080-9c59-ab00666572f6\u0022,\u0022Settings\u0022:null,\u0022DelegatedResource\u0022:null},{\u0022SlotName\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022coding-session-workspace\u0022,\u0022ConnectorId\u0022:null,\u0022Settings\u0022:{\u0022WorkingPath\u0022:\u0022/workspace/repos/workspace-repo\u0022},\u0022DelegatedResource\u0022:null}]",
+    "TriggeredByPrincipalId": "fb2427ca-42aa-4cbb-bccd-cc681c1c9735",
+    "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022f4fc9713-741a-4d00-b94e-514a604dd6ef\u0022,\u0022WorkflowType\u0022:\u0022implementation\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-implementation-workflow:system-test\u0022,\u0022Context\u0022:{\u0022push-mode\u0022:\u0022prompt\u0022,\u0022user-code-gate\u0022:\u0022true\u0022,\u0022user-plan-gate\u0022:\u0022true\u0022,\u0022ai-plan-review\u0022:\u0022false\u0022,\u0022ai-code-review\u0022:\u0022false\u0022,\u0022gate-idle-compaction\u0022:\u00220\u0022,\u0022refinement-check\u0022:\u0022true\u0022,\u0022work-item-id\u0022:\u00223141412321\u0022,\u0022refinement-instructions\u0022:\u0022Assess whether the user story is complete and unambiguous enough to implement: acceptance criteria, affected areas, edge cases, and open dependencies. Do not plan or implement yet.\u0022,\u0022plan-instructions\u0022:\u0022Create a detailed implementation plan (markdown) for the story: approach, files to touch, tests, and risks. Include a \\u0027## Design\\u0027 section that describes the change with a mermaid diagram (flow or architecture). Do NOT implement yet.\u0022,\u0022implement-instructions\u0022:\u0022Implement the approved plan point by point and run the tests you touch. Commit NOTHING \\u2014 the workflow handles git.\u0022,\u0022review-instructions\u0022:\u0022Review critically and concretely: correctness, completeness against the story, tests, and risks. Name specific files and findings; do not rubber-stamp.\u0022,\u0022plan-agent\u0022:\u0022shared\u0022,\u0022implement-agent\u0022:\u0022shared\u0022,\u0022review-by\u0022:\u0022reviewer\u0022,\u0022max-ai-review-rounds\u0022:\u00222\u0022,\u0022artifact-review\u0022:\u0022false\u0022,\u0022reviewer-mode\u0022:\u0022headless\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00221b0cfb805f5548aaab14ace7ce7cb2e9\u0022,\u0022SlotProviderTypes\u0022:[\u0022simulated-work-items\u0022,\u0022claude-code-cli\u0022,\u0022coding-session-workspace\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022workspace-repo\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022http://host.docker.internal:8418/git/test.git\u0022,\u0022no-cache\u0022:\u0022true\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:workspace-repo\u0022}],\u0022EnvironmentCapabilities\u0022:null}",
+    "CreatedUtc": "2026-07-30T21:02:38.4538476+00:00"
+  }
+]

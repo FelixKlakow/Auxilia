@@ -19,7 +19,7 @@ Auxilia uses a four-tier test pyramid. Each tier has a distinct scope, dependenc
 
 ## Level 1 – Unit Tests
 
-**Projects:** `Auxilia.Core.Api.Tests/UnitTests/`, `Auxilia.Core.Runner.Tests/`, `Auxilia.Workflows.Client.Tests/UnitTests/`, `Auxilia.AdminConsole.Tests/`
+**Projects:** `Tests/Platform/Auxilia.Core.Api.Tests/UnitTests/`, `Tests/Platform/Auxilia.Core.Runner.Tests/`, `Tests/Libraries/Auxilia.Workflows.Client.Tests/UnitTests/`, `Tests/Platform/Auxilia.AdminConsole.Tests/`
 
 **Scope:** A single class or function in isolation. All external dependencies are replaced with Moq mocks.
 
@@ -39,7 +39,7 @@ Auxilia uses a four-tier test pyramid. Each tier has a distinct scope, dependenc
 
 ## Level 2 – Component Tests
 
-**Projects:** `Auxilia.Core.Api.Tests/ComponentTests/` (incl. the multi-client SSE concurrency fixtures), `Auxilia.AdminConsole.Tests/` (bUnit)
+**Projects:** `Tests/Platform/Auxilia.Core.Api.Tests/ComponentTests/` (incl. the multi-client SSE concurrency fixtures), `Tests/Platform/Auxilia.AdminConsole.Tests/` (bUnit)
 
 **Scope:** Most of a single service executable is constructed using the real DI container, but external infrastructure (
 RabbitMQ, databases, HTTP endpoints) is replaced with in-memory fakes (`FakeMessageBusClient`, etc.).
@@ -60,7 +60,7 @@ RabbitMQ, databases, HTTP endpoints) is replaced with in-memory fakes (`FakeMess
 
 ## Level 3 – System Tests
 
-**Projects:** `Auxilia.SystemTestSuite/`
+**Projects:** `Tests/System/Auxilia.SystemTestSuite/`
 
 **Scope:** The entire system or a meaningful sub-system is started with real infrastructure running in Docker
 containers (via Testcontainers). Only deliberate cost-generating third-party integrations (Azure DevOps, AI services)
@@ -73,7 +73,7 @@ are replaced with in-process abstractions / stubs.
 - Test classes in the corresponding namespace under `SystemTests/` share that environment automatically via NUnit's
   namespace-scoped `[SetUpFixture]`.
 - Running a single environment's tests: `dotnet test --filter "namespace=Auxilia.SystemTestSuite.SystemTests"`
-- Running all system tests: `dotnet test Auxilia.SystemTestSuite/`
+- Running all system tests: `dotnet test Tests/System/Auxilia.SystemTestSuite/`
 
 **Current environments:**
 
@@ -106,7 +106,7 @@ are replaced with in-process abstractions / stubs.
 **Execution:**
 
 - On-demand or in a dedicated resource-intensive CI stage.
-- Run manually: `dotnet test Auxilia.SystemTestSuite/ --filter "Category=System"`
+- Run manually: `dotnet test Tests/System/Auxilia.SystemTestSuite/ --filter "Category=System"`
 
 ---
 
@@ -133,8 +133,8 @@ data). These produce real costs and side-effects.
 
 ## Adding a New System Test Environment
 
-1. Create `Auxilia.SystemTestSuite/Environments/<Name>Environment.cs` as a `[SetUpFixture]`.
+1. Create `Tests/System/Auxilia.SystemTestSuite/Environments/<Name>Environment.cs` as a `[SetUpFixture]`.
 2. Define the namespace (e.g. `Auxilia.SystemTestSuite.SystemTests.<Name>`).
-3. Create `Auxilia.SystemTestSuite/SystemTests/<Name>SystemTests.cs` in the same namespace.
+3. Create `Tests/System/Auxilia.SystemTestSuite/SystemTests/<Name>SystemTests.cs` in the same namespace.
 4. The environment starts and stops automatically when tests in that namespace run.
 

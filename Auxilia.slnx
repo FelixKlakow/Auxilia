@@ -1,26 +1,12 @@
 <Solution>
-  <Folder Name="/.github/">
+  <Folder Name="/Overview/">
+    <File Path="README.md" />
     <File Path=".github/copilot-instructions.md" />
-  </Folder>
-  <Folder Name="/01_CommonDomain/">
-    <Project Path="Auxilia.Governance.Tests\Auxilia.Governance.Tests.csproj" />
-    <Project Path="Auxilia.Governance\Auxilia.Governance.csproj" />
-    <Project Path="Auxilia.PlatformData.Tests\Auxilia.PlatformData.Tests.csproj" />
-    <Project Path="Auxilia.PlatformData\Auxilia.PlatformData.csproj" />
-    <Project Path="Auxilia.UniversalDataAccess.Tests\Auxilia.UniversalDataAccess.Tests.csproj" />
-    <Project Path="Auxilia.UniversalDataAccess\Auxilia.UniversalDataAccess.csproj" />
-    <Project Path="Source\Auxilia.Messaging\Auxilia.Messaging.csproj" />
-  </Folder>
-  <Folder Name="/02_FrontendDomain/" />
-  <Folder Name="/03_RunnerDomain/">
-    <Project Path="Auxilia.Core.Runner.Tests\Auxilia.Core.Runner.Tests.csproj" />
-    <Project Path="Source\Auxilia.Core.Runner\Auxilia.Core.Runner.csproj" />
-  </Folder>
-  <Folder Name="/04_BackendDomain/">
-    <Project Path="Auxilia.Adapters.Email.Tests\Auxilia.Adapters.Email.Tests.csproj" />
-    <Project Path="Auxilia.Ai.Tests\Auxilia.Ai.Tests.csproj" />
-    <Project Path="Auxilia.AI\Auxilia.AI.csproj" />
-    <Project Path="Source\Auxilia.Adapters.Email\Auxilia.Adapters.Email.csproj" />
+    <File Path="docs/ARCHITECTURE.md" />
+    <File Path="docs/CommitConventions.md" />
+    <File Path="docs/TestStrategy.md" />
+    <File Path="docs/USE-CASES.md" />
+    <File Path="docs/workflow-sdk-design.md" />
   </Folder>
   <Folder Name="/Hooks/">
     <File Path="Hooks\commit-msg" />
@@ -28,70 +14,91 @@
     <File Path="Hooks\RegisterHooks.ps1" />
   </Folder>
   <Folder Name="/Scripts/">
+    <File Path="Scripts\Cleanup-TestWorkflows.ps1" />
+    <File Path="Scripts\Demo-ImplementationAgents.ps1" />
     <File Path="Scripts\Run-SystemTests.ps1" />
-    <Project Path="Auxilia.DevStand\Auxilia.DevStand.csproj" />
+    <File Path="Scripts\Snap-Window.ps1" />
+    <File Path="Scripts\Start-DevStack.ps1" />
   </Folder>
-  <Folder Name="/Overview/">
-    <File Path="docs/ARCHITECTURE.md" />
-    <File Path="docs/workflow-sdk-design.md" />
-    <File Path="README.md" />
-    <File Path="docs/CommitConventions.md" />
-    <File Path="docs/TestStrategy.md" />
-    <File Path="docs/USE-CASES.md" />
+  <Folder Name="/Source/Platform/">
+    <Project Path="Source\Platform\Auxilia.AdminConsole\Auxilia.AdminConsole.csproj" />
+    <Project Path="Source\Platform\Auxilia.Core.Api\Auxilia.Core.Api.csproj" />
+    <Project Path="Source\Platform\Auxilia.Core.Runner\Auxilia.Core.Runner.csproj" />
+    <Project Path="Source\Platform\Auxilia.TriggerHost\Auxilia.TriggerHost.csproj" />
   </Folder>
-  <Folder Name="/05_WorkflowsDomain/">
-    <Project Path="Auxilia.Workflows.Packer.Tests\Auxilia.Workflows.Packer.Tests.csproj" />
-    <Project Path="Auxilia.Workflows.Packer\Auxilia.Workflows.Packer.csproj" />
-    <Project Path="Auxilia.Workflows.SlotPackages.Tests\Auxilia.Workflows.SlotPackages.Tests.csproj" />
-    <Project Path="Auxilia.Workflows.Testing.Tests\Auxilia.Workflows.Testing.Tests.csproj" />
-    <Project Path="Auxilia.Workflows.Testing\Auxilia.Workflows.Testing.csproj" />
-    <Project Path="Auxilia.Workflows.Tests\Auxilia.Workflows.Tests.csproj" />
-    <Project Path="Auxilia.Workflows\Auxilia.Workflows.csproj" />
-    <Project Path="Source/Auxilia.Workflows.TestRunner/Auxilia.Workflows.TestRunner.csproj" />
-    <Project Path="Source\Auxilia.Workflows.AiAgent\Auxilia.Workflows.AiAgent.csproj" />
-    <Project Path="Source\Auxilia.Workflows.PullRequestAccess\Auxilia.Workflows.PullRequestAccess.csproj" />
-    <Project Path="Source\Auxilia.Workflows.SourceControl\Auxilia.Workflows.SourceControl.csproj" />
-    <Project Path="Source\Auxilia.Workflows.TaskSource\Auxilia.Workflows.TaskSource.csproj" />
+  <Folder Name="/Source/Libraries/">
+    <Project Path="Source\Libraries\Auxilia.Adapters.Email\Auxilia.Adapters.Email.csproj" />
+    <Project Path="Source\Libraries\Auxilia.AI\Auxilia.AI.csproj" />
+    <Project Path="Source\Libraries\Auxilia.Core.Client\Auxilia.Core.Client.csproj" />
+    <Project Path="Source\Libraries\Auxilia.Core.Contracts\Auxilia.Core.Contracts.csproj" />
+    <Project Path="Source\Libraries\Auxilia.Governance\Auxilia.Governance.csproj" />
+    <Project Path="Source\Libraries\Auxilia.Messaging\Auxilia.Messaging.csproj" />
+    <Project Path="Source\Libraries\Auxilia.PlatformData\Auxilia.PlatformData.csproj" />
+    <Project Path="Source\Libraries\Auxilia.UniversalDataAccess\Auxilia.UniversalDataAccess.csproj" />
+    <Project Path="Source\Libraries\Auxilia.Workflows\Auxilia.Workflows.csproj" />
+    <Project Path="Source\Libraries\Auxilia.Workflows.AiAgent\Auxilia.Workflows.AiAgent.csproj" />
+    <Project Path="Source\Libraries\Auxilia.Workflows.Client\Auxilia.Workflows.Client.csproj" />
+    <Project Path="Source\Libraries\Auxilia.Workflows.Packer\Auxilia.Workflows.Packer.csproj" />
+    <Project Path="Source\Libraries\Auxilia.Workflows.PullRequestAccess\Auxilia.Workflows.PullRequestAccess.csproj" />
+    <Project Path="Source\Libraries\Auxilia.Workflows.SourceControl\Auxilia.Workflows.SourceControl.csproj" />
+    <Project Path="Source\Libraries\Auxilia.Workflows.TaskSource\Auxilia.Workflows.TaskSource.csproj" />
+    <Project Path="Source\Libraries\Auxilia.Workflows.TestRunner\Auxilia.Workflows.TestRunner.csproj" />
   </Folder>
-  <Folder Name="/06_WorkflowImplementations/">
-    <Project Path="Auxilia.ClaudeCode.Workflow.Tests\Auxilia.ClaudeCode.Workflow.Tests.csproj" />
-    <Project Path="Auxilia.CodingSession.Workflow.Tests\Auxilia.CodingSession.Workflow.Tests.csproj" />
-    <Project Path="Auxilia.SessionNotifier.Workflow.Tests\Auxilia.SessionNotifier.Workflow.Tests.csproj" />
-    <Project Path="Auxilia.CodeReview.Workflow.Tests\Auxilia.CodeReview.Workflow.Tests.csproj" />
-    <Project Path="Auxilia.FakeSlots.CodeReview.Happy\Auxilia.FakeSlots.CodeReview.Happy.csproj" />
-    <Project Path="Auxilia.FakeSlots.CodeReview.WriteBackFailure\Auxilia.FakeSlots.CodeReview.WriteBackFailure.csproj" />
-    <Project Path="Auxilia.FakeSlots.Tests\Auxilia.FakeSlots.Tests.csproj" />
-    <Project Path="Auxilia.Slots.AzureDevOps.Tests\Auxilia.Slots.AzureDevOps.Tests.csproj" />
-    <Project Path="Auxilia.Slots.AzureDevOps\Auxilia.Slots.AzureDevOps.csproj" />
-    <Project Path="Auxilia.Slots.ClaudeCode.Tests\Auxilia.Slots.ClaudeCode.Tests.csproj" />
-    <Project Path="Auxilia.Slots.ClaudeCode\Auxilia.Slots.ClaudeCode.csproj" />
-    <Project Path="Auxilia.Slots.GitHubCopilot.Tests\Auxilia.Slots.GitHubCopilot.Tests.csproj" />
-    <Project Path="Auxilia.Slots.GitHubCopilot\Auxilia.Slots.GitHubCopilot.csproj" />
-    <Project Path="Auxilia.Slots.CodingSession\Auxilia.Slots.CodingSession.csproj" />
-    <Project Path="Auxilia.Slots.CredentialProbe\Auxilia.Slots.CredentialProbe.csproj" />
-    <Project Path="Auxilia.Slots.Email.Tests\Auxilia.Slots.Email.Tests.csproj" />
-    <Project Path="Auxilia.Slots.Email\Auxilia.Slots.Email.csproj" />
-    <Project Path="Auxilia.Slots.GitHub.Tests\Auxilia.Slots.GitHub.Tests.csproj" />
-    <Project Path="Auxilia.Slots.SimulatedWorkItems\Auxilia.Slots.SimulatedWorkItems.csproj" />
-    <Project Path="Auxilia.Slots.GitHub\Auxilia.Slots.GitHub.csproj" />
-    <Project Path="Source/Auxilia.ClaudeCode.Workflow/Auxilia.ClaudeCode.Workflow.csproj" />
-    <Project Path="Source/Auxilia.Implementation.Workflow/Auxilia.Implementation.Workflow.csproj" />
-    <Project Path="Source/Auxilia.Copilot.Workflow/Auxilia.Copilot.Workflow.csproj" />
-    <Project Path="Source/Auxilia.CodingSession.Workflow/Auxilia.CodingSession.Workflow.csproj" />
-    <Project Path="Source/Auxilia.SessionNotifier.Workflow/Auxilia.SessionNotifier.Workflow.csproj" />
-    <Project Path="Source\Auxilia.CodeReview.Workflow\Auxilia.CodeReview.Workflow.csproj" />
+  <Folder Name="/Source/Slots/">
+    <Project Path="Source\Slots\Auxilia.Slots.AzureDevOps\Auxilia.Slots.AzureDevOps.csproj" />
+    <Project Path="Source\Slots\Auxilia.Slots.ClaudeCode\Auxilia.Slots.ClaudeCode.csproj" />
+    <Project Path="Source\Slots\Auxilia.Slots.CodingSession\Auxilia.Slots.CodingSession.csproj" />
+    <Project Path="Source\Slots\Auxilia.Slots.CredentialProbe\Auxilia.Slots.CredentialProbe.csproj" />
+    <Project Path="Source\Slots\Auxilia.Slots.Email\Auxilia.Slots.Email.csproj" />
+    <Project Path="Source\Slots\Auxilia.Slots.GitHub\Auxilia.Slots.GitHub.csproj" />
+    <Project Path="Source\Slots\Auxilia.Slots.GitHubCopilot\Auxilia.Slots.GitHubCopilot.csproj" />
+    <Project Path="Source\Slots\Auxilia.Slots.SimulatedWorkItems\Auxilia.Slots.SimulatedWorkItems.csproj" />
   </Folder>
-  <Folder Name="/Source/">
-    <Project Path="Source/Auxilia.AdminConsole/Auxilia.AdminConsole.csproj" />
-    <Project Path="Source/Auxilia.Core.Api/Auxilia.Core.Api.csproj" />
-    <Project Path="Source/Auxilia.TriggerHost/Auxilia.TriggerHost.csproj" />
+  <Folder Name="/Source/Workflows/">
+    <Project Path="Source\Workflows\Auxilia.ClaudeCode.Workflow\Auxilia.ClaudeCode.Workflow.csproj" />
+    <Project Path="Source\Workflows\Auxilia.CodeReview.Workflow\Auxilia.CodeReview.Workflow.csproj" />
+    <Project Path="Source\Workflows\Auxilia.CodingSession.Workflow\Auxilia.CodingSession.Workflow.csproj" />
+    <Project Path="Source\Workflows\Auxilia.Copilot.Workflow\Auxilia.Copilot.Workflow.csproj" />
+    <Project Path="Source\Workflows\Auxilia.Implementation.Workflow\Auxilia.Implementation.Workflow.csproj" />
+    <Project Path="Source\Workflows\Auxilia.SessionNotifier.Workflow\Auxilia.SessionNotifier.Workflow.csproj" />
   </Folder>
-  <Project Path="Auxilia.AdminConsole.Tests/Auxilia.AdminConsole.Tests.csproj" />
-  <Project Path="Auxilia.Core.Api.Tests/Auxilia.Core.Api.Tests.csproj" />
-  <Project Path="Auxilia.Core.Client/Auxilia.Core.Client.csproj" />
-  <Project Path="Auxilia.Core.Contracts/Auxilia.Core.Contracts.csproj" />
-  <Project Path="Auxilia.Workflows.Client/Auxilia.Workflows.Client.csproj" />
-  <Project Path="Auxilia.Workflows.Client.Tests/Auxilia.Workflows.Client.Tests.csproj" />
-  <Project Path="Auxilia.Implementation.Workflow.Tests/Auxilia.Implementation.Workflow.Tests.csproj" />
-  <Project Path="Auxilia.SystemTestSuite\Auxilia.SystemTestSuite.csproj" />
+  <Folder Name="/Tests/Platform/">
+    <Project Path="Tests\Platform\Auxilia.AdminConsole.Tests\Auxilia.AdminConsole.Tests.csproj" />
+    <Project Path="Tests\Platform\Auxilia.Core.Api.Tests\Auxilia.Core.Api.Tests.csproj" />
+    <Project Path="Tests\Platform\Auxilia.Core.Runner.Tests\Auxilia.Core.Runner.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Tests/Libraries/">
+    <Project Path="Tests\Libraries\Auxilia.Adapters.Email.Tests\Auxilia.Adapters.Email.Tests.csproj" />
+    <Project Path="Tests\Libraries\Auxilia.Ai.Tests\Auxilia.Ai.Tests.csproj" />
+    <Project Path="Tests\Libraries\Auxilia.Governance.Tests\Auxilia.Governance.Tests.csproj" />
+    <Project Path="Tests\Libraries\Auxilia.PlatformData.Tests\Auxilia.PlatformData.Tests.csproj" />
+    <Project Path="Tests\Libraries\Auxilia.UniversalDataAccess.Tests\Auxilia.UniversalDataAccess.Tests.csproj" />
+    <Project Path="Tests\Libraries\Auxilia.Workflows.Client.Tests\Auxilia.Workflows.Client.Tests.csproj" />
+    <Project Path="Tests\Libraries\Auxilia.Workflows.Packer.Tests\Auxilia.Workflows.Packer.Tests.csproj" />
+    <Project Path="Tests\Libraries\Auxilia.Workflows.SlotPackages.Tests\Auxilia.Workflows.SlotPackages.Tests.csproj" />
+    <Project Path="Tests\Libraries\Auxilia.Workflows.Tests\Auxilia.Workflows.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Tests/Slots/">
+    <Project Path="Tests\Slots\Auxilia.Slots.AzureDevOps.Tests\Auxilia.Slots.AzureDevOps.Tests.csproj" />
+    <Project Path="Tests\Slots\Auxilia.Slots.ClaudeCode.Tests\Auxilia.Slots.ClaudeCode.Tests.csproj" />
+    <Project Path="Tests\Slots\Auxilia.Slots.Email.Tests\Auxilia.Slots.Email.Tests.csproj" />
+    <Project Path="Tests\Slots\Auxilia.Slots.GitHub.Tests\Auxilia.Slots.GitHub.Tests.csproj" />
+    <Project Path="Tests\Slots\Auxilia.Slots.GitHubCopilot.Tests\Auxilia.Slots.GitHubCopilot.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Tests/Workflows/">
+    <Project Path="Tests\Workflows\Auxilia.ClaudeCode.Workflow.Tests\Auxilia.ClaudeCode.Workflow.Tests.csproj" />
+    <Project Path="Tests\Workflows\Auxilia.CodeReview.Workflow.Tests\Auxilia.CodeReview.Workflow.Tests.csproj" />
+    <Project Path="Tests\Workflows\Auxilia.CodingSession.Workflow.Tests\Auxilia.CodingSession.Workflow.Tests.csproj" />
+    <Project Path="Tests\Workflows\Auxilia.Implementation.Workflow.Tests\Auxilia.Implementation.Workflow.Tests.csproj" />
+    <Project Path="Tests\Workflows\Auxilia.SessionNotifier.Workflow.Tests\Auxilia.SessionNotifier.Workflow.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Tests/System/">
+    <Project Path="Tests\System\Auxilia.DevStand\Auxilia.DevStand.csproj" />
+    <Project Path="Tests\System\Auxilia.FakeSlots.CodeReview.Happy\Auxilia.FakeSlots.CodeReview.Happy.csproj" />
+    <Project Path="Tests\System\Auxilia.FakeSlots.CodeReview.WriteBackFailure\Auxilia.FakeSlots.CodeReview.WriteBackFailure.csproj" />
+    <Project Path="Tests\System\Auxilia.FakeSlots.Tests\Auxilia.FakeSlots.Tests.csproj" />
+    <Project Path="Tests\System\Auxilia.SystemTestSuite\Auxilia.SystemTestSuite.csproj" />
+    <Project Path="Tests\System\Auxilia.Workflows.Testing\Auxilia.Workflows.Testing.csproj" />
+    <Project Path="Tests\System\Auxilia.Workflows.Testing.Tests\Auxilia.Workflows.Testing.Tests.csproj" />
+  </Folder>
 </Solution>

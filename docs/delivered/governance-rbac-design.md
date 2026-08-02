@@ -62,7 +62,7 @@ Notes:
 ## 2. Components and project layout
 
 ```
-Auxilia.Governance/                      ← new project (repo root, like Auxilia.Workflows)
+Source/Libraries/Auxilia.Governance/                      ← new project (repo root, like Auxilia.Workflows)
   Principals/        Principal, PrincipalKind, PrincipalStatus
   Roles/             Role, RoleAssignment, BuiltInRoles (seed), PermissionActions (constants)
   Policy/            IPolicyEngine, PolicyDecision, PolicyContext, PolicyEngine
@@ -71,7 +71,7 @@ Auxilia.Governance/                      ← new project (repo root, like Auxili
   Access/            WorkflowTypeAccess, IWorkflowTypeAccessStore
   Stores/            IPrincipalStore, IRoleStore, ICredentialStore (interfaces only —
                      implementations come from the persistence layer, Task #6)
-Auxilia.Governance.Tests/                ← unit + component tests
+Tests/Libraries/Auxilia.Governance.Tests/                ← unit + component tests
 ```
 
 Component responsibilities:

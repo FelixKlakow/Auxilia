@@ -142,14 +142,14 @@ The `SteeringSession` (Hub-side) is the state machine: in-mandate proposals auto
 
 A fresh session can inspect these as proven, adaptable references (this repo, not the steering client):
 
-- **Signals / input to a running run (P2):** `Source/Auxilia.Core.Runner/Workflows/SignalDispatcher.cs`, `SignalHandlerStore` (in `…/Workflows/Storage/`); permission `PermissionActions.RunProvideInput` (`run.provide-input`); per-instance token in `WorkflowInstanceTokenRegistry` (`…/Workflows/Storage/`).
-- **Resource Proxy / action choke point (P3):** `Source/Auxilia.Core.Runner/Workflows/ResourceProxyHandler.cs` (ARCHITECTURE §8) — the audited path through which a workflow reaches external systems.
-- **Authorization + SoD (P1):** `Auxilia.Governance/Policy/PolicyEngine.cs`; `PermissionActions.WorkflowApprove`; the run's triggering principal is stashed at dispatch on `CoreRunResolutionRecord.TriggeredByPrincipalId` (used for connector gating; the same value enforces approver ≠ requester).
-- **JIT credentials, never in the container:** `Source/Auxilia.Core.Api/Services/SlotCredentialResolver.cs` + `ICoreCredentialClient` (defined in **Core.Runner**, `…/Workflows/CoreCredentialClient.cs`); connectors (`ConnectorService` in **Core.Api**/Services — a same-named class also exists under BackendService/Dashboard; `ConnectorAccessPolicy`); the per-run repo auth path (`RepositoryAuthResolver`) is the closest analogue to "the Hub holds the credential, the sandbox never sees it."
+- **Signals / input to a running run (P2):** `Source/Platform/Auxilia.Core.Runner/Workflows/SignalDispatcher.cs`, `SignalHandlerStore` (in `…/Workflows/Storage/`); permission `PermissionActions.RunProvideInput` (`run.provide-input`); per-instance token in `WorkflowInstanceTokenRegistry` (`…/Workflows/Storage/`).
+- **Resource Proxy / action choke point (P3):** `Source/Platform/Auxilia.Core.Runner/Workflows/ResourceProxyHandler.cs` (ARCHITECTURE §8) — the audited path through which a workflow reaches external systems.
+- **Authorization + SoD (P1):** `Source/Libraries/Auxilia.Governance/Policy/PolicyEngine.cs`; `PermissionActions.WorkflowApprove`; the run's triggering principal is stashed at dispatch on `CoreRunResolutionRecord.TriggeredByPrincipalId` (used for connector gating; the same value enforces approver ≠ requester).
+- **JIT credentials, never in the container:** `Source/Platform/Auxilia.Core.Api/Services/SlotCredentialResolver.cs` + `ICoreCredentialClient` (defined in **Core.Runner**, `…/Workflows/CoreCredentialClient.cs`); connectors (`ConnectorService` in **Core.Api**/Services — a same-named class also exists under BackendService/Dashboard; `ConnectorAccessPolicy`); the per-run repo auth path (`RepositoryAuthResolver`) is the closest analogue to "the Hub holds the credential, the sandbox never sees it."
 - **Live + persisted views / status:** `IViewPublisher`, `WorkflowStatusEvent` — the model for streaming the agent's turns to the steering client.
-- **Egress ceiling:** `Source/Auxilia.Core.Runner/Workflows/NetworkPolicyResolver.cs`; `RequiresNetworkEndpoint` (a builder method on `IWorkflowBuilder`); `AllowAllNetworkPermitted` (a setting on `…/Workflows/WorkflowDispatcherSettings.cs`) — default-deny, the "egress-locked container".
-- **Audit:** `Auxilia.PlatformData/AuditLog.cs`.
-- **Container launch:** `IWorkflowLauncher` / `WorkflowDispatcher` (`Source/Auxilia.Core.Runner/Workflows/`).
+- **Egress ceiling:** `Source/Platform/Auxilia.Core.Runner/Workflows/NetworkPolicyResolver.cs`; `RequiresNetworkEndpoint` (a builder method on `IWorkflowBuilder`); `AllowAllNetworkPermitted` (a setting on `…/Workflows/WorkflowDispatcherSettings.cs`) — default-deny, the "egress-locked container".
+- **Audit:** `Source/Libraries/Auxilia.PlatformData/AuditLog.cs`.
+- **Container launch:** `IWorkflowLauncher` / `WorkflowDispatcher` (`Source/Platform/Auxilia.Core.Runner/Workflows/`).
 
 ---
 

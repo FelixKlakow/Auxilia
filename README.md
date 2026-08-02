@@ -105,7 +105,7 @@ Requires **.NET 10** and, for running workflows, **Docker**. Solution file: `Aux
 dotnet build Auxilia.slnx        # build everything
 dotnet test  Auxilia.slnx        # full test suite (system tests need Docker)
 
-./Start-DevStack.ps1 -Build      # local Core stack: Core.Api on :5280 + Core.Runner,
+./Scripts/Start-DevStack.ps1 -Build      # local Core stack: Core.Api on :5280 + Core.Runner,
                                  # simulation-seeded; -Stop tears it down
 ```
 

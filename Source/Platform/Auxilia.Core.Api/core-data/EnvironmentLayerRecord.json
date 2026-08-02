@@ -1,0 +1,22 @@
+[
+  {
+    "Id": "409599cc-5dc4-59b6-a3ce-5f165696e048",
+    "ProviderType": "dotnet-10",
+    "Description": "The .NET 10 SDK preinstalled \u2014 build, test, and run .NET projects inside the session.",
+    "BaseEnvironment": "linux",
+    "SetupScript": "curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh\nbash /tmp/dotnet-install.sh --channel 10.0 --install-dir /usr/share/dotnet\nln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet\nrm /tmp/dotnet-install.sh\ndotnet --list-sdks",
+    "Version": "10.0",
+    "UpdatedUtc": "2026-07-27T20:53:40.6339184+00:00",
+    "UpdatedBy": "cf486163-06a5-4515-8389-197be1f6a142"
+  },
+  {
+    "Id": "1beefa4f-f686-5cf4-a511-e44312379876",
+    "ProviderType": "node-22",
+    "Description": "Node.js 22 with npm preinstalled \u2014 build and run JavaScript/TypeScript projects inside the session.",
+    "BaseEnvironment": "linux",
+    "SetupScript": "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -\napt-get install -y --no-install-recommends nodejs\nrm -rf /var/lib/apt/lists/*\nnode --version \u0026\u0026 npm --version",
+    "Version": "22",
+    "UpdatedUtc": "2026-07-27T20:53:40.690731+00:00",
+    "UpdatedBy": "cf486163-06a5-4515-8389-197be1f6a142"
+  }
+]

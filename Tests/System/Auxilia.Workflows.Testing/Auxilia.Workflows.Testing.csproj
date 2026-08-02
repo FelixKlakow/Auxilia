@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Source\Libraries\Auxilia.Workflows\Auxilia.Workflows.csproj" />
+    <ProjectReference Include="..\..\..\Source\Libraries\Auxilia.Workflows.SourceControl\Auxilia.Workflows.SourceControl.csproj" />
+  </ItemGroup>
+
+</Project>

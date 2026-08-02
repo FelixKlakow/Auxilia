@@ -13,21 +13,21 @@ Cross-reference: `docs/TestStrategy.md` for tier definitions.
 
 | Component | Location | Responsibility |
 |---|---|---|
-| `RunWorkflowCommand` | `Auxilia.Workflows/Messaging/Messages/` | New message: external trigger → Core.Runner |
+| `RunWorkflowCommand` | `Source/Libraries/Auxilia.Workflows/Messaging/Messages/` | New message: external trigger → Core.Runner |
 | `WorkflowDispatcher` | `Auxilia.Core.Runner/Workflows/` | Consumes `workflow.run-commands`; calls `IWorkflowLauncher` |
 | `IWorkflowLauncher` | `Auxilia.Core.Runner/Workflows/` | Abstraction over "start a workflow process" |
 | `WorkflowLaunchRequest` | `Auxilia.Core.Runner/Workflows/` | Launcher parameter: image + env vars |
 | `DockerWorkflowLauncher` | `Auxilia.Core.Runner/Workflows/` | Production impl: `docker run -d` + injects RabbitMQ env vars |
 | `DockerWorkflowLauncherSettings` | `Auxilia.Core.Runner/Workflows/` | Config POCO (`WorkflowLauncher` section) |
 | `WorkflowAnnouncementHandler` | `Auxilia.Core.Runner/Workflows/` | Consumes `workflow.announcements`; responds `WorkflowDirective(Run)` |
-| `IWorkflowBuilder.WithRunBody` | `Auxilia.Workflows/` | Registers business-logic delegate; executed inside resolved DI scope |
+| `IWorkflowBuilder.WithRunBody` | `Source/Libraries/Auxilia.Workflows/` | Registers business-logic delegate; executed inside resolved DI scope |
 | `SlotConfigurationsSettings` | `Auxilia.Core.Runner/Workflows/Storage/` | Config-file slot config seeding |
 
 ---
 
 ## Level 1 – Unit Tests
 
-**Project:** `Auxilia.Core.Runner.Tests/` (new unit test files)
+**Project:** `Tests/Platform/Auxilia.Core.Runner.Tests/` (new unit test files)
 
 ### `WorkflowAnnouncementHandlerTests`
 
@@ -67,7 +67,7 @@ These tests verify the argument-building logic of `DockerWorkflowLauncher` is co
 
 ## Level 2 – Component Tests
 
-**Project:** `Auxilia.Core.Runner.Tests/ComponentTests/` (new folder)
+**Project:** `Tests/Platform/Auxilia.Core.Runner.Tests/ComponentTests/` (new folder)
 
 Use `FakeMessageBusClient` (from `Auxilia.Messaging`) and a `FakeWorkflowLauncher` (to be created — records calls, does not invoke Docker).
 
@@ -86,13 +86,13 @@ End-to-end through the in-process DI container of the Core.Runner; no real netwo
 
 ## Level 3 – System Test
 
-**Project:** `Auxilia.SystemTestSuite/`
+**Project:** `Tests/System/Auxilia.SystemTestSuite/`
 
 **Status:** Strategy defined here; implementation tracked separately.
 
 ### New environment: `WorkflowDispatchEnvironment`
 
-**File:** `Auxilia.SystemTestSuite/WorkflowDispatch/WorkflowDispatchEnvironment.cs`
+**File:** `Tests/System/Auxilia.SystemTestSuite/WorkflowDispatch/WorkflowDispatchEnvironment.cs`
 
 **Containers:**
 
@@ -112,7 +112,7 @@ End-to-end through the in-process DI container of the Core.Runner; no real netwo
 
 ### Test class: `WorkflowDispatchSystemTests`
 
-**File:** `Auxilia.SystemTestSuite/WorkflowDispatch/WorkflowDispatchSystemTests.cs`
+**File:** `Tests/System/Auxilia.SystemTestSuite/WorkflowDispatch/WorkflowDispatchSystemTests.cs`
 
 ```
 [TestFixture]

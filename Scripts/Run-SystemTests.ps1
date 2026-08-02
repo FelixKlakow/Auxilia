@@ -46,7 +46,7 @@ try
     }
 
     $test = Start-Process dotnet `
-        -ArgumentList 'test', 'Auxilia.SystemTestSuite/', '--filter', $Filter, '--no-build' `
+        -ArgumentList 'test', 'Tests/System/Auxilia.SystemTestSuite/', '--filter', $Filter, '--no-build' `
         -NoNewWindow -PassThru
 
     # While the tests run, surface every Backend Service container that publishes

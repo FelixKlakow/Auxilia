@@ -173,7 +173,8 @@ source-reported vocabulary (pre-selecting `target-state` if set) and calls `SetS
 
 ## Relation to the OLD Auxilia.ImplementationWorkflow
 
-An older-generation `Source/Auxilia.ImplementationWorkflow` exists (headless `IAiAgent`
+An older-generation `Auxilia.ImplementationWorkflow` existed (removed with the 2026-08-02
+repo restructure; headless `IAiAgent`
 orchestrators, result-sink reviewer, PR step satisfied only by fakes, no user gates, no
 console). The new `implementation` workflow REPLACES it (greenfield rule — no coexistence),
 salvaging: `BranchNamingService`, the signal records, `WriteBackService` (comment + status
