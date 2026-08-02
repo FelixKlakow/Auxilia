@@ -65,9 +65,13 @@
   just-in-time scoped credentials, live operator steering, full REST + MCP parity") and
   topics (ai-agents, agentic-ai, workflow-engine, ai-orchestration, coding-agent,
   claude-code, mcp, model-context-protocol, self-hosted, dotnet, csharp, aspnetcore,
-  blazor, rabbitmq, docker), and register `.github/workflows/publish-nuget.yml` as the
+  blazor, rabbitmq, docker), register `.github/workflows/publish-nuget.yml` as the
   nuget.org Trusted Publishing workflow (tag-triggered `v*`; verify the nuget.org
-  username in the workflow's `user:` input).
+  username in the workflow's `user:` input), and walk the repo-settings checklist:
+  enable Discussions + private vulnerability reporting (SECURITY.md points there),
+  Dependabot alerts, secret-scanning push protection; restrict Actions to the two
+  used action publishers + read-only default GITHUB_TOKEN; a main ruleset blocking
+  force-push/deletion with admin bypass; disable Wiki/Projects.
 - **steering client desktop per-user sign-in** — replace the API-key principal with interactive
   (device-code/OIDC) sign-in that mints a per-user bearer (per-user audit/SoD). Needs a Core
   non-browser token-issue path.
