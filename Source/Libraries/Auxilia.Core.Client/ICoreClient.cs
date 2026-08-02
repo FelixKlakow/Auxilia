@@ -128,6 +128,8 @@ public interface ICoreClient
     Task<WorkflowTypeRegistrationDto?> GetWorkflowTypeRegistrationAsync(string workflowType, CancellationToken ct = default);
     /// <summary>Removes a type from the registry; it can no longer be run.</summary>
     Task UnregisterWorkflowTypeAsync(string workflowType, CancellationToken ct = default);
+    /// <summary>Operational on/off switch: a disabled type stops dispatching until re-enabled.</summary>
+    Task<WorkflowTypeRegistrationDto> SetWorkflowTypeEnabledAsync(string workflowType, bool enabled, CancellationToken ct = default);
     /// <summary>Signing authority: accepts a pending registration; the type becomes Active.</summary>
     Task<WorkflowTypeRegistrationDto> ApproveWorkflowTypeAsync(string workflowType, CancellationToken ct = default);
     /// <summary>Signing authority: refuses a registration with a recorded reason.</summary>

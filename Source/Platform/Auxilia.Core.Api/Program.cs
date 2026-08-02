@@ -1142,6 +1142,19 @@ app.MapDelete("/api/workflow-types/{type}", async (
         : Results.NotFound();
 }).RequireAuthorization();
 
+app.MapPost("/api/workflow-types/{type}/enabled", async (
+        string type, SetWorkflowTypeEnabledRequest request, HttpContext http, IPolicyEngine policy,
+        WorkflowTypeRegistryService registry, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.WorkflowTypeManage, ct) is { } fail)
+        return fail;
+    var outcome = await registry.SetEnabledAsync(
+        type, request.Enabled, CoreClaims.PrincipalIdOf(http.User)!.Value.ToString("D"), ct);
+    return outcome.Registration is { } registration
+        ? Results.Ok(registration)
+        : Results.BadRequest(new { error = outcome.Error });
+}).RequireAuthorization();
+
 app.MapPost("/api/workflow-types/{type}/approve", async (
         string type, HttpContext http, IPolicyEngine policy, WorkflowTypeRegistryService registry,
         CancellationToken ct) =>

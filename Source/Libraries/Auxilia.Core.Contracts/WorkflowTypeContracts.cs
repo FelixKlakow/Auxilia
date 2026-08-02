@@ -11,6 +11,10 @@ public static class WorkflowTypeStatus
 
     /// <summary>The signing authority refused the package — not runnable; the reason is recorded.</summary>
     public const string Denied = "Denied";
+
+    /// <summary>Administratively switched off — not runnable (nor configurable) until re-enabled.
+    /// Unlike <see cref="Denied"/> this is an operational act, not a trust decision.</summary>
+    public const string Disabled = "Disabled";
 }
 
 /// <summary>
@@ -47,6 +51,12 @@ public sealed record RegisterWorkflowTypeRequest(
 
 /// <summary>Deny a pending workflow-type registration; the reason is recorded and returned to callers.</summary>
 public sealed record DenyWorkflowTypeRequest(string Reason);
+
+/// <summary>
+/// Switch a registered type off (or back on) operationally: a disabled type cannot be run — every
+/// configured workflow of it stops dispatching — and returns to Active when re-enabled.
+/// </summary>
+public sealed record SetWorkflowTypeEnabledRequest(bool Enabled);
 
 /// <summary>
 /// The registry's administrative view of one workflow type: status, package coordinate, the

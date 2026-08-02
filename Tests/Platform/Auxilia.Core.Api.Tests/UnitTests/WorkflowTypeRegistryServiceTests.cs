@@ -244,6 +244,55 @@ public sealed class WorkflowTypeRegistryServiceTests
     }
 
     [Test]
+    public async Task Disable_SwitchesAnActiveTypeOff_AndBlocksDispatch()
+    {
+        var service = NewService(new CoreApiSettings { TrustedPublisherKeys = { PublisherKeyBase64 } });
+        var package = BuildSignedPackage("switchable-wf");
+        await service.RegisterAsync(
+            new RegisterWorkflowTypeRequest("switchable-wf", PackageBase64: Convert.ToBase64String(package)),
+            null, CancellationToken.None);
+
+        var disabled = await service.SetEnabledAsync("switchable-wf", enabled: false, "admin", CancellationToken.None);
+
+        Assert.That(disabled.Registration!.Status, Is.EqualTo(WorkflowTypeStatus.Disabled));
+        Assert.ThrowsAsync<InvalidOperationException>(() => service.ResolvePackageUriForDispatchAsync(
+            "switchable-wf", Guid.NewGuid(), "tok", CancellationToken.None),
+            "a disabled type must not dispatch — its configured workflows become unavailable");
+    }
+
+    [Test]
+    public async Task Enable_RestoresADisabledType_ToActive()
+    {
+        var service = NewService(new CoreApiSettings { TrustedPublisherKeys = { PublisherKeyBase64 } });
+        var package = BuildSignedPackage("switchable-wf");
+        await service.RegisterAsync(
+            new RegisterWorkflowTypeRequest("switchable-wf", PackageBase64: Convert.ToBase64String(package)),
+            null, CancellationToken.None);
+        await service.SetEnabledAsync("switchable-wf", enabled: false, "admin", CancellationToken.None);
+
+        var enabled = await service.SetEnabledAsync("switchable-wf", enabled: true, "admin", CancellationToken.None);
+
+        Assert.That(enabled.Registration!.Status, Is.EqualTo(WorkflowTypeStatus.Active));
+        Assert.That(enabled.Registration.StatusReason, Is.EqualTo("re-enabled by admin"));
+    }
+
+    [Test]
+    public async Task EnabledSwitch_NeverTouchesTrustStates()
+    {
+        var service = NewService();
+        await service.RegisterAsync(
+            new RegisterWorkflowTypeRequest("pending-wf", "docker://img:1"), null, CancellationToken.None);
+
+        var disablePending = await service.SetEnabledAsync("pending-wf", enabled: false, "admin", CancellationToken.None);
+        var enablePending = await service.SetEnabledAsync("pending-wf", enabled: true, "admin", CancellationToken.None);
+        var unknown = await service.SetEnabledAsync("ghost", enabled: false, "admin", CancellationToken.None);
+
+        Assert.That(disablePending.Error, Does.Contain("only an active type"));
+        Assert.That(enablePending.Error, Does.Contain("only a disabled type"));
+        Assert.That(unknown.Error, Does.Contain("not registered"));
+    }
+
+    [Test]
     public async Task SchemaAnnouncements_NeverCreateATypeOnlyRefreshIt()
     {
         var service = NewService();

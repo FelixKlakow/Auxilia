@@ -212,6 +212,35 @@ public sealed class WorkflowTypeRegistryService(
         return RegistryOutcome.Ok(ToDto(updated));
     }
 
+    /// <summary>
+    /// Operational on/off switch, distinct from the trust decision: only an Active type can be
+    /// disabled, only a Disabled one re-enabled — Pending/Denied stay with the signing authority.
+    /// A disabled type stops dispatching (every configured workflow of it becomes unavailable).
+    /// </summary>
+    public async Task<RegistryOutcome> SetEnabledAsync(
+        string workflowType, bool enabled, string actor, CancellationToken ct)
+    {
+        var record = await store.ReadAsync(CoreWorkflowTypeRecord.IdFor(workflowType), ct);
+        if (record is null)
+            return RegistryOutcome.Fail("workflow type is not registered.");
+        if (enabled && record.Status != WorkflowTypeStatus.Disabled)
+            return RegistryOutcome.Fail($"only a disabled type can be re-enabled (status: {record.Status}).");
+        if (!enabled && record.Status != WorkflowTypeStatus.Active)
+            return RegistryOutcome.Fail($"only an active type can be disabled (status: {record.Status}).");
+
+        var updated = record with
+        {
+            Status = enabled ? WorkflowTypeStatus.Active : WorkflowTypeStatus.Disabled,
+            StatusReason = enabled ? $"re-enabled by {actor}" : $"disabled by {actor}",
+            UpdatedUtc = clock.GetUtcNow()
+        };
+        await store.SaveAsync(updated, ct);
+        await auditLog.AppendAsync(
+            actor, enabled ? "workflow-type.enable" : "workflow-type.disable", workflowType,
+            updated.Status, updated.StatusReason, ct);
+        return RegistryOutcome.Ok(ToDto(updated));
+    }
+
     public async Task<WorkflowTypeRegistrationDto?> GetRegistrationAsync(string workflowType, CancellationToken ct)
         => await store.ReadAsync(CoreWorkflowTypeRecord.IdFor(workflowType), ct) is { } record ? ToDto(record) : null;
 

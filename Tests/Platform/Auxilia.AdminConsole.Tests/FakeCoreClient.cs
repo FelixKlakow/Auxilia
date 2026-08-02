@@ -479,6 +479,10 @@ internal sealed class FakeCoreClient : ICoreClient
         => Task.FromResult<WorkflowTypeRegistrationDto?>(null);
     public Task UnregisterWorkflowTypeAsync(string workflowType, CancellationToken ct = default)
         => Task.CompletedTask;
+    public Task<WorkflowTypeRegistrationDto> SetWorkflowTypeEnabledAsync(string workflowType, bool enabled, CancellationToken ct = default)
+        => Task.FromResult(new WorkflowTypeRegistrationDto(
+            workflowType, null, enabled ? WorkflowTypeStatus.Active : WorkflowTypeStatus.Disabled,
+            null, null, false, null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
     public Task<WorkflowTypeRegistrationDto> ApproveWorkflowTypeAsync(string workflowType, CancellationToken ct = default)
         => Task.FromResult(new WorkflowTypeRegistrationDto(
             workflowType, null, WorkflowTypeStatus.Active, null, null, false,

@@ -138,6 +138,7 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task<PagedResult<WorkflowTypeDto>> ListWorkflowTypesAsync(WorkflowTypeQuery query, CancellationToken ct = default) => Nope<Task<PagedResult<WorkflowTypeDto>>>();
     public Task<WorkflowTypeRegistrationDto> RegisterWorkflowTypeAsync(RegisterWorkflowTypeRequest request, CancellationToken ct = default) => Nope<Task<WorkflowTypeRegistrationDto>>();
     public Task<WorkflowTypeRegistrationDto?> GetWorkflowTypeRegistrationAsync(string workflowType, CancellationToken ct = default) => Nope<Task<WorkflowTypeRegistrationDto?>>();
+    public Task<WorkflowTypeRegistrationDto> SetWorkflowTypeEnabledAsync(string workflowType, bool enabled, CancellationToken ct = default) => Nope<Task<WorkflowTypeRegistrationDto>>();
     public Task<WorkflowTypeRegistrationDto> ApproveWorkflowTypeAsync(string workflowType, CancellationToken ct = default) => Nope<Task<WorkflowTypeRegistrationDto>>();
     public Task<WorkflowTypeRegistrationDto> DenyWorkflowTypeAsync(string workflowType, string reason, CancellationToken ct = default) => Nope<Task<WorkflowTypeRegistrationDto>>();
     public Task<GroupDto> CreateGroupAsync(CreateGroupRequest request, CancellationToken ct = default) => Nope<Task<GroupDto>>();

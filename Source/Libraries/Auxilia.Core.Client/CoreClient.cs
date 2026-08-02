@@ -278,6 +278,12 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
     public Task UnregisterWorkflowTypeAsync(string workflowType, CancellationToken ct = default)
         => DeleteAsync($"/api/workflow-types/{Uri.EscapeDataString(workflowType)}", ct);
 
+    public Task<WorkflowTypeRegistrationDto> SetWorkflowTypeEnabledAsync(
+        string workflowType, bool enabled, CancellationToken ct = default)
+        => PostAsync<SetWorkflowTypeEnabledRequest, WorkflowTypeRegistrationDto>(
+            $"/api/workflow-types/{Uri.EscapeDataString(workflowType)}/enabled",
+            new SetWorkflowTypeEnabledRequest(enabled), ct);
+
     public Task<WorkflowTypeRegistrationDto> ApproveWorkflowTypeAsync(string workflowType, CancellationToken ct = default)
         => PostAsync<WorkflowTypeRegistrationDto>(
             $"/api/workflow-types/{Uri.EscapeDataString(workflowType)}/approve", ct);
