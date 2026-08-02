@@ -67,7 +67,8 @@ to talk.
 
 ## How to obtain one
 
-Open an issue or discussion on the Auxilia repository on GitHub with:
+Licensing involves your company's details, so it runs over email, not a
+public issue tracker. Write to **20222977+FelixKlakow@users.noreply.github.com** with:
 
 1. The name and country of the legal entity that will use Auxilia
 2. A short description of the intended use
@@ -75,6 +76,9 @@ Open an issue or discussion on the Auxilia repository on GitHub with:
 
 You will receive a written license agreement. Use in production begins once
 that agreement is signed.
+
+General, non-confidential questions (which side of the line a use falls on,
+how the license works) are welcome as GitHub discussions too.
 
 ## The Change Date
 

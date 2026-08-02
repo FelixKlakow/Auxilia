@@ -52,10 +52,18 @@
   open: pick the feed (nuget.org vs private) and extract the steering codec into its own
   package so desktop clients don't need the full contracts surface.
 - **Go-public pre-flight** (repo is otherwise publish-ready: rewritten noreply-only history,
-  single `main`, licenses + pricing incl. free personal tier): final outside-eyes read of
+  single `main`, licenses + pricing incl. free personal tier; licensing contact is EMAIL —
+  a public issue would expose the inquirer's company details): final outside-eyes read of
   README/CONTRIBUTING, verify or retire `Start-Presentation.bat` (stale header comment, a
   "via Studio" help string in DevStand), optionally ask GitHub Support to GC the
-  pre-rewrite objects, then flip the repository public.
+  pre-rewrite objects, then flip the repository public. On flipping: set the repo
+  description ("Self-hosted platform for governed AI agent workflows — signed containers,
+  just-in-time scoped credentials, live operator steering, full REST + MCP parity") and
+  topics (ai-agents, agentic-ai, workflow-engine, ai-orchestration, coding-agent,
+  claude-code, mcp, model-context-protocol, self-hosted, dotnet, csharp, aspnetcore,
+  blazor, rabbitmq, docker), and register `.github/workflows/publish-nuget.yml` as the
+  nuget.org Trusted Publishing workflow (tag-triggered `v*`; verify the nuget.org
+  username in the workflow's `user:` input).
 - **steering client desktop per-user sign-in** — replace the API-key principal with interactive
   (device-code/OIDC) sign-in that mints a per-user bearer (per-user audit/SoD). Needs a Core
   non-browser token-issue path.

@@ -1,0 +1,45 @@
+# Packs and publishes the client-library packages to nuget.org via TRUSTED PUBLISHING:
+# no long-lived API key — the job authenticates with its GitHub OIDC token and NuGet/login
+# exchanges it for a short-lived key. Register this file on nuget.org under
+# Trusted Publishing as: owner FelixKlakow, repository Auxilia,
+# workflow file publish-nuget.yml (environment: none).
+#
+# Runs only when a version tag (v0.1.0, v0.2.1, ...) is pushed — never on ordinary commits.
+name: publish-nuget
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write # the OIDC token Trusted Publishing exchanges for a short-lived API key
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Pack the client libraries
+        run: |
+          dotnet pack Auxilia.Core.Contracts/Auxilia.Core.Contracts.csproj  -c Release -o packages
+          dotnet pack Auxilia.Core.Client/Auxilia.Core.Client.csproj        -c Release -o packages
+          dotnet pack Auxilia.Workflows.Client/Auxilia.Workflows.Client.csproj -c Release -o packages
+
+      - name: NuGet login (Trusted Publishing)
+        uses: NuGet/login@v1
+        id: nuget-login
+        with:
+          user: FelixKlakow
+
+      - name: Push to nuget.org
+        run: >
+          dotnet nuget push "packages/*.nupkg"
+          --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}"
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
