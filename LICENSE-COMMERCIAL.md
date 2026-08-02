@@ -68,7 +68,7 @@ to talk.
 ## How to obtain one
 
 Licensing involves your company's details, so it runs over email, not a
-public issue tracker. Write to **20222977+FelixKlakow@users.noreply.github.com** with:
+public issue tracker. Write to **felix.klakow.github@gmail.com** with:
 
 1. The name and country of the legal entity that will use Auxilia
 2. A short description of the intended use
