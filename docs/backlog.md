@@ -110,9 +110,6 @@ access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing di
   memory/CPU caps in `ImageBuildParameters`.
 
 ## Generic binding pipeline
-- **OS-sensitive `DockerSocketPath` default** — Docker Desktop 29.4.2 broke the unix-socket
-  default on Windows hosts; local runners need
-  `WorkflowLauncher__DockerSocketPath=npipe://./pipe/docker_engine` (dev stack sets it).
 - **AdminConsole editors on the generic model** — the Blazor editors still assume
   connector-only bindings and know nothing of provider-type narrowing, choice labels,
   environment slots, or the plan view.

@@ -35,10 +35,13 @@ public sealed class DockerWorkflowLauncherSettings
     public string RabbitMqPassword { get; set; } = "guest";
 
     /// <summary>
-    /// URI of the Docker daemon socket used to launch workflow containers.
-    /// Defaults to the standard Unix socket. Override in config or env for remote daemons.
+    /// URI of the Docker daemon socket used to launch workflow containers. Defaults to the
+    /// host OS's standard local daemon endpoint (named pipe on Windows, Unix socket elsewhere).
+    /// Override in config or env for remote daemons.
     /// </summary>
-    public string DockerSocketPath { get; set; } = "unix:///var/run/docker.sock";
+    public string DockerSocketPath { get; set; } = OperatingSystem.IsWindows()
+        ? "npipe://./pipe/docker_engine"
+        : "unix:///var/run/docker.sock";
 
     /// <summary>
     /// Base container image used to run workflow assemblies.

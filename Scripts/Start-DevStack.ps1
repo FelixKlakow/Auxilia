@@ -34,7 +34,6 @@ if ($Build) {
 
 $runnerEnv = @{
     WorkflowDispatcher__CoreApiBaseAddress                        = "http://localhost:5280"
-    WorkflowLauncher__DockerSocketPath                            = "npipe://./pipe/docker_engine"
     WorkflowLauncher__RabbitMqHost                                = "host.docker.internal"
     # Hyphenated names MUST be quoted — an unquoted hash key with a hyphen is a parser error
     # that kills the whole script before anything starts.
