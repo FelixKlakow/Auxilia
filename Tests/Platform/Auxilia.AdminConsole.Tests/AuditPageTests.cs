@@ -69,6 +69,26 @@ public sealed class AuditPageTests
     }
 
     [Test]
+    public void Audit_ResolvesGuidActors_ToPrincipalDisplayNames()
+    {
+        var principalId = Guid.NewGuid();
+        var core = new FakeCoreClient();
+        core.Principals.Add(new PrincipalDto(principalId, "Human", "Ada Lovelace", "Active", null, []));
+        core.AuditEntries.Add(Entry(principalId.ToString(), "connector.created", "github-bot", DateTimeOffset.UtcNow));
+        core.AuditEntries.Add(Entry(Guid.NewGuid().ToString(), "policy.allowed", "audit-log", DateTimeOffset.UtcNow.AddMinutes(-1)));
+        using var ctx = NewContext(core);
+
+        var cut = ctx.Render<Audit>();
+
+        cut.WaitForAssertion(() => Assert.Multiple(() =>
+        {
+            Assert.That(cut.Markup, Does.Contain("Ada Lovelace"), "a known principal renders its display name");
+            Assert.That(cut.Markup, Does.Contain($"title=\"{principalId}\""), "the raw id stays reachable via the tooltip");
+            Assert.That(cut.Markup, Does.Contain("policy.allowed"), "an unknown-principal entry still renders (raw id)");
+        }));
+    }
+
+    [Test]
     public void Audit_ShowsAccessDenied_OnForbidden()
     {
         var core = new FakeCoreClient

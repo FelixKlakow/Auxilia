@@ -69,7 +69,7 @@ else
                 {
                     <tr>
                         <td class="cell-mono">@entry.TimestampUtc.ToString("yyyy-MM-dd HH:mm:ss")</td>
-                        <td><span class="cell-truncate" title="@entry.Actor">@entry.Actor</span></td>
+                        <td><span class="cell-truncate" title="@entry.Actor">@DisplayActor(entry.Actor)</span></td>
                         <td class="cell-strong">@entry.Action</td>
                         <td><span class="cell-mono cell-truncate" title="@entry.Subject">@entry.Subject</span></td>
                         <td>@entry.Outcome</td>
@@ -139,6 +139,7 @@ else
             _total = page.Total;
             _entries.AddRange(page.Items);
             _skip += page.Items.Count;
+            await ResolveActorNamesAsync(page.Items);
         }
         catch (CoreApiException ex)
         {
@@ -150,5 +151,31 @@ else
     }
 
     private static string? Empty(string value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    // Actor → resolved display name; null marks a lookup that found nothing (raw id stays shown).
+    private readonly Dictionary<string, string?> _actorNames = new(StringComparer.OrdinalIgnoreCase);
+
+    private string DisplayActor(string actor) => _actorNames.GetValueOrDefault(actor) ?? actor;
+
+    /// <summary>
+    /// Resolves GUID actors to principal display names, one lookup per distinct actor. A failed or
+    /// unauthorized lookup is cached as unresolved so the raw id renders without retry storms.
+    /// </summary>
+    private async Task ResolveActorNamesAsync(IReadOnlyList<AuditEntry> entries)
+    {
+        foreach (var actor in entries.Select(e => e.Actor).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (_actorNames.ContainsKey(actor) || !Guid.TryParse(actor, out var id))
+                continue;
+            try
+            {
+                _actorNames[actor] = (await Core.GetPrincipalAsync(id))?.DisplayName;
+            }
+            catch (CoreApiException)
+            {
+                _actorNames[actor] = null;
+            }
+        }
+    }
 
 }

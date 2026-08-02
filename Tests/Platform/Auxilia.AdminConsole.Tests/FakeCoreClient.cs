@@ -384,7 +384,8 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task<IReadOnlyList<GroupDto>> ListGroupsAsync(CancellationToken ct = default) => Nope<Task<IReadOnlyList<GroupDto>>>();
     public Task AddGroupMemberAsync(Guid groupId, AddGroupMemberRequest request, CancellationToken ct = default) => Nope<Task>();
     public Task AssignGroupRoleAsync(Guid groupId, AssignGroupRoleRequest request, CancellationToken ct = default) => Nope<Task>();
-    public Task<PrincipalDto?> GetPrincipalAsync(Guid id, CancellationToken ct = default) => Nope<Task<PrincipalDto?>>();
+    public Task<PrincipalDto?> GetPrincipalAsync(Guid id, CancellationToken ct = default)
+        => Task.FromResult(Principals.FirstOrDefault(p => p.Id == id));
     public Task<IReadOnlyList<GroupMappingDto>> ListGroupMappingsAsync(CancellationToken ct = default) => Nope<Task<IReadOnlyList<GroupMappingDto>>>();
     public Task<GroupMappingDto> CreateGroupMappingAsync(CreateGroupMappingRequest request, CancellationToken ct = default) => Nope<Task<GroupMappingDto>>();
     public Task RemoveGroupMappingAsync(Guid id, CancellationToken ct = default) => Nope<Task>();
