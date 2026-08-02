@@ -892,10 +892,12 @@ Every operation in Auxilia — human, AI, or service — is performed by an auth
 | Principal kind | Authenticates via | Notes |
 |---|---|---|
 | **Human user** | Identity Provider (Local, OIDC/AAD/LDAP) | Interactive dashboard sessions |
-| **AI principal** | Its own Account Bundle (API key / token) via MCP | Full UI parity; additionally constrained by the AI bundle's purpose restrictions and usage quotas |
-| **Service principal** | Platform-issued credentials | Integration adapters, schedulers, platform components acting on their own behalf |
+| **Service principal** | Platform-issued API key (shown once at creation, stored hashed) | Integration adapters, schedulers, AI agents — every non-human identity |
 
-All three kinds flow through the same role, permission, and audit machinery — an AI principal is not a special case, it is a principal with extra bundle-level constraints.
+Both kinds flow through the same role, permission, and audit machinery. Finer classification is
+**tags**: free-form, admin-managed strings on the principal (e.g. `ai-agent`, a team, an
+environment) — a filter/grouping/reporting axis, never a policy input. An AI agent is therefore
+not a special principal kind; it is a Service principal tagged as one.
 
 ### Built-in roles
 
@@ -944,6 +946,24 @@ Connectors and run configurations share one ownership model (`ResourceScope` + `
 ### Groups and group mapping
 
 Roles reach a principal three ways, unioned deny-by-default: **direct** assignment; membership in a **first-class group** (`GroupDirectory` + `GroupRoleResolver` — a group carries members and roles, and a member inherits the group's roles); and IdP **mapping**, where an administrator maintains `(identity provider, group) → role(s)` mappings so corporate directory groups (AAD/LDAP/OIDC claims) translate to Auxilia roles at sign-in without per-user administration. A principal's **effective roles are the union of all three**. First-class groups and their role assignments are administered in the Core (REST + authenticated MCP: `create_group`, `add_group_member`, `assign_group_role`); IdP mappings are evaluated at session start and cached for the session lifetime.
+
+### Safeguards for principal administration
+
+Two server-side safeguards protect the identity plane itself (clients may add type-to-confirm
+UX on top, but these are enforced in the Core and apply equally to REST and MCP):
+
+- **Last-administrator lock-out guard** — revoking the Administrator role or disabling a
+  principal is refused (HTTP 409) when it would leave **no enabled administrator**. Group-derived
+  admin roles count both ways: a direct revoke is allowed while the target keeps admin through a
+  group, and another principal's group-held admin role satisfies the guard.
+- **Step-up re-authentication** — holding `principal.administer` is not enough for the most
+  sensitive mutations: **granting or revoking the Administrator role and disabling a principal**
+  additionally demand a fresh **elevation**. The caller re-proves their *own* credential
+  (password / API key) at `POST /auth/step-up` and receives a self-validating HMAC ticket
+  (principal + expiry, ~5 minutes — the same node-portable construction as terminal tickets),
+  sent as the `X-Auxilia-Elevation` header (MCP: the `step_up` tool + an `elevationToken`
+  parameter). Without it those calls fail with the error detail `elevation-required`, which
+  clients key their re-authentication prompt on. Step-ups are audited, granted and denied.
 
 ### Administration
 

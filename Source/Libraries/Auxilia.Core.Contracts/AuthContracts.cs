@@ -17,3 +17,18 @@ public sealed record CurrentPrincipal(
 /// caller. Opaque to the client; sent as <c>Authorization: Bearer &lt;token&gt;</c> until <c>ExpiresUtc</c>.
 /// </summary>
 public sealed record UserBearerToken(string Token, DateTimeOffset ExpiresUtc);
+
+/// <summary>
+/// Step-up re-authentication (<c>POST /auth/step-up</c>): the caller re-proves their OWN
+/// credential — password for humans, API key for service principals — to obtain a short-lived
+/// elevation for security-sensitive administration (granting/revoking administrator rights,
+/// disabling principals).
+/// </summary>
+public sealed record StepUpRequest(string Secret);
+
+/// <summary>
+/// The elevation minted by a successful step-up: sent as the <c>X-Auxilia-Elevation</c> header
+/// and valid for a few minutes of work. Endpoints that demand it reject other callers with the
+/// error detail <c>elevation-required</c>.
+/// </summary>
+public sealed record ElevationTicket(string Token, DateTimeOffset ExpiresUtc);

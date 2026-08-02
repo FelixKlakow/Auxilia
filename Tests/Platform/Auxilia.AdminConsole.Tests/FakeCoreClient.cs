@@ -109,6 +109,9 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task SetPrincipalTagsAsync(Guid id, SetPrincipalTagsRequest request, CancellationToken ct = default)
         => Task.CompletedTask;
 
+    public Task<ElevationTicket> StepUpAsync(StepUpRequest request, CancellationToken ct = default)
+        => Task.FromResult(new ElevationTicket("fake-elevation", DateTimeOffset.UtcNow.AddMinutes(5)));
+
     // --- Identity sources ---
     public List<IdentityConnectorDescriptorDto> IdentityConnectors { get; } = [];
     public List<IdentitySourceDto> IdentitySources { get; } = [];

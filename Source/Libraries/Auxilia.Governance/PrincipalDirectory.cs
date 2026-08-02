@@ -156,6 +156,31 @@ public sealed class PrincipalDirectory(
         return true;
     }
 
+    /// <summary>
+    /// Re-proves the principal's OWN credential for step-up flows: the password of a human, the
+    /// API key of a service principal. Never authenticates — the caller is already signed in;
+    /// this only confirms the person at the keyboard still holds the credential.
+    /// </summary>
+    public async Task<bool> VerifySecretAsync(Guid principalId, string secret, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(secret))
+            return false;
+        var all = await credentials.ReadAsync(ct);
+        foreach (var credential in all.Where(c => c.PrincipalId == principalId))
+        {
+            var verified = credential.Kind switch
+            {
+                "Password" => PasswordHasher.Verify(secret, credential.SecretHash),
+                "ApiKey" => string.Equals(
+                    LocalIdentityProvider.HashApiKey(secret), credential.SecretHash, StringComparison.Ordinal),
+                _ => false,
+            };
+            if (verified)
+                return true;
+        }
+        return false;
+    }
+
     public async Task<bool> AnyAdministratorExistsAsync(CancellationToken ct = default)
     {
         var assignmentsQuery = await roleAssignments.ReadAsync(ct);

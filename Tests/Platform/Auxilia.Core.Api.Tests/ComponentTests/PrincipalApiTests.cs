@@ -31,6 +31,33 @@ public sealed class PrincipalApiTests : CoreApiComponentTestBase
     }
 
     [Test]
+    public async Task AdministratorGrant_AndDisable_RequireStepUpElevation()
+    {
+        var directory = Factory.Services.GetRequiredService<PrincipalDirectory>();
+        var (admin, apiKey) = await directory.CreateApiKeyPrincipalAsync($"svc-{Guid.NewGuid():N}");
+        await directory.AssignRoleAsync(admin.Id, BuiltInRoles.Administrator);
+        var client = Factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        ICoreClient core = new CoreClient(client);
+        var target = await core.CreateHumanPrincipalAsync(new CreateHumanPrincipalRequest(
+            "Elevation Target", $"target-{Guid.NewGuid():N}", "pw"));
+
+        // Granting Administrator without a fresh step-up is refused with the distinctive detail.
+        var refused = Assert.ThrowsAsync<CoreApiException>(() => core.AssignPrincipalRoleAsync(
+            target.Id, new AssignRoleRequest(BuiltInRoles.Administrator)));
+        Assert.That(refused!.ErrorDetail, Is.EqualTo("elevation-required"));
+
+        // A wrong secret does not elevate.
+        Assert.ThrowsAsync<CoreApiException>(() => core.StepUpAsync(new StepUpRequest("not-my-key")));
+
+        // Re-proving the caller's OWN API key elevates; grant, admin-revoke, and disable now pass.
+        await core.StepUpAsync(new StepUpRequest(apiKey));
+        await core.AssignPrincipalRoleAsync(target.Id, new AssignRoleRequest(BuiltInRoles.Administrator));
+        await core.RevokePrincipalRoleAsync(target.Id, BuiltInRoles.Administrator);
+        await core.SetPrincipalEnabledAsync(target.Id, new SetPrincipalEnabledRequest(false));
+    }
+
+    [Test]
     public async Task CreateHuman_AppearsInList_WithNoRoles()
     {
         var core = Core;
@@ -121,6 +148,8 @@ public sealed class PrincipalApiTests : CoreApiComponentTestBase
         var core = Core;
         var result = await core.CreateApiKeyPrincipalAsync(new CreateApiKeyPrincipalRequest($"bot-{Guid.NewGuid():N}"));
         await core.AssignPrincipalRoleAsync(result.Principal.Id, new AssignRoleRequest(BuiltInRoles.Operator));
+        // Disabling demands the step-up elevation.
+        await core.StepUpAsync(new StepUpRequest(TestApiKey));
 
         var keyed = Factory.CreateClient();
         keyed.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", result.ApiKey);
@@ -140,7 +169,10 @@ public sealed class PrincipalApiTests : CoreApiComponentTestBase
     [Test]
     public async Task SetEnabled_UnknownPrincipal_Returns404()
     {
-        var response = await CreateClient().PostAsJsonAsync(
+        var client = CreateClient();
+        // The elevation gate sits in front of the lookup — step up so the 404 is reachable.
+        await new CoreClient(client).StepUpAsync(new StepUpRequest(TestApiKey));
+        var response = await client.PostAsJsonAsync(
             $"/api/principals/{Guid.NewGuid()}/enabled", new SetPrincipalEnabledRequest(false));
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
     }

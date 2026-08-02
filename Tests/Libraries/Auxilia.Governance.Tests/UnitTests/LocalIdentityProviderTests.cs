@@ -74,6 +74,23 @@ public class LocalIdentityProviderTests
     }
 
     [Test]
+    public async Task VerifySecret_AcceptsOnlyThePrincipalsOwnCredential()
+    {
+        var human = await _ctx.Directory.CreateHumanAsync("Alice", $"alice-{Guid.NewGuid():N}", "s3cret");
+        var (service, apiKey) = await _ctx.Directory.CreateApiKeyPrincipalAsync("Bot");
+
+        Assert.Multiple(async () =>
+        {
+            Assert.That(await _ctx.Directory.VerifySecretAsync(human.Id, "s3cret"), Is.True);
+            Assert.That(await _ctx.Directory.VerifySecretAsync(human.Id, "wrong"), Is.False);
+            Assert.That(await _ctx.Directory.VerifySecretAsync(service.Id, apiKey), Is.True);
+            Assert.That(await _ctx.Directory.VerifySecretAsync(service.Id, "s3cret"), Is.False);
+            Assert.That(await _ctx.Directory.VerifySecretAsync(human.Id, apiKey), Is.False,
+                "another principal's credential must never elevate");
+        });
+    }
+
+    [Test]
     public async Task LastAdministrator_CanNeitherBeRevokedNorDisabled()
     {
         var admin = await _ctx.Directory.CreateHumanAsync("Only Admin", $"admin-{Guid.NewGuid():N}", "pw");

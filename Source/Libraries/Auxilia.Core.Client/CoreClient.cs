@@ -378,6 +378,15 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
     public Task<CurrentPrincipal> GetCurrentPrincipalAsync(CancellationToken ct = default)
         => GetAsync<CurrentPrincipal>("/auth/me", ct);
 
+    public async Task<ElevationTicket> StepUpAsync(StepUpRequest request, CancellationToken ct = default)
+    {
+        var ticket = await PostAsync<StepUpRequest, ElevationTicket>("/auth/step-up", request, ct);
+        // Hold the elevation on this client: subsequent sensitive calls carry it automatically.
+        http.DefaultRequestHeaders.Remove("X-Auxilia-Elevation");
+        http.DefaultRequestHeaders.Add("X-Auxilia-Elevation", ticket.Token);
+        return ticket;
+    }
+
     public Task<IReadOnlyList<RoleDto>> ListRolesAsync(CancellationToken ct = default)
         => GetAsync<IReadOnlyList<RoleDto>>("/api/roles", ct);
 

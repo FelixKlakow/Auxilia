@@ -171,6 +171,12 @@ public interface ICoreClient
     // --- Identity / diagnostics ---
     /// <summary>The principal the client is authenticated as, with its resolved roles.</summary>
     Task<CurrentPrincipal> GetCurrentPrincipalAsync(CancellationToken ct = default);
+    /// <summary>
+    /// Step-up: re-proves the caller's OWN credential and holds the returned elevation for
+    /// subsequent security-sensitive calls (admin-role grant/revoke, principal disable) until it
+    /// expires. Those calls otherwise fail with the error detail <c>elevation-required</c>.
+    /// </summary>
+    Task<ElevationTicket> StepUpAsync(StepUpRequest request, CancellationToken ct = default);
     /// <summary>The built-in roles and the permission actions each grants.</summary>
     Task<IReadOnlyList<RoleDto>> ListRolesAsync(CancellationToken ct = default);
     /// <summary>Principals + first-class groups for sharing pickers (ids and display names only).</summary>

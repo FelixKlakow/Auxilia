@@ -36,6 +36,7 @@ public sealed class CoreMcpTools(
     IdentityImportService identityImport,
     PrincipalDirectory principals,
     PrincipalAdminService principalAdmin,
+    ElevationTicketService elevation,
     Auxilia.UniversalDataAccess.IDataAccess<Data.CoreArtifactRecord> artifacts)
 {
     private static readonly JsonSerializerOptions JsonOptions = JsonSerializerOptions.Web;
@@ -646,6 +647,30 @@ public sealed class CoreMcpTools(
         return JsonResult(new CreatedApiKeyPrincipal(PrincipalAdminService.ToDto(principal, []), apiKey));
     }
 
+    [McpServerTool(Name = "step_up")]
+    [Description("Re-proves YOUR OWN credential (API key) and returns a short-lived elevation token " +
+                 "required by security-sensitive administration: assigning/revoking the Administrator " +
+                 "role and disabling principals. Pass the token as elevationToken to those tools.")]
+    public async Task<CallToolResult> StepUpAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Your own credential (the API key this session authenticates with).")] string secret,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } actor)
+            return NoPrincipal();
+        if (!await principals.VerifySecretAsync(actor, secret, cancellationToken))
+            return Error("the credential was not accepted.");
+        var (token, expiresUtc) = elevation.Issue(actor);
+        return JsonResult(new ElevationTicket(token, expiresUtc));
+    }
+
+    /// <summary>Elevation gate for the security-sensitive principal mutations.</summary>
+    private CallToolResult? DenyWithoutElevation(System.Security.Claims.ClaimsPrincipal user, string? elevationToken)
+        => CoreClaims.PrincipalIdOf(user) is { } caller && elevation.Validate(elevationToken, caller)
+            ? null
+            : Error(ElevationTicketService.RequiredError
+                    + " — call step_up with your own credential first and pass the returned token.");
+
     [McpServerTool(Name = "set_principal_tags")]
     [Description("Replaces a principal's free-form tags — the admin-managed classification axis " +
                  "(e.g. \"ai-agent\", a team, an environment). An empty list clears them.")]
@@ -673,12 +698,16 @@ public sealed class CoreMcpTools(
         RequestContext<CallToolRequestParams> context,
         [Description("Principal id (GUID).")] string principalId,
         [Description("Role name (Administrator, Operator, User, Auditor).")] string roleName,
+        [Description("Step-up elevation token (from step_up) — required when assigning Administrator.")] string? elevationToken = null,
         CancellationToken cancellationToken = default)
     {
         if (CoreClaims.PrincipalIdOf(context.User) is not { } actor)
             return NoPrincipal();
         if (await DenyAsync(actor, PermissionActions.PrincipalAdminister, null, cancellationToken) is { } denial)
             return denial;
+        if (roleName == Governance.BuiltInRoles.Administrator
+            && DenyWithoutElevation(context.User, elevationToken) is { } unelevated)
+            return unelevated;
         if (!Guid.TryParse(principalId, out var pid))
             return Error("principalId must be a GUID.");
         try
@@ -699,12 +728,16 @@ public sealed class CoreMcpTools(
         RequestContext<CallToolRequestParams> context,
         [Description("Principal id (GUID).")] string principalId,
         [Description("Role name to revoke.")] string roleName,
+        [Description("Step-up elevation token (from step_up) — required when revoking Administrator.")] string? elevationToken = null,
         CancellationToken cancellationToken = default)
     {
         if (CoreClaims.PrincipalIdOf(context.User) is not { } actor)
             return NoPrincipal();
         if (await DenyAsync(actor, PermissionActions.PrincipalAdminister, null, cancellationToken) is { } denial)
             return denial;
+        if (roleName == Governance.BuiltInRoles.Administrator
+            && DenyWithoutElevation(context.User, elevationToken) is { } unelevated)
+            return unelevated;
         if (!Guid.TryParse(principalId, out var pid))
             return Error("principalId must be a GUID.");
         try
@@ -725,12 +758,15 @@ public sealed class CoreMcpTools(
         RequestContext<CallToolRequestParams> context,
         [Description("Principal id (GUID).")] string principalId,
         [Description("True to enable, false to disable.")] bool enabled,
+        [Description("Step-up elevation token (from step_up) — required when disabling.")] string? elevationToken = null,
         CancellationToken cancellationToken = default)
     {
         if (CoreClaims.PrincipalIdOf(context.User) is not { } actor)
             return NoPrincipal();
         if (await DenyAsync(actor, PermissionActions.PrincipalAdminister, null, cancellationToken) is { } denial)
             return denial;
+        if (!enabled && DenyWithoutElevation(context.User, elevationToken) is { } unelevated)
+            return unelevated;
         if (!Guid.TryParse(principalId, out var pid))
             return Error("principalId must be a GUID.");
         try

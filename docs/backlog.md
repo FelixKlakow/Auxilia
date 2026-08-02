@@ -6,6 +6,12 @@
 ## Core.Api — client-surface follow-ups
 - **Per-user bearer hardening** — the short-lived bearer is embedded in the prerendered page
   (same-origin TLS); consider a server-side opaque-handle store keyed by principal.
+- **AdminConsole step-up prompt** — the Core now demands an `X-Auxilia-Elevation` step-up for
+  admin-role grant/revoke and principal disable (2026-08-02, see ARCHITECTURE §16). The steering client
+  has the re-authentication dialog; the AdminConsole does not yet — those actions currently
+  surface the raw `elevation-required` failure there. Add a step-up prompt (and ideally the
+  steering client's type-to-confirm pattern) for parity. Tags administration UI in the AdminConsole is
+  also still missing (steering client-only today).
 - **Workflow-type registry administration** — full client surface exists on `ICoreClient`
   (register/approve/deny/unregister), and the steering client ships a registry-administration panel
   (2026-08-02, permission-gated on `workflow-type.manage`/`workflow-type.sign`); the

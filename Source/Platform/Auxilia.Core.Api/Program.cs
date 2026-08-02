@@ -124,6 +124,7 @@ builder.Services.AddSingleton<Auxilia.PlatformData.Artifacts.IArtifactPayloadRea
 builder.Services.AddSingleton<Auxilia.Workflows.Messaging.WorkflowStatusPublisher>();
 builder.Services.AddSingleton<RunnerLivenessTracker>();
 builder.Services.AddSingleton<TerminalTicketService>();
+builder.Services.AddSingleton<ElevationTicketService>();
 builder.Services.AddSingleton<TerminalProxyService>();
 builder.Services.AddSingleton<FailoverMonitor>();
 builder.Services.AddHostedService<RunTrackingService>();
@@ -244,6 +245,24 @@ app.MapPost("/auth/token", (HttpContext http, UserBearerTokenService tokens) =>
     var (token, expiresUtc) = tokens.Issue(principalId);
     return Results.Ok(new UserBearerToken(token, expiresUtc));
 }).RequireAuthorization(CoreAuthExtensions.CookieSessionPolicy);
+
+// Step-up: re-prove the caller's OWN credential (password / API key) to obtain a short-lived
+// elevation for security-sensitive administration. Both outcomes are audited.
+app.MapPost("/auth/step-up", async (
+        StepUpRequest request, HttpContext http, PrincipalDirectory directory,
+        ElevationTicketService elevation, AuditLog audit, CancellationToken ct) =>
+{
+    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+        return Results.Unauthorized();
+    if (!await directory.VerifySecretAsync(principalId, request.Secret, ct))
+    {
+        await audit.AppendAsync(principalId.ToString(), "auth.step-up", principalId.ToString(), "denied", ct: ct);
+        return Results.Json(new { error = "the credential was not accepted" }, statusCode: StatusCodes.Status403Forbidden);
+    }
+    var (token, expiresUtc) = elevation.Issue(principalId);
+    await audit.AppendAsync(principalId.ToString(), "auth.step-up", principalId.ToString(), "granted", ct: ct);
+    return Results.Ok(new ElevationTicket(token, expiresUtc));
+}).RequireAuthorization();
 
 app.MapGet("/auth/me", (HttpContext http) =>
 {
@@ -1407,13 +1426,26 @@ app.MapPost("/api/principals/{id:guid}/tags", async (
         : Results.NotFound();
 }).RequireAuthorization();
 
+// A caller may hold principal.administer all day; GRANTING administrator rights, revoking them,
+// or disabling a principal additionally demands a fresh step-up elevation (re-typed credential).
+static IResult? RequireElevation(HttpContext http, ElevationTicketService elevation)
+{
+    var token = http.Request.Headers[ElevationTicketService.HeaderName].FirstOrDefault();
+    return CoreClaims.PrincipalIdOf(http.User) is { } caller && elevation.Validate(token, caller)
+        ? null
+        : Results.Json(new { error = ElevationTicketService.RequiredError },
+            statusCode: StatusCodes.Status403Forbidden);
+}
+
 // Assign a Direct role (idempotent). Never touches Group-/GroupMapping-sourced roles.
 app.MapPost("/api/principals/{id:guid}/roles", async (
         Guid id, AssignRoleRequest request, HttpContext http, IPolicyEngine policy,
-        PrincipalDirectory directory, CancellationToken ct) =>
+        PrincipalDirectory directory, ElevationTicketService elevation, CancellationToken ct) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PrincipalAdminister, ct) is { } fail)
         return fail;
+    if (request.RoleName == BuiltInRoles.Administrator && RequireElevation(http, elevation) is { } denied)
+        return denied;
     try
     {
         await directory.AssignRoleAsync(id, request.RoleName, ct);
@@ -1429,10 +1461,12 @@ app.MapPost("/api/principals/{id:guid}/roles", async (
 // only through a group is not a Direct assignment and is therefore left untouched.
 app.MapDelete("/api/principals/{id:guid}/roles/{role}", async (
         Guid id, string role, HttpContext http, IPolicyEngine policy,
-        PrincipalDirectory directory, CancellationToken ct) =>
+        PrincipalDirectory directory, ElevationTicketService elevation, CancellationToken ct) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PrincipalAdminister, ct) is { } fail)
         return fail;
+    if (role == BuiltInRoles.Administrator && RequireElevation(http, elevation) is { } denied)
+        return denied;
     try
     {
         await directory.RevokeRoleAsync(id, role, ct);
@@ -1447,10 +1481,13 @@ app.MapDelete("/api/principals/{id:guid}/roles/{role}", async (
 
 app.MapPost("/api/principals/{id:guid}/enabled", async (
         Guid id, SetPrincipalEnabledRequest request, HttpContext http, IPolicyEngine policy,
-        PrincipalDirectory directory, CancellationToken ct) =>
+        PrincipalDirectory directory, ElevationTicketService elevation, CancellationToken ct) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PrincipalAdminister, ct) is { } fail)
         return fail;
+    // Disabling is the deletion-equivalent — it demands the step-up; re-enabling does not.
+    if (!request.Enabled && RequireElevation(http, elevation) is { } denied)
+        return denied;
     try
     {
         return await directory.SetEnabledAsync(id, request.Enabled, ct)
