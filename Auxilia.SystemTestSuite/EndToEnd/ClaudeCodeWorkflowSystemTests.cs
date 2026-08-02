@@ -44,7 +44,10 @@ public sealed class ClaudeCodeWorkflowSystemTests
                 new Dictionary<string, string>
                 {
                     ["Title"] = "Leave a note in the workspace",
-                    ["Body"]  = "Create STUB_NOTES.md summarizing what you find."
+                    ["Body"]  = "Create STUB_NOTES.md summarizing what you find.",
+                    // Autonomous run: without this the session uses the ask-operator default
+                    // (since the steering wave) and blocks on a permission card nobody answers.
+                    ["permission-mode"] = "auto-allow"
                 },
                 SlotBindings: new List<SlotBinding>
                 {

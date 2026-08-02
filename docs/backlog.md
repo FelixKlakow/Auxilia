@@ -104,22 +104,14 @@ access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing di
 ## CI validation — Docker system tests (not runnable locally)
 - Email slot **plugin-dependency loading** (highest risk — MailKit/MimeKit/BouncyCastle
   copied alongside the provider DLL).
-- Core resolves fake code-review slots from inline `ProviderType`+`Settings` bindings.
-- Declared-slot set of `pull-request-code-review` matches the six seeded bindings.
-- `/api/audit` response shape (camelCase `PagedResult`). (The Failover system test itself
-  runs locally again since 2026-08-02 — it now reads the owner from the claim transition per
-  the preserve-last-non-null contract.)
-
-## Known-broken system fixtures (found 2026-08-02, pre-existing)
-- **`CodeReviewWorkflowSystemTests`** — its environment still waits for
-  `"SlotConfigurationSeedHandler started"` and seeds via the `*-slot-seed.*` queues, but that
-  runner subsystem was deleted with `d582b5d` (Core is the sole credential source). The
-  fixture needs a rewrite onto the Core-dispatch path (the modern path is covered by
-  `CoreApiDispatch` and the mail-triggered EndToEnd test, which pass).
-- **`ClaudeCodeWorkflowSystemTests`** — the run hangs mid-session with the stub CLI waiting
-  on the multi-turn stream-json driver (workflow + stub processes alive, views up to the
-  first conversation items published fine). This is the multi-turn real-stack verification
-  that has been pending since 2026-07-27; not a bus/routing issue.
+- `/api/audit` response shape (camelCase `PagedResult`).
+- (2026-08-02: the whole system suite runs locally again. The Failover test reads the owner
+  from the claim transition per the preserve-last-non-null contract; the legacy
+  `CodeReviewWorkflow` fixture — dead since the seed-subsystem removal in `d582b5d` — was
+  replaced by `EndToEnd/CodeReviewDispatchSystemTests` covering inline
+  `ProviderType`+`Settings` bindings for happy AND write-back-failure runs; the ClaudeCode
+  test dispatches `permission-mode=auto-allow`, since the steering-era ask-operator default
+  otherwise blocks an autonomous run on a permission card — that was the "hang".)
 
 ## DevStand
 - `ScreenshotHarness` stubbed (targeted the retired dashboard) — rewire to boot

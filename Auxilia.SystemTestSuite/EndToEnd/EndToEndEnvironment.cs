@@ -144,6 +144,9 @@ public class EndToEndEnvironment
         // All slot providers land in ONE plugins directory the runner mounts and loads from.
         await PublishProjectAsync(
             "Auxilia.FakeSlots.CodeReview.Happy/Auxilia.FakeSlots.CodeReview.Happy.csproj", _publishDir);
+        await PublishProjectAsync(
+            "Auxilia.FakeSlots.CodeReview.WriteBackFailure/Auxilia.FakeSlots.CodeReview.WriteBackFailure.csproj",
+            _publishDir);
         await PublishProjectAsync("Auxilia.Slots.Email/Auxilia.Slots.Email.csproj", _publishDir);
         await PublishProjectAsync("Auxilia.Slots.ClaudeCode/Auxilia.Slots.ClaudeCode.csproj", _publishDir);
         await PublishProjectAsync("Auxilia.Slots.CodingSession/Auxilia.Slots.CodingSession.csproj", _publishDir);
@@ -267,6 +270,8 @@ public class EndToEndEnvironment
             // Provider plugin DLLs the launcher copies into the workflow container per provider type.
             .WithEnvironment("WorkflowLauncher__SlotPackages__fake-code-review-happy",
                 $"{ContainerPluginsDir}/Auxilia.FakeSlots.CodeReview.Happy.slothandler.dll")
+            .WithEnvironment("WorkflowLauncher__SlotPackages__fake-code-review-write-back-failure",
+                $"{ContainerPluginsDir}/Auxilia.FakeSlots.CodeReview.WriteBackFailure.slothandler.dll")
             .WithEnvironment("WorkflowLauncher__SlotPackages__email-work-items",
                 $"{ContainerPluginsDir}/Auxilia.Slots.Email.slothandler.dll")
             .WithEnvironment("WorkflowLauncher__SlotPackages__claude-code-cli",
