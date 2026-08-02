@@ -44,6 +44,15 @@ public interface ICoreClient
     Task<PagedResult<RunViewItem>> GetRunViewsAsync(
         Guid runId, string? view = null, int skip = 0, int take = 200, CancellationToken ct = default);
 
+    /// <summary>Server-side aggregate run counts for dashboards.</summary>
+    Task<RunStats> GetRunStatsAsync(CancellationToken ct = default);
+
+    // --- Dashboard pins (personal to the calling principal) ---
+    Task<IReadOnlyList<DashboardPin>> ListDashboardPinsAsync(CancellationToken ct = default);
+    /// <summary>Pins a run view to the caller's dashboard (idempotent per run+view).</summary>
+    Task<DashboardPin> PinDashboardViewAsync(CreateDashboardPin request, CancellationToken ct = default);
+    Task UnpinDashboardViewAsync(Guid pinId, CancellationToken ct = default);
+
     /// <summary>
     /// Delivers an opaque input (guidance / a decision / halt) into a running workflow — the
     /// steer-back half of the loop. The Core authorizes and audits; it never interprets the payload.

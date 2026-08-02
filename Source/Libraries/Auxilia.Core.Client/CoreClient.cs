@@ -92,6 +92,18 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
             ("skip", skip.ToString()),
             ("take", take.ToString())), ct);
 
+    public Task<RunStats> GetRunStatsAsync(CancellationToken ct = default)
+        => GetAsync<RunStats>("/api/runs/stats", ct);
+
+    public Task<IReadOnlyList<DashboardPin>> ListDashboardPinsAsync(CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<DashboardPin>>("/api/dashboard/pins", ct);
+
+    public Task<DashboardPin> PinDashboardViewAsync(CreateDashboardPin request, CancellationToken ct = default)
+        => PostAsync<CreateDashboardPin, DashboardPin>("/api/dashboard/pins", request, ct);
+
+    public Task UnpinDashboardViewAsync(Guid pinId, CancellationToken ct = default)
+        => DeleteAsync($"/api/dashboard/pins/{pinId}", ct);
+
     public Task ProvideInputAsync(Guid runId, string payloadJson, CancellationToken ct = default)
         => PostAsync($"/api/runs/{runId}/inputs", new ProvideRunInput(payloadJson), ct);
 

@@ -82,13 +82,17 @@ else
     @foreach (var (viewName, buffer) in views)
     {
         var items = buffer.Items;
-        var descriptor = DescriptorFor(viewName, items);
+        var descriptor = ViewDescriptorHeuristics.DescriptorFor(viewName, items);
         <section class="card view-card">
             <div class="card-header">
                 <h2 class="view-title">
                     @viewName
                     <span class="type-chip">@descriptor.Rendering.ToString().ToLowerInvariant()</span>
                 </h2>
+                <button class="btn btn-secondary btn-pin" title="Keep this view on your dashboard"
+                        disabled="@_busy" @onclick="() => PinAsync(viewName)">
+                    @(_pinned.Contains(viewName) ? "Pinned ✓" : "Pin to dashboard")
+                </button>
             </div>
             <div class="card-body">
                 <ViewRenderer Descriptor="descriptor" Items="items" IsLive="!IsTerminal"/>
@@ -260,35 +264,6 @@ else
             return _buffers.ToList();
     }
 
-    /// <summary>
-    /// The console has no persisted view descriptor over the live stream, so synthesize one per view:
-    /// items shaped like an <see cref="AgentChatEntry"/> render through the agent-chat plug-in; everything
-    /// else falls back to the generic log rendering (structured key/value or raw lines).
-    /// </summary>
-    private static ViewDescriptor DescriptorFor(string viewName, IReadOnlyList<ViewDataRecord> items)
-        => LooksLikeAgentChat(items)
-            ? new ViewDescriptor(viewName, "", ViewRendering.Custom, ViewLifecycle.Live, AgentChatEntry.RendererKey)
-            : new ViewDescriptor(viewName, "", ViewRendering.Log, ViewLifecycle.Live);
-
-    private static bool LooksLikeAgentChat(IReadOnlyList<ViewDataRecord> items)
-    {
-        if (items.Count == 0)
-            return false;
-        try
-        {
-            var element = JsonSerializer.Deserialize<JsonElement>(items[0].PayloadJson);
-            return element is { ValueKind: JsonValueKind.Object }
-                   && element.TryGetProperty("role", out var role)
-                   && role.ValueKind == JsonValueKind.String
-                   && Enum.TryParse<AgentChatRole>(role.GetString(), ignoreCase: true, out _)
-                   && element.TryGetProperty("content", out _);
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-    }
-
     private static T? Decode<T>(string json)
     {
         try
@@ -298,6 +273,21 @@ else
         catch (JsonException)
         {
             return default;
+        }
+    }
+
+    private readonly HashSet<string> _pinned = new(StringComparer.Ordinal);
+
+    private async Task PinAsync(string viewName)
+    {
+        try
+        {
+            await Core.PinDashboardViewAsync(new CreateDashboardPin(Id, viewName), _cts.Token);
+            _pinned.Add(viewName);
+        }
+        catch (CoreApiException ex)
+        {
+            _error = ex.ErrorDetail ?? ex.Message;
         }
     }
 

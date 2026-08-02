@@ -107,6 +107,10 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task<RunAccepted> RerunAsync(Guid id, CancellationToken ct = default) => Nope<Task<RunAccepted>>();
     public IAsyncEnumerable<RunStreamEvent> StreamRunAsync(Guid runId, CancellationToken ct = default) => Nope<IAsyncEnumerable<RunStreamEvent>>();
     public Task<PagedResult<RunViewItem>> GetRunViewsAsync(Guid runId, string? view = null, int skip = 0, int take = 200, CancellationToken ct = default) => Nope<Task<PagedResult<RunViewItem>>>();
+    public Task<RunStats> GetRunStatsAsync(CancellationToken ct = default) => Nope<Task<RunStats>>();
+    public Task<IReadOnlyList<DashboardPin>> ListDashboardPinsAsync(CancellationToken ct = default) => Nope<Task<IReadOnlyList<DashboardPin>>>();
+    public Task<DashboardPin> PinDashboardViewAsync(CreateDashboardPin request, CancellationToken ct = default) => Nope<Task<DashboardPin>>();
+    public Task UnpinDashboardViewAsync(Guid pinId, CancellationToken ct = default) => Nope<Task>();
     public Task ProvideInputAsync(Guid runId, string payloadJson, CancellationToken ct = default) => Nope<Task>();
     public Task<TerminalTicket> OpenTerminalAsync(Guid runId, CancellationToken ct = default) => Nope<Task<TerminalTicket>>();
     public Task<int> ClearFinishedRunsAsync(CancellationToken ct = default) => Nope<Task<int>>();

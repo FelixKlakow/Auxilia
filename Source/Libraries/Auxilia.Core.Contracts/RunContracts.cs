@@ -56,6 +56,25 @@ public sealed record RunQuery(
 /// <summary>A page of results plus the total number of matches before paging.</summary>
 public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Total, int Skip, int Take);
 
+/// <summary>Aggregate run counts, computed server-side for dashboards (no page scraping).</summary>
+public sealed record RunStats(
+    int Total,
+    /// <summary>Runs currently in a non-terminal state.</summary>
+    int Active,
+    /// <summary>Count per run state (e.g. "Success", "Failed", "Running").</summary>
+    IReadOnlyDictionary<string, int> ByState);
+
+/// <summary>One run view pinned to the caller's dashboard (pins are personal).</summary>
+public sealed record DashboardPin(
+    Guid Id,
+    Guid RunId,
+    string ViewName,
+    /// <summary>Denormalized at pin time so the dashboard can label the card without a run read.</summary>
+    string WorkflowType,
+    DateTimeOffset PinnedUtc);
+
+public sealed record CreateDashboardPin(Guid RunId, string ViewName);
+
 /// <summary>
 /// One persisted view item of a run — the read-later counterpart of the live stream's view
 /// frames. <see cref="Sequence"/> is per-(run, view) monotonic.

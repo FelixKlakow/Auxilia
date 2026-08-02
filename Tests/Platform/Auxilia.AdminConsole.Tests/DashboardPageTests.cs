@@ -24,6 +24,43 @@ public sealed class DashboardPageTests
     }
 
     [Test]
+    public void Dashboard_RendersPinnedViews_FromPersistedStore()
+    {
+        var runId = Guid.NewGuid();
+        var core = new FakeCoreClient();
+        core.Runs.Add(new RunStatus(runId, "impl", "Success", null, DateTimeOffset.UtcNow, null, null));
+        core.DashboardPins.Add(new DashboardPin(Guid.NewGuid(), runId, "summary", "impl", DateTimeOffset.UtcNow));
+        core.RunViews.Add(new RunViewItem("summary", 1, "{\"message\":\"pinned-payload\"}", DateTimeOffset.UtcNow));
+        using var ctx = NewContext(core);
+
+        var cut = ctx.Render<Dashboard>();
+
+        cut.WaitForAssertion(() => Assert.Multiple(() =>
+        {
+            Assert.That(cut.Markup, Does.Contain("Pinned views"), "the pinned section renders");
+            Assert.That(cut.Markup, Does.Contain("pinned-payload"), "the pinned view's persisted items render");
+            Assert.That(cut.Markup, Does.Contain("Unpin"), "each pinned card offers unpin");
+        }));
+    }
+
+    [Test]
+    public void Dashboard_StatTiles_UseTheServerSideStats()
+    {
+        var core = new FakeCoreClient();
+        core.Runs.Add(new RunStatus(Guid.NewGuid(), "impl", "Running", null, DateTimeOffset.UtcNow, null, null));
+        core.Runs.Add(new RunStatus(Guid.NewGuid(), "impl", "Success", null, DateTimeOffset.UtcNow, null, null));
+        using var ctx = NewContext(core);
+
+        var cut = ctx.Render<Dashboard>();
+
+        cut.WaitForAssertion(() => Assert.Multiple(() =>
+        {
+            Assert.That(cut.Markup, Does.Contain("Succeeded"), "the succeeded tile renders from stats");
+            Assert.That(cut.Markup, Does.Contain("Runs total"), "the total tile renders from stats");
+        }));
+    }
+
+    [Test]
     public void Dashboard_RendersRunningAndRecent()
     {
         var running = new RunStatus(Guid.NewGuid(), "impl", "Running", null, DateTimeOffset.UtcNow, null, null);

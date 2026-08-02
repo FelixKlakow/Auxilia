@@ -24,22 +24,53 @@ else
 
     <div class="stat-grid">
         <div class="stat-tile">
-            <span class="stat-value">@_active.Count</span>
+            <span class="stat-value">@(_stats?.Active ?? _active.Count)</span>
             <span class="stat-label">Active now</span>
         </div>
         <div class="stat-tile">
-            <span class="stat-value">@CountOf("Success")</span>
-            <span class="stat-label">Recent success</span>
+            <span class="stat-value">@StatOf("Success")</span>
+            <span class="stat-label">Succeeded</span>
         </div>
-        <div class="stat-tile @(CountOf("Failed") > 0 ? "stat-bad" : null)">
-            <span class="stat-value">@CountOf("Failed")</span>
-            <span class="stat-label">Recent failed</span>
+        <div class="stat-tile @(StatOf("Failed") > 0 ? "stat-bad" : null)">
+            <span class="stat-value">@StatOf("Failed")</span>
+            <span class="stat-label">Failed</span>
         </div>
         <div class="stat-tile">
-            <span class="stat-value">@_total</span>
-            <span class="stat-label">Runs (recent window)</span>
+            <span class="stat-value">@(_stats?.Total ?? _total)</span>
+            <span class="stat-label">Runs total</span>
         </div>
     </div>
+
+    @if (_pins.Count > 0)
+    {
+        <section class="pinned-views-section">
+            <h2 class="section-title">Pinned views</h2>
+            @foreach (var pin in _pins)
+            {
+                var items = _pinnedItems.GetValueOrDefault(pin.Id) ?? [];
+                <section class="card view-card">
+                    <div class="card-header">
+                        <h2 class="view-title">
+                            <a href="runs/@pin.RunId">@pin.WorkflowType</a> · @pin.ViewName
+                        </h2>
+                        <button class="btn btn-secondary" title="Remove from the dashboard"
+                                @onclick="() => UnpinAsync(pin.Id)">Unpin</button>
+                    </div>
+                    <div class="card-body">
+                        @if (items.Count == 0)
+                        {
+                            <p class="muted">No persisted items for this view.</p>
+                        }
+                        else
+                        {
+                            <ViewRenderer Descriptor="ViewDescriptorHeuristics.DescriptorFor(pin.ViewName, items)"
+                                          Items="items" IsLive="false"/>
+                        }
+                    </div>
+                </section>
+            }
+        </section>
+    }
 
     <section class="live-now-section">
         <h2 class="section-title">Live now</h2>
@@ -122,11 +153,14 @@ else
     private List<RunStatus> _all = [];
     private IReadOnlyList<RunStatus> _active = [];
     private List<RunStatus> _recent = [];
+    private RunStats? _stats;
+    private IReadOnlyList<DashboardPin> _pins = [];
+    private readonly Dictionary<Guid, IReadOnlyList<ViewDataRecord>> _pinnedItems = new();
 
     private readonly CancellationTokenSource _cts = new();
     private PeriodicTimer? _timer;
 
-    private int CountOf(string state) => _all.Count(r => r.State == state);
+    private int StatOf(string state) => _stats?.ByState.GetValueOrDefault(state) ?? _all.Count(r => r.State == state);
 
     protected override Task OnInitializedAsync() => LoadAsync();
 
@@ -158,8 +192,9 @@ else
     {
         try
         {
-            // A single recent-window query drives every surface; counts are computed client-side
-            // (there is no stats endpoint yet).
+            // Tiles come from the server-side stats endpoint; the recent-window query still
+            // drives the live/recent tables.
+            _stats = await Core.GetRunStatsAsync(_cts.Token);
             var page = await Core.QueryRunsAsync(new RunQuery(Skip: 0, Take: Window), _cts.Token);
             _denied = false;
             _error = null;
@@ -167,6 +202,7 @@ else
             _all = page.Items.ToList();
             _active = LiveNow.ActiveOf(_all);
             _recent = _all.Where(r => !LiveNow.IsActive(r.State)).Take(10).ToList();
+            await LoadPinsAsync();
         }
         catch (CoreApiException ex)
         {
@@ -175,6 +211,41 @@ else
         }
 
         _loaded = true;
+    }
+
+    /// <summary>Loads the caller's pins and each pin's persisted view items (newest-first cards).</summary>
+    private async Task LoadPinsAsync()
+    {
+        _pins = await Core.ListDashboardPinsAsync(_cts.Token);
+        foreach (var pin in _pins)
+        {
+            var page = await Core.GetRunViewsAsync(pin.RunId, pin.ViewName, ct: _cts.Token);
+            _pinnedItems[pin.Id] = page.Items
+                .Select(i => new ViewDataRecord
+                {
+                    Id = Guid.NewGuid(),
+                    WorkflowInstanceId = pin.RunId,
+                    ViewName = i.ViewName,
+                    Sequence = i.Sequence,
+                    PayloadJson = i.PayloadJson,
+                    TimestampUtc = i.TimestampUtc
+                })
+                .ToList();
+        }
+    }
+
+    private async Task UnpinAsync(Guid pinId)
+    {
+        try
+        {
+            await Core.UnpinDashboardViewAsync(pinId, _cts.Token);
+            _pins = _pins.Where(p => p.Id != pinId).ToList();
+            _pinnedItems.Remove(pinId);
+        }
+        catch (CoreApiException ex)
+        {
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
     }
 
     public void Dispose()

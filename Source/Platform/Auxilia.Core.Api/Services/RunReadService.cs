@@ -31,6 +31,15 @@ public sealed class RunReadService(IDataAccess<CoreRunRecord> runs)
         return new PagedResult<RunStatus>(page, ordered.Count, query.Skip, query.Take);
     }
 
+    /// <summary>Aggregate counts over ALL run records — the dashboard's server-side stats.</summary>
+    public async Task<RunStats> GetStatsAsync(CancellationToken ct)
+    {
+        var all = (await runs.ReadAsync(ct)).ToList();
+        var byState = all.GroupBy(r => r.State).ToDictionary(g => g.Key, g => g.Count());
+        var active = all.Count(r => !CoreRunStates.IsTerminal(r.State));
+        return new RunStats(all.Count, active, byState);
+    }
+
     /// <summary>The raw record behind a run id (instance or dispatch alias) — for rerun.</summary>
     internal async Task<CoreRunRecord?> GetRecordAsync(Guid id, CancellationToken ct)
         => await runs.ReadAsync(id, ct)

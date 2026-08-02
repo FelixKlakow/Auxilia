@@ -409,6 +409,32 @@ internal sealed class FakeCoreClient : ICoreClient
         => Task.FromResult(WorkflowSchemas.GetValueOrDefault(workflowType));
 
     public List<RunViewItem> RunViews { get; } = [];
+    public List<DashboardPin> DashboardPins { get; } = [];
+
+    public Task<RunStats> GetRunStatsAsync(CancellationToken ct = default)
+    {
+        var byState = Runs.GroupBy(r => r.State).ToDictionary(g => g.Key, g => g.Count());
+        var active = Runs.Count(r => r.State is not ("Success" or "Failed" or "Cancelled" or "PreFlightFailed"));
+        return Task.FromResult(new RunStats(Runs.Count, active, byState));
+    }
+
+    public Task<IReadOnlyList<DashboardPin>> ListDashboardPinsAsync(CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<DashboardPin>>(DashboardPins.ToList());
+
+    public Task<DashboardPin> PinDashboardViewAsync(CreateDashboardPin request, CancellationToken ct = default)
+    {
+        var run = Runs.First(r => r.RunId == request.RunId);
+        var pin = new DashboardPin(Guid.NewGuid(), request.RunId, request.ViewName, run.WorkflowType, DateTimeOffset.UtcNow);
+        DashboardPins.RemoveAll(p => p.RunId == request.RunId && p.ViewName == request.ViewName);
+        DashboardPins.Add(pin);
+        return Task.FromResult(pin);
+    }
+
+    public Task UnpinDashboardViewAsync(Guid pinId, CancellationToken ct = default)
+    {
+        DashboardPins.RemoveAll(p => p.Id == pinId);
+        return Task.CompletedTask;
+    }
 
     public Task<PagedResult<RunViewItem>> GetRunViewsAsync(
         Guid runId, string? view = null, int skip = 0, int take = 200, CancellationToken ct = default)

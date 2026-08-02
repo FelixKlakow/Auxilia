@@ -4,8 +4,6 @@
 > records live in `docs/delivered/` and the git history.
 
 ## Core.Api — client-surface follow-ups
-- **Dashboard stats/pins** — no stats endpoint (counts computed client-side from a query page)
-  and no persisted pinned dashboards.
 - **Per-user bearer hardening** — the short-lived bearer is embedded in the prerendered page
   (same-origin TLS); consider a server-side opaque-handle store keyed by principal.
 - **Workflow-type registry administration** — register/approve/deny run via REST/MCP only;

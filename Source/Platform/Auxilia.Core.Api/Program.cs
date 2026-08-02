@@ -37,6 +37,7 @@ builder.Services.AddPlatformEntity<CoreRunConfigurationRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreConnectorRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreRunRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreRunViewRecord>(platformData);
+builder.Services.AddPlatformEntity<CoreDashboardPinRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreArtifactRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreRunResolutionRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreWorkflowTypeRecord>(platformData);
@@ -103,6 +104,7 @@ builder.Services.AddSingleton<DelegatedTokenStore>();
 builder.Services.AddSingleton<RunConfigurationService>();
 builder.Services.AddSingleton<RunService>();
 builder.Services.AddSingleton<RunReadService>();
+builder.Services.AddSingleton<DashboardPinService>();
 builder.Services.AddSingleton<AuditReadService>();
 builder.Services.AddSingleton<ProviderCatalogService>();
 builder.Services.AddSingleton<EnvironmentLayerService>();
@@ -341,9 +343,42 @@ app.MapGet("/api/runs", async (
         new RunQuery(state, workflowType, configurationId, skip, take == 0 ? 50 : take), ct)))
     .RequireAuthorization();
 
+// Server-side aggregate counts — the dashboard's stat tiles, no page scraping. (Must be mapped
+// before the {id:guid} route only by convention; the guid constraint already disambiguates.)
+app.MapGet("/api/runs/stats", async (RunReadService svc, CancellationToken ct) =>
+        Results.Ok(await svc.GetStatsAsync(ct)))
+    .RequireAuthorization();
+
 app.MapGet("/api/runs/{id:guid}", async (Guid id, RunReadService svc, CancellationToken ct) =>
         await svc.GetAsync(id, ct) is { } status ? Results.Ok(status) : Results.NotFound())
     .RequireAuthorization();
+
+// --- Dashboard pins (personal): a principal keeps chosen run views on their dashboard ---
+
+app.MapGet("/api/dashboard/pins", async (
+        HttpContext http, DashboardPinService svc, CancellationToken ct) =>
+    CoreClaims.PrincipalIdOf(http.User) is { } principalId
+        ? Results.Ok(await svc.ListAsync(principalId, ct))
+        : Results.Unauthorized())
+    .RequireAuthorization();
+
+app.MapPost("/api/dashboard/pins", async (
+        CreateDashboardPin request, HttpContext http, DashboardPinService svc, CancellationToken ct) =>
+{
+    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+        return Results.Unauthorized();
+    return await svc.PinAsync(principalId, request, ct) is { } pin
+        ? Results.Ok(pin)
+        : Results.NotFound();
+}).RequireAuthorization();
+
+app.MapDelete("/api/dashboard/pins/{id:guid}", async (
+        Guid id, HttpContext http, DashboardPinService svc, CancellationToken ct) =>
+{
+    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+        return Results.Unauthorized();
+    return await svc.UnpinAsync(principalId, id, ct) ? Results.NoContent() : Results.NotFound();
+}).RequireAuthorization();
 
 app.MapPost("/api/runs/{id:guid}/cancel", async (
         Guid id, HttpContext http, IPolicyEngine policy, RunService runs, RunReadService runView,
