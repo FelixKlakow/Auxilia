@@ -27,8 +27,9 @@ licence to use your contribution in both the source-available and the
 commercial distribution of Auxilia. You can keep using your own contribution
 however you like.
 
-Signing is a one-time thing, handled by the CLA Assistant bot directly on
-your first pull request.
+Signing is a one-time thing, handled directly on your first pull request:
+the CLA workflow comments with instructions, and you sign by replying with
+its sign-off sentence.
 
 If you are not comfortable with the CLA, that is completely fine — please
 open an issue describing the change instead, and I will look at implementing

@@ -85,5 +85,8 @@ place of residence in Germany.
 | Email | |
 | Date | |
 
-*Signature is recorded electronically via the CLA Assistant bot on your first
-pull request.*
+*Signature is recorded electronically on your first pull request: the CLA
+workflow asks you to reply with the sign-off sentence "I have read the CLA
+Document and I hereby sign the CLA", and stores your signature (GitHub
+username, date) in the repository's `cla-signatures` branch. The table above
+is for signing on paper when contributing outside GitHub.*
