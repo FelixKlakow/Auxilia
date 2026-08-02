@@ -43,11 +43,11 @@ public sealed class ClaudeCodeWorkflowSystemTests
                 EndToEndEnvironment.ClaudeWorkflowType,
                 new Dictionary<string, string>
                 {
+                    // Deliberately NO permission-mode: an unattended dispatch (no operator UI
+                    // sent a choice) must default to auto-allow and never block on a
+                    // permission card nobody answers.
                     ["Title"] = "Leave a note in the workspace",
-                    ["Body"]  = "Create STUB_NOTES.md summarizing what you find.",
-                    // Autonomous run: without this the session uses the ask-operator default
-                    // (since the steering wave) and blocks on a permission card nobody answers.
-                    ["permission-mode"] = "auto-allow"
+                    ["Body"]  = "Create STUB_NOTES.md summarizing what you find."
                 },
                 SlotBindings: new List<SlotBinding>
                 {

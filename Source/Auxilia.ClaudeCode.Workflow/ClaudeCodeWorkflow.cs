@@ -94,7 +94,9 @@ public static class ClaudeCodeWorkflow
                              + "request becomes a decision card you answer from the steering client. "
                              + "Auto-approve: requests are allowed automatically — the isolated "
                              + "container stays the safety net, and you can still guide or halt. "
-                             + "Changeable live while the session runs.")
+                             + "Changeable live while the session runs. Unattended dispatches "
+                             + "(triggers, API calls without this input) auto-approve — they must "
+                             + "never block on a question nobody answers.")
             {
                 Kind = "Choice",
                 DefaultValue = AgentPermissionModes.AskOperator,
@@ -110,7 +112,8 @@ public static class ClaudeCodeWorkflow
                 Description: "Pushes have their OWN policy, independent of the general permission "
                              + "mode — auto-approve edits but confirm each push, or the inverse. "
                              + "Only matters for repositories bound with pushing allowed. "
-                             + "Changeable live while the session runs.")
+                             + "Changeable live while the session runs. Unattended dispatches "
+                             + "without this input auto-approve.")
             {
                 Kind = "Choice",
                 DefaultValue = AgentPermissionModes.AskOperator,

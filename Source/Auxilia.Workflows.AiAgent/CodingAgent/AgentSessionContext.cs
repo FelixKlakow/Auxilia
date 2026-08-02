@@ -11,11 +11,15 @@ public sealed record AgentSessionContext(
     string WorkspaceDirectory,
     string OutputDirectory)
 {
-    /// <summary>How permission requests are handled; see <see cref="AgentPermissionModes"/>.</summary>
-    public string PermissionMode { get; init; } = AgentPermissionModes.AskOperator;
+    /// <summary>
+    /// How permission requests are handled; see <see cref="AgentPermissionModes"/>. The absent-key
+    /// default is auto-allow: operator UIs always dispatch their (preselected) choice, so a run
+    /// without the key is unattended — it must never block on a question nobody will answer.
+    /// </summary>
+    public string PermissionMode { get; init; } = AgentPermissionModes.AutoAllow;
 
-    /// <summary>The push-action policy, independent of <see cref="PermissionMode"/>.</summary>
-    public string PushPolicy { get; init; } = AgentPermissionModes.AskOperator;
+    /// <summary>The push-action policy, independent of <see cref="PermissionMode"/>; same unattended default.</summary>
+    public string PushPolicy { get; init; } = AgentPermissionModes.AutoAllow;
 
     /// <summary>
     /// The session stays alive after each turn awaiting the operator's next instruction; the
@@ -72,11 +76,15 @@ public sealed record AgentSessionContext(
             Fallback(workspaceDirectory, "agent-session-workspace"),
             Fallback(outputDirectory, "agent-session-output"))
         {
+            // Absent = unattended dispatch (triggers, plain API calls): operator UIs always send
+            // their preselected choice, and an unattended session must never block on a
+            // permission card nobody will answer. The SCHEMA default stays ask-operator — that
+            // is what every attended dispatch surface preselects.
             PermissionMode = string.IsNullOrWhiteSpace(permissionMode)
-                ? AgentPermissionModes.AskOperator
+                ? AgentPermissionModes.AutoAllow
                 : permissionMode.Trim(),
             PushPolicy = string.IsNullOrWhiteSpace(pushPolicy)
-                ? AgentPermissionModes.AskOperator
+                ? AgentPermissionModes.AutoAllow
                 : pushPolicy.Trim(),
             MultiTurn = isMultiTurn,
             ViewMode = isConsole ? AgentViewModes.Console : AgentViewModes.Advanced,

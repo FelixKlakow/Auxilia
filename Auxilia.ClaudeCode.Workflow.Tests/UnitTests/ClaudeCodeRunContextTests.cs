@@ -95,6 +95,34 @@ public sealed class AgentSessionContextTests
     }
 
     [Test]
+    public void AbsentPermissionInputs_DefaultToAutoAllow_TheUnattendedDispatch()
+    {
+        // Operator UIs always send their preselected choice — a context without the keys is an
+        // unattended dispatch (trigger, plain API) and must never block on a permission card.
+        var context = AgentSessionContext.FromValues("Do something", null, "/w", "/o");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(context.PermissionMode, Is.EqualTo(AgentPermissionModes.AutoAllow));
+            Assert.That(context.PushPolicy, Is.EqualTo(AgentPermissionModes.AutoAllow));
+        });
+    }
+
+    [Test]
+    public void ExplicitPermissionInputs_AreRespected()
+    {
+        var context = AgentSessionContext.FromValues(
+            "Do something", null, "/w", "/o",
+            permissionMode: " ask-operator ", pushPolicy: "ask-operator");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(context.PermissionMode, Is.EqualTo(AgentPermissionModes.AskOperator));
+            Assert.That(context.PushPolicy, Is.EqualTo(AgentPermissionModes.AskOperator));
+        });
+    }
+
+    [Test]
     public void MissingDirectories_FallBackToCreatedTempDirectories()
     {
         var context = AgentSessionContext.FromValues("Do something", null, null, null);
