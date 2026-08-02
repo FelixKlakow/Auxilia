@@ -53,7 +53,11 @@
   package so desktop clients don't need the full contracts surface.
 - **Go-public pre-flight** (repo is otherwise publish-ready: rewritten noreply-only history,
   single `main`, licenses + pricing incl. free personal tier; licensing contact is EMAIL —
-  a public issue would expose the inquirer's company details): final outside-eyes read of
+  a public issue would expose the inquirer's company details). **BLOCKED 2026-08-02: Google
+  flagged the freshly created licensing mailbox (felix.klakow.github@gmail.com — the address
+  in both LICENSE files) right after signup; recover it (phone verification/appeal) or swap
+  in a different receiving address, and verify the forward + send-as loop with a test mail
+  BEFORE flipping public.** Then: final outside-eyes read of
   README/CONTRIBUTING, verify or retire `Start-Presentation.bat` (stale header comment, a
   "via Studio" help string in DevStand), optionally ask GitHub Support to GC the
   pre-rewrite objects, then flip the repository public. On flipping: set the repo
