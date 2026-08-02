@@ -47,11 +47,11 @@ public class WorkflowDispatcherDockerImageUriTests
 
         // The dispatcher publishes a WorkflowStatusEvent for every received command.
         _mockBus
-            .Setup(b => b.DeclareExchangeAsync("workflow.status-events", It.IsAny<CancellationToken>()))
+            .Setup(b => b.DeclareTopicExchangeAsync("workflow.status", It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _mockBus
-            .Setup(b => b.PublishToExchangeAsync(
-                "workflow.status-events", It.IsAny<WorkflowStatusEvent>(), It.IsAny<CancellationToken>()))
+            .Setup(b => b.PublishToTopicExchangeAsync(
+                "workflow.status", It.IsAny<string>(), It.IsAny<WorkflowStatusEvent>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         _mockBus

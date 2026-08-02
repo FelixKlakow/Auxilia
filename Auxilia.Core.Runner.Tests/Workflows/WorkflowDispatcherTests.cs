@@ -113,11 +113,11 @@ public class WorkflowDispatcherTests
 
         // The dispatcher publishes a WorkflowStatusEvent for every received command.
         _mockBus
-            .Setup(b => b.DeclareExchangeAsync("workflow.status-events", It.IsAny<CancellationToken>()))
+            .Setup(b => b.DeclareTopicExchangeAsync("workflow.status", It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _mockBus
-            .Setup(b => b.PublishToExchangeAsync(
-                "workflow.status-events", It.IsAny<WorkflowStatusEvent>(), It.IsAny<CancellationToken>()))
+            .Setup(b => b.PublishToTopicExchangeAsync(
+                "workflow.status", It.IsAny<string>(), It.IsAny<WorkflowStatusEvent>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         _mockBus
@@ -420,8 +420,9 @@ public class WorkflowDispatcherTests
             l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()),
             Times.Never);
         _mockBus.Verify(
-            b => b.PublishToExchangeAsync(
-                "workflow.status-events",
+            b => b.PublishToTopicExchangeAsync(
+                "workflow.status",
+                It.IsAny<string>(),
                 It.Is<WorkflowStatusEvent>(e => e.State == "PreFlightFailed"),
                 It.IsAny<CancellationToken>()),
             Times.Once);
@@ -632,8 +633,9 @@ public class WorkflowDispatcherTests
         Assert.That(record!.State, Is.EqualTo("Failed"),
             "a crashed container must fail its run — never leave it stuck in Queued/Running");
         Assert.That(record.ErrorMessage, Does.Contain("exited (code 139)").And.Contain("segfault"));
-        _mockBus.Verify(b => b.PublishToExchangeAsync(
-            "workflow.status-events",
+        _mockBus.Verify(b => b.PublishToTopicExchangeAsync(
+            "workflow.status",
+            It.IsAny<string>(),
             It.Is<WorkflowStatusEvent>(e => e.WorkflowInstanceId == instanceId && e.State == "Failed"),
             It.IsAny<CancellationToken>()), Times.Once);
     }

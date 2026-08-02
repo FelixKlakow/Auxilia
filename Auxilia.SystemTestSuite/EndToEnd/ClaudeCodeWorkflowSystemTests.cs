@@ -28,9 +28,9 @@ public sealed class ClaudeCodeWorkflowSystemTests
         var bus = EndToEndEnvironment.MessageBusClient;
 
         var statusEvents = new ConcurrentQueue<WorkflowStatusEvent>();
-        await bus.DeclareExchangeAsync(WorkflowStatusEvent.ExchangeName, cancellationToken);
-        await using var statusSubscription = await bus.SubscribeToExchangeAsync<WorkflowStatusEvent>(
-            WorkflowStatusEvent.ExchangeName,
+        await bus.DeclareTopicExchangeAsync(WorkflowStatusEvent.ExchangeName, cancellationToken);
+        await using var statusSubscription = await bus.SubscribeToTopicExchangeAsync<WorkflowStatusEvent>(
+            WorkflowStatusEvent.ExchangeName, ["#"],
             (msg, _) => { statusEvents.Enqueue(msg); return Task.CompletedTask; },
             cancellationToken);
 

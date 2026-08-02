@@ -93,7 +93,26 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
         MessagingTelemetry.PublishCounter.Add(1, new TagList { { "messaging.topic", topic } });
     }
 
-    public async Task PublishToExchangeAsync<T>(string exchangeName, T message, CancellationToken cancellationToken = default)
+    public async Task DeclareTopicExchangeAsync(string exchangeName, CancellationToken cancellationToken = default)
+    {
+        await _publishChannel.ExchangeDeclareAsync(
+            exchangeName,
+            "topic",
+            durable: true,
+            autoDelete: false,
+            arguments: null,
+            cancellationToken: cancellationToken);
+    }
+
+    public Task PublishToExchangeAsync<T>(string exchangeName, T message, CancellationToken cancellationToken = default)
+        => PublishToExchangeCoreAsync(exchangeName, string.Empty, message, cancellationToken);
+
+    public Task PublishToTopicExchangeAsync<T>(
+        string exchangeName, string routingKey, T message, CancellationToken cancellationToken = default)
+        => PublishToExchangeCoreAsync(exchangeName, routingKey, message, cancellationToken);
+
+    private async Task PublishToExchangeCoreAsync<T>(
+        string exchangeName, string routingKey, T message, CancellationToken cancellationToken)
     {
         using var activity = MessagingTelemetry.ActivitySource.StartActivity(
             "rabbitmq.publish", ActivityKind.Producer);
@@ -124,7 +143,7 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
 
         await _publishChannel.BasicPublishAsync(
             exchangeName,
-            string.Empty,
+            routingKey,
             false,
             props,
             body,
@@ -246,6 +265,91 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
         return new SubscriptionHandle(channel, consumerTag);
     }
 
+    public async Task<ITopicSubscription> SubscribeToTopicExchangeAsync<T>(
+        string exchangeName,
+        IReadOnlyCollection<string> routingKeys,
+        Func<T, CancellationToken, Task> handler,
+        CancellationToken cancellationToken = default)
+    {
+        var channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken);
+        var queueDeclareResult = await channel.QueueDeclareAsync(
+            string.Empty, false, true, true, null, cancellationToken: cancellationToken);
+        var queueName = queueDeclareResult.QueueName;
+        foreach (var routingKey in routingKeys)
+            await channel.QueueBindAsync(queueName, exchangeName, routingKey, null, cancellationToken: cancellationToken);
+
+        var consumerTag = await AttachConsumerAsync(channel, queueName, exchangeName, handler, cancellationToken);
+        return new TopicSubscriptionHandle(channel, consumerTag, queueName, exchangeName);
+    }
+
+    public async Task<IAsyncDisposable> SubscribeToTopicExchangeSharedAsync<T>(
+        string exchangeName,
+        string queueName,
+        string bindingKey,
+        Func<T, CancellationToken, Task> handler,
+        CancellationToken cancellationToken = default)
+    {
+        // A durable named queue bound to the topic exchange (mirrors bind "#"): every subscriber
+        // sharing the name competes for the same deliveries — each event processed once fleet-wide.
+        var channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken);
+        await channel.QueueDeclareAsync(
+            queueName, durable: true, exclusive: false, autoDelete: false, arguments: null,
+            cancellationToken: cancellationToken);
+        await channel.QueueBindAsync(queueName, exchangeName, bindingKey, null, cancellationToken: cancellationToken);
+
+        var consumerTag = await AttachConsumerAsync(channel, queueName, exchangeName, handler, cancellationToken);
+        return new SubscriptionHandle(channel, consumerTag);
+    }
+
+    private static async Task<string> AttachConsumerAsync<T>(
+        IChannel channel,
+        string queueName,
+        string exchangeName,
+        Func<T, CancellationToken, Task> handler,
+        CancellationToken cancellationToken)
+    {
+        var consumer = new AsyncEventingBasicConsumer(channel);
+        consumer.ReceivedAsync += async (_, ea) =>
+        {
+            var parentContext = Propagators.DefaultTextMapPropagator.Extract(
+                default,
+                ea.BasicProperties.Headers,
+                static (headers, key) =>
+                {
+                    if (headers == null || !headers.TryGetValue(key, out var val))
+                        return [];
+                    var str = val is byte[] bytes ? Encoding.UTF8.GetString(bytes) : val?.ToString();
+                    return str is null ? [] : [str];
+                });
+
+            using var activity = MessagingTelemetry.ActivitySource.StartActivity(
+                "rabbitmq.consume",
+                ActivityKind.Consumer,
+                parentContext.ActivityContext);
+            activity?.SetTag("messaging.system", "rabbitmq");
+            activity?.SetTag("messaging.destination", exchangeName);
+            activity?.SetTag("messaging.operation", "receive");
+
+            MessagingTelemetry.ReceiveCounter.Add(1, new TagList { { "messaging.queue", queueName } });
+
+            // Same type-tag guard as every other consumer: multiple message types can share
+            // an exchange, and lenient deserialization must not fabricate partially-null records.
+            var messageType = ea.BasicProperties.Type;
+            if (messageType is not null && messageType != typeof(T).FullName)
+            {
+                await channel.BasicAckAsync(ea.DeliveryTag, false);
+                return;
+            }
+
+            var body = Encoding.UTF8.GetString(ea.Body.ToArray());
+            var msg = JsonSerializer.Deserialize<T>(body);
+            if (msg is not null)
+                await handler(msg, CancellationToken.None);
+            await channel.BasicAckAsync(ea.DeliveryTag, false);
+        };
+        return await channel.BasicConsumeAsync(queueName, false, consumer, cancellationToken);
+    }
+
     public async Task<IAsyncDisposable> SubscribeAsync<T>(
         string queueName,
         Func<T, CancellationToken, Task> handler,
@@ -322,6 +426,43 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
         {
             await channel.BasicCancelAsync(consumerTag);
             await channel.DisposeAsync();
+        }
+    }
+
+    private sealed class TopicSubscriptionHandle(
+        IChannel channel, string consumerTag, string queueName, string exchangeName) : ITopicSubscription
+    {
+        // Binding mutations arrive from concurrent SSE opens/closes; a channel is not safe for
+        // concurrent operations, so they are serialized here.
+        private readonly SemaphoreSlim _gate = new(1, 1);
+
+        public async Task AddBindingAsync(string routingKey, CancellationToken cancellationToken = default)
+        {
+            await _gate.WaitAsync(cancellationToken);
+            try
+            {
+                await channel.QueueBindAsync(
+                    queueName, exchangeName, routingKey, null, cancellationToken: cancellationToken);
+            }
+            finally { _gate.Release(); }
+        }
+
+        public async Task RemoveBindingAsync(string routingKey, CancellationToken cancellationToken = default)
+        {
+            await _gate.WaitAsync(cancellationToken);
+            try
+            {
+                await channel.QueueUnbindAsync(
+                    queueName, exchangeName, routingKey, null, cancellationToken);
+            }
+            finally { _gate.Release(); }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await channel.BasicCancelAsync(consumerTag);
+            await channel.DisposeAsync();
+            _gate.Dispose();
         }
     }
 }

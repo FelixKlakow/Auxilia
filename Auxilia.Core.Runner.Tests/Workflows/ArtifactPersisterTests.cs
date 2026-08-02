@@ -71,13 +71,18 @@ public class ArtifactPersisterTests
         await File.WriteAllTextAsync(Path.Combine(outputDir, "result.json"), """{"verdict":"approve"}""");
 
         ArtifactPersistedEvent? published = null;
+        string? publishedKey = null;
         _mockBus
-            .Setup(b => b.DeclareExchangeAsync("workflow.artifact-events", It.IsAny<CancellationToken>()))
+            .Setup(b => b.DeclareTopicExchangeAsync("workflow.artifacts", It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _mockBus
-            .Setup(b => b.PublishToExchangeAsync(
-                "workflow.artifact-events", It.IsAny<ArtifactPersistedEvent>(), It.IsAny<CancellationToken>()))
-            .Callback<string, ArtifactPersistedEvent, CancellationToken>((_, e, _) => published = e)
+            .Setup(b => b.PublishToTopicExchangeAsync(
+                "workflow.artifacts", It.IsAny<string>(), It.IsAny<ArtifactPersistedEvent>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, ArtifactPersistedEvent, CancellationToken>((_, key, e, _) =>
+            {
+                publishedKey = key;
+                published = e;
+            })
             .Returns(Task.CompletedTask);
 
         await _sut.PersistOutputsAsync(
@@ -91,9 +96,11 @@ public class ArtifactPersisterTests
         Assert.That(lineage[0].RunInstanceId, Is.EqualTo(_instanceId));
         Assert.That(lineage[0].Version, Is.EqualTo(1));
 
-        _mockBus.Verify(b => b.PublishToExchangeAsync(
-            "workflow.artifact-events", It.IsAny<ArtifactPersistedEvent>(), It.IsAny<CancellationToken>()),
+        _mockBus.Verify(b => b.PublishToTopicExchangeAsync(
+            "workflow.artifacts", It.IsAny<string>(), It.IsAny<ArtifactPersistedEvent>(), It.IsAny<CancellationToken>()),
             Times.Once);
+        Assert.That(publishedKey, Is.EqualTo("review-result"),
+            "The routing key must be the artifact type so subscribers can bind selectively.");
         Assert.That(published, Is.Not.Null);
         Assert.That(published!.ArtifactId, Is.EqualTo(lineage[0].Id));
         Assert.That(published.ContentHash, Is.EqualTo(lineage[0].ContentHash));

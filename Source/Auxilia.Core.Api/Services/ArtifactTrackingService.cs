@@ -21,11 +21,11 @@ public sealed class ArtifactTrackingService(
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        await bus.DeclareExchangeAsync(ArtifactPersistedEvent.ExchangeName, cancellationToken);
-        // SHARED queue: with N Core.Api nodes, exactly one mirrors each artifact event; the
-        // live ArtifactStreamPublisher keeps its per-node copy for SSE.
-        _subscription = await bus.SubscribeToExchangeSharedAsync<ArtifactPersistedEvent>(
-            ArtifactPersistedEvent.ExchangeName, "core-api.artifact-tracking", HandleAsync, cancellationToken);
+        await bus.DeclareTopicExchangeAsync(ArtifactPersistedEvent.ExchangeName, cancellationToken);
+        // SHARED queue bound "#": with N Core.Api nodes, exactly one mirrors each artifact event;
+        // the live ArtifactStreamPublisher keeps its selectively-bound per-node copy for SSE.
+        _subscription = await bus.SubscribeToTopicExchangeSharedAsync<ArtifactPersistedEvent>(
+            ArtifactPersistedEvent.ExchangeName, "core-api.artifact-tracking", "#", HandleAsync, cancellationToken);
         logger.LogInformation("ArtifactTrackingService listening on {Exchange}.",
             ArtifactPersistedEvent.ExchangeName);
     }

@@ -719,7 +719,9 @@ The admin console UI, the control plane (Core.Api), and the execution layer (Cor
 The Admin Console (`Auxilia.AdminConsole`) is a Blazor Server app, so each browser holds a live circuit pinned to one console instance:
 
 - **Sticky sessions** at the load balancer — a client always returns to the same console instance for the lifetime of its circuit
-- **Live views over the Core.Api SSE stream, not a backplane** — when a circuit opens a run's live view the console opens a `GET /api/runs/{id}/stream` SSE subscription to Core.Api; Core.Api's `RunStreamPublisher` consumes the bus status/view-data fanouts and its `RunStreamBroker` fans each event to every open SSE subscription for that run. Each console instance subscribes independently, so **no Redis/SignalR backplane is needed between console instances** — the fan-out point is Core.Api, not the Blazor tier
+- **Live views over the Core.Api SSE stream, not a backplane** — when a circuit opens a run's live view the console opens a `GET /api/runs/{id}/stream` SSE subscription to Core.Api; Core.Api's `RunStreamPublisher` consumes the bus status/view topic exchanges **selectively** (see below) and its `RunStreamBroker` fans each event to every open SSE subscription for that run. Each console instance subscribes independently, so **no Redis/SignalR backplane is needed between console instances** — the fan-out point is Core.Api, not the Blazor tier
+
+**Selective event routing (topic exchanges).** The live event feeds are **topic** exchanges with the routing key stamped at publish: `workflow.status` (key `{instanceId}`, extended to `{instanceId}.{commandId}` on the claim transition), `workflow.views` (key = instance id, stamped by the workflow SDK — a change that requires rebuilding every workflow image), and `workflow.artifacts` (key = sanitized artifact type). A Core.Api node binds **only the keys it has an audience for**: the SSE brokers report every subscribe/unsubscribe to their bus publishers (`IRunStreamBindingListener` / `IArtifactStreamBindingListener`), which add/remove queue bindings (`ITopicSubscription.AddBinding/RemoveBinding`) — awaited on subscribe, so the binding exists before the SSE response is flushed. A run-stream audience that only knows the dispatch **command id** gains the instance id as an **alias binding** once the pairing is known (from the claim event, or resolved from the tracked-runs store for late subscribers). The persisting mirrors (`RunTrackingService`, `RunViewTrackingService`, `ArtifactTrackingService`) bind `#` on shared queues — every event, processed once fleet-wide. Per-node ingest therefore scales with the node's audience, not with global event volume. (On Azure Service Bus the same model maps to topic subscription rules.)
 
 Console instances are stateless from a data perspective (pure Core clients). Instances can be added or removed at any time.
 
@@ -736,13 +738,13 @@ graph LR
         BS2[Console Instance 2 owns circuits B and C]
     end
     API[Core.Api RunStreamBroker]
-    BUS[Message Bus status + view-data]
+    BUS[Message Bus status + view topics]
     B1 -->|Sticky| LB
     B2 -->|Sticky| LB
     B3 -->|Sticky| LB
     LB --> BS1
     LB --> BS2
-    BUS -->|status + view-data fanout| API
+    BUS -->|status + views, only keys with an audience| API
     API -->|SSE stream per viewed run| BS1
     API -->|SSE stream per viewed run| BS2
     BS1 -->|Only to circuit A| B1
@@ -766,7 +768,7 @@ graph TB
     subgraph MessageBus[Message Bus RabbitMQ]
         CMD[Command Queue competing consumers]
         HB[platform.runner-heartbeats]
-        EVT[Status events fanout]
+        EVT[workflow.status topic]
     end
     subgraph RunnerPool[Core.Runner Pool]
         SI1[Core.Runner 1 owns WF-101 WF-102]
@@ -815,7 +817,7 @@ sequenceDiagram
     WF->>BUS: StepCompleted message
     BUS->>SI: Delivered to owning Core.Runner
     SI->>BUS: Publish WorkflowStatusEvent (+ ViewData)
-    BUS->>API: status / view-data fanout consumed
+    BUS->>API: status / view topics, delivered only to nodes bound to this run
     API->>BS1: SSE frame on this run's open stream
     Note over BS2: No open stream for this run - nothing sent
     BS1->>UA: Render on subscribed circuit
@@ -862,7 +864,7 @@ views:
 ```mermaid
 graph LR
     WF["Workflow"] -->|"ViewData message<br/>(instanceId, viewName, sequence, payload)"| BUS["Message Bus (IMessageBusClient)"]
-    BUS -->|"workflow.view-data fanout"| API["Core.Api: RunStreamPublisher → RunStreamBroker"]
+    BUS -->|"workflow.views topic, key = instance id"| API["Core.Api: RunStreamPublisher → RunStreamBroker"]
     API -->|"SSE: GET /api/runs/{id}/stream"| FE["Auxilia.AdminConsole: renders view from descriptor"]
     BUS -->|"lifecycle includes persisted"| STORE["View Store (Core.Runner / Product DB / IArtifactStore)"]
     STORE --> FE2["Auxilia.AdminConsole: re-opens views of finished runs"]
@@ -870,7 +872,7 @@ graph LR
 ```
 
 - Workflows publish `ViewData` messages: an envelope of `(instanceId, viewName, sequence, payload)` where the payload conforms to the declared view schema. The bus carries only view data items — large blobs belong in the Artifact Store, referenced from the payload
-- **Live**: Core.Api's `RunStreamPublisher` consumes the `workflow.view-data` fanout and its `RunStreamBroker` re-emits each item over the SSE stream (`GET /api/runs/{id}/stream`, section 14); the Admin Console consumes that SSE on its Blazor circuit and renders from the descriptor — a live agent view is simply a view with `rendering: stream`. There is **no SignalR/Redis backplane**
+- **Live**: Core.Api's `RunStreamPublisher` consumes the `workflow.views` topic exchange (bound only to runs with an open stream, section 14.1) and its `RunStreamBroker` re-emits each item over the SSE stream (`GET /api/runs/{id}/stream`, section 14); the Admin Console consumes that SSE on its Blazor circuit and renders from the descriptor — a live agent view is simply a view with `rendering: stream`. There is **no SignalR/Redis backplane**
 - **Persisted**: view data is stored so the Admin Console can re-open the views of completed runs — viewing finished workflow results uses the identical rendering path as live data, replayed from the store
 - **Generic rendering**: the frontend renders views purely from the descriptor (schema + rendering hint); adding a new workflow with new views requires **no frontend changes**. A `custom` rendering hint allows future pluggable visual components
 - **AI parity**: the MCP server exposes the same views to AI agents — no hidden data channel

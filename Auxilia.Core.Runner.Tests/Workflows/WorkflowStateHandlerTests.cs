@@ -40,11 +40,11 @@ public class WorkflowStateHandlerTests
 
         // The handler republishes every state change as a WorkflowStatusEvent.
         _mockBus
-            .Setup(b => b.DeclareExchangeAsync("workflow.status-events", It.IsAny<CancellationToken>()))
+            .Setup(b => b.DeclareTopicExchangeAsync("workflow.status", It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _mockBus
-            .Setup(b => b.PublishToExchangeAsync(
-                "workflow.status-events", It.IsAny<WorkflowStatusEvent>(), It.IsAny<CancellationToken>()))
+            .Setup(b => b.PublishToTopicExchangeAsync(
+                "workflow.status", It.IsAny<string>(), It.IsAny<WorkflowStatusEvent>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         _mockBus
@@ -241,12 +241,13 @@ public class WorkflowStateHandlerTests
         await File.WriteAllTextAsync(Path.Combine(outputDir, "result.json"), """{"verdict":"approve"}""");
 
         _mockBus
-            .Setup(b => b.DeclareExchangeAsync(
+            .Setup(b => b.DeclareTopicExchangeAsync(
                 ArtifactPersistedEvent.ExchangeName, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _mockBus
-            .Setup(b => b.PublishToExchangeAsync(
-                ArtifactPersistedEvent.ExchangeName, It.IsAny<ArtifactPersistedEvent>(), It.IsAny<CancellationToken>()))
+            .Setup(b => b.PublishToTopicExchangeAsync(
+                ArtifactPersistedEvent.ExchangeName, It.IsAny<string>(), It.IsAny<ArtifactPersistedEvent>(),
+                It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         await _capturedHandler!(

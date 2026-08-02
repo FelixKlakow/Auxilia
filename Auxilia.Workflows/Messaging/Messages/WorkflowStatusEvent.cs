@@ -1,9 +1,10 @@
 namespace Auxilia.Workflows.Messaging.Messages;
 
 /// <summary>
-/// Published by the Core.Runner to the <c>workflow.status-events</c> fanout exchange on
-/// every lifecycle transition. Failures, retries, and failovers are never silent: the Backend
-/// Service consumes these for the dashboard (and MCP) so users always see why a run changed state.
+/// Published by the Core.Runner to the <c>workflow.status</c> topic exchange on every lifecycle
+/// transition, keyed by run identity (<see cref="RoutingKeyFor"/>) so nodes ingest only the runs
+/// they have an audience for. Failures, retries, and failovers are never silent: the Core.Api
+/// consumes these for tracking and SSE so users always see why a run changed state.
 /// </summary>
 public sealed record WorkflowStatusEvent(
     Guid WorkflowInstanceId,
@@ -31,5 +32,21 @@ public sealed record WorkflowStatusEvent(
     /// </summary>
     string? TerminalEndpoint = null)
 {
-    public const string ExchangeName = "workflow.status-events";
+    // Topic exchange (selective routing) — a NEW name, because the retired fanout
+    // "workflow.status-events" cannot be redeclared with a different type in place.
+    public const string ExchangeName = "workflow.status";
+
+    /// <summary>
+    /// Routing key at publish: the instance id, extended with the originating command id on the
+    /// claim transition so a subscriber that only knows the dispatch command id still matches.
+    /// </summary>
+    public static string RoutingKeyFor(Guid instanceId, Guid? commandId = null)
+        => commandId is { } c && c != instanceId ? $"{instanceId}.{c}" : instanceId.ToString();
+
+    /// <summary>
+    /// Binding keys for a subscriber interested in <paramref name="runId"/> under EITHER identity:
+    /// first-word match (instance id; <c>#</c> also matches the single-word key) and
+    /// second-word match (command id on the claim transition).
+    /// </summary>
+    public static IReadOnlyList<string> BindingKeysFor(Guid runId) => [$"{runId}.#", $"*.{runId}"];
 }

@@ -25,9 +25,12 @@ public sealed class ViewDataHandler(
 
     public async Task StartAsync(CancellationToken ct = default)
     {
-        await messageBus.DeclareExchangeAsync(ViewDataMessage.ExchangeName, ct);
-        _subscription = await messageBus.SubscribeToExchangeAsync<ViewDataMessage>(
-            ViewDataMessage.ExchangeName, HandleAsync, ct);
+        await messageBus.DeclareTopicExchangeAsync(ViewDataMessage.ExchangeName, ct);
+        // Binds "#": a runner persists views for its own instances only (foreign instances miss
+        // the local registry and are dropped), but which instances are local is not knowable as
+        // a static binding.
+        _subscription = await messageBus.SubscribeToTopicExchangeAsync<ViewDataMessage>(
+            ViewDataMessage.ExchangeName, ["#"], HandleAsync, ct);
 
         logger.LogInformation("ViewDataHandler started — listening on {Exchange}.",
             ViewDataMessage.ExchangeName);

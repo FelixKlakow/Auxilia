@@ -63,13 +63,14 @@ await viewPublisher.PublishAsync("agent-conversation", new AgentMessage(...));
 ```
 
 The SDK wraps each item in a `ViewDataMessage(WorkflowInstanceId, ViewName, Sequence, PayloadJson)`
-published to the **`workflow.view-data` exchange**. `Sequence` is a per-(instance, view)
+published to the **`workflow.views` topic exchange, routing key = instance id** (selective
+routing, ARCHITECTURE §14.1). `Sequence` is a per-(instance, view)
 monotonic counter assigned by the SDK so consumers can order and de-duplicate. Payloads are
 view items only — large blobs belong in the Artifact Store, referenced from the payload.
 
 ## 3. Persistence (Core.Api)
 
-Core.Api mirrors the exchange (`RunViewTrackingService`): each item is stored as a
+Core.Api mirrors the exchange (`RunViewTrackingService`, shared queue bound `#`): each item is stored as a
 `CoreRunViewRecord(RunId, ViewName, Sequence, PayloadJson, TimestampUtc)` in the **Core.Api
 database** (capped per run — large data belongs in the Artifact Store) and read back over
 `GET /api/runs/{id}/views` (`ICoreClient.GetRunViewsAsync`) — so finished runs replay through
@@ -77,7 +78,8 @@ the identical rendering path.
 
 ## 4. Live fan-out (Core.Api SSE)
 
-Core.Api's `RunStreamPublisher` consumes the same exchange and fans each item to the run's
+Core.Api's `RunStreamPublisher` consumes the same exchange (bound only to runs with an open
+stream) and fans each item to the run's
 open `GET /api/runs/{id}/stream` SSE subscriptions (`RunStreamBroker`) — clients (AdminConsole,
 the steering client, any `Auxilia.Core.Client` app) hold ONE stream per observed run; there is no
 SignalR backplane. Observing requires the `run.observe` policy check. Replay of a finished

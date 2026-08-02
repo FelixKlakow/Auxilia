@@ -72,12 +72,12 @@ public class WorkflowDispatcherWorkspaceTests
             .Setup(b => b.DeclareQueueAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _mockBus
-            .Setup(b => b.DeclareExchangeAsync("workflow.status-events", It.IsAny<CancellationToken>()))
+            .Setup(b => b.DeclareTopicExchangeAsync("workflow.status", It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _mockBus
-            .Setup(b => b.PublishToExchangeAsync(
-                "workflow.status-events", It.IsAny<WorkflowStatusEvent>(), It.IsAny<CancellationToken>()))
-            .Callback<string, WorkflowStatusEvent, CancellationToken>((_, evt, _) => _statusEvents.Add(evt))
+            .Setup(b => b.PublishToTopicExchangeAsync(
+                "workflow.status", It.IsAny<string>(), It.IsAny<WorkflowStatusEvent>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, WorkflowStatusEvent, CancellationToken>((_, _, evt, _) => _statusEvents.Add(evt))
             .Returns(Task.CompletedTask);
         _mockBus
             .Setup(b => b.SubscribeAsync<RunWorkflowCommand>(

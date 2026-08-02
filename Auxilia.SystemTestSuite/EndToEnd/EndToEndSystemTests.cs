@@ -40,14 +40,14 @@ public sealed class EndToEndSystemTests
         var statusEvents = new ConcurrentQueue<WorkflowStatusEvent>();
         var artifactEvents = new ConcurrentQueue<ArtifactPersistedEvent>();
 
-        await bus.DeclareExchangeAsync(WorkflowStatusEvent.ExchangeName, cancellationToken);
-        await bus.DeclareExchangeAsync(ArtifactPersistedEvent.ExchangeName, cancellationToken);
-        await using var statusSubscription = await bus.SubscribeToExchangeAsync<WorkflowStatusEvent>(
-            WorkflowStatusEvent.ExchangeName,
+        await bus.DeclareTopicExchangeAsync(WorkflowStatusEvent.ExchangeName, cancellationToken);
+        await bus.DeclareTopicExchangeAsync(ArtifactPersistedEvent.ExchangeName, cancellationToken);
+        await using var statusSubscription = await bus.SubscribeToTopicExchangeAsync<WorkflowStatusEvent>(
+            WorkflowStatusEvent.ExchangeName, ["#"],
             (msg, _) => { statusEvents.Enqueue(msg); return Task.CompletedTask; },
             cancellationToken);
-        await using var artifactSubscription = await bus.SubscribeToExchangeAsync<ArtifactPersistedEvent>(
-            ArtifactPersistedEvent.ExchangeName,
+        await using var artifactSubscription = await bus.SubscribeToTopicExchangeAsync<ArtifactPersistedEvent>(
+            ArtifactPersistedEvent.ExchangeName, ["#"],
             (msg, _) => { artifactEvents.Enqueue(msg); return Task.CompletedTask; },
             cancellationToken);
 

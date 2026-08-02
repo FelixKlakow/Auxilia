@@ -4,8 +4,9 @@ using Auxilia.Workflows.Messaging.Messages;
 namespace Auxilia.Workflows.Messaging;
 
 /// <summary>
-/// Publishes lifecycle transitions to the <see cref="WorkflowStatusEvent.ExchangeName"/> fanout
-/// exchange. Every transition goes through here so failures and restarts are never silent.
+/// Publishes lifecycle transitions to the <see cref="WorkflowStatusEvent.ExchangeName"/> topic
+/// exchange, keyed by run identity. Every transition goes through here so failures and restarts
+/// are never silent.
 /// </summary>
 public sealed class WorkflowStatusPublisher(IMessageBusClient messageBus, TimeProvider timeProvider)
 {
@@ -18,11 +19,12 @@ public sealed class WorkflowStatusPublisher(IMessageBusClient messageBus, TimePr
     {
         if (!_exchangeDeclared)
         {
-            await messageBus.DeclareExchangeAsync(WorkflowStatusEvent.ExchangeName, ct);
+            await messageBus.DeclareTopicExchangeAsync(WorkflowStatusEvent.ExchangeName, ct);
             _exchangeDeclared = true;
         }
 
-        await messageBus.PublishToExchangeAsync(WorkflowStatusEvent.ExchangeName,
+        await messageBus.PublishToTopicExchangeAsync(WorkflowStatusEvent.ExchangeName,
+            WorkflowStatusEvent.RoutingKeyFor(instanceId, commandId),
             new WorkflowStatusEvent(
                 instanceId, workflowType, state, errorMessage, timeProvider.GetUtcNow(),
                 ownerServiceId, commandId, terminalEndpoint), ct);

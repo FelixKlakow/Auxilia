@@ -24,9 +24,9 @@ public sealed class FailoverSystemTests
         var bus = FailoverEnvironment.MessageBusClient;
         var statusEvents = new ConcurrentQueue<WorkflowStatusEvent>();
 
-        await bus.DeclareExchangeAsync(WorkflowStatusEvent.ExchangeName, cancellationToken);
-        await using var subscription = await bus.SubscribeToExchangeAsync<WorkflowStatusEvent>(
-            WorkflowStatusEvent.ExchangeName,
+        await bus.DeclareTopicExchangeAsync(WorkflowStatusEvent.ExchangeName, cancellationToken);
+        await using var subscription = await bus.SubscribeToTopicExchangeAsync<WorkflowStatusEvent>(
+            WorkflowStatusEvent.ExchangeName, ["#"],
             (msg, _) => { statusEvents.Enqueue(msg); return Task.CompletedTask; },
             cancellationToken);
 
@@ -43,8 +43,10 @@ public sealed class FailoverSystemTests
             "/api/runs", request, cancellationToken);
         runResp.EnsureSuccessStatusCode();
 
-        // 2. Wait until the run is Running and learn which runner owns it (the status event carries
-        //    the owning service id — the Core's own DB is never read across the DB split).
+        // 2. Wait until the run is Running and learn which runner owns it. The owner rides the
+        //    claim ("Received") transition and later transitions may omit it — the documented
+        //    contract is preserve-the-last-non-null-value, so it is read from the instance's
+        //    event history, not from the Running event itself.
         WorkflowStatusEvent? running = null;
         while (running is null)
         {
@@ -52,14 +54,17 @@ public sealed class FailoverSystemTests
             await Task.Delay(1000, cancellationToken);
             running = statusEvents.FirstOrDefault(e =>
                 e.WorkflowType == "sleeping-workflow" &&
-                e.State == "Running" &&
-                e.OwnerServiceId is not null);
+                e.State == "Running");
         }
         var runId = running.WorkflowInstanceId;
-        Assert.That(running.OwnerServiceId, Is.Not.Null, "The dispatcher must record the owning instance.");
+        var ownerServiceId = statusEvents
+            .Where(e => e.WorkflowInstanceId == runId)
+            .Select(e => e.OwnerServiceId)
+            .FirstOrDefault(id => id is not null);
+        Assert.That(ownerServiceId, Is.Not.Null, "The claim transition must record the owning instance.");
 
         var owner1 = await FailoverEnvironment.ServiceIdOfAsync(FailoverEnvironment.Runner1);
-        var ownerContainer = running.OwnerServiceId == owner1
+        var ownerContainer = ownerServiceId == owner1
             ? FailoverEnvironment.Runner1
             : FailoverEnvironment.Runner2;
 

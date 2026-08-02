@@ -16,5 +16,14 @@ public sealed record ArtifactPersistedEvent(
     long SizeBytes,
     DateTimeOffset TimestampUtc)
 {
-    public const string ExchangeName = "workflow.artifact-events";
+    // Topic exchange (selective routing) — a NEW name, because the retired fanout
+    // "workflow.artifact-events" cannot be redeclared with a different type in place.
+    public const string ExchangeName = "workflow.artifacts";
+
+    /// <summary>
+    /// Routing key at publish and exact binding key: the artifact type, with AMQP topic
+    /// wildcard characters neutralized so a type name can never widen a binding.
+    /// </summary>
+    public static string RoutingKeyFor(string artifactType)
+        => artifactType.Replace('*', '-').Replace('#', '-');
 }

@@ -76,10 +76,11 @@ public sealed class ArtifactPersister(
 
             if (!_exchangeDeclared)
             {
-                await messageBus.DeclareExchangeAsync(ArtifactPersistedEvent.ExchangeName, ct);
+                await messageBus.DeclareTopicExchangeAsync(ArtifactPersistedEvent.ExchangeName, ct);
                 _exchangeDeclared = true;
             }
-            await messageBus.PublishToExchangeAsync(ArtifactPersistedEvent.ExchangeName,
+            await messageBus.PublishToTopicExchangeAsync(ArtifactPersistedEvent.ExchangeName,
+                ArtifactPersistedEvent.RoutingKeyFor(record.ArtifactType),
                 new ArtifactPersistedEvent(
                     record.Id, record.ArtifactType, record.WorkflowType, record.WorkItemId,
                     record.RunInstanceId, record.Version, record.ContentHash, record.SizeBytes,

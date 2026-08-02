@@ -35,9 +35,9 @@ public sealed class ImplementationWorkflowSystemTests
         var bus = EndToEndEnvironment.MessageBusClient;
 
         var statusEvents = new ConcurrentQueue<WorkflowStatusEvent>();
-        await bus.DeclareExchangeAsync(WorkflowStatusEvent.ExchangeName, cancellationToken);
-        await using var statusSubscription = await bus.SubscribeToExchangeAsync<WorkflowStatusEvent>(
-            WorkflowStatusEvent.ExchangeName,
+        await bus.DeclareTopicExchangeAsync(WorkflowStatusEvent.ExchangeName, cancellationToken);
+        await using var statusSubscription = await bus.SubscribeToTopicExchangeAsync<WorkflowStatusEvent>(
+            WorkflowStatusEvent.ExchangeName, ["#"],
             (msg, _) => { statusEvents.Enqueue(msg); return Task.CompletedTask; },
             cancellationToken);
 
@@ -202,17 +202,17 @@ public sealed class ImplementationWorkflowSystemTests
         var bus = EndToEndEnvironment.MessageBusClient;
 
         var statusEvents = new ConcurrentQueue<WorkflowStatusEvent>();
-        await bus.DeclareExchangeAsync(WorkflowStatusEvent.ExchangeName, cancellationToken);
-        await using var statusSubscription = await bus.SubscribeToExchangeAsync<WorkflowStatusEvent>(
-            WorkflowStatusEvent.ExchangeName,
+        await bus.DeclareTopicExchangeAsync(WorkflowStatusEvent.ExchangeName, cancellationToken);
+        await using var statusSubscription = await bus.SubscribeToTopicExchangeAsync<WorkflowStatusEvent>(
+            WorkflowStatusEvent.ExchangeName, ["#"],
             (msg, _) => { statusEvents.Enqueue(msg); return Task.CompletedTask; },
             cancellationToken);
 
         var flowSnapshots = new ConcurrentQueue<(Guid Instance, string Payload)>();
         var stateGates = new ConcurrentQueue<(Guid Instance, string RequestId)>();
-        await bus.DeclareExchangeAsync(ViewDataMessage.ExchangeName, cancellationToken);
-        await using var viewSubscription = await bus.SubscribeToExchangeAsync<ViewDataMessage>(
-            ViewDataMessage.ExchangeName,
+        await bus.DeclareTopicExchangeAsync(ViewDataMessage.ExchangeName, cancellationToken);
+        await using var viewSubscription = await bus.SubscribeToTopicExchangeAsync<ViewDataMessage>(
+            ViewDataMessage.ExchangeName, ["#"],
             (msg, _) =>
             {
                 if (msg.ViewName == "flow")

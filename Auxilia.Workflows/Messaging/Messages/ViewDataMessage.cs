@@ -11,5 +11,10 @@ public sealed record ViewDataMessage(
     long Sequence,
     string PayloadJson)
 {
-    public const string ExchangeName = "workflow.view-data";
+    // Topic exchange (selective routing) — a NEW name, because the retired fanout
+    // "workflow.view-data" cannot be redeclared with a different type in place.
+    public const string ExchangeName = "workflow.views";
+
+    /// <summary>Routing key at publish and exact binding key: the instance id.</summary>
+    public static string RoutingKeyFor(Guid instanceId) => instanceId.ToString();
 }

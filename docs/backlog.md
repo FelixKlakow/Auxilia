@@ -106,8 +106,20 @@ access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing di
   copied alongside the provider DLL).
 - Core resolves fake code-review slots from inline `ProviderType`+`Settings` bindings.
 - Declared-slot set of `pull-request-code-review` matches the six seeded bindings.
-- `/api/audit` response shape (camelCase `PagedResult`); Failover timing (8s timeout / 2s
-  scan; owner stamped on the status event; re-dispatch queue).
+- `/api/audit` response shape (camelCase `PagedResult`). (The Failover system test itself
+  runs locally again since 2026-08-02 — it now reads the owner from the claim transition per
+  the preserve-last-non-null contract.)
+
+## Known-broken system fixtures (found 2026-08-02, pre-existing)
+- **`CodeReviewWorkflowSystemTests`** — its environment still waits for
+  `"SlotConfigurationSeedHandler started"` and seeds via the `*-slot-seed.*` queues, but that
+  runner subsystem was deleted with `d582b5d` (Core is the sole credential source). The
+  fixture needs a rewrite onto the Core-dispatch path (the modern path is covered by
+  `CoreApiDispatch` and the mail-triggered EndToEnd test, which pass).
+- **`ClaudeCodeWorkflowSystemTests`** — the run hangs mid-session with the stub CLI waiting
+  on the multi-turn stream-json driver (workflow + stub processes alive, views up to the
+  first conversation items published fine). This is the multi-turn real-stack verification
+  that has been pending since 2026-07-27; not a bus/routing issue.
 
 ## DevStand
 - `ScreenshotHarness` stubbed (targeted the retired dashboard) — rewire to boot
@@ -116,15 +128,15 @@ access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing di
 ## Core scalability — path to ~100k simultaneous clients
 The shape is right (stateless Core.Api, SSE per node, competing-consumer runners, clients
 never on the bus); the 2026-08-01 wave delivered shared-queue tracking mirrors, the auth
-cache, signed terminal tickets, and the batched audit writer. Remaining:
-- **Selective event routing.** `RunStreamPublisher`/`ArtifactStreamPublisher` consume their
-  FANOUTs on every node (per-node ingest = global event volume; server-side per-subscriber
-  filtering already exists for artifacts). Design for the dedicated session: topic exchanges
-  under NEW names (fanout→topic cannot be redeclared in place), routing key = run id
-  (status/view) / artifact type (artifacts) stamped at publish (runner + workflow SDK —
-  **every workflow image must be rebuilt**), per-node dynamic bindings for runs with open SSE
-  streams (subscriptions gain Add/RemoveBinding), tracking mirrors bind `#`, ASB mapping =
-  topic subscription rules.
+cache, signed terminal tickets, and the batched audit writer. **Selective event routing is
+DELIVERED (2026-08-02)**: `workflow.status`/`workflow.views`/`workflow.artifacts` topic
+exchanges (new names — the retired fanouts could not be redeclared), routing key stamped at
+publish (status = `{instanceId}` or `{instanceId}.{commandId}` on the claim; views =
+instance id; artifacts = sanitized artifact type), per-node dynamic bindings driven by the
+SSE brokers' binding listeners (subscriptions gained Add/RemoveBinding; awaited on subscribe
+so the no-event-lost-after-flush guarantee holds), command-id aliases resolved from the run
+store for late subscribers, tracking mirrors bind `#`. ASB mapping (topic subscription
+rules) remains a note for the ASB backend. Remaining:
 - Infra per the ARCHITECTURE §14.4 table (RabbitMQ cluster / ASB, MongoDB backend). Note:
   100k clients ≠ 100k concurrent runs — the run axis is runner-fleet/container capacity plus
   heartbeat/failover-monitor volume, tracked separately.

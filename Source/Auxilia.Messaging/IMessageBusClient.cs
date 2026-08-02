@@ -52,4 +52,64 @@ public interface IMessageBusClient
         Func<T, CancellationToken, Task> handler,
         CancellationToken cancellationToken = default)
         => SubscribeToExchangeAsync(exchangeName, handler, cancellationToken);
+
+    /// <summary>
+    ///     Declares a topic exchange (selective routing). Idempotent. The default degrades to the
+    ///     fanout declaration — correct for in-memory fakes, which route by message type anyway;
+    ///     broker implementations override with a real topic exchange.
+    /// </summary>
+    Task DeclareTopicExchangeAsync(string exchangeName, CancellationToken cancellationToken = default)
+        => DeclareExchangeAsync(exchangeName, cancellationToken);
+
+    /// <summary>
+    ///     Publishes to a topic exchange under <paramref name="routingKey"/>; only queues whose
+    ///     bindings match receive a copy. The default ignores the key and fans out — in-memory
+    ///     fakes over-deliver, and consumers filter (routing is verified against a real broker).
+    /// </summary>
+    Task PublishToTopicExchangeAsync<T>(
+        string exchangeName, string routingKey, T message, CancellationToken cancellationToken = default)
+        => PublishToExchangeAsync(exchangeName, message, cancellationToken);
+
+    /// <summary>
+    ///     Creates a private exclusive queue on a topic exchange, binds the given routing keys,
+    ///     and subscribes. Bindings can be added/removed while consuming
+    ///     (<see cref="ITopicSubscription"/>) — the per-node selective-ingest primitive for SSE
+    ///     fan-out. The default degrades to an everything-subscription with no-op bindings.
+    /// </summary>
+    async Task<ITopicSubscription> SubscribeToTopicExchangeAsync<T>(
+        string exchangeName,
+        IReadOnlyCollection<string> routingKeys,
+        Func<T, CancellationToken, Task> handler,
+        CancellationToken cancellationToken = default)
+        => new NonSelectiveTopicSubscription(
+            await SubscribeToExchangeAsync(exchangeName, handler, cancellationToken));
+
+    /// <summary>
+    ///     Binds a durable NAMED queue to a topic exchange under <paramref name="bindingKey"/>
+    ///     (mirrors bind <c>#</c>) and consumes it as competing consumers — the multi-node
+    ///     bus→store mirror pattern. The default degrades to the shared fanout subscription.
+    /// </summary>
+    Task<IAsyncDisposable> SubscribeToTopicExchangeSharedAsync<T>(
+        string exchangeName,
+        string queueName,
+        string bindingKey,
+        Func<T, CancellationToken, Task> handler,
+        CancellationToken cancellationToken = default)
+        => SubscribeToExchangeSharedAsync(exchangeName, queueName, handler, cancellationToken);
+}
+
+/// <summary>
+///     Wraps a plain exchange subscription as an <see cref="ITopicSubscription"/> whose binding
+///     mutations are no-ops — the degraded mode of non-broker implementations, which deliver
+///     everything and leave filtering to the consumer.
+/// </summary>
+public sealed class NonSelectiveTopicSubscription(IAsyncDisposable inner) : ITopicSubscription
+{
+    public Task AddBindingAsync(string routingKey, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
+    public Task RemoveBindingAsync(string routingKey, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
+    public ValueTask DisposeAsync() => inner.DisposeAsync();
 }

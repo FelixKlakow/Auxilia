@@ -127,7 +127,9 @@ builder.Services.AddSingleton<FailoverMonitor>();
 builder.Services.AddHostedService<RunTrackingService>();
 builder.Services.AddHostedService<RunViewTrackingService>();
 builder.Services.AddHostedService<WorkflowSchemaTrackingService>();
-builder.Services.AddHostedService<RunStreamPublisher>();
+// Resolvable singleton: the run-stream SSE endpoint primes command-id aliases on it.
+builder.Services.AddSingleton<RunStreamPublisher>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<RunStreamPublisher>());
 builder.Services.AddHostedService<ArtifactTrackingService>();
 builder.Services.AddHostedService<ArtifactStreamPublisher>();
 // Resolve the same FailoverMonitor instance for the hosted lifecycle (so tests can drive ScanOnceAsync).
@@ -397,7 +399,9 @@ app.MapPost("/api/runs/{id:guid}/rerun", async (
 // RunStreamBroker, until the run reaches a terminal state or the client disconnects. Replaces the
 // BackendService SignalR /hubs/views live push.
 app.MapGet("/api/runs/{id:guid}/stream", async (
-        Guid id, HttpContext http, IPolicyEngine policy, RunStreamBroker broker, CancellationToken ct) =>
+        Guid id, HttpContext http, IPolicyEngine policy, RunStreamBroker broker,
+        RunStreamPublisher streamPublisher, Auxilia.UniversalDataAccess.IDataAccess<CoreRunRecord> runRecords,
+        CancellationToken ct) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.RunObserve, ct) is { } fail)
     {
@@ -409,7 +413,17 @@ app.MapGet("/api/runs/{id:guid}/stream", async (
     http.Response.Headers.CacheControl = "no-cache";
     http.Response.Headers["X-Accel-Buffering"] = "no";
 
-    using var subscription = broker.Subscribe(id);
+    // The id may be the dispatch COMMAND id rather than the runner's instance id. Selective
+    // routing binds by key, so resolve the pairing from the tracked runs and prime the alias —
+    // a late subscriber cannot rely on observing the claim transition on the bus.
+    if (await runRecords.ReadAsync(id, ct) is null)
+    {
+        var byCommand = (await runRecords.ReadAsync(ct)).FirstOrDefault(r => r.CommandId == id);
+        if (byCommand is not null)
+            await streamPublisher.RegisterAliasAsync(id, byCommand.Id, ct);
+    }
+
+    using var subscription = await broker.SubscribeAsync(id, ct);
     // Flush headers so the client's SendAsync completes with the subscription already registered —
     // no live event published after this point is lost.
     await http.Response.Body.FlushAsync(ct);
@@ -679,7 +693,7 @@ app.MapGet("/api/artifacts/stream", async (
     http.Response.Headers.CacheControl = "no-cache";
     http.Response.Headers["X-Accel-Buffering"] = "no";
 
-    using var subscription = broker.Subscribe(artifactType, workItemId);
+    using var subscription = await broker.SubscribeAsync(artifactType, workItemId, ct);
     // Flush headers so the client's SendAsync completes with the subscription already registered —
     // no live event published after this point is lost.
     await http.Response.Body.FlushAsync(ct);

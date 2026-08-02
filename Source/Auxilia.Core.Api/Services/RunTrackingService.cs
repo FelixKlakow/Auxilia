@@ -20,11 +20,12 @@ public sealed class RunTrackingService(
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        await bus.DeclareExchangeAsync(WorkflowStatusEvent.ExchangeName, cancellationToken);
-        // SHARED queue: with N Core.Api nodes, exactly one processes each status transition
-        // into CoreRunRecord — no N× write amplification.
-        _subscription = await bus.SubscribeToExchangeSharedAsync<WorkflowStatusEvent>(
-            WorkflowStatusEvent.ExchangeName, "core-api.run-tracking", HandleAsync, cancellationToken);
+        await bus.DeclareTopicExchangeAsync(WorkflowStatusEvent.ExchangeName, cancellationToken);
+        // SHARED queue bound "#": with N Core.Api nodes, exactly one processes each status
+        // transition into CoreRunRecord — no N× write amplification, and the mirror sees every
+        // run regardless of the selective per-node SSE bindings.
+        _subscription = await bus.SubscribeToTopicExchangeSharedAsync<WorkflowStatusEvent>(
+            WorkflowStatusEvent.ExchangeName, "core-api.run-tracking", "#", HandleAsync, cancellationToken);
         logger.LogInformation(
             "RunTrackingService listening on {Exchange}.", WorkflowStatusEvent.ExchangeName);
     }

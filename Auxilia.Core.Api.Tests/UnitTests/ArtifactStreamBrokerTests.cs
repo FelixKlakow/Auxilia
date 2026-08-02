@@ -14,10 +14,10 @@ public sealed class ArtifactStreamBrokerTests
             DateTimeOffset.UtcNow);
 
     [Test]
-    public void NullFilters_ReceiveEverything()
+    public async Task NullFilters_ReceiveEverything()
     {
         var broker = new ArtifactStreamBroker();
-        using var subscription = broker.Subscribe(artifactType: null, workItemId: null);
+        using var subscription = await broker.SubscribeAsync(artifactType: null, workItemId: null);
 
         broker.Publish(Event("a"));
         broker.Publish(Event("b"));
@@ -26,10 +26,10 @@ public sealed class ArtifactStreamBrokerTests
     }
 
     [Test]
-    public void TypeFilter_DropsOtherTypes_ServerSide()
+    public async Task TypeFilter_DropsOtherTypes_ServerSide()
     {
         var broker = new ArtifactStreamBroker();
-        using var subscription = broker.Subscribe("code-review-result", workItemId: null);
+        using var subscription = await broker.SubscribeAsync("code-review-result", workItemId: null);
 
         broker.Publish(Event("design-doc"));
         broker.Publish(Event("code-review-result"));
@@ -41,10 +41,10 @@ public sealed class ArtifactStreamBrokerTests
     }
 
     [Test]
-    public void CombinedFilters_MustBothMatch()
+    public async Task CombinedFilters_MustBothMatch()
     {
         var broker = new ArtifactStreamBroker();
-        using var subscription = broker.Subscribe("plan", "WI-7");
+        using var subscription = await broker.SubscribeAsync("plan", "WI-7");
 
         broker.Publish(Event("plan", "WI-1"));
         broker.Publish(Event("other", "WI-7"));
@@ -56,10 +56,10 @@ public sealed class ArtifactStreamBrokerTests
     }
 
     [Test]
-    public void WhitespaceFilters_AreTreatedAsNoFilter()
+    public async Task WhitespaceFilters_AreTreatedAsNoFilter()
     {
         var broker = new ArtifactStreamBroker();
-        using var subscription = broker.Subscribe("  ", "");
+        using var subscription = await broker.SubscribeAsync("  ", "");
 
         broker.Publish(Event("anything", "WI-x"));
 
@@ -67,10 +67,10 @@ public sealed class ArtifactStreamBrokerTests
     }
 
     [Test]
-    public void DisposedSubscription_ReceivesNothingFurther()
+    public async Task DisposedSubscription_ReceivesNothingFurther()
     {
         var broker = new ArtifactStreamBroker();
-        var subscription = broker.Subscribe(null, null);
+        var subscription = await broker.SubscribeAsync(null, null);
         subscription.Dispose();
 
         broker.Publish(Event("a"));
@@ -79,11 +79,66 @@ public sealed class ArtifactStreamBrokerTests
         Assert.That(subscription.Reader.TryRead(out _), Is.False);
     }
 
+    [Test]
+    public async Task Listener_SeesTheNormalizedTypeFilter()
+    {
+        var broker = new ArtifactStreamBroker();
+        var listener = new RecordingListener();
+        broker.SetListener(listener);
+
+        var typed = await broker.SubscribeAsync("plan", "WI-7");
+        var unfiltered = await broker.SubscribeAsync("  ", null);
+        typed.Dispose();
+        unfiltered.Dispose();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(listener.Added, Is.EqualTo(new[] { "plan", null }));
+            Assert.That(listener.Removed, Is.EqualTo(new[] { "plan", null }));
+        });
+    }
+
+    [Test]
+    public void FailingListener_FailsTheSubscribe_AndLeavesNoSubscriber()
+    {
+        var broker = new ArtifactStreamBroker();
+        broker.SetListener(new ThrowingListener());
+
+        Assert.ThrowsAsync<InvalidOperationException>(() => broker.SubscribeAsync("plan", null));
+        Assert.DoesNotThrow(() => broker.Publish(Event("plan")));
+    }
+
     private static List<ArtifactStreamEvent> Drain(ArtifactStreamBroker.Subscription subscription)
     {
         var received = new List<ArtifactStreamEvent>();
         while (subscription.Reader.TryRead(out var evt))
             received.Add(evt);
         return received;
+    }
+
+    private sealed class RecordingListener : IArtifactStreamBindingListener
+    {
+        public List<string?> Added { get; } = new();
+        public List<string?> Removed { get; } = new();
+
+        public Task ArtifactInterestAddedAsync(string? artifactType, CancellationToken ct)
+        {
+            Added.Add(artifactType);
+            return Task.CompletedTask;
+        }
+
+        public Task ArtifactInterestRemovedAsync(string? artifactType)
+        {
+            Removed.Add(artifactType);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class ThrowingListener : IArtifactStreamBindingListener
+    {
+        public Task ArtifactInterestAddedAsync(string? artifactType, CancellationToken ct)
+            => throw new InvalidOperationException("bind failed");
+
+        public Task ArtifactInterestRemovedAsync(string? artifactType) => Task.CompletedTask;
     }
 }

@@ -4,19 +4,38 @@ using Auxilia.Core.Contracts;
 namespace Auxilia.Core.Api.Services;
 
 /// <summary>
-/// In-memory registry of live-view (SSE) subscribers keyed by run id — the Core.Api analogue of the
-/// BackendService <c>LiveViewBroker</c>, rebuilt for the pull-based SSE endpoint. The bus fan-out
+/// Receives run-audience transitions from the <see cref="RunStreamBroker"/> so bus bindings can
+/// follow the audience (selective routing). Subscribe is awaited — the binding exists before the
+/// SSE response is flushed; unsubscribe is best-effort and must not throw.
+/// </summary>
+public interface IRunStreamBindingListener
+{
+    Task RunSubscribedAsync(Guid runId, CancellationToken ct);
+    Task RunUnsubscribedAsync(Guid runId);
+}
+
+/// <summary>
+/// In-memory registry of live-view (SSE) subscribers keyed by run id. The bus fan-out
 /// (<see cref="RunStreamPublisher"/>) calls <see cref="Publish"/>; each open
 /// <c>GET /api/runs/{id}/stream</c> holds a <see cref="Subscription"/> and drains its channel. A frame
-/// is delivered only to subscribers of its own <see cref="RunStreamEvent.RunId"/>.
+/// is delivered only to subscribers of its own <see cref="RunStreamEvent.RunId"/>. Every
+/// subscribe/unsubscribe is reported to the registered <see cref="IRunStreamBindingListener"/> so
+/// this node's bus bindings track exactly the runs with an open stream.
 /// </summary>
 public sealed class RunStreamBroker
 {
     private readonly object _gate = new();
     private readonly Dictionary<Guid, List<Channel<RunStreamEvent>>> _subscribers = new();
+    private IRunStreamBindingListener? _listener;
 
-    /// <summary>Registers a subscriber for <paramref name="runId"/>; dispose to unregister.</summary>
-    public Subscription Subscribe(Guid runId)
+    /// <summary>Registers the (single) binding listener — the bus-side publisher.</summary>
+    public void SetListener(IRunStreamBindingListener listener) => _listener = listener;
+
+    /// <summary>
+    /// Registers a subscriber for <paramref name="runId"/> and awaits the listener so the bus
+    /// binding is in place when this returns; dispose to unregister.
+    /// </summary>
+    public async Task<Subscription> SubscribeAsync(Guid runId, CancellationToken ct = default)
     {
         var channel = Channel.CreateUnbounded<RunStreamEvent>(
             new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
@@ -26,7 +45,21 @@ public sealed class RunStreamBroker
                 _subscribers[runId] = list = new List<Channel<RunStreamEvent>>();
             list.Add(channel);
         }
-        return new Subscription(this, runId, channel);
+
+        var subscription = new Subscription(this, runId, channel);
+        if (_listener is { } listener)
+        {
+            try
+            {
+                await listener.RunSubscribedAsync(runId, ct);
+            }
+            catch
+            {
+                subscription.Dispose();
+                throw;
+            }
+        }
+        return subscription;
     }
 
     /// <summary>Fans an event to every subscriber of its run id. Never throws.</summary>
@@ -49,11 +82,14 @@ public sealed class RunStreamBroker
         {
             if (!_subscribers.TryGetValue(runId, out var list))
                 return;
-            list.Remove(channel);
+            if (!list.Remove(channel))
+                return;
             if (list.Count == 0)
                 _subscribers.Remove(runId);
         }
         channel.Writer.TryComplete();
+        // Best-effort unbind; listeners never throw here — a stale binding only over-delivers.
+        _ = _listener?.RunUnsubscribedAsync(runId);
     }
 
     /// <summary>A single subscriber's read side; dispose to unregister and complete the channel.</summary>

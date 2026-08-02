@@ -25,12 +25,13 @@ public sealed class DefaultViewPublisher(
 
         if (!_exchangeDeclared)
         {
-            await messageBus.DeclareExchangeAsync(ViewDataMessage.ExchangeName, ct);
+            await messageBus.DeclareTopicExchangeAsync(ViewDataMessage.ExchangeName, ct);
             _exchangeDeclared = true;
         }
 
         var sequence = _sequences.AddOrUpdate(viewName, 1, (_, current) => current + 1);
-        await messageBus.PublishToExchangeAsync(ViewDataMessage.ExchangeName,
+        await messageBus.PublishToTopicExchangeAsync(ViewDataMessage.ExchangeName,
+            ViewDataMessage.RoutingKeyFor(instanceId),
             new ViewDataMessage(instanceId, viewName, sequence, JsonSerializer.Serialize(item)), ct);
     }
 }
