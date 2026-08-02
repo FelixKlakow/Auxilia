@@ -138,6 +138,102 @@ public sealed class WorkflowsPageTests
         });
     }
 
+    [Test]
+    public void Editor_GenericBinding_NarrowsProvidersByContract_AndSavesProviderTypeWithSettings()
+    {
+        var core = new FakeCoreClient();
+        core.WorkflowTypes.Add(new WorkflowTypeDto("impl", "1.0.0", "Ephemeral", null, []));
+        core.WorkflowSchemas["impl"] = Schema("impl",
+            new WorkflowSlotDto("agent", "coding-agent", null, false, null));
+        core.ProviderCatalog.Add(CatalogEntry("claude-code-cli", ["coding-agent"],
+            descriptors: [new ProviderSettingDescriptor("model", "Model", "Choice", false, null, "sonnet", ["sonnet", "opus"], false)]));
+        core.ProviderCatalog.Add(CatalogEntry("smtp-mail", ["email-intake"]));
+        using var ctx = NewContext(core);
+        var cut = ctx.Render<WorkflowEditor>();
+
+        cut.Find("input[placeholder='e.g. Nightly code review']").Change("Agent run");
+        cut.FindAll("select")[0].Change("impl");
+        // selects: [0] workflow type, [1] scope, [2] the slot's PROVIDER picker
+        var providerSelect = cut.FindAll("select")[2];
+        Assert.That(providerSelect.InnerHtml, Does.Contain("claude-code-cli").And.Not.Contain("smtp-mail"),
+            "only providers serving the slot's contract are offered");
+        providerSelect.Change("claude-code-cli");
+
+        // The provider's declared settings render; the Choice descriptor becomes a select.
+        var modelSelect = cut.FindAll("select").First(s => s.InnerHtml.Contains("opus"));
+        modelSelect.Change("opus");
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Create configuration").Click();
+
+        var binding = core.LastCreatedConfiguration!.SlotBindings!.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(binding.SlotName, Is.EqualTo("agent"));
+            Assert.That(binding.ProviderType, Is.EqualTo("claude-code-cli"));
+            Assert.That(binding.ConnectorId, Is.Null, "no connector was picked — inline provider binding");
+            Assert.That(binding.Settings!["model"], Is.EqualTo("opus"));
+        });
+    }
+
+    [Test]
+    public void Editor_EnvironmentSlot_MultiSelect_ConstrainedToOneBase()
+    {
+        var core = new FakeCoreClient();
+        core.WorkflowTypes.Add(new WorkflowTypeDto("session", "1.0.0", "Ephemeral", null, []));
+        core.WorkflowSchemas["session"] = Schema("session",
+            new WorkflowSlotDto("environment", "environment-capability", null, true, null, AllowMultiple: true));
+        core.ProviderCatalog.Add(EnvironmentLayer("dotnet-10", "linux"));
+        core.ProviderCatalog.Add(EnvironmentLayer("node-22", "linux"));
+        core.ProviderCatalog.Add(EnvironmentLayer("windows-vs", "windows"));
+        using var ctx = NewContext(core);
+        var cut = ctx.Render<WorkflowEditor>();
+
+        cut.Find("input[placeholder='e.g. Nightly code review']").Change("Session");
+        cut.FindAll("select")[0].Change("session");
+
+        // Environment slots render as checkboxes (one per layer), not a connector select.
+        cut.FindAll("input[type=checkbox]").First(c => c.Parent!.TextContent.Contains("dotnet-10")).Change(true);
+
+        cut.WaitForAssertion(() =>
+        {
+            var windowsBox = cut.FindAll("input[type=checkbox]").First(c => c.Parent!.TextContent.Contains("windows-vs"));
+            Assert.That(windowsBox.HasAttribute("disabled"), Is.True,
+                "picking a linux layer disables layers of any other base");
+        });
+        cut.FindAll("input[type=checkbox]").First(c => c.Parent!.TextContent.Contains("node-22")).Change(true);
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Create configuration").Click();
+
+        var layers = core.LastCreatedConfiguration!.SlotBindings!.Where(b => b.SlotName == "environment").ToList();
+        Assert.That(layers.Select(b => b.ProviderType), Is.EquivalentTo(new[] { "dotnet-10", "node-22" }),
+            "each selected layer becomes its own ProviderType-only binding");
+    }
+
+    [Test]
+    public void Editor_ChoiceInput_RendersChoiceLabels()
+    {
+        var core = new FakeCoreClient();
+        core.WorkflowTypes.Add(new WorkflowTypeDto("impl", "1.0.0", "Ephemeral", null, []));
+        core.WorkflowSchemas["impl"] = new WorkflowSchemaDto("impl", "1.0.0", "1", "Ephemeral", [], [],
+            [new WorkflowInputDto("effort", "Effort", false, null, InputKinds.Choice,
+                Choices: ["low", "high"], ChoiceLabels: new Dictionary<string, string> { ["low"] = "Low effort", ["high"] = "High effort" })],
+            [], [], [], null, "{}");
+        using var ctx = NewContext(core);
+        var cut = ctx.Render<WorkflowEditor>();
+
+        cut.FindAll("select")[0].Change("impl");
+
+        Assert.That(cut.Markup, Does.Contain("Low effort").And.Contain("High effort"),
+            "a Choice input renders its declared labels, not the raw values");
+    }
+
+    private static ProviderCatalogEntry CatalogEntry(
+        string providerType, IReadOnlyList<string> contracts,
+        IReadOnlyList<ProviderSettingDescriptor>? descriptors = null)
+        => new(providerType, true, "capability", descriptors ?? [], contracts, null);
+
+    private static ProviderCatalogEntry EnvironmentLayer(string providerType, string environmentBase)
+        => new(providerType, true, "environment", [], ["environment-capability"], null,
+            ComposesEnvironment: true, EnvironmentBase: environmentBase);
+
     private static WorkflowSchemaDto Schema(string type, params WorkflowSlotDto[] slots)
         => new(type, "1.0.0", "1", "Ephemeral", [], slots, [], [], [], [], null, "{}");
 }

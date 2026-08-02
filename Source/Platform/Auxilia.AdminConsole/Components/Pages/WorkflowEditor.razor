@@ -10,7 +10,7 @@
 <div class="page-back"><a href="workflows">← All workflows</a></div>
 
 <PageHeader Title="@(IsEdit ? "Edit workflow configuration" : "New workflow configuration")"
-            Subtitle="Pick a workflow type, bind its capability slots to connectors, fill any inputs, then save."/>
+            Subtitle="Pick a workflow type, bind its capability slots, fill any inputs, then save."/>
 
 @if (!_loaded)
 {
@@ -96,11 +96,14 @@ else
     }
     else
     {
-        @* ---- Step 2: bind slots to connectors ---- *@
+        @* ---- Step 2: bind the capability slots ---- *@
         <section class="card">
             <div class="card-header">
-                <h2><span class="step-number">2</span> Slots &amp; connectors</h2>
-                <p class="card-subtitle">Bind each capability slot to a connector. Optional slots may be left unbound.</p>
+                <h2><span class="step-number">2</span> Slots</h2>
+                <p class="card-subtitle">
+                    Bind each capability slot: pick a provider, then a connector and/or its settings.
+                    Optional slots may be left unbound.
+                </p>
             </div>
             <div class="card-body">
                 @if (_schema.Slots.Count == 0)
@@ -109,6 +112,8 @@ else
                 }
                 @foreach (var slot in _schema.Slots)
                 {
+                    var edit = EditOf(slot.SlotName);
+                    var providers = EligibleProviders(slot);
                     <div class="slot-binding">
                         <div class="slot-binding-header">
                             <div>
@@ -124,27 +129,122 @@ else
                                 }
                             </div>
                         </div>
-                        <label>
-                            Connector
-                            <select value="@(_bindings.GetValueOrDefault(slot.SlotName))"
-                                    @onchange="e => SetBinding(slot.SlotName, e.Value?.ToString())">
-                                <option value="">@(slot.Optional ? "— leave unbound —" : "— pick a connector —")</option>
-                                @foreach (var connector in _connectors)
-                                {
-                                    <option value="@connector.Id">@connector.Name (@connector.ProviderType)</option>
-                                }
-                            </select>
-                            @if (_connectors.Count == 0)
+                        @if (IsEnvironmentMultiSlot(slot, providers))
+                        {
+                            @* Environment capabilities: any number of layers, but ONE base per run. *@
+                            @foreach (var provider in providers)
                             {
-                                <span class="field-hint">No connectors exist yet — create one on the Connectors page.</span>
+                                var conflict = HasBaseConflict(edit, provider);
+                                <label class="check-label">
+                                    <input type="checkbox"
+                                           checked="@edit.MultiProviders.Contains(provider.ProviderType)"
+                                           disabled="@conflict"
+                                           @onchange="e => ToggleLayer(edit, provider.ProviderType, e.Value is true)"/>
+                                    @provider.ProviderType
+                                    <span class="type-chip">@BaseOf(provider)</span>
+                                    @if (provider.Description is { Length: > 0 })
+                                    {
+                                        <span class="field-hint">@provider.Description</span>
+                                    }
+                                    @if (conflict)
+                                    {
+                                        <span class="field-hint">unavailable — a run composes layers of one base only</span>
+                                    }
+                                </label>
                             }
-                        </label>
+                        }
+                        else if (providers.Count > 0)
+                        {
+                            <label>
+                                Provider
+                                <select value="@edit.Provider"
+                                        @onchange="e => SetProvider(edit, e.Value?.ToString())">
+                                    <option value="">@(slot.Optional ? "— leave unbound —" : "— pick a provider —")</option>
+                                    @foreach (var provider in providers)
+                                    {
+                                        <option value="@provider.ProviderType">
+                                            @provider.ProviderType@(provider.Description is { Length: > 0 } ? $" — {provider.Description}" : "")
+                                        </option>
+                                    }
+                                </select>
+                            </label>
+                            @if (ProviderOf(edit.Provider) is { } selected)
+                            {
+                                var connectors = EligibleConnectors(selected);
+                                @if (connectors.Count > 0)
+                                {
+                                    <label>
+                                        Connector
+                                        <select value="@edit.ConnectorId"
+                                                @onchange="e => edit.ConnectorId = Str(e.Value)">
+                                            <option value="">— no connector —</option>
+                                            @foreach (var connector in connectors)
+                                            {
+                                                <option value="@connector.Id">@connector.Name (@connector.ProviderType)</option>
+                                            }
+                                        </select>
+                                    </label>
+                                }
+                                @foreach (var descriptor in selected.Descriptors.Where(d => !d.Disabled))
+                                {
+                                    <label>
+                                        @descriptor.Label@(descriptor.Required ? " *" : "")
+                                        @if (descriptor.Choices is { Count: > 0 })
+                                        {
+                                            <select value="@SettingOf(edit, descriptor)"
+                                                    @onchange="e => edit.Settings[descriptor.Key] = Str(e.Value)">
+                                                <option value="">—</option>
+                                                @foreach (var choice in descriptor.Choices)
+                                                {
+                                                    <option value="@choice">@choice</option>
+                                                }
+                                            </select>
+                                        }
+                                        else if (descriptor.Kind is "Boolean")
+                                        {
+                                            <input type="checkbox"
+                                                   checked="@(SettingOf(edit, descriptor) == "true")"
+                                                   @onchange="e => edit.Settings[descriptor.Key] = Bool(e.Value)"/>
+                                        }
+                                        else
+                                        {
+                                            <input type="@(descriptor.Kind is "Secret" ? "password" : "text")"
+                                                   value="@SettingOf(edit, descriptor)"
+                                                   @onchange="e => edit.Settings[descriptor.Key] = Str(e.Value)"/>
+                                        }
+                                        @if (descriptor.HelpText is { Length: > 0 })
+                                        {
+                                            <span class="field-hint">@descriptor.HelpText</span>
+                                        }
+                                    </label>
+                                }
+                            }
+                        }
+                        else
+                        {
+                            @* No catalog entry matches — the plain connector binding stays available. *@
+                            <label>
+                                Connector
+                                <select value="@edit.ConnectorId"
+                                        @onchange="e => edit.ConnectorId = Str(e.Value)">
+                                    <option value="">@(slot.Optional ? "— leave unbound —" : "— pick a connector —")</option>
+                                    @foreach (var connector in _connectors)
+                                    {
+                                        <option value="@connector.Id">@connector.Name (@connector.ProviderType)</option>
+                                    }
+                                </select>
+                                @if (_connectors.Count == 0)
+                                {
+                                    <span class="field-hint">No connectors exist yet — create one on the Connectors page.</span>
+                                }
+                            </label>
+                        }
                     </div>
                 }
             </div>
         </section>
 
-        @* ---- Inputs ---- *@
+        @* ---- Inputs (rendered by declared kind, never by name) ---- *@
         @if (_schema.Inputs.Count > 0)
         {
             <section class="card">
@@ -157,7 +257,38 @@ else
                     {
                         <label>
                             @input.Label@(input.Required ? " *" : " (optional)")
-                            <input @bind="_inputs[input.Name]"/>
+                            @if (input.Kind == InputKinds.Choice && input.Choices is { Count: > 0 })
+                            {
+                                <select value="@_inputs.GetValueOrDefault(input.Name, "")"
+                                        @onchange="e => _inputs[input.Name] = Str(e.Value)">
+                                    <option value="">—</option>
+                                    @foreach (var choice in input.Choices)
+                                    {
+                                        <option value="@choice">@(input.ChoiceLabels?.GetValueOrDefault(choice) ?? choice)</option>
+                                    }
+                                </select>
+                            }
+                            else if (input.Kind == InputKinds.Boolean)
+                            {
+                                <input type="checkbox"
+                                       checked="@(_inputs.GetValueOrDefault(input.Name) == "true")"
+                                       @onchange="e => _inputs[input.Name] = Bool(e.Value)"/>
+                            }
+                            else if (input.Kind == InputKinds.Multiline)
+                            {
+                                <textarea value="@_inputs.GetValueOrDefault(input.Name, "")"
+                                          @onchange="e => _inputs[input.Name] = Str(e.Value)"></textarea>
+                            }
+                            else if (input.Kind == InputKinds.Number)
+                            {
+                                <input type="number" value="@_inputs.GetValueOrDefault(input.Name, "")"
+                                       @onchange="e => _inputs[input.Name] = Str(e.Value)"/>
+                            }
+                            else
+                            {
+                                <input value="@_inputs.GetValueOrDefault(input.Name, "")"
+                                       @onchange="e => _inputs[input.Name] = Str(e.Value)"/>
+                            }
                             @if (input.Description is { Length: > 0 })
                             {
                                 <span class="field-hint">@input.Description</span>
@@ -168,17 +299,34 @@ else
             </section>
         }
 
-        @* ---- Step 3: triggers (link-out placeholder) ---- *@
+        @* ---- Plan: what a run of this configuration dispatches ---- *@
         <section class="card">
             <div class="card-header">
-                <h2><span class="step-number">3</span> Triggers</h2>
-                <p class="card-subtitle">How this workflow's runs start automatically.</p>
+                <h2>Plan</h2>
+                <p class="card-subtitle">What a run of this configuration will dispatch.</p>
             </div>
             <div class="card-body">
-                <div class="panel">
-                    Triggers are managed in Workflow Studio. This console has no trigger-editing API yet,
-                    so a saved configuration is run on demand (or from Workflow Studio's triggers).
-                </div>
+                <table class="data-table">
+                    <thead>
+                    <tr>
+                        <th>Slot</th>
+                        <th>Binding</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var slot in _schema.Slots)
+                    {
+                        <tr>
+                            <td class="cell-strong">@slot.SlotName</td>
+                            <td>@PlanOf(slot)</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+                @if (SelectedBase() is { } environmentBase)
+                {
+                    <p class="field-hint">Environment base: @environmentBase</p>
+                }
             </div>
         </section>
     }
@@ -219,10 +367,20 @@ else
 
     private List<WorkflowTypeDto> _types = [];
     private List<Connector> _connectors = [];
+    private List<ProviderCatalogEntry> _catalog = [];
     private WorkflowSchemaDto? _schema;
 
-    // slot name → connector id (as string; "" = unbound)
-    private readonly Dictionary<string, string> _bindings = new(StringComparer.Ordinal);
+    /// <summary>Editing state of one slot: a provider + connector + settings, or (for
+    /// multi-capability environment slots) a set of layer provider types.</summary>
+    private sealed class SlotEdit
+    {
+        public string Provider = "";
+        public string ConnectorId = "";
+        public Dictionary<string, string> Settings { get; } = new(StringComparer.Ordinal);
+        public HashSet<string> MultiProviders { get; } = new(StringComparer.Ordinal);
+    }
+
+    private readonly Dictionary<string, SlotEdit> _slotEdits = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _inputs = new(StringComparer.Ordinal);
 
     private readonly CancellationTokenSource _cts = new();
@@ -250,6 +408,8 @@ else
             _types = types.Items.ToList();
             var connectors = await Core.QueryConnectorsAsync(new ConnectorQuery(Take: 200), _cts.Token);
             _connectors = connectors.Items.ToList();
+            var catalog = await Core.QueryProviderCatalogAsync(new ProviderCatalogQuery(Available: true, Take: 200), _cts.Token);
+            _catalog = catalog.Items.ToList();
 
             if (ConfigurationId is { } id)
             {
@@ -277,18 +437,32 @@ else
         _scope = configuration.Scope;
         foreach (var (key, value) in configuration.Context)
             _inputs[key] = value;
-        foreach (var binding in configuration.SlotBindings)
-        {
-            if (binding.ConnectorId is { } connectorId)
-                _bindings[binding.SlotName] = connectorId.ToString();
-        }
         await LoadSchemaAsync(configuration.WorkflowType);
+        foreach (var group in configuration.SlotBindings.GroupBy(b => b.SlotName, StringComparer.Ordinal))
+        {
+            var edit = EditOf(group.Key);
+            var slot = _schema?.Slots.FirstOrDefault(s => s.SlotName == group.Key);
+            if (slot?.AllowMultiple == true || group.Count() > 1)
+            {
+                foreach (var binding in group)
+                {
+                    if (binding.ProviderType is { Length: > 0 } provider)
+                        edit.MultiProviders.Add(provider);
+                }
+                continue;
+            }
+            var single = group.First();
+            edit.Provider = single.ProviderType ?? "";
+            edit.ConnectorId = single.ConnectorId?.ToString() ?? "";
+            foreach (var (key, value) in single.Settings ?? new Dictionary<string, string>())
+                edit.Settings[key] = value;
+        }
     }
 
     private async Task OnTypeChangedAsync(string workflowType)
     {
         _selectedType = workflowType;
-        _bindings.Clear();
+        _slotEdits.Clear();
         _inputs.Clear();
         if (string.IsNullOrWhiteSpace(workflowType))
         {
@@ -307,7 +481,7 @@ else
             if (_schema is not null)
             {
                 foreach (var input in _schema.Inputs)
-                    _inputs.TryAdd(input.Name, "");
+                    _inputs.TryAdd(input.Name, input.DefaultValue ?? "");
             }
         }
         catch (CoreApiException ex)
@@ -317,12 +491,115 @@ else
         }
     }
 
-    private void SetBinding(string slotName, string? connectorId)
+    private static string Str(object? value) => value?.ToString() ?? "";
+
+    private static string Bool(object? value) => value is true ? "true" : "false";
+
+    private SlotEdit EditOf(string slotName)
     {
-        if (string.IsNullOrEmpty(connectorId))
-            _bindings.Remove(slotName);
+        if (!_slotEdits.TryGetValue(slotName, out var edit))
+            _slotEdits[slotName] = edit = new SlotEdit();
+        return edit;
+    }
+
+    // --- Provider narrowing ---
+
+    /// <summary>Available catalog providers admitted by the slot's declared narrowing and contract.</summary>
+    private List<ProviderCatalogEntry> EligibleProviders(WorkflowSlotDto slot)
+        => _catalog
+            .Where(p => slot.ProviderTypes is null || slot.ProviderTypes.Contains(p.ProviderType))
+            .Where(p => slot.Contract is null or "" || p.Contracts.Contains(slot.Contract))
+            .OrderBy(p => p.ProviderType, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private ProviderCatalogEntry? ProviderOf(string providerType)
+        => providerType is { Length: > 0 }
+            ? _catalog.FirstOrDefault(p => p.ProviderType == providerType)
+            : null;
+
+    /// <summary>
+    /// Connectors that can credential the selected provider: its own instances, plus (when it
+    /// declares a required credential contract) connectors of any provider serving that contract.
+    /// </summary>
+    private List<Connector> EligibleConnectors(ProviderCatalogEntry provider)
+    {
+        var credentialProviders = provider.RequiredCredentialContract is { Length: > 0 } contract
+            ? _catalog.Where(p => p.Contracts.Contains(contract)).Select(p => p.ProviderType).ToHashSet(StringComparer.Ordinal)
+            : null;
+        return _connectors
+            .Where(c => c.ProviderType == provider.ProviderType || credentialProviders?.Contains(c.ProviderType) == true)
+            .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private void SetProvider(SlotEdit edit, string? providerType)
+    {
+        edit.Provider = providerType ?? "";
+        edit.ConnectorId = "";
+        edit.Settings.Clear();
+        // Seed the provider's declared defaults so the plan reflects what will dispatch.
+        if (ProviderOf(edit.Provider) is { } provider)
+        {
+            foreach (var descriptor in provider.Descriptors.Where(d => !d.Disabled && d.DefaultValue is { Length: > 0 }))
+                edit.Settings[descriptor.Key] = descriptor.DefaultValue!;
+        }
+    }
+
+    private static string SettingOf(SlotEdit edit, ProviderSettingDescriptor descriptor)
+        => edit.Settings.GetValueOrDefault(descriptor.Key) ?? descriptor.DefaultValue ?? "";
+
+    // --- Environment slots (multi-capability, one base per run) ---
+
+    private static bool IsEnvironmentMultiSlot(WorkflowSlotDto slot, List<ProviderCatalogEntry> providers)
+        => slot.AllowMultiple && providers.Count > 0 && providers.All(p => p.ComposesEnvironment);
+
+    private static string BaseOf(ProviderCatalogEntry provider)
+        => provider.EnvironmentBase is { Length: > 0 } environmentBase ? environmentBase : EnvironmentBases.Linux;
+
+    /// <summary>The single base every selected environment layer shares, once any layer is picked.</summary>
+    private string? SelectedBase()
+    {
+        foreach (var edit in _slotEdits.Values)
+        {
+            foreach (var providerType in edit.MultiProviders)
+            {
+                if (ProviderOf(providerType) is { } provider)
+                    return BaseOf(provider);
+            }
+        }
+        return null;
+    }
+
+    private bool HasBaseConflict(SlotEdit edit, ProviderCatalogEntry provider)
+        => !edit.MultiProviders.Contains(provider.ProviderType)
+           && SelectedBase() is { } selectedBase
+           && BaseOf(provider) != selectedBase;
+
+    private void ToggleLayer(SlotEdit edit, string providerType, bool selected)
+    {
+        if (selected)
+            edit.MultiProviders.Add(providerType);
         else
-            _bindings[slotName] = connectorId;
+            edit.MultiProviders.Remove(providerType);
+    }
+
+    // --- Plan ---
+
+    private string PlanOf(WorkflowSlotDto slot)
+    {
+        var edit = EditOf(slot.SlotName);
+        if (edit.MultiProviders.Count > 0)
+            return string.Join(", ", edit.MultiProviders.OrderBy(p => p, StringComparer.OrdinalIgnoreCase));
+        var parts = new List<string>();
+        if (edit.Provider is { Length: > 0 })
+            parts.Add(edit.Provider);
+        if (Guid.TryParse(edit.ConnectorId, out var connectorId)
+            && _connectors.FirstOrDefault(c => c.Id == connectorId) is { } connector)
+            parts.Add($"via {connector.Name}");
+        var settings = edit.Settings.Where(s => !string.IsNullOrWhiteSpace(s.Value)).Select(s => s.Key).ToList();
+        if (settings.Count > 0)
+            parts.Add($"({string.Join(", ", settings)})");
+        return parts.Count > 0 ? string.Join(" ", parts) : slot.Optional ? "unbound" : "⚠ unbound (required)";
     }
 
     private async Task SaveAsync()
@@ -331,10 +608,26 @@ else
         _busy = true;
         try
         {
-            var slotBindings = _bindings
-                .Where(b => Guid.TryParse(b.Value, out _))
-                .Select(b => new SlotBinding(b.Key, ConnectorId: Guid.Parse(b.Value)))
-                .ToList();
+            var slotBindings = new List<SlotBinding>();
+            foreach (var (slotName, edit) in _slotEdits)
+            {
+                foreach (var layer in edit.MultiProviders.OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
+                    slotBindings.Add(new SlotBinding(slotName, ProviderType: layer));
+                if (edit.MultiProviders.Count > 0)
+                    continue;
+                var settings = edit.Settings
+                    .Where(s => !string.IsNullOrWhiteSpace(s.Value))
+                    .ToDictionary(s => s.Key, s => s.Value, StringComparer.Ordinal);
+                var connectorId = Guid.TryParse(edit.ConnectorId, out var parsed) ? parsed : (Guid?)null;
+                if (edit.Provider is { Length: > 0 } || connectorId is not null || settings.Count > 0)
+                {
+                    slotBindings.Add(new SlotBinding(
+                        slotName,
+                        ProviderType: edit.Provider is { Length: > 0 } ? edit.Provider : null,
+                        ConnectorId: connectorId,
+                        Settings: settings.Count > 0 ? settings : null));
+                }
+            }
 
             var context = _inputs
                 .Where(i => !string.IsNullOrWhiteSpace(i.Value))
