@@ -105,6 +105,14 @@ access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing di
 - **Composed-image GC** for content-addressed `auxilia-env:<hash>` images.
 - **Trust keys in real deployments** — `WorkflowDispatcher__TrustedEnvironmentSigningKeys`
   is empty (permissive) in dev; any real deployment needs the key material story.
+- **Build-time hardening (context, 2026-08-02).** Environment composition runs `docker build`
+  on a generated one-file Dockerfile (context = that file only; nothing from the host leaks
+  in). The RUN steps execute in ordinary build containers: root inside, NO egress policy
+  (the daemon's default build network — layers must download packages), no resource caps.
+  The protection is deliberately WHO may author (admin-only + Core signature, verified by
+  the runner before the build) rather than what the build may do. Future levers if needed:
+  pin the build's NetworkMode to a network that reaches only the package proxy, and pass
+  memory/CPU caps in `ImageBuildParameters`.
 
 ## Generic binding pipeline
 - **OS-sensitive `DockerSocketPath` default** — Docker Desktop 29.4.2 broke the unix-socket
