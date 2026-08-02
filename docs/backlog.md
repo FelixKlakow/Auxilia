@@ -8,8 +8,6 @@
   and no persisted pinned dashboards.
 - **Audit actor display names** — actor→display-name resolution in the Audit view ties to a
   principals lookup (the role-list endpoint itself shipped 2026-08-01: `GET /api/roles`).
-- **Legacy `ConnectorRecord` cleanup** — superseded by `CoreConnectorRecord`; verify no
-  consumer, then remove.
 - **Per-user bearer hardening** — the short-lived bearer is embedded in the prerendered page
   (same-origin TLS); consider a server-side opaque-handle store keyed by principal.
 - **Workflow-type registry administration** — register/approve/deny run via REST/MCP only;
