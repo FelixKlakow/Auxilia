@@ -62,6 +62,14 @@ public sealed class DockerWorkflowLauncherSettings
     public bool ReapWorkflowContainersOnStart { get; set; } = true;
 
     /// <summary>
+    /// Composed environment images (<c>auxilia-env:&lt;hash&gt;</c>) older than this and not used
+    /// by any container are removed at startup. Content-addressing makes the sweep safe — a
+    /// purged composition that is needed again rebuilds on the next launch. Zero or negative
+    /// disables the sweep.
+    /// </summary>
+    public double ComposedImageMaxAgeDays { get; set; } = 14;
+
+    /// <summary>
     /// Maps an environment-capability provider type → absolute path of its Dockerfile fragment
     /// on the Core.Runner filesystem. This is the runner-owned side of the environment catalog:
     /// the fragment is layered onto the workflow image when a run selects the capability.

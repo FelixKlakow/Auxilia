@@ -233,6 +233,18 @@ try
         {
             Log.Warning(ex, "Startup container reaping failed — continuing; the Core's zombie sweep still covers the run records.");
         }
+
+        // Expired composed environment images: safe to purge (content-addressed, rebuild on demand).
+        try
+        {
+            var swept = await dockerLauncher.SweepComposedImagesAsync(app.Lifetime.ApplicationStopping);
+            if (swept > 0)
+                Log.Information("Removed {Count} expired composed environment image(s) at startup.", swept);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Composed-image sweep failed — continuing; stale auxilia-env images only cost disk.");
+        }
     }
 
     var dispatcher = app.Services.GetRequiredService<WorkflowDispatcher>();

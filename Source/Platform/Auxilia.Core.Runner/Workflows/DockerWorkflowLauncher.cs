@@ -361,6 +361,47 @@ public sealed class DockerWorkflowLauncher(
     }
 
     /// <summary>
+    /// Removes composed environment images (<c>auxilia-env:*</c>) older than the configured max
+    /// age and not referenced by any container. Because the tags are content-addressed, the sweep
+    /// can never break a launch — a purged composition that is selected again simply rebuilds.
+    /// Scoped strictly to the <c>auxilia-env</c> repository; nothing else on the host is touched.
+    /// </summary>
+    public async Task<int> SweepComposedImagesAsync(CancellationToken ct = default)
+    {
+        var settings = settingsOptions.Value;
+        if (settings.ComposedImageMaxAgeDays <= 0)
+            return 0;
+        var cutoff = DateTime.UtcNow - TimeSpan.FromDays(settings.ComposedImageMaxAgeDays);
+        using var client = clientFactory.CreateClient(settings.DockerSocketPath);
+        var images = await client.Images.ListImagesAsync(new ImagesListParameters
+        {
+            Filters = new Dictionary<string, IDictionary<string, bool>>
+            {
+                ["reference"] = new Dictionary<string, bool> { ["auxilia-env"] = true },
+            },
+        }, ct);
+        var inUse = (await client.Containers.ListContainersAsync(new ContainersListParameters { All = true }, ct))
+            .Select(c => c.ImageID)
+            .Where(id => !string.IsNullOrEmpty(id))
+            .ToHashSet();
+        var removed = 0;
+        foreach (var image in images)
+        {
+            if (image.Created >= cutoff || inUse.Contains(image.ID))
+                continue;
+            foreach (var tag in image.RepoTags ?? [])
+            {
+                logger.LogInformation(
+                    "Removing expired composed environment image {Tag} (created {CreatedUtc:u}).",
+                    tag, image.Created);
+                await client.Images.DeleteImageAsync(tag, new ImageDeleteParameters(), ct);
+            }
+            removed++;
+        }
+        return removed;
+    }
+
+    /// <summary>
     /// Every workflow container is labeled so startup reaping (and any operator tooling) can
     /// find Auxilia's containers WITHOUT touching anything else on the Docker host.
     /// </summary>

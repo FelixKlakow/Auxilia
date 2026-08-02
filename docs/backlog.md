@@ -95,7 +95,6 @@ access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing di
 - **Base-aware environment pickers** — the steering client/AdminConsole environment selection should
   constrain to one base once the first layer is picked (`ProviderCatalogEntry.EnvironmentBase`
   carries the data); today the Core rejects a mixed dispatch with a clear error.
-- **Composed-image GC** for content-addressed `auxilia-env:<hash>` images.
 - **Trust keys in real deployments** — `WorkflowDispatcher__TrustedEnvironmentSigningKeys`
   is empty (permissive) in dev; any real deployment needs the key material story.
 - **Build-time hardening (context, 2026-08-02).** Environment composition runs `docker build`
