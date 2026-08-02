@@ -58,10 +58,11 @@
   flagged the freshly created licensing mailbox (felix.klakow.github@gmail.com — the address
   in both LICENSE files) right after signup; recover it (phone verification/appeal) or swap
   in a different receiving address, and verify the forward + send-as loop with a test mail
-  BEFORE flipping public.** Then: final outside-eyes read of
-  README/CONTRIBUTING, verify or retire `Start-Presentation.bat` (stale header comment, a
-  "via Studio" help string in DevStand), optionally ask GitHub Support to GC the
-  pre-rewrite objects, then flip the repository public. On flipping: set the repo
+  BEFORE flipping public.** (Pre-flight re-verified 2026-08-03: single `main`, noreply-only
+  history, no product-external names in tracked files, no real secrets — only fake test
+  tokens; `Start-Presentation.bat` is already retired and the stale "via Studio" DevStand
+  string is fixed. The mailbox is the ONE open gate.) Then: optionally ask GitHub Support
+  to GC the pre-rewrite objects, then flip the repository public. On flipping: set the repo
   description ("Self-hosted platform for governed AI agent workflows — signed containers,
   just-in-time scoped credentials, live operator steering, full REST + MCP parity") and
   topics (ai-agents, agentic-ai, workflow-engine, ai-orchestration, coding-agent,

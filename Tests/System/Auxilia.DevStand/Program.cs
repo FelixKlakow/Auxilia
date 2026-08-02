@@ -56,7 +56,7 @@ try
         ? "ephemeral (start with --keep-data to keep seeded triggers across restarts)"
         : $"durable in Docker volumes '{EndToEndEnvironment.DataVolumeName}-*'")}");
     Console.WriteLine();
-    Console.WriteLine("  [m] send a demo mail (triggers a Code Review run via Studio)   [s] send a session mail   [q] quit");
+    Console.WriteLine("  [m] send a demo mail (triggers a Code Review run via the email intake)   [s] send a session mail   [q] quit");
     Console.WriteLine();
 
     if (Console.IsInputRedirected)
