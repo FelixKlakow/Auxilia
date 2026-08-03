@@ -23,7 +23,7 @@ public class WorkItemAccessMcpToolsTests
     }
 
     [Test]
-    public async Task ToolNames_AfterStart_ContainsBothPrefixedNames()
+    public async Task ToolNames_AfterStart_ContainsAllPrefixedNames()
     {
         var tools = new WorkItemAccessMcpTools(SlotName, new StubWorkItemAccess());
         await tools.StartAsync(new HttpMcpTransportConfig("http://localhost:0", "test"));
@@ -32,7 +32,9 @@ public class WorkItemAccessMcpToolsTests
             Assert.That(tools.ToolNames, Is.EquivalentTo(new[]
             {
                 SlotMcpPrefix.Format(SlotName, "get_work_item"),
-                SlotMcpPrefix.Format(SlotName, "get_work_items")
+                SlotMcpPrefix.Format(SlotName, "get_work_items"),
+                SlotMcpPrefix.Format(SlotName, "get_work_item_relations"),
+                SlotMcpPrefix.Format(SlotName, "get_work_item_states")
             }));
         }
         finally
