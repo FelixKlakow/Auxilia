@@ -21,6 +21,25 @@ else
     {
         <div class="panel denied">@_error</div>
     }
+    @if (_stepUpPending is not null)
+    {
+        <div class="panel">
+            <strong>Re-authentication required.</strong>
+            This change affects administrator rights or disables a principal — re-enter YOUR
+            credential (password or API key); the elevation then holds for a few minutes of work.
+            <div class="button-row" style="margin-top:.5rem">
+                <input type="password" placeholder="your password / API key" @bind="_stepUpSecret"
+                       @bind:event="oninput"/>
+                <button class="btn btn-primary btn-sm" @onclick="ConfirmStepUpAsync"
+                        disabled="@(_busy || string.IsNullOrEmpty(_stepUpSecret))">Re-authenticate</button>
+                <button class="btn btn-secondary btn-sm" @onclick="CancelStepUp" disabled="@_busy">Cancel</button>
+            </div>
+            @if (_stepUpError is { Length: > 0 })
+            {
+                <div class="muted" style="color:var(--bs-danger,#c0392b)">@_stepUpError</div>
+            }
+        </div>
+    }
     @if (_createdApiKey is not null)
     {
         <div class="panel success">
@@ -324,6 +343,41 @@ else
     private Task SetEnabledAsync(Guid id, bool enabled)
         => MutateAsync(() => Core.SetPrincipalEnabledAsync(id, new SetPrincipalEnabledRequest(enabled)));
 
+    // --- Step-up re-authentication: the Core rejects admin-role grant/revoke and principal
+    // disable with 'elevation-required' until the operator re-proves their OWN credential.
+    // StepUpAsync holds the X-Auxilia-Elevation header on this circuit's client, so the
+    // retried action (and further sensitive work for a few minutes) passes without re-asking.
+    private Func<Task>? _stepUpPending;
+    private string _stepUpSecret = "";
+    private string? _stepUpError;
+
+    private void CancelStepUp()
+    {
+        _stepUpPending = null;
+        _stepUpSecret = "";
+        _stepUpError = null;
+    }
+
+    private async Task ConfirmStepUpAsync()
+    {
+        _busy = true;
+        try
+        {
+            await Core.StepUpAsync(new StepUpRequest(_stepUpSecret));
+        }
+        catch (CoreApiException ex)
+        {
+            _stepUpError = ex.ErrorDetail ?? ex.Message;
+            _busy = false;
+            return;
+        }
+        var pending = _stepUpPending;
+        CancelStepUp();
+        _busy = false;
+        if (pending is not null)
+            await MutateAsync(pending);
+    }
+
     private async Task MutateAsync(Func<Task> action)
     {
         _error = null;
@@ -332,6 +386,12 @@ else
         {
             await action();
             await LoadAsync(reset: true);
+        }
+        catch (CoreApiException ex) when (ex.ErrorDetail == "elevation-required")
+        {
+            _stepUpPending = action;
+            _stepUpSecret = "";
+            _stepUpError = null;
         }
         catch (CoreApiException ex)
         {

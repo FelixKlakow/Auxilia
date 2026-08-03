@@ -67,6 +67,37 @@ public sealed class AdminPageTests
     }
 
     [Test]
+    public void Admin_ElevationRequired_ShowsStepUpPrompt_AndRetriesAfterReAuth()
+    {
+        var core = new FakeCoreClient { RequireElevation = true };
+        var admin = Human("Jane Admin", new PrincipalRoleDto("User", "Direct"));
+        core.Principals.Add(admin);
+        using var ctx = NewContext(core);
+        var cut = ctx.Render<Admin>();
+
+        // Disabling is elevation-gated: the raw error must NOT surface — the prompt appears.
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Disable").Click();
+        Assert.Multiple(() =>
+        {
+            Assert.That(cut.Markup, Does.Contain("Re-authentication required"));
+            Assert.That(cut.Markup, Does.Not.Contain("elevation-required"),
+                "the raw error detail must be replaced by the prompt");
+            Assert.That(core.EnabledChanges, Is.Empty);
+        });
+
+        // Re-authenticating retries the pending mutation automatically.
+        cut.Find("input[type=password]").Input("my-own-secret");
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Re-authenticate").Click();
+        Assert.Multiple(() =>
+        {
+            Assert.That(core.LastStepUpSecret, Is.EqualTo("my-own-secret"));
+            Assert.That(core.EnabledChanges, Is.EqualTo(new[] { (admin.Id, false) }),
+                "the gated disable runs after the successful step-up");
+            Assert.That(cut.Markup, Does.Not.Contain("Re-authentication required"));
+        });
+    }
+
+    [Test]
     public void Admin_ShowsAccessDenied_OnForbidden()
     {
         var core = new FakeCoreClient
