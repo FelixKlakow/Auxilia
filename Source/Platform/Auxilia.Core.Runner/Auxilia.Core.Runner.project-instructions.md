@@ -41,7 +41,7 @@ Source/Platform/Auxilia.Core.Runner/
     ├── WorkflowAnnouncementHandler.cs / WorkflowRegistrationHandler.cs  # Authenticated announce + registration (env + schema + signal handlers)
     ├── SlotActivationHandler.cs / CoreCredentialClient.cs  # JIT slot activation: resolve + relay the Core-encrypted credential
     ├── EnvironmentValidator.cs / RunnerProfile.cs / ValidationResult.cs  # Manifest env requirements vs runner capabilities
-    ├── WorkspaceManager.cs           # Warm cache + per-run CoW repo snapshots and mounts
+    ├── WorkspaceManager.cs           # Warm cache + per-run CoW repo snapshots and mounts; empty-workspace scratch dirs
     ├── NetworkPolicyResolver.cs      # Effective egress policy (manifest baseline + run config, clamped by platform ceiling)
     ├── ResourceProxyHandler.cs / IResourceConnector.cs  # Audited Resource Proxy calls on the workflow's behalf
     ├── ArtifactPersister.cs          # Persists declared artifact outputs to the Artifact Store

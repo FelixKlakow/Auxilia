@@ -142,9 +142,23 @@ if ($catalog -notcontains "coding-session-workspace") {
     } | ConvertTo-Json -Depth 4) | Out-Null
     Write-Host "Provider coding-session-workspace registered."
 }
+if ($catalog -notcontains "empty-workspace") {
+    # The non-git workspace provider: same roles pipeline as git-repository, no clone-url role —
+    # the runner materializes a fresh scratch directory per run (deleted with the run root).
+    Invoke-RestMethod -Method Post "http://localhost:5280/api/provider-catalog" -Headers $headers -ContentType "application/json" -Body (@{
+        providerType = "empty-workspace"; category = "workspace"
+        description = "A fresh, empty scratch directory materialized into the run's workspace - no clone, no credential."
+        contracts = @()
+        mountsIntoWorkspace = $true
+        settings = @(
+            @{ key = "WorkingDirectory"; label = "Working directory"; kind = "Text"; required = $false; role = "working-directory" },
+            @{ key = "SetupScript"; label = "Setup script"; kind = "Text"; required = $false; role = "setup-script" })
+    } | ConvertTo-Json -Depth 4) | Out-Null
+    Write-Host "Provider empty-workspace registered."
+}
 
 # Availability is deny-by-default — the editors only offer AVAILABLE providers.
-foreach ($type in "simulated-work-items", "coding-session-workspace") {
+foreach ($type in "simulated-work-items", "coding-session-workspace", "empty-workspace") {
     if (($catalogItems | Where-Object providerType -eq $type).available -ne $true) {
         Invoke-RestMethod -Method Post "http://localhost:5280/api/provider-catalog/$type/availability" `
             -Headers $headers -ContentType "application/json" -Body '{"available":true}' | Out-Null

@@ -44,7 +44,7 @@ public class WorkspaceManagerTests
     [Test]
     public async Task Prepare_EmptyRepositoryList_ReturnsNullAndCreatesNoDirectories()
     {
-        var result = await _sut.PrepareAsync(Guid.NewGuid(), [], CancellationToken.None);
+        var result = await _sut.PrepareAsync(Guid.NewGuid(), [], ct: CancellationToken.None);
 
         Assert.That(result, Is.Null);
         Assert.That(Directory.Exists(_settings.WorkspaceRootDirectory), Is.False);
@@ -59,7 +59,7 @@ public class WorkspaceManagerTests
         var instanceId = Guid.NewGuid();
 
         var runRoot = await _sut.PrepareAsync(
-            instanceId, [new RepositoryDeclaration("main", _originRepo)], CancellationToken.None);
+            instanceId, [new RepositoryDeclaration("main", _originRepo)], ct: CancellationToken.None);
 
         Assert.That(runRoot, Is.EqualTo(
             Path.Combine(_settings.WorkspaceRootDirectory, instanceId.ToString("N"))));
@@ -71,7 +71,7 @@ public class WorkspaceManagerTests
     public async Task Prepare_FirstUse_PopulatesWarmCache()
     {
         await _sut.PrepareAsync(
-            Guid.NewGuid(), [new RepositoryDeclaration("main", _originRepo)], CancellationToken.None);
+            Guid.NewGuid(), [new RepositoryDeclaration("main", _originRepo)], ct: CancellationToken.None);
 
         Assert.That(Directory.Exists(_settings.WarmCacheDirectory), Is.True);
         Assert.That(Directory.GetDirectories(_settings.WarmCacheDirectory), Has.Length.EqualTo(1));
@@ -81,7 +81,7 @@ public class WorkspaceManagerTests
     public async Task Prepare_SecondInstance_ReusesCacheAfterOriginDeleted()
     {
         await _sut.PrepareAsync(
-            Guid.NewGuid(), [new RepositoryDeclaration("main", _originRepo)], CancellationToken.None);
+            Guid.NewGuid(), [new RepositoryDeclaration("main", _originRepo)], ct: CancellationToken.None);
 
         // The origin disappears — only the warm cache can satisfy the next run.
         // The fetch fails, is logged as a warning, and the stale cache is used.
@@ -89,7 +89,7 @@ public class WorkspaceManagerTests
 
         var secondInstance = Guid.NewGuid();
         var runRoot = await _sut.PrepareAsync(
-            secondInstance, [new RepositoryDeclaration("main", _originRepo)], CancellationToken.None);
+            secondInstance, [new RepositoryDeclaration("main", _originRepo)], ct: CancellationToken.None);
 
         Assert.That(File.Exists(Path.Combine(runRoot!, "repos", "main", "test.txt")), Is.True,
             "The second run must be served from the warm cache when the origin is gone.");
@@ -103,11 +103,30 @@ public class WorkspaceManagerTests
         var runRoot = await _sut.PrepareAsync(
             Guid.NewGuid(),
             [new RepositoryDeclaration("main", _originRepo, NoCache: true)],
-            CancellationToken.None);
+            ct: CancellationToken.None);
 
         Assert.That(File.Exists(Path.Combine(runRoot!, "repos", "main", "test.txt")), Is.True);
         Assert.That(Directory.Exists(_settings.WarmCacheDirectory), Is.False,
             "NoCache repositories must never enter the warm cache.");
+    }
+
+    // ------------------------------------------------------------------ mixed materializers
+
+    [Test]
+    public async Task Prepare_RepositoryAndEmptyWorkspaceTogether_ShareOneRunRoot()
+    {
+        var runRoot = await _sut.PrepareAsync(
+            Guid.NewGuid(),
+            [new RepositoryDeclaration("main", _originRepo)],
+            [new EmptyWorkspaceDeclaration("scratch")],
+            CancellationToken.None);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(File.Exists(Path.Combine(runRoot!, "repos", "main", "test.txt")), Is.True);
+            Assert.That(Directory.Exists(Path.Combine(runRoot!, "repos", "scratch")), Is.True,
+                "Both materializers land in the same per-run root.");
+        });
     }
 
     // ------------------------------------------------------------------ identity + push
@@ -121,7 +140,7 @@ public class WorkspaceManagerTests
                 new RepositoryDeclaration("named", _originRepo)
                     { CommitName = "Felix Klakow", CommitEmail = "felix@example.com" },
             ],
-            CancellationToken.None);
+            ct: CancellationToken.None);
 
         var repoDir = Path.Combine(runRoot!, "repos", "named");
         Assert.Multiple(() =>
@@ -135,7 +154,7 @@ public class WorkspaceManagerTests
     public async Task Prepare_WithoutIdentitySettings_FallsBackToThePlatformIdentity()
     {
         var runRoot = await _sut.PrepareAsync(
-            Guid.NewGuid(), [new RepositoryDeclaration("main", _originRepo)], CancellationToken.None);
+            Guid.NewGuid(), [new RepositoryDeclaration("main", _originRepo)], ct: CancellationToken.None);
 
         Assert.That(GitOutput(Path.Combine(runRoot!, "repos", "main"), "config", "user.name"),
             Is.EqualTo("Auxilia Agent"),
@@ -148,7 +167,7 @@ public class WorkspaceManagerTests
         var runRoot = await _sut.PrepareAsync(
             Guid.NewGuid(),
             [new RepositoryDeclaration("push", _originRepo) { AllowPush = true }],
-            CancellationToken.None);
+            ct: CancellationToken.None);
 
         var repoDir = Path.Combine(runRoot!, "repos", "push");
         Assert.Multiple(() =>
@@ -168,7 +187,7 @@ public class WorkspaceManagerTests
         var missingOrigin = Path.Combine(_tempRoot, "does-not-exist");
 
         Assert.ThrowsAsync<InvalidOperationException>(() => _sut.PrepareAsync(
-            Guid.NewGuid(), [new RepositoryDeclaration("main", missingOrigin)], CancellationToken.None));
+            Guid.NewGuid(), [new RepositoryDeclaration("main", missingOrigin)], ct: CancellationToken.None));
     }
 
     // ------------------------------------------------------------------ cleanup
@@ -178,7 +197,7 @@ public class WorkspaceManagerTests
     {
         var instanceId = Guid.NewGuid();
         var runRoot = await _sut.PrepareAsync(
-            instanceId, [new RepositoryDeclaration("main", _originRepo)], CancellationToken.None);
+            instanceId, [new RepositoryDeclaration("main", _originRepo)], ct: CancellationToken.None);
         Assert.That(Directory.Exists(runRoot), Is.True);
 
         await _sut.CleanupAsync(instanceId);

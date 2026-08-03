@@ -7,12 +7,13 @@ using Microsoft.Extensions.Options;
 namespace Auxilia.Core.Runner.Workflows;
 
 /// <summary>
-/// Prepares per-run repository workspaces (ARCHITECTURE §9). Cached repositories are cloned
-/// once into the warm cache, refreshed via <c>git fetch</c> on reuse, and copied into an
-/// isolated per-run directory the launcher bind-mounts at <c>/workspace</c>. The copy is a
-/// plain recursive copy — CoW snapshots on non-overlayfs hosts are a documented follow-up.
+/// Prepares per-run workspaces (ARCHITECTURE §9). Cached repositories are cloned once into
+/// the warm cache, refreshed via <c>git fetch</c> on reuse, and copied into an isolated
+/// per-run directory the launcher bind-mounts at <c>/workspace</c>. The copy is a plain
+/// recursive copy — CoW snapshots on non-overlayfs hosts are a documented follow-up.
 /// <c>NoCache</c> repositories are cloned straight into the run directory and never touch
-/// the cache.
+/// the cache. Empty workspaces (the non-git materializer) are fresh scratch directories under
+/// the same layout — no clone, no credential, no cache.
 /// </summary>
 public sealed class WorkspaceManager(
     IOptions<WorkflowDispatcherSettings> settings,
@@ -21,15 +22,19 @@ public sealed class WorkspaceManager(
     private static readonly TimeSpan GitCommandTimeout = TimeSpan.FromMinutes(5);
 
     /// <summary>
-    /// Creates the run workspace and returns its root, or null when no repositories are declared.
+    /// Creates the run workspace and returns its root, or null when no mounts are declared.
     /// </summary>
     public async Task<string?> PrepareAsync(
-        Guid instanceId, IReadOnlyList<RepositoryDeclaration> repositories, CancellationToken ct = default)
+        Guid instanceId, IReadOnlyList<RepositoryDeclaration> repositories,
+        IReadOnlyList<EmptyWorkspaceDeclaration>? emptyWorkspaces = null, CancellationToken ct = default)
     {
-        if (repositories.Count == 0)
+        emptyWorkspaces ??= [];
+        if (repositories.Count == 0 && emptyWorkspaces.Count == 0)
             return null;
 
         var runRoot = RunRootFor(instanceId);
+        foreach (var workspace in emptyWorkspaces)
+            PrepareEmptyWorkspace(instanceId, runRoot, workspace);
         foreach (var repository in repositories)
         {
             var runRepoDir = Path.Combine(runRoot, "repos", repository.Id);
@@ -65,6 +70,30 @@ public sealed class WorkspaceManager(
         }
 
         return runRoot;
+    }
+
+    /// <summary>
+    /// The empty-workspace materializer: a fresh scratch directory per run under the same
+    /// <c>repos/&lt;id&gt;</c> layout as repository mounts. A bound working directory is
+    /// pre-created so the announced mount root exists — but must stay inside the mount.
+    /// </summary>
+    private void PrepareEmptyWorkspace(Guid instanceId, string runRoot, EmptyWorkspaceDeclaration workspace)
+    {
+        var mountDir = Path.Combine(runRoot, "repos", workspace.Id);
+        var targetDir = workspace.WorkingDirectory is { Length: > 0 } workingDirectory
+            ? Path.Combine(mountDir, workingDirectory.Trim('/', '\\'))
+            : mountDir;
+        var fullMountDir = Path.GetFullPath(mountDir);
+        var fullTargetDir = Path.GetFullPath(targetDir);
+        if (fullTargetDir != fullMountDir
+            && !fullTargetDir.StartsWith(fullMountDir + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"working directory '{workspace.WorkingDirectory}' escapes workspace mount '{workspace.Id}'.");
+        Directory.CreateDirectory(fullTargetDir);
+
+        logger.LogInformation(
+            "Empty workspace prepared. InstanceId={InstanceId} MountId={MountId}",
+            instanceId, workspace.Id);
     }
 
     /// <summary>Best-effort removal of the run's workspace root.</summary>
