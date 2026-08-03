@@ -4,17 +4,23 @@
 > records live in `docs/delivered/` and the git history.
 
 ## Core.Api — client-surface follow-ups
-- **Per-user bearer hardening** — the short-lived bearer is embedded in the prerendered page
-  (same-origin TLS); consider a server-side opaque-handle store keyed by principal.
+- ~~Per-user bearer hardening~~ — DONE 2026-08-03: the raw bearer no longer rides the
+  prerendered page. The relay stashes it server-side (`UserBearerHandleStore`, singleton) and
+  persists only a cryptographically random ONE-SHOT handle; the circuit redeems it exactly once,
+  unredeemed entries expire after 2 minutes and never outlive the token. No raw-token fallback.
 - ~~AdminConsole step-up prompt~~ — DONE 2026-08-03: `elevation-required` now opens an inline
   re-authentication panel on the Principals page; the successful step-up retries the pending
   mutation (the elevation header rides the circuit's client). Still open: the steering client's
   type-to-confirm pattern, and tags administration UI (steering client-only today).
 - **Workflow-type registry administration** — full client surface exists on `ICoreClient`
   (register/approve/deny/unregister), and the steering client ships a registry-administration panel
-  (2026-08-02, permission-gated on `workflow-type.manage`/`workflow-type.sign`); the
-  AdminConsole still has no registry UI. The AI safety-check approval handler (static
-  workflow over the submitted package) is designed but unbuilt.
+  (2026-08-02, permission-gated on `workflow-type.manage`/`workflow-type.sign`).
+  ~~AdminConsole registry UI~~ — DONE 2026-08-03: `/admin/workflow-types` page (list with
+  status/tags/lifetime, registration detail, register by package URI, approve/deny-with-reason
+  gated on `workflow-type.sign`, enable/disable/unregister-with-confirm gated on
+  `workflow-type.manage`; nav entry appears with either permission). No step-up panel: the Core
+  does not elevation-gate registry mutations (only principal admin does). The AI safety-check
+  approval handler (static workflow over the submitted package) remains designed but unbuilt.
 - **Session terminal remainders** — a console-mode Docker system test (stub CLI under tmux)
   and an AdminConsole terminal surface.
 
@@ -75,8 +81,12 @@
   `POST /auth/login` (username+password → the same per-user bearer the browser mints, desktop
   lifetime `CoreSecurity:LoginTokenLifetimeMinutes`, default one workday, audited both ways)
   plus the steering client sign-in overlay/header buttons (never a silent fallback to the service key
-  once in user mode). Still open: the device-code/OIDC variant for Entra-only principals
-  (SSO-provisioned humans have no password), and rate limiting on /auth/login.
+  once in user mode). Rate limiting on /auth/login DONE 2026-08-03: per-client-IP fixed window
+  (`CoreSecurity:LoginRateLimitPermitsPerMinute`, default 5) plus a per-username failed-attempt
+  throttle (`LoginFailureLimitPerUsername`/`LoginFailureWindowMinutes`, defaults 5/5) that a
+  successful sign-in clears; excess attempts get a 429 and an `auth.login` rate-limited audit.
+  Still open: the device-code/OIDC variant for Entra-only principals (SSO-provisioned humans
+  have no password).
 
 ## Config store — DECIDED 2026-08-01: stays in the Core
 The earlier "move the config store out of the Core" direction is reversed by decision, not
@@ -136,11 +146,14 @@ access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing di
   the mount's root before the application, fail-fast, under the run's egress policy. Open:
   a Docker system test exercising a real in-container setup script.
 
-- **Temporary/empty workspaces (2026-08-03).** With workspaces first-class (a saved
-  workspace-mount resource is usually a repository but named for what it IS), the natural next
-  provider is a non-git one: an "empty workspace" mount that materializes a fresh scratch
-  directory (optionally artifact-seeded) per run — same roles pipeline, no clone. Nothing in
-  the Core needs to change; it is one new mount materializer + catalog descriptor.
+- ~~Temporary/empty workspaces~~ — DONE 2026-08-03 (ARCHITECTURE §9): the `empty-workspace`
+  provider — a data-only catalog descriptor (`mountsIntoWorkspace`, `working-directory` +
+  `setup-script` roles, no credential contract; seeded by `Start-DevStack.ps1`) plus the
+  runner's non-git materializer: a mount without a `clone-url` role becomes a fresh scratch
+  directory under the same `repos/<mount-id>` layout, working directory pre-created, deleted
+  with the run root at terminal state (cleanup was already materializer-agnostic). Nothing in
+  the Core changed. Deliberately left out: artifact seeding — no natural fit yet (seed via the
+  setup script for now; revisit with a dedicated artifact-input role if needed).
 
 ## CI validation — Docker system tests (not runnable locally)
 - Email slot **plugin-dependency loading** (highest risk — MailKit/MimeKit/BouncyCastle
@@ -155,8 +168,14 @@ access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing di
   otherwise blocks an autonomous run on a permission card — that was the "hang".)
 
 ## DevStand
-- `ScreenshotHarness` stubbed (targeted the retired dashboard) — rewire to boot
-  `Auxilia.AdminConsole` in `EndToEndEnvironment`.
+- ~~`ScreenshotHarness` stubbed (targeted the retired dashboard) — rewire to boot
+  `Auxilia.AdminConsole` in `EndToEndEnvironment`.~~ (DONE 2026-08-03: the AdminConsole now
+  runs as a container in `EndToEndEnvironment` — new
+  `Source/Platform/Auxilia.AdminConsole/Dockerfile`, `auxilia-admin-console:system-test`
+  image, `Core__ApiKey` = a step-up-granted Administrator service key so pages render fully
+  authenticated without a browser session — and the harness captures the console's twelve
+  pages (`01-dashboard.png` … `12-audit.png`, dashboard live while the mail-triggered run is
+  Running); the dev stand prints/opens the console URL again.)
 - **AdminConsole under `dotnet run` serves broken static assets** — the Debug static-asset
   manifest's runtime-patching handler 500s on the packaged BlazorAgentView css and serves
   0-byte compressed bodies for `app.css` (page renders unstyled). The published build

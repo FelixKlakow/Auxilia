@@ -529,6 +529,16 @@ executes it). The SDK runs every script INSIDE the workflow container — in the
 after the workspace is bound, before the application, under the run's egress policy — and a
 non-zero exit fails the run fail-fast.
 
+**Empty scratch workspaces (2026-08-03).** The first non-git workspace provider:
+`empty-workspace` (a data-only catalog descriptor, no Core code) materializes a fresh, empty
+scratch directory per run under the same `/workspace/repos/<mount-id>/` layout — no clone, no
+credential, same roles pipeline (a bound `working-directory` is pre-created host-side so the
+announced root exists; a bound `setup-script` is announced as usual). The runner selects the
+materializer from the roles a mount carries: a mount WITH a `clone-url` role is materialized
+by git; one without it (and without a credential — a credentialed mount lacking a clone source
+fails pre-flight as a misconfiguration) becomes an empty scratch directory. Like every mount
+it lives in the run root and is deleted at terminal state.
+
 **Multi-source repository support:**
 - A workflow manifest declares all required repositories with their source system and identifier
 - Each repository is fetched and cached independently using the correct Account Bundle for its source
@@ -990,6 +1000,15 @@ separation of duties apply to desktop clients too. The desktop lifetime
 token — there is no cookie session to silently re-mint from, and the client must never hold
 the password to renew. Disabled principals cannot sign in; both outcomes are audited
 (`auth.login` granted/denied).
+
+Brute-forcing is never free: the endpoint is rate-limited per client IP (fixed window,
+`CoreSecurity:LoginRateLimitPermitsPerMinute`, default 5/minute) and, inside the endpoint, a
+per-username failed-attempt throttle (`CoreSecurity:LoginFailureLimitPerUsername` within
+`LoginFailureWindowMinutes`, defaults 5 in 5) refuses further attempts for that account even
+when the attacker rotates IPs — cleared by a successful sign-in. Either refusal is a 429 with
+an `auth.login` rate-limited audit entry, and a throttled attempt is refused before the
+password is checked. `POST /auth/token` needs no such limit: it mints only from an
+already-authenticated cookie session, never from a password.
 
 ### Runtime platform settings (2026-08-03)
 
