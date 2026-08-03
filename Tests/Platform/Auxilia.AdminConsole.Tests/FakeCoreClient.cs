@@ -430,8 +430,9 @@ internal sealed class FakeCoreClient : ICoreClient
         LastWorkflowTypeQuery = query;
         if (WorkflowTypesError is { } error)
             throw error;
-        var page = WorkflowTypes.Skip(query.Skip).Take(query.Take).ToList();
-        return Task.FromResult(new PagedResult<WorkflowTypeDto>(page, WorkflowTypes.Count, query.Skip, query.Take));
+        var filtered = WorkflowTypes.Where(t => query.Status is null || t.Status == query.Status).ToList();
+        var page = filtered.Skip(query.Skip).Take(query.Take).ToList();
+        return Task.FromResult(new PagedResult<WorkflowTypeDto>(page, filtered.Count, query.Skip, query.Take));
     }
 
     public Task<WorkflowSchemaDto?> GetWorkflowSchemaAsync(string workflowType, CancellationToken ct = default)
@@ -520,25 +521,62 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task<int> ClearFinishedRunsAsync(CancellationToken ct = default)
         => Task.FromResult(0);
 
-    // --- Workflow-type registry (admin surface; unused by current console pages) ---
+    // --- Workflow-type registry (AdminWorkflowTypes page) ---
+    public Dictionary<string, WorkflowTypeRegistrationDto> WorkflowTypeRegistrations { get; } = new(StringComparer.Ordinal);
+    public RegisterWorkflowTypeRequest? LastRegisteredWorkflowType { get; private set; }
+    public List<string> ApprovedWorkflowTypes { get; } = [];
+    public List<(string Type, string Reason)> DeniedWorkflowTypes { get; } = [];
+    public List<string> UnregisteredWorkflowTypes { get; } = [];
+    public List<(string Type, bool Enabled)> WorkflowTypeEnabledChanges { get; } = [];
+    /// <summary>Status a newly registered type lands in (trusted signature = Active, else Pending).</summary>
+    public string RegisteredWorkflowTypeStatus { get; set; } = WorkflowTypeStatus.Pending;
+
+    private WorkflowTypeRegistrationDto SetWorkflowTypeStatus(string workflowType, string status, string? reason = null)
+    {
+        var index = WorkflowTypes.FindIndex(t => t.WorkflowType == workflowType);
+        if (index >= 0)
+            WorkflowTypes[index] = WorkflowTypes[index] with { Status = status };
+        var registration = new WorkflowTypeRegistrationDto(
+            workflowType, null, status, reason, null, false, null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        WorkflowTypeRegistrations[workflowType] = registration;
+        return registration;
+    }
+
     public Task<WorkflowTypeRegistrationDto> RegisterWorkflowTypeAsync(RegisterWorkflowTypeRequest request, CancellationToken ct = default)
-        => Task.FromResult(new WorkflowTypeRegistrationDto(
-            request.WorkflowType, request.PackageUri, WorkflowTypeStatus.Active, null, null, false,
-            null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+    {
+        LastRegisteredWorkflowType = request;
+        WorkflowTypes.Add(new WorkflowTypeDto(
+            request.WorkflowType, "1.0", "Job", null, [], request.PackageUri, RegisteredWorkflowTypeStatus));
+        return Task.FromResult(SetWorkflowTypeStatus(request.WorkflowType, RegisteredWorkflowTypeStatus));
+    }
+
     public Task<WorkflowTypeRegistrationDto?> GetWorkflowTypeRegistrationAsync(string workflowType, CancellationToken ct = default)
-        => Task.FromResult<WorkflowTypeRegistrationDto?>(null);
+        => Task.FromResult(WorkflowTypeRegistrations.GetValueOrDefault(workflowType));
+
     public Task UnregisterWorkflowTypeAsync(string workflowType, CancellationToken ct = default)
-        => Task.CompletedTask;
+    {
+        UnregisteredWorkflowTypes.Add(workflowType);
+        WorkflowTypes.RemoveAll(t => t.WorkflowType == workflowType);
+        WorkflowTypeRegistrations.Remove(workflowType);
+        return Task.CompletedTask;
+    }
+
     public Task<WorkflowTypeRegistrationDto> SetWorkflowTypeEnabledAsync(string workflowType, bool enabled, CancellationToken ct = default)
-        => Task.FromResult(new WorkflowTypeRegistrationDto(
-            workflowType, null, enabled ? WorkflowTypeStatus.Active : WorkflowTypeStatus.Disabled,
-            null, null, false, null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+    {
+        WorkflowTypeEnabledChanges.Add((workflowType, enabled));
+        return Task.FromResult(SetWorkflowTypeStatus(
+            workflowType, enabled ? WorkflowTypeStatus.Active : WorkflowTypeStatus.Disabled));
+    }
+
     public Task<WorkflowTypeRegistrationDto> ApproveWorkflowTypeAsync(string workflowType, CancellationToken ct = default)
-        => Task.FromResult(new WorkflowTypeRegistrationDto(
-            workflowType, null, WorkflowTypeStatus.Active, null, null, false,
-            null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+    {
+        ApprovedWorkflowTypes.Add(workflowType);
+        return Task.FromResult(SetWorkflowTypeStatus(workflowType, WorkflowTypeStatus.Active));
+    }
+
     public Task<WorkflowTypeRegistrationDto> DenyWorkflowTypeAsync(string workflowType, string reason, CancellationToken ct = default)
-        => Task.FromResult(new WorkflowTypeRegistrationDto(
-            workflowType, null, WorkflowTypeStatus.Denied, reason, null, false,
-            null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+    {
+        DeniedWorkflowTypes.Add((workflowType, reason));
+        return Task.FromResult(SetWorkflowTypeStatus(workflowType, WorkflowTypeStatus.Denied, reason));
+    }
 }

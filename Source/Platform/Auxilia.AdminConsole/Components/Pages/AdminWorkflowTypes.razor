@@ -1,0 +1,436 @@
+@page "/admin/workflow-types"
+@attribute [Authorize]
+@inject ICoreClient Core
+
+<PageTitle>Workflow types — Auxilia</PageTitle>
+
+<PageHeader Title="Workflow types"
+            Subtitle="The registry — the platform's deploy-time trust gate. Only registered, signed-and-approved types can run; disabling a type stops every configured workflow of it."/>
+
+@if (!_loaded)
+{
+    <p class="muted">Loading…</p>
+}
+else if (_denied)
+{
+    <div class="panel denied">Access denied: @_error</div>
+}
+else
+{
+    @if (_error is { Length: > 0 })
+    {
+        <div class="panel denied">@_error</div>
+    }
+    @if (_notice is not null)
+    {
+        <div class="panel success">@_notice</div>
+    }
+
+    <div class="toolbar">
+        <label>
+            Status
+            <select @bind="_statusFilter">
+                <option value="">any</option>
+                <option value="@WorkflowTypeStatus.Pending">Pending</option>
+                <option value="@WorkflowTypeStatus.Active">Active</option>
+                <option value="@WorkflowTypeStatus.Denied">Denied</option>
+                <option value="@WorkflowTypeStatus.Disabled">Disabled</option>
+            </select>
+        </label>
+        <button class="btn btn-secondary" @onclick="ApplyAsync">Apply</button>
+    </div>
+
+    <section class="card">
+        <div class="card-header">
+            <h2>Registered types</h2>
+            <p class="card-subtitle">
+                A Pending type awaits the signing authority's decision and cannot run;
+                Denied and Disabled types stay registered but never dispatch.
+            </p>
+        </div>
+        @if (_types.Count == 0)
+        {
+            <div class="card-body"><p class="muted view-empty">No workflow types match the current filter.</p></div>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                <tr>
+                    <th>Type</th>
+                    <th>Version</th>
+                    <th>Lifetime</th>
+                    <th>Status</th>
+                    <th>Tags</th>
+                    <th>Actions</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var type in _types)
+                {
+                    <tr>
+                        <td>
+                            <span class="cell-strong">@type.WorkflowType</span>
+                            @if (type.Description is { Length: > 0 } description)
+                            {
+                                <span class="cell-sub">@description</span>
+                            }
+                        </td>
+                        <td>@type.Version</td>
+                        <td>@type.Lifetime</td>
+                        <td>
+                            <span class="badge badge-state @BadgeClassOf(type.Status)">@type.Status</span>
+                        </td>
+                        <td>
+                            @foreach (var tag in type.Tags)
+                            {
+                                <span class="badge badge-role">@tag</span>
+                            }
+                        </td>
+                        <td>
+                            <div class="cell-actions">
+                                @if (_canManage)
+                                {
+                                    <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                            @onclick="() => ToggleDetailAsync(type.WorkflowType)">
+                                        @(_detailType == type.WorkflowType ? "Hide details" : "Details")
+                                    </button>
+                                }
+                                @if (type.Status == WorkflowTypeStatus.Pending && _canSign)
+                                {
+                                    <button class="btn btn-primary btn-sm" disabled="@_busy"
+                                            @onclick="() => ApproveAsync(type.WorkflowType)">Approve</button>
+                                    @if (_denyType == type.WorkflowType)
+                                    {
+                                        <input class="input-inline" placeholder="denial reason"
+                                               @bind="_denyReason" @bind:event="oninput"/>
+                                        <button class="btn btn-danger btn-sm"
+                                                disabled="@(_busy || string.IsNullOrWhiteSpace(_denyReason))"
+                                                @onclick="() => DenyAsync(type.WorkflowType)">Deny</button>
+                                        <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                                @onclick="CancelDeny">Cancel</button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-danger btn-sm" disabled="@_busy"
+                                                @onclick="() => BeginDeny(type.WorkflowType)">Deny…</button>
+                                    }
+                                }
+                                @if (_canManage)
+                                {
+                                    @if (type.Status == WorkflowTypeStatus.Active)
+                                    {
+                                        <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                                @onclick="() => SetEnabledAsync(type.WorkflowType, false)">Disable</button>
+                                    }
+                                    else if (type.Status == WorkflowTypeStatus.Disabled)
+                                    {
+                                        <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                                @onclick="() => SetEnabledAsync(type.WorkflowType, true)">Enable</button>
+                                    }
+                                    @if (_confirmUnregisterType == type.WorkflowType)
+                                    {
+                                        <button class="btn btn-danger btn-sm" disabled="@_busy"
+                                                @onclick="() => UnregisterAsync(type.WorkflowType)">Really unregister?</button>
+                                        <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                                @onclick="() => _confirmUnregisterType = null">Keep</button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-danger btn-sm" disabled="@_busy"
+                                                @onclick="() => _confirmUnregisterType = type.WorkflowType">Unregister</button>
+                                    }
+                                }
+                            </div>
+                        </td>
+                    </tr>
+                    @if (_detailType == type.WorkflowType)
+                    {
+                        <tr>
+                            <td colspan="6">
+                                @if (_detail is null)
+                                {
+                                    <p class="muted">No registration record found for this type.</p>
+                                }
+                                else
+                                {
+                                    <dl class="meta-grid">
+                                        <div>
+                                            <dt>Status</dt>
+                                            <dd>
+                                                @_detail.Status
+                                                @if (_detail.StatusReason is { Length: > 0 } reason)
+                                                {
+                                                    <span class="muted"> — @reason</span>
+                                                }
+                                            </dd>
+                                        </div>
+                                        <div>
+                                            <dt>Package</dt>
+                                            <dd>
+                                                @if (_detail.HasStoredPackage)
+                                                {
+                                                    <span>stored on the Core</span>
+                                                }
+                                                else
+                                                {
+                                                    <span>@(_detail.PackageUri ?? "—")</span>
+                                                }
+                                            </dd>
+                                        </div>
+                                        <div><dt>Publisher key</dt><dd class="cell-mono">@Shorten(_detail.PublisherKeyBase64)</dd></div>
+                                        <div><dt>Registered</dt><dd>@TimeText.Relative(_detail.RegisteredUtc)</dd></div>
+                                        <div><dt>Updated</dt><dd>@TimeText.Relative(_detail.UpdatedUtc)</dd></div>
+                                    </dl>
+                                }
+                            </td>
+                        </tr>
+                    }
+                }
+                </tbody>
+            </table>
+            @if (_skip + _types.Count < _total)
+            {
+                <div class="card-body table-more">
+                    <button class="btn btn-secondary" @onclick="ShowMoreAsync">
+                        Show more (@(_skip + _types.Count) of @_total)
+                    </button>
+                </div>
+            }
+        }
+    </section>
+
+    @if (_canManage)
+    {
+        <section class="card">
+            <div class="card-header">
+                <h2>Register workflow type</h2>
+                <p class="card-subtitle">
+                    Point at a signed <code>.workflow.zip</code> (https) or a <code>docker://</code> image.
+                    A package signed by a trusted publisher key activates immediately; anything else enters
+                    Pending until the signing authority approves or denies it.
+                </p>
+            </div>
+            <div class="card-body form-grid">
+                <label>
+                    Workflow type
+                    <input @bind="_registerType" placeholder="e.g. code-review"/>
+                    <span class="field-hint">The type name runs are dispatched by — must match the package's declared type.</span>
+                </label>
+                <label>
+                    Package URI
+                    <input @bind="_registerPackageUri" placeholder="https://…/type.workflow.zip or docker://image:tag"/>
+                    <span class="field-hint">docker:// images carry no verifiable signature and always need approval.</span>
+                </label>
+                <label>
+                    Schema JSON (optional)
+                    <textarea rows="6" @bind="_registerSchemaJson"
+                              placeholder="declared schema — only for packages that don't embed one"></textarea>
+                </label>
+                <div class="button-row">
+                    <button class="btn btn-primary" disabled="@_busy" @onclick="RegisterAsync">Register</button>
+                </div>
+            </div>
+        </section>
+    }
+}
+
+@code {
+
+    private const int PageSize = 50;
+
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    // Row actions are gated on the Core-computed effective permissions: register/unregister/
+    // enable-disable need workflow-type.manage, approve/deny the workflow-type.sign authority.
+    private bool _canManage;
+    private bool _canSign;
+
+    private bool _loaded;
+    private bool _denied;
+    private bool _busy;
+    private string? _error;
+    private string? _notice;
+
+    private string _statusFilter = "";
+
+    private int _skip;
+    private int _total;
+    private List<WorkflowTypeDto> _types = [];
+
+    private string? _detailType;
+    private WorkflowTypeRegistrationDto? _detail;
+
+    private string? _denyType;
+    private string _denyReason = "";
+    private string? _confirmUnregisterType;
+
+    private string _registerType = "";
+    private string _registerPackageUri = "";
+    private string _registerSchemaJson = "";
+
+    private static string BadgeClassOf(string status) => status switch
+    {
+        WorkflowTypeStatus.Active => "badge-success",
+        WorkflowTypeStatus.Pending => "badge-pending",
+        WorkflowTypeStatus.Denied => "badge-failed",
+        _ => "badge-cancelled"
+    };
+
+    private static string Shorten(string? keyBase64)
+        => keyBase64 is { Length: > 16 } ? keyBase64[..16] + "…" : keyBase64 ?? "—";
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState is not null)
+        {
+            var user = (await AuthState).User;
+            _canManage = ConsoleAuthenticationStateProvider.Can(user, PermissionActions.WorkflowTypeManage);
+            _canSign = ConsoleAuthenticationStateProvider.Can(user, PermissionActions.WorkflowTypeSign);
+        }
+        await LoadAsync(reset: true);
+    }
+
+    private Task ApplyAsync() => LoadAsync(reset: true);
+
+    private Task ShowMoreAsync() => LoadAsync(reset: false);
+
+    private async Task LoadAsync(bool reset)
+    {
+        if (reset)
+        {
+            _skip = 0;
+            _types = [];
+        }
+
+        var query = new WorkflowTypeQuery(
+            Skip: _skip,
+            Take: PageSize,
+            Status: string.IsNullOrWhiteSpace(_statusFilter) ? null : _statusFilter);
+
+        try
+        {
+            var page = await Core.ListWorkflowTypesAsync(query);
+            _denied = false;
+            _error = null;
+            _total = page.Total;
+            _types.AddRange(page.Items);
+            _skip += page.Items.Count;
+        }
+        catch (CoreApiException ex)
+        {
+            _denied = ex.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+
+        _loaded = true;
+    }
+
+    private async Task ToggleDetailAsync(string workflowType)
+    {
+        if (_detailType == workflowType)
+        {
+            _detailType = null;
+            _detail = null;
+            return;
+        }
+
+        try
+        {
+            _detail = await Core.GetWorkflowTypeRegistrationAsync(workflowType);
+            _detailType = workflowType;
+        }
+        catch (CoreApiException ex)
+        {
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+    }
+
+    private void BeginDeny(string workflowType)
+    {
+        _denyType = workflowType;
+        _denyReason = "";
+    }
+
+    private void CancelDeny()
+    {
+        _denyType = null;
+        _denyReason = "";
+    }
+
+    private Task ApproveAsync(string workflowType)
+        => MutateAsync(async () =>
+        {
+            await Core.ApproveWorkflowTypeAsync(workflowType);
+            _notice = $"\"{workflowType}\" approved — the type is now Active and runnable.";
+        });
+
+    private Task DenyAsync(string workflowType)
+        => MutateAsync(async () =>
+        {
+            await Core.DenyWorkflowTypeAsync(workflowType, _denyReason.Trim());
+            _notice = $"\"{workflowType}\" denied.";
+            CancelDeny();
+        });
+
+    private Task SetEnabledAsync(string workflowType, bool enabled)
+        => MutateAsync(async () =>
+        {
+            await Core.SetWorkflowTypeEnabledAsync(workflowType, enabled);
+            _notice = enabled
+                ? $"\"{workflowType}\" re-enabled — configured workflows dispatch again."
+                : $"\"{workflowType}\" disabled — every configured workflow of it stops dispatching.";
+        });
+
+    private Task UnregisterAsync(string workflowType)
+        => MutateAsync(async () =>
+        {
+            await Core.UnregisterWorkflowTypeAsync(workflowType);
+            _notice = $"\"{workflowType}\" unregistered — it can no longer be run.";
+            _confirmUnregisterType = null;
+        });
+
+    private Task RegisterAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_registerType) || string.IsNullOrWhiteSpace(_registerPackageUri))
+        {
+            _error = "Workflow type and package URI are required.";
+            _notice = null;
+            return Task.CompletedTask;
+        }
+
+        return MutateAsync(async () =>
+        {
+            var registration = await Core.RegisterWorkflowTypeAsync(new RegisterWorkflowTypeRequest(
+                WorkflowType: _registerType.Trim(),
+                PackageUri: _registerPackageUri.Trim(),
+                SchemaJson: string.IsNullOrWhiteSpace(_registerSchemaJson) ? null : _registerSchemaJson));
+            _notice = registration.Status == WorkflowTypeStatus.Active
+                ? $"\"{registration.WorkflowType}\" registered and active (trusted publisher signature)."
+                : $"\"{registration.WorkflowType}\" registered — awaiting the signing authority's approval.";
+            _registerType = _registerPackageUri = _registerSchemaJson = "";
+        });
+    }
+
+    private async Task MutateAsync(Func<Task> action)
+    {
+        _error = _notice = null;
+        _busy = true;
+        try
+        {
+            await action();
+            if (_detailType is { } open)
+                _detail = await Core.GetWorkflowTypeRegistrationAsync(open);
+            await LoadAsync(reset: true);
+        }
+        catch (CoreApiException ex)
+        {
+            _error = (ex.ErrorDetail ?? ex.Message).Replace('\n', ' ');
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+}
