@@ -30,10 +30,13 @@ public sealed class UserBearerTokenService
         _lifetime = TimeSpan.FromMinutes(Math.Max(1, settings.Value.UserTokenLifetimeMinutes));
     }
 
-    /// <summary>Issues a token for the principal, expiring the configured lifetime from now.</summary>
-    public (string Token, DateTimeOffset ExpiresUtc) Issue(Guid principalId)
+    /// <summary>
+    /// Issues a token for the principal, expiring <paramref name="lifetime"/> (or the configured
+    /// console lifetime) from now.
+    /// </summary>
+    public (string Token, DateTimeOffset ExpiresUtc) Issue(Guid principalId, TimeSpan? lifetime = null)
     {
-        var expiresUtc = _clock.GetUtcNow().Add(_lifetime);
+        var expiresUtc = _clock.GetUtcNow().Add(lifetime ?? _lifetime);
         return (Protect(principalId, expiresUtc), expiresUtc);
     }
 

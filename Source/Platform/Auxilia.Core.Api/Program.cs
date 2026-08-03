@@ -35,6 +35,8 @@ builder.Services.AddSettingsProtection(platformData);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddPlatformEntity<CoreRunConfigurationRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreConnectorRecord>(platformData);
+// First-class repository/workspace resources (non-secret settings + connector reference).
+builder.Services.AddPlatformEntity<CoreRepositoryRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreRunRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreRunViewRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreDashboardPinRecord>(platformData);
@@ -102,6 +104,7 @@ builder.Services.AddSingleton<ConnectorBrowseService>();
 builder.Services.AddSingleton<ConnectorTokenRefresher>();
 builder.Services.AddSingleton<AccessGrantEvaluator>();
 builder.Services.AddSingleton<ConnectorAccessPolicy>();
+builder.Services.AddSingleton<RepositoryResourceService>();
 builder.Services.AddSingleton<DelegatedTokenStore>();
 builder.Services.AddSingleton<RunConfigurationService>();
 builder.Services.AddSingleton<RunService>();
@@ -248,6 +251,30 @@ app.MapPost("/auth/token", (HttpContext http, UserBearerTokenService tokens) =>
     var (token, expiresUtc) = tokens.Issue(principalId);
     return Results.Ok(new UserBearerToken(token, expiresUtc));
 }).RequireAuthorization(CoreAuthExtensions.CookieSessionPolicy);
+
+// Non-browser (desktop/CLI) sign-in: username + password exchanged for the SAME per-user bearer
+// the browser path mints — per-user audit/SoD applies to desktop clients too. Anonymous by
+// design (it IS the sign-in); both outcomes are audited. The desktop lifetime is longer than the
+// console token: there is no cookie session to silently re-mint from, and the client must not
+// hold the password to renew.
+app.MapPost("/auth/login", async (
+        PasswordLoginRequest request, Auxilia.Governance.Identity.IIdentityProvider identity,
+        UserBearerTokenService tokens, IOptions<CoreSecuritySettings> security, AuditLog audit,
+        CancellationToken ct) =>
+{
+    var username = request.Username?.Trim() ?? "";
+    var session = await identity.AuthenticatePasswordAsync(username, request.Password ?? "", ct);
+    if (session is null)
+    {
+        await audit.AppendAsync(username, "auth.login", username, "denied", ct: ct);
+        return Results.Json(new { error = "invalid credentials" }, statusCode: StatusCodes.Status401Unauthorized);
+    }
+    var lifetime = TimeSpan.FromMinutes(Math.Max(1, security.Value.LoginTokenLifetimeMinutes));
+    var (token, expiresUtc) = tokens.Issue(session.PrincipalId, lifetime);
+    await audit.AppendAsync(
+        session.PrincipalId.ToString(), "auth.login", session.PrincipalId.ToString(), "granted", ct: ct);
+    return Results.Ok(new UserBearerToken(token, expiresUtc));
+}).AllowAnonymous();
 
 // Step-up: re-prove the caller's OWN credential (password / API key) to obtain a short-lived
 // elevation for security-sensitive administration. Both outcomes are audited.
@@ -963,7 +990,11 @@ app.MapGet("/api/provider-catalog", async (
         bool? available, HttpContext http, IPolicyEngine policy, ProviderCatalogService svc,
         CancellationToken ct, int skip = 0, int take = 50) =>
 {
-    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ProviderCatalogManage, ct) is { } fail)
+    // The AVAILABLE slice is what configuration editors render their forms from — readable by
+    // every authenticated principal (availability IS the admin's curation act). The full view,
+    // unavailable entries included, stays a provider-catalog-manage surface.
+    if (available != true
+        && await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ProviderCatalogManage, ct) is { } fail)
         return fail;
     return Results.Ok(await svc.QueryAsync(
         new ProviderCatalogQuery(available, skip, take == 0 ? 50 : take), ct));
@@ -1357,6 +1388,98 @@ app.MapPost("/api/connectors/{id:guid}/grants", async (
         return fail;
     return await svc.SetGrantsAsync(id, request.Grants, ct)
         ? Results.Accepted($"/api/connectors/{id}")
+        : Results.NotFound();
+}).RequireAuthorization();
+
+// --- Repositories: first-class workspace resources (settings are NON-secret, so reads return
+//     them; the credential stays a connector reference). Personal = self-serve, Company gated
+//     like company connectors; edits apply live to every configuration referencing the id. ---
+app.MapPost("/api/repositories", async (
+        CreateRepositoryResource request, HttpContext http, IPolicyEngine policy,
+        RepositoryResourceService svc, AuditLog audit, CancellationToken ct) =>
+{
+    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+        return Results.Unauthorized();
+    if (request.Scope != ResourceScope.Personal
+        && await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.SlotConfigWrite, ct) is { } fail)
+        return fail;
+    try
+    {
+        var created = await svc.CreateAsync(request, principalId, ct);
+        await audit.AppendAsync(principalId.ToString(), "repository.created", created.Id.ToString(), created.Name, ct: ct);
+        return Results.Ok(created);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+}).RequireAuthorization();
+
+app.MapGet("/api/repositories", async (
+        HttpContext http, RepositoryResourceService svc, CancellationToken ct) =>
+    Results.Ok(await svc.ListVisibleAsync(CoreClaims.PrincipalIdOf(http.User), ct)))
+    .RequireAuthorization();
+
+app.MapGet("/api/repositories/{id:guid}", async (
+        Guid id, HttpContext http, RepositoryResourceService svc, CancellationToken ct) =>
+    await svc.GetAsync(id, ct) is { } repository
+    && await svc.CanUseAsync(id, CoreClaims.PrincipalIdOf(http.User), ct)
+        ? Results.Ok(repository)
+        : Results.NotFound())
+    .RequireAuthorization();
+
+app.MapPut("/api/repositories/{id:guid}", async (
+        Guid id, UpdateRepositoryResource request, HttpContext http, IPolicyEngine policy,
+        RepositoryResourceService svc, AuditLog audit, CancellationToken ct) =>
+{
+    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+        return Results.Unauthorized();
+    if (await svc.GetAsync(id, ct) is not { } repository)
+        return Results.NotFound();
+    if (repository.OwnerPrincipalId != principalId
+        && await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.SlotConfigWrite, ct) is { } fail)
+        return fail;
+    try
+    {
+        var updated = await svc.UpdateAsync(id, request, ct);
+        await audit.AppendAsync(principalId.ToString(), "repository.updated", id.ToString(), request.Name, ct: ct);
+        return Results.Ok(updated);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+}).RequireAuthorization();
+
+app.MapDelete("/api/repositories/{id:guid}", async (
+        Guid id, HttpContext http, IPolicyEngine policy, RepositoryResourceService svc,
+        AuditLog audit, CancellationToken ct) =>
+{
+    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+        return Results.Unauthorized();
+    if (await svc.GetAsync(id, ct) is not { } repository)
+        return Results.NotFound();
+    if (repository.OwnerPrincipalId != principalId
+        && await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.SlotConfigWrite, ct) is { } fail)
+        return fail;
+    await svc.DeleteAsync(id, ct);
+    await audit.AppendAsync(principalId.ToString(), "repository.deleted", id.ToString(), repository.Name, ct: ct);
+    return Results.NoContent();
+}).RequireAuthorization();
+
+app.MapPost("/api/repositories/{id:guid}/grants", async (
+        Guid id, SetRepositoryGrants request, HttpContext http, IPolicyEngine policy,
+        RepositoryResourceService svc, CancellationToken ct) =>
+{
+    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+        return Results.Unauthorized();
+    if (await svc.GetAsync(id, ct) is not { } repository)
+        return Results.NotFound();
+    if (repository.OwnerPrincipalId != principalId
+        && await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.SlotConfigWrite, ct) is { } fail)
+        return fail;
+    return await svc.SetGrantsAsync(id, request.Grants, ct)
+        ? Results.Accepted($"/api/repositories/{id}")
         : Results.NotFound();
 }).RequireAuthorization();
 

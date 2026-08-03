@@ -506,6 +506,17 @@ graph TB
     WF_A -.->|cannot reach| CACHE
 ```
 
+**First-class repository resources (2026-08-03).** A repository can be saved once as a Core
+resource (`/api/repositories`): a workspace-mount provider's NON-secret settings (clone URL,
+branch, working directory, cache/push policy, commit identity, setup script) plus an optional
+credential-connector reference, shared exactly like connectors (Personal owner + grants, or
+Company). A configuration's slot binding references it by id (`SlotBinding.RepositoryId`);
+dispatch expands the reference LIVE — the resource supplies provider type, settings, and
+connector, binding-level values override per use, and access is gated like connectors — so
+editing the repository once (a new setup script, a branch move) applies to every configuration
+referencing it. Settings are non-secret and round-trip on reads; the credential never leaves
+the connector.
+
 **Post-binding setup scripts (2026-08-03).** A repository may need repo-specific setup
 (restore, codegen, bootstrap) before the workflow can act on it. Two sources, one executor:
 a manifest-declared script (`RequiresRepository(..., setupScript:)` — part of the signed
@@ -966,6 +977,17 @@ Connectors and run configurations share one ownership model (`ResourceScope` + `
 ### Groups and group mapping
 
 Roles reach a principal three ways, unioned deny-by-default: **direct** assignment; membership in a **first-class group** (`GroupDirectory` + `GroupRoleResolver` — a group carries members and roles, and a member inherits the group's roles); and IdP **mapping**, where an administrator maintains `(identity provider, group) → role(s)` mappings so corporate directory groups (AAD/LDAP/OIDC claims) translate to Auxilia roles at sign-in without per-user administration. A principal's **effective roles are the union of all three**. First-class groups and their role assignments are administered in the Core (REST + authenticated MCP: `create_group`, `add_group_member`, `assign_group_role`); IdP mappings are evaluated at session start and cached for the session lifetime.
+
+### Non-browser sign-in (2026-08-03)
+
+Desktop/CLI clients (the steering client) sign a human in without a browser: `POST /auth/login`
+(anonymous by design — it IS the sign-in) verifies username + password through the identity
+provider and mints the **same per-user bearer** the browser path issues, so per-user audit and
+separation of duties apply to desktop clients too. The desktop lifetime
+(`CoreSecurity:LoginTokenLifetimeMinutes`, default one workday) is longer than the console
+token — there is no cookie session to silently re-mint from, and the client must never hold
+the password to renew. Disabled principals cannot sign in; both outcomes are audited
+(`auth.login` granted/denied).
 
 ### Safeguards for principal administration
 

@@ -115,6 +115,14 @@ public interface ICoreClient
     Task<EnvironmentLayerDto> UpsertEnvironmentLayerAsync(UpsertEnvironmentLayer request, CancellationToken ct = default);
     Task DeleteEnvironmentLayerAsync(string providerType, CancellationToken ct = default);
 
+    // --- Repositories (first-class workspace resources; settings non-secret, credential = connector ref) ---
+    Task<IReadOnlyList<RepositoryResource>> ListRepositoriesAsync(CancellationToken ct = default);
+    Task<RepositoryResource?> GetRepositoryAsync(Guid id, CancellationToken ct = default);
+    Task<RepositoryResource> CreateRepositoryAsync(CreateRepositoryResource request, CancellationToken ct = default);
+    Task<RepositoryResource> UpdateRepositoryAsync(Guid id, UpdateRepositoryResource request, CancellationToken ct = default);
+    Task DeleteRepositoryAsync(Guid id, CancellationToken ct = default);
+    Task SetRepositoryGrantsAsync(Guid id, SetRepositoryGrants request, CancellationToken ct = default);
+
     // --- Environment bases (the configurable (name, version) vocabulary layers build on) ---
     Task<IReadOnlyList<EnvironmentBaseDto>> ListEnvironmentBasesAsync(CancellationToken ct = default);
     Task<EnvironmentBaseDto> UpsertEnvironmentBaseAsync(UpsertEnvironmentBase request, CancellationToken ct = default);
@@ -182,6 +190,12 @@ public interface ICoreClient
     /// expires. Those calls otherwise fail with the error detail <c>elevation-required</c>.
     /// </summary>
     Task<ElevationTicket> StepUpAsync(StepUpRequest request, CancellationToken ct = default);
+    /// <summary>
+    /// Desktop/CLI sign-in: exchanges a human principal's username + password for a per-user
+    /// bearer (the client's OWN authentication is not required for this one call). The caller
+    /// re-authenticates the client with the returned token.
+    /// </summary>
+    Task<UserBearerToken> LoginAsync(PasswordLoginRequest request, CancellationToken ct = default);
     /// <summary>The built-in roles and the permission actions each grants.</summary>
     Task<IReadOnlyList<RoleDto>> ListRolesAsync(CancellationToken ct = default);
     /// <summary>Principals + first-class groups for sharing pickers (ids and display names only).</summary>

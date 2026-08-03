@@ -17,4 +17,11 @@ public sealed class CoreSecuritySettings
     /// delegated console caller. Kept short — the console re-mints from its live cookie session.
     /// </summary>
     public int UserTokenLifetimeMinutes { get; set; } = 30;
+
+    /// <summary>
+    /// Lifetime (in minutes) of a per-user bearer minted by <c>POST /auth/login</c> for desktop/CLI
+    /// clients. Longer than the console token — a desktop client has no cookie session to silently
+    /// re-mint from, and must not hold the user's password to renew. Default: one workday.
+    /// </summary>
+    public int LoginTokenLifetimeMinutes { get; set; } = 480;
 }

@@ -19,6 +19,13 @@ public sealed record CurrentPrincipal(
 public sealed record UserBearerToken(string Token, DateTimeOffset ExpiresUtc);
 
 /// <summary>
+/// Non-browser (desktop/CLI) sign-in (<c>POST /auth/login</c>): a human principal's username and
+/// password exchanged for a per-user bearer — the same token shape the browser path mints, so
+/// per-user audit and separation of duties apply to desktop clients too.
+/// </summary>
+public sealed record PasswordLoginRequest(string Username, string Password);
+
+/// <summary>
 /// Step-up re-authentication (<c>POST /auth/step-up</c>): the caller re-proves their OWN
 /// credential — password for humans, API key for service principals — to obtain a short-lived
 /// elevation for security-sensitive administration (granting/revoking administrator rights,

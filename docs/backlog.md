@@ -6,12 +6,10 @@
 ## Core.Api — client-surface follow-ups
 - **Per-user bearer hardening** — the short-lived bearer is embedded in the prerendered page
   (same-origin TLS); consider a server-side opaque-handle store keyed by principal.
-- **AdminConsole step-up prompt** — the Core now demands an `X-Auxilia-Elevation` step-up for
-  admin-role grant/revoke and principal disable (2026-08-02, see ARCHITECTURE §16). The steering client
-  has the re-authentication dialog; the AdminConsole does not yet — those actions currently
-  surface the raw `elevation-required` failure there. Add a step-up prompt (and ideally the
-  steering client's type-to-confirm pattern) for parity. Tags administration UI in the AdminConsole is
-  also still missing (steering client-only today).
+- ~~AdminConsole step-up prompt~~ — DONE 2026-08-03: `elevation-required` now opens an inline
+  re-authentication panel on the Principals page; the successful step-up retries the pending
+  mutation (the elevation header rides the circuit's client). Still open: the steering client's
+  type-to-confirm pattern, and tags administration UI (steering client-only today).
 - **Workflow-type registry administration** — full client surface exists on `ICoreClient`
   (register/approve/deny/unregister), and the steering client ships a registry-administration panel
   (2026-08-02, permission-gated on `workflow-type.manage`/`workflow-type.sign`); the
@@ -54,11 +52,10 @@
   package so desktop clients don't need the full contracts surface.
 - **Go-public pre-flight** (repo is otherwise publish-ready: rewritten noreply-only history,
   single `main`, licenses + pricing incl. free personal tier; licensing contact is EMAIL —
-  a public issue would expose the inquirer's company details). **BLOCKED 2026-08-02: Google
-  flagged the freshly created licensing mailbox (felix.klakow.github@gmail.com — the address
-  in both LICENSE files) right after signup; recover it (phone verification/appeal) or swap
-  in a different receiving address, and verify the forward + send-as loop with a test mail
-  BEFORE flipping public.** (Pre-flight re-verified 2026-08-03: single `main`, noreply-only
+  a public issue would expose the inquirer's company details). **Mailbox RESOLVED 2026-08-03
+  (the flagged felix.klakow.github@gmail.com account is recovered/done). Remaining gate:
+  Felix verifies the forward + send-as loop with a test mail himself and then explicitly
+  decides to publish — do NOT flip public before that go.** (Pre-flight re-verified 2026-08-03: single `main`, noreply-only
   history, no product-external names in tracked files, no real secrets — only fake test
   tokens; `Start-Presentation.bat` is already retired and the stale "via Studio" DevStand
   string is fixed. The mailbox is the ONE open gate.) Then: optionally ask GitHub Support
@@ -74,9 +71,12 @@
   Dependabot alerts, secret-scanning push protection; restrict Actions to the two
   used action publishers + read-only default GITHUB_TOKEN; a main ruleset blocking
   force-push/deletion with admin bypass; disable Wiki/Projects.
-- **steering client desktop per-user sign-in** — replace the API-key principal with interactive
-  (device-code/OIDC) sign-in that mints a per-user bearer (per-user audit/SoD). Needs a Core
-  non-browser token-issue path.
+- ~~steering client desktop per-user sign-in~~ — DONE 2026-08-03 for the password path: the Core's
+  `POST /auth/login` (username+password → the same per-user bearer the browser mints, desktop
+  lifetime `CoreSecurity:LoginTokenLifetimeMinutes`, default one workday, audited both ways)
+  plus the steering client sign-in overlay/header buttons (never a silent fallback to the service key
+  once in user mode). Still open: the device-code/OIDC variant for Entra-only principals
+  (SSO-provisioned humans have no password), and rate limiting on /auth/login.
 
 ## Config store — DECIDED 2026-08-01: stays in the Core
 The earlier "move the config store out of the Core" direction is reversed by decision, not

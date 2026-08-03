@@ -88,8 +88,23 @@ internal sealed class FakeCoreClient : ICoreClient
         return Task.FromResult(new CreatedApiKeyPrincipal(principal, CreatedApiKeyValue));
     }
 
+    /// <summary>True = principal mutations demand step-up until <see cref="StepUpAsync"/> succeeds.</summary>
+    public bool RequireElevation { get; set; }
+
+    public string? LastStepUpSecret { get; private set; }
+
+    private bool _elevated;
+
+    private void DemandElevationIfRequired()
+    {
+        if (RequireElevation && !_elevated)
+            throw new CoreApiException(
+                System.Net.HttpStatusCode.Forbidden, "elevation-required", "step-up required");
+    }
+
     public Task AssignPrincipalRoleAsync(Guid id, AssignRoleRequest request, CancellationToken ct = default)
     {
+        DemandElevationIfRequired();
         AssignedRoles.Add((id, request.RoleName));
         return Task.CompletedTask;
     }
@@ -102,6 +117,7 @@ internal sealed class FakeCoreClient : ICoreClient
 
     public Task SetPrincipalEnabledAsync(Guid id, SetPrincipalEnabledRequest request, CancellationToken ct = default)
     {
+        DemandElevationIfRequired();
         EnabledChanges.Add((id, request.Enabled));
         return Task.CompletedTask;
     }
@@ -109,8 +125,15 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task SetPrincipalTagsAsync(Guid id, SetPrincipalTagsRequest request, CancellationToken ct = default)
         => Task.CompletedTask;
 
+    public Task<UserBearerToken> LoginAsync(PasswordLoginRequest request, CancellationToken ct = default)
+        => Task.FromResult(new UserBearerToken("auxu_fake", DateTimeOffset.UtcNow.AddHours(8)));
+
     public Task<ElevationTicket> StepUpAsync(StepUpRequest request, CancellationToken ct = default)
-        => Task.FromResult(new ElevationTicket("fake-elevation", DateTimeOffset.UtcNow.AddMinutes(5)));
+    {
+        LastStepUpSecret = request.Secret;
+        _elevated = true;
+        return Task.FromResult(new ElevationTicket("fake-elevation", DateTimeOffset.UtcNow.AddMinutes(5)));
+    }
 
     // --- Identity sources ---
     public List<IdentityConnectorDescriptorDto> IdentityConnectors { get; } = [];
@@ -463,6 +486,17 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task<EnvironmentLayerDto> UpsertEnvironmentLayerAsync(UpsertEnvironmentLayer request, CancellationToken ct = default)
         => Nope<Task<EnvironmentLayerDto>>();
     public Task DeleteEnvironmentLayerAsync(string providerType, CancellationToken ct = default)
+        => Nope<Task>();
+    public Task<IReadOnlyList<RepositoryResource>> ListRepositoriesAsync(CancellationToken ct = default)
+        => Nope<Task<IReadOnlyList<RepositoryResource>>>();
+    public Task<RepositoryResource?> GetRepositoryAsync(Guid id, CancellationToken ct = default)
+        => Nope<Task<RepositoryResource?>>();
+    public Task<RepositoryResource> CreateRepositoryAsync(CreateRepositoryResource request, CancellationToken ct = default)
+        => Nope<Task<RepositoryResource>>();
+    public Task<RepositoryResource> UpdateRepositoryAsync(Guid id, UpdateRepositoryResource request, CancellationToken ct = default)
+        => Nope<Task<RepositoryResource>>();
+    public Task DeleteRepositoryAsync(Guid id, CancellationToken ct = default) => Nope<Task>();
+    public Task SetRepositoryGrantsAsync(Guid id, SetRepositoryGrants request, CancellationToken ct = default)
         => Nope<Task>();
     public Task<IReadOnlyList<EnvironmentBaseDto>> ListEnvironmentBasesAsync(CancellationToken ct = default)
         => Nope<Task<IReadOnlyList<EnvironmentBaseDto>>>();

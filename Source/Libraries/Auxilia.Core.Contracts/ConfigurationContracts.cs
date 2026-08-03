@@ -14,7 +14,8 @@ public sealed record SlotBinding(
     string? ProviderType = null,
     Guid? ConnectorId = null,
     IReadOnlyDictionary<string, string>? Settings = null,
-    string? DelegatedResource = null);
+    string? DelegatedResource = null,
+    Guid? RepositoryId = null);
 
 /// <summary>
 /// Create a run configuration in the Core store. The configuration references a registered

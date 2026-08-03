@@ -254,6 +254,26 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
     public Task DeleteEnvironmentLayerAsync(string providerType, CancellationToken ct = default)
         => DeleteAsync($"/api/environment-layers/{Uri.EscapeDataString(providerType)}", ct);
 
+    // --- Repositories ---
+
+    public Task<IReadOnlyList<RepositoryResource>> ListRepositoriesAsync(CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<RepositoryResource>>("/api/repositories", ct);
+
+    public Task<RepositoryResource?> GetRepositoryAsync(Guid id, CancellationToken ct = default)
+        => GetOrNullAsync<RepositoryResource>($"/api/repositories/{id:D}", ct);
+
+    public Task<RepositoryResource> CreateRepositoryAsync(CreateRepositoryResource request, CancellationToken ct = default)
+        => PostAsync<CreateRepositoryResource, RepositoryResource>("/api/repositories", request, ct);
+
+    public Task<RepositoryResource> UpdateRepositoryAsync(Guid id, UpdateRepositoryResource request, CancellationToken ct = default)
+        => PutAsync<UpdateRepositoryResource, RepositoryResource>($"/api/repositories/{id:D}", request, ct);
+
+    public Task DeleteRepositoryAsync(Guid id, CancellationToken ct = default)
+        => DeleteAsync($"/api/repositories/{id:D}", ct);
+
+    public Task SetRepositoryGrantsAsync(Guid id, SetRepositoryGrants request, CancellationToken ct = default)
+        => PostAsync($"/api/repositories/{id:D}/grants", request, ct);
+
     // --- Environment bases ---
 
     public Task<IReadOnlyList<EnvironmentBaseDto>> ListEnvironmentBasesAsync(CancellationToken ct = default)
@@ -390,6 +410,9 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
 
     public Task<CurrentPrincipal> GetCurrentPrincipalAsync(CancellationToken ct = default)
         => GetAsync<CurrentPrincipal>("/auth/me", ct);
+
+    public Task<UserBearerToken> LoginAsync(PasswordLoginRequest request, CancellationToken ct = default)
+        => PostAsync<PasswordLoginRequest, UserBearerToken>("/auth/login", request, ct);
 
     public async Task<ElevationTicket> StepUpAsync(StepUpRequest request, CancellationToken ct = default)
     {

@@ -21,6 +21,7 @@ public sealed class RunService(
     SlotCredentialResolver credentialResolver,
     ConnectorAccessPolicy connectorAccess,
     ConnectorService connectors,
+    RepositoryResourceService repositoryResources,
     RunnerLivenessTracker runnerLiveness,
     TimeProvider clock,
     IOptions<CoreApiSettings> settings,
@@ -145,8 +146,31 @@ public sealed class RunService(
         var environmentBaseVersions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var pluginBindings = new List<SlotBinding>();
         var stashedBindings = new List<SlotBinding>();
-        foreach (var binding in slotBindings)
+        foreach (var boundSlot in slotBindings)
         {
+            var binding = boundSlot;
+            // A repository reference expands LIVE at dispatch: the stored resource supplies the
+            // provider type, settings, and credential connector — so editing the repository once
+            // (branch, setup script, …) applies to every configuration referencing it. Binding-
+            // level settings/connector override per use; access is gated like connectors.
+            if (binding.RepositoryId is { } repositoryId)
+            {
+                var repository = await repositoryResources.GetAsync(repositoryId, ct)
+                    ?? throw new KeyNotFoundException($"repository '{repositoryId:D}' does not exist");
+                if (!await repositoryResources.CanUseAsync(repositoryId, triggeredBy, ct))
+                    throw new InvalidOperationException(
+                        $"not permitted to use repository '{repository.Name}'");
+                var mergedSettings = new Dictionary<string, string>(repository.Settings);
+                foreach (var (key, value) in binding.Settings ?? new Dictionary<string, string>())
+                    mergedSettings[key] = value;
+                binding = binding with
+                {
+                    ProviderType = repository.ProviderType,
+                    ConnectorId = binding.ConnectorId ?? repository.ConnectorId,
+                    Settings = mergedSettings,
+                };
+            }
+
             var entry = await ResolveCatalogEntryAsync(binding, ct);
             // Environment-composing bindings are pure selections: the provider type IS the
             // capability id — no plugin, no credential, interpreted only by the runner.

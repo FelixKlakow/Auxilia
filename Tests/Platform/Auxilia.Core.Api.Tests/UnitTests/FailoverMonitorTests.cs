@@ -91,7 +91,14 @@ public sealed class FailoverMonitorTests
                 new AccessGrantEvaluator(
                     new InMemoryDataAccess<Auxilia.PlatformData.Entities.PrincipalRecord>(),
                     new InMemoryDataAccess<Auxilia.PlatformData.Entities.GroupMembershipRecord>())),
-            connectors, new RunnerLivenessTracker(), _time,
+            connectors,
+            new RepositoryResourceService(
+                new InMemoryDataAccess<CoreRepositoryRecord>(),
+                new AccessGrantEvaluator(
+                    new InMemoryDataAccess<Auxilia.PlatformData.Entities.PrincipalRecord>(),
+                    new InMemoryDataAccess<Auxilia.PlatformData.Entities.GroupMembershipRecord>()),
+                _time),
+            new RunnerLivenessTracker(), _time,
             Options.Create(_settings), NullLogger<RunService>.Instance);
 
         _sut = new FailoverMonitor(

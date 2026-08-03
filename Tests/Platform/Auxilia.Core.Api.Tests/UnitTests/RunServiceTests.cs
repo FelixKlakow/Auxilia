@@ -20,6 +20,7 @@ namespace Auxilia.Core.Api.Tests.UnitTests;
 public sealed class RunServiceTests
 {
     private ProviderCatalogService _providerCatalog = null!;
+    private RepositoryResourceService _repositories = null!;
 
     private (RunService Service, FakeMessageBusClient Bus, RunConfigurationService Configs,
         WorkflowTypeRegistryService Registry, RunnerLivenessTracker Liveness) New(bool allowDispatchWithoutRunner = true)
@@ -66,9 +67,14 @@ public sealed class RunServiceTests
             new InMemoryDataAccess<SlotProviderRecord>(),
             new InMemoryDataAccess<ProviderCatalogRecord>(),
             new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System));
+        var repositories = _repositories = new RepositoryResourceService(
+            new InMemoryDataAccess<CoreRepositoryRecord>(),
+            new AccessGrantEvaluator(
+                new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>()),
+            TimeProvider.System);
         var service = new RunService(
             bus, configs, registry, new WorkflowSchemaReadService(typeStore),
-            providerCatalog, resolver, accessPolicy, connectors, liveness,
+            providerCatalog, resolver, accessPolicy, connectors, repositories, liveness,
             TimeProvider.System,
             Options.Create(new CoreApiSettings { AllowDispatchWithoutRunner = allowDispatchWithoutRunner }),
             NullLogger<RunService>.Instance);
@@ -210,6 +216,74 @@ public sealed class RunServiceTests
         Assert.That(ex!.Message, Does.Contain("mix incompatible bases")
             .And.Contain("dotnet-10").And.Contain("msbuild-17"),
             "One run composes one image on one base - a mixed selection fails fast at dispatch.");
+    }
+
+    [Test]
+    public async Task RunInline_RepositoryReference_ExpandsToTheStoredResource()
+    {
+        var (service, bus, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
+            "git-repository", "workspace", null, ["src-ctl"],
+            [
+                new RegisterProviderSetting("CloneUrl", "Repository", "Text", Required: true, Role: "clone-url"),
+                new RegisterProviderSetting("Branch", "Branch", "Text", Role: "branch"),
+                new RegisterProviderSetting("SetupScript", "Setup script", "Text", Role: "setup-script"),
+            ],
+            MountsIntoWorkspace: true), CancellationToken.None);
+        var repository = await _repositories.CreateAsync(new CreateRepositoryResource(
+                "Main repo", "git-repository",
+                new Dictionary<string, string>
+                {
+                    ["CloneUrl"] = "https://example.test/main.git",
+                    ["SetupScript"] = "dotnet restore",
+                },
+                Scope: ResourceScope.Company),
+            ownerPrincipalId: null, CancellationToken.None);
+
+        await service.RunInlineAsync(
+            new RunRequest("wt", SlotBindings:
+            [
+                // The binding names ONLY the repository; a binding-level setting overrides per use.
+                new SlotBinding("repo", Settings: new Dictionary<string, string> { ["Branch"] = "feature/x" },
+                    RepositoryId: repository.Id),
+            ]),
+            triggeredBy: null, CancellationToken.None);
+
+        var command = bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>().Single();
+        var mount = command.WorkspaceMounts!.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(mount.ProviderType, Is.EqualTo("git-repository"),
+                "the stored resource supplies the provider type");
+            Assert.That(mount.SettingsByRole["clone-url"], Is.EqualTo("https://example.test/main.git"));
+            Assert.That(mount.SettingsByRole["setup-script"], Is.EqualTo("dotnet restore"),
+                "the repository's setup script rides its reference — configured once, applied everywhere");
+            Assert.That(mount.SettingsByRole["branch"], Is.EqualTo("feature/x"),
+                "binding-level settings override the stored resource per use");
+        });
+    }
+
+    [Test]
+    public async Task RunInline_PersonalRepositoryOfAnotherUser_FailsTheDispatch()
+    {
+        var (service, _, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
+            "git-repository", "workspace", null, ["src-ctl"],
+            [new RegisterProviderSetting("CloneUrl", "Repository", "Text", Required: true, Role: "clone-url")],
+            MountsIntoWorkspace: true), CancellationToken.None);
+        var repository = await _repositories.CreateAsync(new CreateRepositoryResource(
+                "Private repo", "git-repository",
+                new Dictionary<string, string> { ["CloneUrl"] = "https://example.test/private.git" }),
+            ownerPrincipalId: Guid.NewGuid(), CancellationToken.None);
+
+        var ex = Assert.ThrowsAsync<InvalidOperationException>(() => service.RunInlineAsync(
+            new RunRequest("wt", SlotBindings: [new SlotBinding("repo", RepositoryId: repository.Id)]),
+            triggeredBy: Guid.NewGuid(), CancellationToken.None));
+
+        Assert.That(ex!.Message, Does.Contain("not permitted").And.Contain("Private repo"),
+            "a personal repository admits only its owner and granted subjects — like connectors");
     }
 
     [Test]
