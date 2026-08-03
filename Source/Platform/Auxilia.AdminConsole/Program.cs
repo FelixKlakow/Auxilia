@@ -22,6 +22,9 @@ builder.Services.AddHttpContextAccessor();
 // Per-user bearer handoff: capture the operator's Core session cookie during prerender, exchange it for
 // a short-lived user token, and relay that token across the prerender → interactive-circuit boundary so
 // the delegated identity survives the whole circuit (see ConsoleCallerTokenProvider / IUserBearerRelay).
+// The token itself stays server-side (singleton handle store); the page only carries a one-shot handle.
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<UserBearerHandleStore>();
 builder.Services.AddScoped<IUserBearerRelay, PersistentUserBearerRelay>();
 builder.Services.AddScoped<ConsoleCallerTokenProvider>();
 builder.Services.AddScoped<ICoreCallerTokenProvider>(sp => sp.GetRequiredService<ConsoleCallerTokenProvider>());

@@ -21,19 +21,26 @@ public interface IUserBearerRelay
 }
 
 /// <summary>
-/// <see cref="IUserBearerRelay"/> over <see cref="PersistentComponentState"/>: persists the minted bearer
-/// at the end of prerender and restores it once the circuit starts. The relayed token is short-lived and
-/// belongs to the very user the page is rendering for; it never outlives its <c>ExpiresUtc</c>.
+/// <see cref="IUserBearerRelay"/> over <see cref="PersistentComponentState"/> + a server-side
+/// <see cref="UserBearerHandleStore"/>: at the end of prerender the minted bearer is stashed
+/// server-side and only a cryptographically random ONE-TIME handle is persisted into the page,
+/// so the raw token never rides the prerendered HTML/state blob. The circuit side redeems the
+/// handle (single use) to recover the token.
 /// </summary>
 public sealed class PersistentUserBearerRelay : IUserBearerRelay, IDisposable
 {
     private const string StateKey = "auxilia.console.userbearer";
 
     private readonly PersistentComponentState _state;
+    private readonly UserBearerHandleStore _store;
     private PersistingComponentStateSubscription? _subscription;
     private Func<UserBearerToken?>? _snapshot;
 
-    public PersistentUserBearerRelay(PersistentComponentState state) => _state = state;
+    public PersistentUserBearerRelay(PersistentComponentState state, UserBearerHandleStore store)
+    {
+        _state = state;
+        _store = store;
+    }
 
     public void OnPersist(Func<UserBearerToken?> snapshot)
     {
@@ -42,13 +49,13 @@ public sealed class PersistentUserBearerRelay : IUserBearerRelay, IDisposable
         _subscription ??= _state.RegisterOnPersisting(() =>
         {
             if (_snapshot?.Invoke() is { } token)
-                _state.PersistAsJson(StateKey, token);
+                _state.PersistAsJson(StateKey, _store.Stash(token));
             return Task.CompletedTask;
         });
     }
 
     public UserBearerToken? TryTake()
-        => _state.TryTakeFromJson<UserBearerToken>(StateKey, out var token) ? token : null;
+        => _state.TryTakeFromJson<string>(StateKey, out var handle) ? _store.Redeem(handle) : null;
 
     public void Dispose() => _subscription?.Dispose();
 }
