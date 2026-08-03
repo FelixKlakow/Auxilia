@@ -5,16 +5,12 @@ using MailKit.Net.Imap;
 using MailKit.Security;
 
 // Interactive dev stand: boots the SAME environment as the EndToEnd acceptance test —
-// GreenMail, RabbitMQ, MongoDB, Core.Runner, Core.Api, and the TriggerHost (email task source),
-// with the mail-review configuration seeded — and keeps it running until you quit, so the mail
-// path can be exercised. F5-able from Visual Studio.
-//
-// NOTE (BackendService retirement, Phase 4): the operator dashboard has moved out of the retired
-// BackendService into the new Auxilia.AdminConsole (a pure Core.Api client). The console is NOT yet
-// wired into this dev stand, so there is no dashboard URL to open. TODO(Phase 4+): boot the
-// AdminConsole container here (same-origin with Core.Api) and restore the browser + screenshot flows.
+// GreenMail, RabbitMQ, MongoDB, Core.Runner, Core.Api, the TriggerHost (email task source), and
+// the Auxilia.AdminConsole operator UI — with the mail-review configuration seeded — and keeps it
+// running until you quit, so the mail path can be exercised and the console explored in a
+// browser. F5-able from Visual Studio.
 
-// Screenshot mode (`-- --screenshots [outputDir]`): parked until the AdminConsole is wired in.
+// Screenshot mode (`-- --screenshots [outputDir]`): captures every AdminConsole page as PNG.
 if (args.Length > 0 && args[0] == "--screenshots")
     return await ScreenshotHarness.RunAsync(args.Length > 1 ? args[1] : null);
 
@@ -51,12 +47,12 @@ try
     Console.WriteLine($"  GreenMail : IMAP localhost:{EndToEndEnvironment.MappedImap}, " +
                       $"SMTP localhost:{EndToEndEnvironment.MappedSmtp}  (auth disabled — any address logs in)");
     Console.WriteLine($"  MongoDB   : {EndToEndEnvironment.MongoConnectionString}  (database 'Auxilia')");
-    Console.WriteLine("  Dashboard : moved to Auxilia.AdminConsole — not yet wired into this stand (TODO Phase 4+).");
+    Console.WriteLine($"  Console   : {EndToEndEnvironment.AdminConsoleUrl}   (Auxilia.AdminConsole, signed in via its Administrator app key)");
     Console.WriteLine($"  Data      : {(EndToEndEnvironment.DataVolumeName is null
         ? "ephemeral (start with --keep-data to keep seeded triggers across restarts)"
         : $"durable in Docker volumes '{EndToEndEnvironment.DataVolumeName}-*'")}");
     Console.WriteLine();
-    Console.WriteLine("  [m] send a demo mail (triggers a Code Review run via the email intake)   [s] send a session mail   [q] quit");
+    Console.WriteLine("  [m] send a demo mail (triggers a Code Review run via the email intake)   [s] send a session mail   [o] open the console   [q] quit");
     Console.WriteLine();
 
     if (Console.IsInputRedirected)
@@ -86,6 +82,10 @@ try
                     await DemoMail.SendAsync(subject, cts.Token);
                     Console.WriteLine($"  -> mail sent: \"{subject}\" — the run dispatches once the trigger polls.");
                     _ = WatchForReplyAsync(subject, cts.Token);
+                    break;
+                case ConsoleKey.O:
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                        EndToEndEnvironment.AdminConsoleUrl) { UseShellExecute = true });
                     break;
                 case ConsoleKey.S:
                     var (sessionSubject, sessionBody, mailSource) = DemoMail.LoadSessionMail(++demoCounter);

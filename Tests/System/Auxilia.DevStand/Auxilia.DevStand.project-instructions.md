@@ -1,46 +1,36 @@
 # Auxilia.DevStand
 
 Interactive developer stand: boots the same containerized platform stack as the EndToEnd
-acceptance test (`Tests/System/Auxilia.SystemTestSuite/EndToEnd/EndToEndEnvironment.cs`) and keeps it
-running until quit, so the dashboard can be explored manually in a browser.
+acceptance test (`Tests/System/Auxilia.SystemTestSuite/EndToEnd/EndToEndEnvironment.cs`) —
+including the `Auxilia.AdminConsole` operator UI — and keeps it running until quit, so the
+console can be explored manually in a browser.
 
 ## Usage
 
 - Visual Studio: set `Auxilia.DevStand` as startup project and F5, or
-- CLI: `dotnet run --project Auxilia.DevStand` (Docker Desktop must be running).
-- `--presentation` boots without pre-built configurations (configure live in the editor);
-  `--keep-data` persists Mongo and the dashboard's cookie-signing keys in named Docker
-  volumes (`auxilia-devstand-*`), so slots, workflows, and the login survive restarts
-  (delete the volumes for a factory reset).
+- CLI: `dotnet run --project Tests/System/Auxilia.DevStand` (Docker Desktop must be running).
+- `--keep-data` persists Mongo in a named Docker volume (`auxilia-devstand-mongo`), so
+  triggers survive restarts (delete the volume for a factory reset).
 
-On startup it prints (and opens) the dashboard URL — login `admin` / `e2e-admin-pw` — plus
-the mapped GreenMail and MongoDB endpoints. Keys: `m` sends a demo mail that triggers a
-Code Review run (the reply is announced when it arrives), `c` dispatches a Claude Code run
-(watch the live agent chat on the dashboard), `o` re-opens the browser, `q` (or Ctrl+C)
-tears everything down.
-
-Claude Code runs use the in-image stub CLI by default. Set `ANTHROPIC_API_KEY` in the
-environment BEFORE starting the stand and the `coding-agent` slot is re-seeded with the
-real `claude` binary baked into the workflow image — `c` then runs a real agent session
-(this is the manual test path; system tests always use the stub).
+On startup it prints the AdminConsole URL plus the mapped Core.Api, GreenMail, and MongoDB
+endpoints. The console container carries a static Administrator app key (`Core__ApiKey`), so
+every page renders fully authenticated as that service principal — no browser sign-in
+(production uses the same-origin Core session cookie instead). Keys: `m` sends a demo mail
+that triggers a Code Review run (the reply is announced when it arrives), `s` sends a session
+mail, `o` opens the console in the browser, `q` (or Ctrl+C) tears everything down.
 
 ## Screenshot mode (visual verification harness)
 
-`dotnet run --project Auxilia.DevStand -- --screenshots [outputDir]` (default outputDir:
-`artifacts/screenshots` under the repo root, which is gitignored) boots the stack, sends one
-demo mail, then drives headless Chromium through Microsoft.Playwright (1600x900 viewport) and
-captures full-page PNGs of every dashboard page: `01-login.png` through `14-audit.png` plus
-`15-runs-filtered.png` (login is captured anonymously, the rest after logging in through the
-real login form). `02-dashboard.png` is captured while the mail-triggered Code Review run is
-still RUNNING (polled via Mongo) so the dashboard's Live now section has content; the harness
-then waits for the terminal state before capturing the remaining pages. Demo data is seeded
-beforehand: catalog availability, one demo workflow configuration, and run-history records
-(the finished run is adopted into the demo configuration and gains a rerun successor plus a
-schedule-dispatched sibling, so `15-runs-filtered.png` shows the trigger-origin column and
-`06-run-detail.png` shows lineage chips). `04-workflow-editor.png` is interactive: the
-harness walks the workflow-editor create flow (basics filled, work-items slot added, email
-provider chosen) so the generated settings form is on screen. It prints each absolute path,
-tears the stack down, and exits 0 on success.
+`dotnet run --project Tests/System/Auxilia.DevStand -- --screenshots [outputDir]` (default
+outputDir: `artifacts/screenshots` under the repo root, which is gitignored) boots the stack,
+sends one demo mail, then drives headless Chromium through Microsoft.Playwright (1600x900
+viewport) and captures full-page PNGs of the AdminConsole pages: `01-dashboard.png` through
+`12-audit.png` (dashboard, home, runs, run detail, workflows, workflow editor, connectors,
+admin principals, provider catalog, identity sources, workflow types, audit).
+`01-dashboard.png` is captured while the mail-triggered Code Review run is still RUNNING
+(polled via Mongo) so the dashboard's Active now tile has content; the harness then waits for
+the terminal state before capturing the remaining pages (`04-run-detail.png` shows that
+finished run). It prints each absolute path, tears the stack down, and exits 0 on success.
 
 Browser provisioning is automatic: before booting containers the harness invokes
 `Microsoft.Playwright.Program.Main(["install", "chromium"])`, which downloads Chromium to

@@ -67,8 +67,9 @@ public class EndToEndEnvironment
     public   const string GitUsername        = "builduser";
     public   const string GitPassword        = "the-pat";
 
-    internal const string CoreApiImageName     = "auxilia-core-api:system-test";
-    internal const string TriggerHostImageName = "auxilia-trigger-host:system-test";
+    internal const string CoreApiImageName      = "auxilia-core-api:system-test";
+    internal const string TriggerHostImageName  = "auxilia-trigger-host:system-test";
+    internal const string AdminConsoleImageName = "auxilia-admin-console:system-test";
     internal const string BootstrapApiKey  = "aux-system-test-key-e2e-0123456789abcd";
 
     public   const string CommandQueue        = "workflow.run-commands-e2e";
@@ -117,6 +118,11 @@ public class EndToEndEnvironment
     public static IContainer CoreApi { get; private set; } = null!;
     /// <summary>TriggerHost running the email task-source adapter + the client-library engines.</summary>
     public static IContainer TriggerHost { get; private set; } = null!;
+    /// <summary>Auxilia.AdminConsole — the operator/admin Blazor UI, a pure Core.Api client.</summary>
+    public static IContainer AdminConsole { get; private set; } = null!;
+    /// <summary>Browser-reachable AdminConsole base URL (mapped host port).</summary>
+    public static string AdminConsoleUrl =>
+        $"http://localhost:{AdminConsole.GetMappedPublicPort(8080)}";
     public static IMessageBusClient MessageBusClient { get; private set; } = null!;
     /// <summary>Authenticated (bootstrap Administrator) client for the Core Run/identity/audit API.</summary>
     public static HttpClient CoreApiClient { get; private set; } = null!;
@@ -159,6 +165,8 @@ public class EndToEndEnvironment
             CoreApiImageName, "Source/Platform/Auxilia.Core.Api/Dockerfile");
         await WorkflowDispatchEnvironment.BuildImageAsync(
             TriggerHostImageName, "Source/Platform/Auxilia.TriggerHost/Dockerfile");
+        await WorkflowDispatchEnvironment.BuildImageAsync(
+            AdminConsoleImageName, "Source/Platform/Auxilia.AdminConsole/Dockerfile");
         await WorkflowDispatchEnvironment.BuildImageAsync(
             WorkflowImageName, "Source/Workflows/Auxilia.CodeReview.Workflow/Dockerfile");
         await WorkflowDispatchEnvironment.BuildImageAsync(
@@ -245,6 +253,7 @@ public class EndToEndEnvironment
         // Seed Core identity + the mail-review configuration over the REST API (bootstrap admin).
         RunAsPrincipalId = await CreateCorePrincipalAsync("E2E Mail Trigger", "User");
         var triggerHostApiKey = await CreateCoreServiceKeyAsync("E2E Trigger Host", "Operator");
+        var adminConsoleApiKey = await CreateCoreServiceKeyAsync("E2E Admin Console", "Administrator");
         MailReviewConfigurationId = await CreateMailReviewConfigurationAsync();
 
         // --- Runner: Mongo-backed execution plane. Resolves every slot JIT from the Core. ---
@@ -311,7 +320,22 @@ public class EndToEndEnvironment
             .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("Email task source started"));
         TriggerHost = triggerHostBuilder.Build();
 
-        await Task.WhenAll(Runner.StartAsync(), TriggerHost.StartAsync());
+        // --- AdminConsole: the operator/admin Blazor UI, a pure Core client. The dev/screenshot
+        // stand runs it with a static Administrator app key (Core__ApiKey): with no browser
+        // session cookie, the console's per-user bearer provider yields null and every Core call
+        // (including the auth handler's who-am-I) falls back to that key — pages render fully
+        // authenticated without the same-origin gateway the production deployment uses.
+        AdminConsole = new ContainerBuilder(AdminConsoleImageName)
+            .WithNetwork(_network)
+            .WithEnvironment("ASPNETCORE_URLS", "http://+:8080")
+            .WithEnvironment("Core__BaseAddress", $"http://{CoreApiAlias}:8080")
+            .WithEnvironment("Core__ApiKey",      adminConsoleApiKey)
+            .WithPortBinding(8080, assignRandomHostPort: true)
+            .WithWaitStrategy(
+                Wait.ForUnixContainer().UntilHttpRequestIsSucceeded(r => r.ForPort(8080).ForPath("/health")))
+            .Build();
+
+        await Task.WhenAll(Runner.StartAsync(), TriggerHost.StartAsync(), AdminConsole.StartAsync());
 
         MessageBusClient = await RabbitMqClient.CreateAsync(
             _rabbitMq.Hostname, _rabbitMq.GetMappedPublicPort(5672));
@@ -384,8 +408,22 @@ public class EndToEndEnvironment
 
     private static async Task AssignRoleAsync(Guid principalId, string role)
     {
-        var resp = await CoreApiClient.PostAsJsonAsync(
-            $"/api/principals/{principalId}/roles", new AssignRoleRequest(role));
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post, $"/api/principals/{principalId}/roles")
+        {
+            Content = JsonContent.Create(new AssignRoleRequest(role))
+        };
+        // Granting Administrator is step-up gated: re-prove the bootstrap caller's own credential
+        // (the API key) for a short-lived elevation ticket and send it along.
+        if (role == "Administrator")
+        {
+            var stepUp = await CoreApiClient.PostAsJsonAsync(
+                "/auth/step-up", new StepUpRequest(BootstrapApiKey));
+            stepUp.EnsureSuccessStatusCode();
+            var ticket = (await stepUp.Content.ReadFromJsonAsync<ElevationTicket>())!;
+            request.Headers.Add("X-Auxilia-Elevation", ticket.Token);
+        }
+        var resp = await CoreApiClient.SendAsync(request);
         resp.EnsureSuccessStatusCode();
     }
 
@@ -456,6 +494,7 @@ public class EndToEndEnvironment
     {
         CoreApiClient?.Dispose();
         if (MessageBusClient is IAsyncDisposable d) await d.DisposeAsync();
+        if (AdminConsole is not null) await AdminConsole.DisposeAsync();
         if (TriggerHost is not null) await TriggerHost.DisposeAsync();
         if (CoreApi is not null) await CoreApi.DisposeAsync();
         if (Runner  is not null) await Runner.DisposeAsync();
