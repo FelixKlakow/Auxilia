@@ -74,8 +74,11 @@ builder.Services.AddCoreAuthentication(builder.Configuration);
 // --- Settings ---
 builder.Services.Configure<CoreApiSettings>(builder.Configuration.GetSection("CoreApi"));
 
-// --- Rate limiting: bound slot-credential resolution per run (defence against a compromised runner) ---
+// --- Rate limiting: bound slot-credential resolution per run (defence against a compromised runner)
+// and password sign-in per client IP (defence against brute-forcing) ---
 var coreApiRateSettings = builder.Configuration.GetSection("CoreApi").Get<CoreApiSettings>() ?? new CoreApiSettings();
+var coreSecurityRateSettings =
+    builder.Configuration.GetSection("CoreSecurity").Get<CoreSecuritySettings>() ?? new CoreSecuritySettings();
 builder.Services.AddRateLimiter(options =>
 {
     options.AddPolicy("resolve-slot", httpContext =>
@@ -87,14 +90,30 @@ builder.Services.AddRateLimiter(options =>
                 PermitLimit = coreApiRateSettings.ResolutionRateLimitPermitsPerMinute,
                 Window = TimeSpan.FromMinutes(1)
             }));
+    options.AddPolicy("auth-login", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = coreSecurityRateSettings.LoginRateLimitPermitsPerMinute,
+                Window = TimeSpan.FromMinutes(1)
+            }));
     options.OnRejected = async (context, ct) =>
     {
         context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        var audit = context.HttpContext.RequestServices.GetRequiredService<AuditLog>();
+        if (context.HttpContext.Request.Path.StartsWithSegments("/auth/login"))
+        {
+            var ip = context.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            await audit.AppendAsync(ip, "auth.login", ip, "rate-limited", ct: ct);
+            return;
+        }
         var runId = context.HttpContext.Request.RouteValues.TryGetValue("runId", out var r) ? r?.ToString() : null;
-        await context.HttpContext.RequestServices.GetRequiredService<AuditLog>().AppendAsync(
+        await audit.AppendAsync(
             "core-api", "workflow.slot-credential.rate-limited", runId ?? "unknown", "rate-limit-exceeded", ct: ct);
     };
 });
+builder.Services.AddSingleton<LoginAttemptThrottle>();
 
 // --- Core services ---
 builder.Services.AddHttpClient();
@@ -262,22 +281,32 @@ app.MapPost("/auth/token", (HttpContext http, UserBearerTokenService tokens) =>
 // hold the password to renew.
 app.MapPost("/auth/login", async (
         PasswordLoginRequest request, Auxilia.Governance.Identity.IIdentityProvider identity,
-        UserBearerTokenService tokens, PlatformSettingsService platformSettings, AuditLog audit,
-        CancellationToken ct) =>
+        UserBearerTokenService tokens, PlatformSettingsService platformSettings,
+        LoginAttemptThrottle throttle, AuditLog audit, CancellationToken ct) =>
 {
     var username = request.Username?.Trim() ?? "";
+    // Per-username failure throttle (the per-IP fixed window rides the endpoint's rate-limit
+    // policy): refused BEFORE the password is even checked, so a throttled attacker learns nothing.
+    if (throttle.IsBlocked(username))
+    {
+        await audit.AppendAsync(username, "auth.login", username, "rate-limited", ct: ct);
+        return Results.Json(new { error = "too many failed attempts; try again later" },
+            statusCode: StatusCodes.Status429TooManyRequests);
+    }
     var session = await identity.AuthenticatePasswordAsync(username, request.Password ?? "", ct);
     if (session is null)
     {
+        throttle.RecordFailure(username);
         await audit.AppendAsync(username, "auth.login", username, "denied", ct: ct);
         return Results.Json(new { error = "invalid credentials" }, statusCode: StatusCodes.Status401Unauthorized);
     }
+    throttle.RecordSuccess(username);
     var lifetime = await platformSettings.GetLoginTokenLifetimeAsync(ct);
     var (token, expiresUtc) = tokens.Issue(session.PrincipalId, lifetime);
     await audit.AppendAsync(
         session.PrincipalId.ToString(), "auth.login", session.PrincipalId.ToString(), "granted", ct: ct);
     return Results.Ok(new UserBearerToken(token, expiresUtc));
-}).AllowAnonymous();
+}).AllowAnonymous().RequireRateLimiting("auth-login");
 
 // Step-up: re-prove the caller's OWN credential (password / API key) to obtain a short-lived
 // elevation for security-sensitive administration. Both outcomes are audited.

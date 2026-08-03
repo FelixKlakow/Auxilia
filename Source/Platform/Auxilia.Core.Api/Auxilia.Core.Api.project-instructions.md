@@ -57,7 +57,8 @@ Source/Platform/Auxilia.Core.Api/
 │   ├── CoreClaims.cs                  # "auxilia:principal-id" claim; PrincipalIdOf; ExternalIdentityFromPrincipal; HasGroupOverage
 │   ├── IDirectoryGroupResolver.cs     # Overage seam + NullDirectoryGroupResolver (no-op default)
 │   ├── GraphDirectoryGroupResolver.cs # Reads >~200-group memberships from Microsoft Graph (delegated); wired when OIDC enabled
-│   ├── CoreSecuritySettings.cs        # BootstrapApiKey
+│   ├── CoreSecuritySettings.cs        # BootstrapApiKey; token lifetimes; /auth/login rate-limit knobs
+│   ├── LoginAttemptThrottle.cs        # Per-username failed-attempt throttle behind POST /auth/login
 │   ├── CoreSecurityBootstrap.cs       # Idempotently ensures the Administrator API-key principal
 │   └── CoreAuthorization.cs           # Shared REST/MCP authorize helper (returns a 401/403 result, or null on allow)
 └── Mcp/

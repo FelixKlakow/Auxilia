@@ -25,4 +25,21 @@ public sealed class CoreSecuritySettings
     /// FALLBACK; an administrator changes it at runtime via the platform-settings surface.
     /// </summary>
     public int LoginTokenLifetimeMinutes { get; set; } = 10080;
+
+    /// <summary>
+    /// Fixed-window rate limit on <c>POST /auth/login</c> per client IP: at most this many attempts
+    /// per minute, successful or not. Excess attempts get a 429 — brute-forcing passwords must
+    /// never be free.
+    /// </summary>
+    public int LoginRateLimitPermitsPerMinute { get; set; } = 5;
+
+    /// <summary>
+    /// Failed <c>POST /auth/login</c> attempts tolerated per username within
+    /// <see cref="LoginFailureWindowMinutes"/> before further attempts for that username are
+    /// refused (429) — throttles distributed guessing that rotates source IPs.
+    /// </summary>
+    public int LoginFailureLimitPerUsername { get; set; } = 5;
+
+    /// <summary>Sliding window (in minutes) for <see cref="LoginFailureLimitPerUsername"/>.</summary>
+    public int LoginFailureWindowMinutes { get; set; } = 5;
 }
