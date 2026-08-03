@@ -115,6 +115,11 @@ public interface ICoreClient
     Task<EnvironmentLayerDto> UpsertEnvironmentLayerAsync(UpsertEnvironmentLayer request, CancellationToken ct = default);
     Task DeleteEnvironmentLayerAsync(string providerType, CancellationToken ct = default);
 
+    // --- Environment bases (the configurable (name, version) vocabulary layers build on) ---
+    Task<IReadOnlyList<EnvironmentBaseDto>> ListEnvironmentBasesAsync(CancellationToken ct = default);
+    Task<EnvironmentBaseDto> UpsertEnvironmentBaseAsync(UpsertEnvironmentBase request, CancellationToken ct = default);
+    Task DeleteEnvironmentBaseAsync(string name, string version, CancellationToken ct = default);
+
     // --- Workflow-type registry (types are registered permanently with their signed package; only
     //     Active types run; reads require workflow-configuration.manage, writes workflow-type.manage,
     //     approve/deny the workflow-type.sign signing authority) ---

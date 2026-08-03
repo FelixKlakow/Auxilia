@@ -254,6 +254,19 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
     public Task DeleteEnvironmentLayerAsync(string providerType, CancellationToken ct = default)
         => DeleteAsync($"/api/environment-layers/{Uri.EscapeDataString(providerType)}", ct);
 
+    // --- Environment bases ---
+
+    public Task<IReadOnlyList<EnvironmentBaseDto>> ListEnvironmentBasesAsync(CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<EnvironmentBaseDto>>("/api/environment-bases", ct);
+
+    public Task<EnvironmentBaseDto> UpsertEnvironmentBaseAsync(
+        UpsertEnvironmentBase request, CancellationToken ct = default)
+        => PostAsync<UpsertEnvironmentBase, EnvironmentBaseDto>("/api/environment-bases", request, ct);
+
+    public Task DeleteEnvironmentBaseAsync(string name, string version, CancellationToken ct = default)
+        => DeleteAsync(
+            $"/api/environment-bases/{Uri.EscapeDataString(name)}/{Uri.EscapeDataString(version)}", ct);
+
     // --- Workflow types + schemas ---
 
     public Task<PagedResult<WorkflowTypeDto>> ListWorkflowTypesAsync(WorkflowTypeQuery query, CancellationToken ct = default)

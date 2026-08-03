@@ -41,7 +41,8 @@ public sealed record ProviderCatalogEntry(
     bool MountsIntoWorkspace = false,
     bool ComposesEnvironment = false,
     ProviderOAuthRefresh? OAuthRefresh = null,
-    string? EnvironmentBase = null);
+    string? EnvironmentBase = null,
+    string? EnvironmentBaseVersion = null);
 
 /// <summary>
 /// Declares, as pure data, how a provider's stored OAuth credential is refreshed: the Core
@@ -89,7 +90,8 @@ public sealed record RegisterSlotProvider(
     bool ComposesEnvironment = false,
     ProviderOAuthRefresh? OAuthRefresh = null,
     ProviderModelCatalog? ModelCatalog = null,
-    string? EnvironmentBase = null);
+    string? EnvironmentBase = null,
+    string? EnvironmentBaseVersion = null);
 
 /// <summary>One manifest setting of a provider being registered.</summary>
 public sealed record RegisterProviderSetting(

@@ -79,16 +79,28 @@ public sealed class WorkflowAuthoring(ICoreClient core)
             return;
 
         var catalog = (await core.QueryProviderCatalogAsync(new ProviderCatalogQuery(Take: 500), ct)).Items;
-        var bases = catalog
+        var entries = catalog
             .Where(e => e.ComposesEnvironment
-                        && e.EnvironmentBase is { Length: > 0 }
                         && providerTypes.Contains(e.ProviderType, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+        var bases = entries
+            .Where(e => e.EnvironmentBase is { Length: > 0 })
             .ToDictionary(e => e.ProviderType, e => e.EnvironmentBase!, StringComparer.OrdinalIgnoreCase);
         if (bases.Values.Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
             throw new ArgumentException(
                 "environment capabilities mix incompatible bases — "
                 + string.Join(", ", bases.Select(b => $"'{b.Key}' ({b.Value})"))
                 + ". One run composes one image on one base; pick layers of a single base.");
+        // The version axis mirrors the dispatch check: pinned versions must agree, unpinned
+        // layers compose with any version.
+        var versions = entries
+            .Where(e => e.EnvironmentBaseVersion is { Length: > 0 })
+            .ToDictionary(e => e.ProviderType, e => e.EnvironmentBaseVersion!, StringComparer.OrdinalIgnoreCase);
+        if (versions.Values.Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
+            throw new ArgumentException(
+                "environment capabilities mix incompatible base versions — "
+                + string.Join(", ", versions.Select(b => $"'{b.Key}' ({b.Value})"))
+                + ". One run composes one image on one base version; pick compatible layers.");
     }
 
     /// <summary>Validates, creates, and immediately dispatches the configuration.</summary>

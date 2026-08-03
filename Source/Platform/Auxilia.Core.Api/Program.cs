@@ -48,6 +48,8 @@ builder.Services.AddPlatformEntity<SlotProviderRecord>(platformData);
 builder.Services.AddPlatformEntity<ProviderCatalogRecord>(platformData);
 // Admin-managed environment layers (Dockerfile fragments the runner composes onto workflow images).
 builder.Services.AddPlatformEntity<EnvironmentLayerRecord>(platformData);
+// The environment-base catalog: configurable (name, version) base pairs layers build on.
+builder.Services.AddPlatformEntity<EnvironmentBaseRecord>(platformData);
 // Batched audit writes are an opt-in for high request rates (Audit:BatchedWrites); the
 // default keeps every append a completed store write.
 var auditSettings = new Auxilia.PlatformData.AuditLogSettings();
@@ -108,6 +110,7 @@ builder.Services.AddSingleton<DashboardPinService>();
 builder.Services.AddSingleton<AuditReadService>();
 builder.Services.AddSingleton<ProviderCatalogService>();
 builder.Services.AddSingleton<EnvironmentLayerService>();
+builder.Services.AddSingleton<EnvironmentBaseService>();
 builder.Services.AddSingleton<WorkflowSchemaReadService>();
 builder.Services.AddSingleton<PrincipalAdminService>();
 builder.Services.AddSingleton<SlotCredentialResolver>();
@@ -1076,6 +1079,42 @@ app.MapDelete("/api/environment-layers/{providerType}", async (
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ProviderCatalogManage, ct) is { } fail)
         return fail;
     return await svc.DeleteAsync(CoreClaims.PrincipalIdOf(http.User), providerType, ct)
+        ? Results.NoContent()
+        : Results.NotFound();
+}).RequireAuthorization();
+
+// --- Environment bases (the configurable (name, version) vocabulary layers build on) ---
+app.MapGet("/api/environment-bases", async (
+        HttpContext http, IPolicyEngine policy, EnvironmentBaseService svc, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ProviderCatalogManage, ct) is { } fail)
+        return fail;
+    return Results.Ok(await svc.ListAsync(ct));
+}).RequireAuthorization();
+
+app.MapPost("/api/environment-bases", async (
+        UpsertEnvironmentBase request, HttpContext http, IPolicyEngine policy,
+        EnvironmentBaseService svc, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ProviderCatalogManage, ct) is { } fail)
+        return fail;
+    try
+    {
+        return Results.Ok(await svc.UpsertAsync(CoreClaims.PrincipalIdOf(http.User), request, ct));
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+}).RequireAuthorization();
+
+app.MapDelete("/api/environment-bases/{name}/{version}", async (
+        string name, string version, HttpContext http, IPolicyEngine policy,
+        EnvironmentBaseService svc, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ProviderCatalogManage, ct) is { } fail)
+        return fail;
+    return await svc.DeleteAsync(CoreClaims.PrincipalIdOf(http.User), name, version, ct)
         ? Results.NoContent()
         : Results.NotFound();
 }).RequireAuthorization();

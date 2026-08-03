@@ -464,6 +464,12 @@ internal sealed class FakeCoreClient : ICoreClient
         => Nope<Task<EnvironmentLayerDto>>();
     public Task DeleteEnvironmentLayerAsync(string providerType, CancellationToken ct = default)
         => Nope<Task>();
+    public Task<IReadOnlyList<EnvironmentBaseDto>> ListEnvironmentBasesAsync(CancellationToken ct = default)
+        => Nope<Task<IReadOnlyList<EnvironmentBaseDto>>>();
+    public Task<EnvironmentBaseDto> UpsertEnvironmentBaseAsync(UpsertEnvironmentBase request, CancellationToken ct = default)
+        => Nope<Task<EnvironmentBaseDto>>();
+    public Task DeleteEnvironmentBaseAsync(string name, string version, CancellationToken ct = default)
+        => Nope<Task>();
     public Task DeleteConnectorAsync(Guid id, CancellationToken ct = default) => Task.CompletedTask;
     public Task<ConnectorBrowseResult> BrowseConnectorAsync(Guid id, BrowseConnector request, CancellationToken ct = default)
         => Task.FromResult(new ConnectorBrowseResult([]));

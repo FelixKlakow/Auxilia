@@ -97,6 +97,25 @@ public sealed class WorkflowAuthoringTests
     }
 
     [Test]
+    public void EnvironmentLayersOfMixedBaseVersions_AreRejectedBeforeSubmit()
+    {
+        _core.Schemas["implementation"] = Schema(
+            new WorkflowSlotDto("environment", null, null, Optional: true, null, AllowMultiple: true));
+        _core.ProviderCatalog.Add(new ProviderCatalogEntry(
+            "dotnet-10", true, "environment", [], [], null,
+            ComposesEnvironment: true, EnvironmentBase: "linux", EnvironmentBaseVersion: "ubuntu-22.04"));
+        _core.ProviderCatalog.Add(new ProviderCatalogEntry(
+            "node-22", true, "environment", [], [], null,
+            ComposesEnvironment: true, EnvironmentBase: "linux", EnvironmentBaseVersion: "ubuntu-24.04"));
+
+        var ex = Assert.ThrowsAsync<ArgumentException>(() => _authoring.ConfigureAsync(Request(
+            new SlotBinding("environment", ProviderType: "dotnet-10"),
+            new SlotBinding("environment", ProviderType: "node-22"))));
+        Assert.That(ex!.Message, Does.Contain("mix incompatible base versions")
+            .And.Contain("ubuntu-22.04").And.Contain("ubuntu-24.04"));
+    }
+
+    [Test]
     public async Task EnvironmentLayersOfOneBase_Pass()
     {
         _core.Schemas["implementation"] = Schema(

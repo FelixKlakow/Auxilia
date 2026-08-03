@@ -21,6 +21,7 @@ public sealed record SignedEnvironmentFragment(
 public sealed class EnvironmentLayerService(
     IDataAccess<EnvironmentLayerRecord> layers,
     ProviderCatalogService catalog,
+    EnvironmentBaseService baseCatalog,
     AuditLog auditLog,
     TimeProvider clock,
     IOptions<CoreApiSettings> settings)
@@ -101,12 +102,21 @@ public sealed class EnvironmentLayerService(
         if (string.IsNullOrWhiteSpace(request.BaseEnvironment))
             throw new ArgumentException("baseEnvironment is required (e.g. linux, windows)");
 
+        // A pinned base version must exist in the base catalog — a pin against a typo would
+        // otherwise silently never compose with anything.
+        var baseName = request.BaseEnvironment.Trim().ToLowerInvariant();
+        var baseVersion = string.IsNullOrWhiteSpace(request.BaseVersion) ? null : request.BaseVersion.Trim();
+        if (baseVersion is not null && !await baseCatalog.ExistsAsync(baseName, baseVersion, ct))
+            throw new ArgumentException(
+                $"base version '{baseName}/{baseVersion}' is not registered in the environment-base catalog");
+
         var record = new EnvironmentLayerRecord
         {
             Id = EnvironmentLayerRecord.IdFor(type),
             ProviderType = type,
             Description = request.Description,
-            BaseEnvironment = request.BaseEnvironment.Trim().ToLowerInvariant(),
+            BaseEnvironment = baseName,
+            BaseVersion = baseVersion,
             SetupScript = request.SetupScript,
             Version = string.IsNullOrWhiteSpace(request.Version) ? null : request.Version.Trim(),
             UpdatedUtc = clock.GetUtcNow(),
@@ -122,7 +132,8 @@ public sealed class EnvironmentLayerService(
             Contracts: [EnvironmentContract],
             Settings: [],
             ComposesEnvironment: true,
-            EnvironmentBase: record.BaseEnvironment), ct);
+            EnvironmentBase: record.BaseEnvironment,
+            EnvironmentBaseVersion: record.BaseVersion), ct);
         await catalog.SetAvailabilityAsync(actorName, type, available: true, ct);
         await auditLog.AppendAsync(actorName, "environment-layer.upserted", type, "upserted", ct: ct);
         return ToDto(record);
@@ -142,5 +153,5 @@ public sealed class EnvironmentLayerService(
 
     private static EnvironmentLayerDto ToDto(EnvironmentLayerRecord record)
         => new(record.ProviderType, record.Description, record.BaseEnvironment,
-            record.SetupScript, record.Version, record.UpdatedUtc);
+            record.SetupScript, record.Version, record.UpdatedUtc, record.BaseVersion);
 }

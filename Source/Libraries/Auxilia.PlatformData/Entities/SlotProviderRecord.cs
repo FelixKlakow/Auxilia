@@ -27,6 +27,9 @@ public sealed record SlotProviderRecord : IEntity
     /// <summary>The base an environment layer builds on ("linux"/"windows") — one run composes ONE base.</summary>
     public string? EnvironmentBase { get; init; }
 
+    /// <summary>Optional pinned base VERSION (from the environment-base catalog); null composes with any.</summary>
+    public string? EnvironmentBaseVersion { get; init; }
+
     /// <summary>Serialized <c>ProviderOAuthRefresh</c> — the data-driven token-refresh spec, when any.</summary>
     public string? OAuthRefreshJson { get; init; }
 

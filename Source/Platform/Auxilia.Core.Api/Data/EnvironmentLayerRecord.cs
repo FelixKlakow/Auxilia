@@ -20,6 +20,9 @@ public sealed record EnvironmentLayerRecord : IEntity
     /// <summary>The base this environment initializes on (e.g. "linux", "windows").</summary>
     public required string BaseEnvironment { get; init; }
 
+    /// <summary>Optional pinned base version (from the environment-base catalog); null = any.</summary>
+    public string? BaseVersion { get; init; }
+
     /// <summary>The initialization script executed while building the environment layer.</summary>
     public required string SetupScript { get; init; }
 

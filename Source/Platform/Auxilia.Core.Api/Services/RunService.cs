@@ -142,6 +142,7 @@ public sealed class RunService(
         var mounts = new List<WorkspaceMountDispatch>();
         var environmentCapabilities = new List<string>();
         var environmentBases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var environmentBaseVersions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var pluginBindings = new List<SlotBinding>();
         var stashedBindings = new List<SlotBinding>();
         foreach (var binding in slotBindings)
@@ -155,6 +156,8 @@ public sealed class RunService(
                     environmentCapabilities.Add(entry.ProviderType);
                 if (entry.EnvironmentBase is { Length: > 0 } envBase)
                     environmentBases[entry.ProviderType] = envBase;
+                if (entry.EnvironmentBaseVersion is { Length: > 0 } envBaseVersion)
+                    environmentBaseVersions[entry.ProviderType] = envBaseVersion;
                 continue;
             }
             if (entry is not { MountsIntoWorkspace: true })
@@ -187,6 +190,13 @@ public sealed class RunService(
                 "environment capabilities mix incompatible bases — "
                 + string.Join(", ", environmentBases.Select(b => $"'{b.Key}' ({b.Value})"))
                 + ". One run composes one image on one base; pick layers of a single base.");
+        // The same holds along the VERSION axis: layers pinning different versions of the base
+        // can never build into one image. Unpinned layers compose with any version.
+        if (environmentBaseVersions.Values.Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
+            throw new InvalidOperationException(
+                "environment capabilities mix incompatible base versions — "
+                + string.Join(", ", environmentBaseVersions.Select(b => $"'{b.Key}' ({b.Value})"))
+                + ". One run composes one image on one base version; pick compatible layers.");
 
         // Gate identity-linked connectors — including each repo's auth connector: the triggering
         // principal must be allowed to use every connector this run binds. Company connectors pass

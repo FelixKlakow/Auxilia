@@ -542,6 +542,16 @@ layers the fragments onto the workflow image, content-addressed (`auxilia-env:<h
 distinct combination builds once and later runs cache-hit. An unknown capability fails
 pre-flight. A "template" is simply a capability whose fragment installs a whole stack.
 
+**Versioned bases (2026-08-03).** A layer's base is a NAME ("linux", "windows") plus an
+optional pinned VERSION from the admin-managed **environment-base catalog**
+(`/api/environment-bases`: (name, version) pairs like ("linux", "ubuntu-24.04") — an open,
+configurable vocabulary, provider-catalog-gated like layers). A pinned version must be
+registered (a typo'd pin would silently never compose); an unpinned layer composes with any
+version of its base. The pin rides the layer's catalog entry (`EnvironmentBaseVersion`), and
+both the dispatch (`RunService`) and the authoring mirror (`WorkflowAuthoring`) fail fast on
+mixed base versions exactly as they do on mixed base names — one run composes one image on
+one base version.
+
 **Warm cache behaviour:**
 - Cache entries are populated on first fetch and kept current by background `git fetch` / equivalent per source system
 - A cache entry may only be used to create a snapshot if the requesting identity independently passes an access check for that repository

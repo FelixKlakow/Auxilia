@@ -103,16 +103,15 @@ access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing di
   layer's base rides its catalog entry.)
 - **Trust keys in real deployments** — `WorkflowDispatcher__TrustedEnvironmentSigningKeys`
   is empty (permissive) in dev; any real deployment needs the key material story.
-- **Versioned bases and layers (2026-08-03).** A base is today a single open-vocabulary
-  string (`linux`/`windows`) and each capability is one record (`IdFor(providerType)` —
-  upsert overwrites), with `Version` a dormant label. Direction: (a) make bases an
-  admin-managed catalog of their own — base name + version → concrete image reference
-  (tag or digest), so "linux" can mean several pinned, configurable images and runs/layers
-  can select or default-latest; (b) let a capability exist in multiple versions (identity
-  becomes provider type + version, each with its own catalog entry, e.g. `dotnet-10` /
-  `dotnet-8` — or one provider with a version axis), with layers optionally declaring a
-  compatible base name + minimum base version. Stays an open vocabulary (no enums);
-  content-addressed composed-image tags already absorb this for free.
+- ~~Versioned bases~~ — DONE 2026-08-03 (ARCHITECTURE "Versioned bases"): admin-managed
+  environment-base catalog ((name, version) pairs, `/api/environment-bases`, provider-catalog
+  gated, full client surface), layers optionally pin a registered base version, the pin rides
+  the catalog entry, and dispatch + authoring fail fast on mixed base versions like mixed
+  base names. Capability-side versioning needs no mechanism — the open provider-type
+  vocabulary already carries it (`dotnet-10` / `dotnet-8` are distinct capabilities).
+  Remaining idea (unbuilt): bases carrying a concrete image reference the composition could
+  `FROM` — today composition always builds FROM the workflow image, so an image ref on the
+  base only becomes meaningful with pre-built environment containers.
 - **Build-time hardening (context, 2026-08-02).** Environment composition runs `docker build`
   on a generated one-file Dockerfile (context = that file only; nothing from the host leaks
   in). The RUN steps execute in ordinary build containers: root inside, NO egress policy

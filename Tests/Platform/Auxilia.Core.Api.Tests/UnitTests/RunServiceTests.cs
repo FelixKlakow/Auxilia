@@ -213,6 +213,59 @@ public sealed class RunServiceTests
     }
 
     [Test]
+    public async Task RunInline_EnvironmentLayersOfMixedBaseVersions_FailTheDispatch()
+    {
+        var (service, _, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
+            "dotnet-10", "environment", null, ["exec-env"], [],
+            ComposesEnvironment: true, EnvironmentBase: "linux", EnvironmentBaseVersion: "ubuntu-22.04"),
+            CancellationToken.None);
+        await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
+            "node-22", "environment", null, ["exec-env"], [],
+            ComposesEnvironment: true, EnvironmentBase: "linux", EnvironmentBaseVersion: "ubuntu-24.04"),
+            CancellationToken.None);
+
+        var ex = Assert.ThrowsAsync<InvalidOperationException>(() => service.RunInlineAsync(
+            new RunRequest("wt", SlotBindings:
+            [
+                new SlotBinding("environment", ProviderType: "dotnet-10"),
+                new SlotBinding("environment", ProviderType: "node-22"),
+            ]),
+            triggeredBy: null, CancellationToken.None));
+
+        Assert.That(ex!.Message, Does.Contain("mix incompatible base versions")
+            .And.Contain("ubuntu-22.04").And.Contain("ubuntu-24.04"),
+            "Layers pinning different base versions can never build into one image.");
+    }
+
+    [Test]
+    public async Task RunInline_PinnedAndUnpinnedBaseVersions_Dispatch()
+    {
+        var (service, bus, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
+            "dotnet-10", "environment", null, ["exec-env"], [],
+            ComposesEnvironment: true, EnvironmentBase: "linux", EnvironmentBaseVersion: "ubuntu-24.04"),
+            CancellationToken.None);
+        await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
+            "node-22", "environment", null, ["exec-env"], [],
+            ComposesEnvironment: true, EnvironmentBase: "linux"), CancellationToken.None);
+
+        await service.RunInlineAsync(
+            new RunRequest("wt", SlotBindings:
+            [
+                new SlotBinding("environment", ProviderType: "dotnet-10"),
+                new SlotBinding("environment", ProviderType: "node-22"),
+            ]),
+            triggeredBy: null, CancellationToken.None);
+
+        Assert.That(
+            bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>().Count(),
+            Is.EqualTo(1), "an unpinned layer composes with any version of its base");
+    }
+
+    [Test]
     public async Task RunInline_EnvironmentLayersOfOneBase_Dispatch()
     {
         var (service, bus, _, registry, _) = New();
