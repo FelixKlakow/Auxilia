@@ -75,11 +75,11 @@ function Start-StackService([string]$Name, [string]$Project, [hashtable]$Service
         # the plain $env:name syntax rejects as a parser error — silently killing the window.
         $setup = ($ServiceEnv.GetEnumerator() | ForEach-Object { "`${env:$($_.Key)}='$($_.Value)'" }) -join "; "
         $proc = Start-Process pwsh -WorkingDirectory $repo -PassThru -ArgumentList "-NoExit", "-Command",
-            "$setup; dotnet run --project $Project --no-build"
+            "$setup; dotnet run --project $Project --no-build --no-launch-profile"
     } else {
         foreach ($e in $ServiceEnv.GetEnumerator()) { Set-Item "env:$($e.Key)" $e.Value }
         $proc = Start-Process dotnet -WorkingDirectory $repo -WindowStyle Hidden -PassThru `
-            -ArgumentList "run", "--project", $Project, "--no-build" `
+            -ArgumentList "run", "--project", $Project, "--no-build", "--no-launch-profile" `
             -RedirectStandardOutput (Join-Path $stateDir "$Name.log") `
             -RedirectStandardError  (Join-Path $stateDir "$Name.err.log")
         foreach ($e in $ServiceEnv.GetEnumerator()) { Remove-Item "env:$($e.Key)" }
