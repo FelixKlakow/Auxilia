@@ -13,6 +13,8 @@
     </ItemGroup>
 
     <ItemGroup>
+        <!-- Pinned above bunit's vulnerable transitive floor (GHSA-pgww-w46g-26qg). -->
+        <PackageReference Include="AngleSharp" Version="1.7.0" />
         <PackageReference Include="bunit" Version="2.7.2" />
         <PackageReference Include="coverlet.collector" Version="6.0.4" />
         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.0" />
