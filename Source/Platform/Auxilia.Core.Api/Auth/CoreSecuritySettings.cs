@@ -21,7 +21,8 @@ public sealed class CoreSecuritySettings
     /// <summary>
     /// Lifetime (in minutes) of a per-user bearer minted by <c>POST /auth/login</c> for desktop/CLI
     /// clients. Longer than the console token — a desktop client has no cookie session to silently
-    /// re-mint from, and must not hold the user's password to renew. Default: one workday.
+    /// re-mint from, and must not hold the user's password to renew. Default: one week. This is the
+    /// FALLBACK; an administrator changes it at runtime via the platform-settings surface.
     /// </summary>
-    public int LoginTokenLifetimeMinutes { get; set; } = 480;
+    public int LoginTokenLifetimeMinutes { get; set; } = 10080;
 }

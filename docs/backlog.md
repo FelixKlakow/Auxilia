@@ -136,6 +136,12 @@ access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing di
   the mount's root before the application, fail-fast, under the run's egress policy. Open:
   a Docker system test exercising a real in-container setup script.
 
+- **Temporary/empty workspaces (2026-08-03).** With workspaces first-class (a saved
+  workspace-mount resource is usually a repository but named for what it IS), the natural next
+  provider is a non-git one: an "empty workspace" mount that materializes a fresh scratch
+  directory (optionally artifact-seeded) per run — same roles pipeline, no clone. Nothing in
+  the Core needs to change; it is one new mount materializer + catalog descriptor.
+
 ## CI validation — Docker system tests (not runnable locally)
 - Email slot **plugin-dependency loading** (highest risk — MailKit/MimeKit/BouncyCastle
   copied alongside the provider DLL).

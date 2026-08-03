@@ -9,7 +9,7 @@ namespace Auxilia.Core.Api.Data;
 /// (Personal owner + grants, or Company). Bindings reference it by id; dispatch expands the
 /// reference live, so edits apply to every configuration using it.
 /// </summary>
-public sealed record CoreRepositoryRecord : IEntity
+public sealed record CoreWorkspaceRecord : IEntity
 {
     public Guid Id { get; init; }
 

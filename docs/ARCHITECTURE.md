@@ -506,14 +506,16 @@ graph TB
     WF_A -.->|cannot reach| CACHE
 ```
 
-**First-class repository resources (2026-08-03).** A repository can be saved once as a Core
-resource (`/api/repositories`): a workspace-mount provider's NON-secret settings (clone URL,
+**First-class workspace resources (2026-08-03).** A workspace source — usually a repository,
+but deliberately named for what it IS: any workspace-mount source, including future
+non-repository ones (a temporary scratch workspace, a share) — can be saved once as a Core
+resource (`/api/workspaces`): a workspace-mount provider's NON-secret settings (clone URL,
 branch, working directory, cache/push policy, commit identity, setup script) plus an optional
 credential-connector reference, shared exactly like connectors (Personal owner + grants, or
-Company). A configuration's slot binding references it by id (`SlotBinding.RepositoryId`);
+Company). A configuration's slot binding references it by id (`SlotBinding.WorkspaceId`);
 dispatch expands the reference LIVE — the resource supplies provider type, settings, and
 connector, binding-level values override per use, and access is gated like connectors — so
-editing the repository once (a new setup script, a branch move) applies to every configuration
+editing the workspace once (a new setup script, a branch move) applies to every configuration
 referencing it. Settings are non-secret and round-trip on reads; the credential never leaves
 the connector.
 
@@ -988,6 +990,17 @@ separation of duties apply to desktop clients too. The desktop lifetime
 token — there is no cookie session to silently re-mint from, and the client must never hold
 the password to renew. Disabled principals cannot sign in; both outcomes are audited
 (`auth.login` granted/denied).
+
+### Runtime platform settings (2026-08-03)
+
+Security knobs an administrator changes WITHOUT a redeployment live in the platform-settings
+store (`GET/PUT /api/platform-settings`, gated `policy.administer`; writes additionally demand
+a step-up elevation — they shape the security posture). Known keys only (a typo fails loudly);
+an unset key falls back to the deployment configuration. First key:
+`auth.login-token-lifetime-minutes` — the desktop sign-in session lifetime (deployment default
+one week), applied to every NEW sign-in immediately. Deliberately NO config-side ceiling: the
+deployment default is a reasonable security default, not a babysitter — the admin surface
+(audited, elevation-gated) is trusted to override it in either direction.
 
 ### Safeguards for principal administration
 

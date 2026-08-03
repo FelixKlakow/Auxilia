@@ -10,20 +10,20 @@ namespace Auxilia.Core.Api.Services;
 /// stays a connector reference), so reads return them — unlike connectors. Use in a run is
 /// gated like connectors: Company usable by anyone, Personal by the owner and granted subjects.
 /// </summary>
-public sealed class RepositoryResourceService(
-    IDataAccess<CoreRepositoryRecord> store,
+public sealed class WorkspaceResourceService(
+    IDataAccess<CoreWorkspaceRecord> store,
     AccessGrantEvaluator grantEvaluator,
     TimeProvider clock)
 {
-    public async Task<RepositoryResource> CreateAsync(
-        CreateRepositoryResource request, Guid? ownerPrincipalId, CancellationToken ct)
+    public async Task<WorkspaceResource> CreateAsync(
+        CreateWorkspaceResource request, Guid? ownerPrincipalId, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.Name))
             throw new ArgumentException("name is required");
         if (string.IsNullOrWhiteSpace(request.ProviderType))
             throw new ArgumentException("providerType is required");
         var personal = request.Scope == ResourceScope.Personal;
-        var record = new CoreRepositoryRecord
+        var record = new CoreWorkspaceRecord
         {
             Id = Guid.NewGuid(),
             Name = request.Name.Trim(),
@@ -38,8 +38,8 @@ public sealed class RepositoryResourceService(
         return ToDto(record);
     }
 
-    public async Task<RepositoryResource?> UpdateAsync(
-        Guid id, UpdateRepositoryResource request, CancellationToken ct)
+    public async Task<WorkspaceResource?> UpdateAsync(
+        Guid id, UpdateWorkspaceResource request, CancellationToken ct)
     {
         if (await store.ReadAsync(id, ct) is not { } record)
             return null;
@@ -65,13 +65,13 @@ public sealed class RepositoryResourceService(
         return true;
     }
 
-    public async Task<RepositoryResource?> GetAsync(Guid id, CancellationToken ct)
+    public async Task<WorkspaceResource?> GetAsync(Guid id, CancellationToken ct)
         => await store.ReadAsync(id, ct) is { } record ? ToDto(record) : null;
 
     /// <summary>Every repository the principal may SEE: company ones, own ones, granted ones.</summary>
-    public async Task<IReadOnlyList<RepositoryResource>> ListVisibleAsync(Guid? principalId, CancellationToken ct)
+    public async Task<IReadOnlyList<WorkspaceResource>> ListVisibleAsync(Guid? principalId, CancellationToken ct)
     {
-        var visible = new List<RepositoryResource>();
+        var visible = new List<WorkspaceResource>();
         foreach (var record in (await store.ReadAsync(ct))
                      .OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase))
             if (await CanUseRecordAsync(record, principalId, ct))
@@ -87,7 +87,7 @@ public sealed class RepositoryResourceService(
         => await store.ReadAsync(id, ct) is not { } record
            || await CanUseRecordAsync(record, principalId, ct);
 
-    private async Task<bool> CanUseRecordAsync(CoreRepositoryRecord record, Guid? principalId, CancellationToken ct)
+    private async Task<bool> CanUseRecordAsync(CoreWorkspaceRecord record, Guid? principalId, CancellationToken ct)
     {
         if (record.Scope != ResourceScope.Personal)
             return true;
@@ -98,7 +98,7 @@ public sealed class RepositoryResourceService(
         return await grantEvaluator.IsGrantedAsync(record.GrantsJson, pid, ct);
     }
 
-    private static RepositoryResource ToDto(CoreRepositoryRecord record)
+    private static WorkspaceResource ToDto(CoreWorkspaceRecord record)
         => new(
             record.Id, record.Name, record.ProviderType,
             JsonSerializer.Deserialize<Dictionary<string, string>>(record.SettingsJson)

@@ -116,12 +116,16 @@ public interface ICoreClient
     Task DeleteEnvironmentLayerAsync(string providerType, CancellationToken ct = default);
 
     // --- Repositories (first-class workspace resources; settings non-secret, credential = connector ref) ---
-    Task<IReadOnlyList<RepositoryResource>> ListRepositoriesAsync(CancellationToken ct = default);
-    Task<RepositoryResource?> GetRepositoryAsync(Guid id, CancellationToken ct = default);
-    Task<RepositoryResource> CreateRepositoryAsync(CreateRepositoryResource request, CancellationToken ct = default);
-    Task<RepositoryResource> UpdateRepositoryAsync(Guid id, UpdateRepositoryResource request, CancellationToken ct = default);
-    Task DeleteRepositoryAsync(Guid id, CancellationToken ct = default);
-    Task SetRepositoryGrantsAsync(Guid id, SetRepositoryGrants request, CancellationToken ct = default);
+    Task<IReadOnlyList<WorkspaceResource>> ListWorkspacesAsync(CancellationToken ct = default);
+    Task<WorkspaceResource?> GetWorkspaceAsync(Guid id, CancellationToken ct = default);
+    Task<WorkspaceResource> CreateWorkspaceAsync(CreateWorkspaceResource request, CancellationToken ct = default);
+    Task<WorkspaceResource> UpdateWorkspaceAsync(Guid id, UpdateWorkspaceResource request, CancellationToken ct = default);
+    Task DeleteWorkspaceAsync(Guid id, CancellationToken ct = default);
+    Task SetWorkspaceGrantsAsync(Guid id, SetWorkspaceGrants request, CancellationToken ct = default);
+
+    // --- Platform settings (runtime security knobs; policy.administer, writes step-up-gated) ---
+    Task<IReadOnlyList<PlatformSettingDto>> ListPlatformSettingsAsync(CancellationToken ct = default);
+    Task<PlatformSettingDto> SetPlatformSettingAsync(string key, SetPlatformSetting request, CancellationToken ct = default);
 
     // --- Environment bases (the configurable (name, version) vocabulary layers build on) ---
     Task<IReadOnlyList<EnvironmentBaseDto>> ListEnvironmentBasesAsync(CancellationToken ct = default);

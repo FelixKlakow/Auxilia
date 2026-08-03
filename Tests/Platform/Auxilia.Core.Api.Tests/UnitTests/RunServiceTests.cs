@@ -20,7 +20,7 @@ namespace Auxilia.Core.Api.Tests.UnitTests;
 public sealed class RunServiceTests
 {
     private ProviderCatalogService _providerCatalog = null!;
-    private RepositoryResourceService _repositories = null!;
+    private WorkspaceResourceService _repositories = null!;
 
     private (RunService Service, FakeMessageBusClient Bus, RunConfigurationService Configs,
         WorkflowTypeRegistryService Registry, RunnerLivenessTracker Liveness) New(bool allowDispatchWithoutRunner = true)
@@ -67,8 +67,8 @@ public sealed class RunServiceTests
             new InMemoryDataAccess<SlotProviderRecord>(),
             new InMemoryDataAccess<ProviderCatalogRecord>(),
             new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System));
-        var repositories = _repositories = new RepositoryResourceService(
-            new InMemoryDataAccess<CoreRepositoryRecord>(),
+        var repositories = _repositories = new WorkspaceResourceService(
+            new InMemoryDataAccess<CoreWorkspaceRecord>(),
             new AccessGrantEvaluator(
                 new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>()),
             TimeProvider.System);
@@ -219,7 +219,7 @@ public sealed class RunServiceTests
     }
 
     [Test]
-    public async Task RunInline_RepositoryReference_ExpandsToTheStoredResource()
+    public async Task RunInline_WorkspaceReference_ExpandsToTheStoredResource()
     {
         var (service, bus, _, registry, _) = New();
         await SeedActiveTypeAsync(registry, "wt", "docker://img");
@@ -231,7 +231,7 @@ public sealed class RunServiceTests
                 new RegisterProviderSetting("SetupScript", "Setup script", "Text", Role: "setup-script"),
             ],
             MountsIntoWorkspace: true), CancellationToken.None);
-        var repository = await _repositories.CreateAsync(new CreateRepositoryResource(
+        var repository = await _repositories.CreateAsync(new CreateWorkspaceResource(
                 "Main repo", "git-repository",
                 new Dictionary<string, string>
                 {
@@ -246,7 +246,7 @@ public sealed class RunServiceTests
             [
                 // The binding names ONLY the repository; a binding-level setting overrides per use.
                 new SlotBinding("repo", Settings: new Dictionary<string, string> { ["Branch"] = "feature/x" },
-                    RepositoryId: repository.Id),
+                    WorkspaceId: repository.Id),
             ]),
             triggeredBy: null, CancellationToken.None);
 
@@ -265,7 +265,7 @@ public sealed class RunServiceTests
     }
 
     [Test]
-    public async Task RunInline_PersonalRepositoryOfAnotherUser_FailsTheDispatch()
+    public async Task RunInline_PersonalWorkspaceOfAnotherUser_FailsTheDispatch()
     {
         var (service, _, _, registry, _) = New();
         await SeedActiveTypeAsync(registry, "wt", "docker://img");
@@ -273,13 +273,13 @@ public sealed class RunServiceTests
             "git-repository", "workspace", null, ["src-ctl"],
             [new RegisterProviderSetting("CloneUrl", "Repository", "Text", Required: true, Role: "clone-url")],
             MountsIntoWorkspace: true), CancellationToken.None);
-        var repository = await _repositories.CreateAsync(new CreateRepositoryResource(
+        var repository = await _repositories.CreateAsync(new CreateWorkspaceResource(
                 "Private repo", "git-repository",
                 new Dictionary<string, string> { ["CloneUrl"] = "https://example.test/private.git" }),
             ownerPrincipalId: Guid.NewGuid(), CancellationToken.None);
 
         var ex = Assert.ThrowsAsync<InvalidOperationException>(() => service.RunInlineAsync(
-            new RunRequest("wt", SlotBindings: [new SlotBinding("repo", RepositoryId: repository.Id)]),
+            new RunRequest("wt", SlotBindings: [new SlotBinding("repo", WorkspaceId: repository.Id)]),
             triggeredBy: Guid.NewGuid(), CancellationToken.None));
 
         Assert.That(ex!.Message, Does.Contain("not permitted").And.Contain("Private repo"),

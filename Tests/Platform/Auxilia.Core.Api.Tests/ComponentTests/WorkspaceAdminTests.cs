@@ -13,9 +13,9 @@ namespace Auxilia.Core.Api.Tests.ComponentTests;
 /// </summary>
 [TestFixture]
 [Category("Component")]
-public sealed class RepositoryAdminTests : CoreApiComponentTestBase
+public sealed class WorkspaceAdminTests : CoreApiComponentTestBase
 {
-    private static CreateRepositoryResource MainRepo(string scope = ResourceScope.Personal) => new(
+    private static CreateWorkspaceResource MainRepo(string scope = ResourceScope.Personal) => new(
         "Main product repo", "git-repository",
         new Dictionary<string, string>
         {
@@ -41,19 +41,19 @@ public sealed class RepositoryAdminTests : CoreApiComponentTestBase
     {
         var admin = CreateClient();
 
-        var created = await (await admin.PostAsJsonAsync("/api/repositories", MainRepo()))
-            .Content.ReadFromJsonAsync<RepositoryResource>();
+        var created = await (await admin.PostAsJsonAsync("/api/workspaces", MainRepo()))
+            .Content.ReadFromJsonAsync<WorkspaceResource>();
         Assert.That(created!.Settings["SetupScript"], Is.EqualTo("dotnet restore"),
             "settings are non-secret and round-trip on reads");
 
-        var updated = await (await admin.PutAsJsonAsync($"/api/repositories/{created.Id}",
-                new UpdateRepositoryResource("Main product repo", new Dictionary<string, string>
+        var updated = await (await admin.PutAsJsonAsync($"/api/workspaces/{created.Id}",
+                new UpdateWorkspaceResource("Main product repo", new Dictionary<string, string>
                 {
                     ["CloneUrl"] = "https://git.example.test/product.git",
                     ["Branch"] = "develop",
                     ["SetupScript"] = "dotnet restore && npm ci",
                 })))
-            .Content.ReadFromJsonAsync<RepositoryResource>();
+            .Content.ReadFromJsonAsync<WorkspaceResource>();
         Assert.Multiple(() =>
         {
             Assert.That(updated!.Settings["Branch"], Is.EqualTo("develop"));
@@ -61,11 +61,11 @@ public sealed class RepositoryAdminTests : CoreApiComponentTestBase
                 "edit once — every configuration referencing the id gets the new script");
         });
 
-        var deleted = await admin.DeleteAsync($"/api/repositories/{created.Id}");
+        var deleted = await admin.DeleteAsync($"/api/workspaces/{created.Id}");
         Assert.Multiple(async () =>
         {
             Assert.That(deleted.StatusCode, Is.EqualTo(HttpStatusCode.NoContent));
-            Assert.That((await admin.GetAsync($"/api/repositories/{created.Id}")).StatusCode,
+            Assert.That((await admin.GetAsync($"/api/workspaces/{created.Id}")).StatusCode,
                 Is.EqualTo(HttpStatusCode.NotFound));
         });
     }
@@ -76,11 +76,11 @@ public sealed class RepositoryAdminTests : CoreApiComponentTestBase
         var owner = await UserClientAsync();
         var stranger = await UserClientAsync();
 
-        var created = await (await owner.PostAsJsonAsync("/api/repositories", MainRepo()))
-            .Content.ReadFromJsonAsync<RepositoryResource>();
+        var created = await (await owner.PostAsJsonAsync("/api/workspaces", MainRepo()))
+            .Content.ReadFromJsonAsync<WorkspaceResource>();
 
-        var ownList = await owner.GetFromJsonAsync<IReadOnlyList<RepositoryResource>>("/api/repositories");
-        var strangerList = await stranger.GetFromJsonAsync<IReadOnlyList<RepositoryResource>>("/api/repositories");
+        var ownList = await owner.GetFromJsonAsync<IReadOnlyList<WorkspaceResource>>("/api/workspaces");
+        var strangerList = await stranger.GetFromJsonAsync<IReadOnlyList<WorkspaceResource>>("/api/workspaces");
         Assert.Multiple(() =>
         {
             Assert.That(ownList!.Select(r => r.Id), Does.Contain(created!.Id));
@@ -94,11 +94,11 @@ public sealed class RepositoryAdminTests : CoreApiComponentTestBase
     {
         var owner = await UserClientAsync();
         var stranger = await UserClientAsync();
-        var created = await (await owner.PostAsJsonAsync("/api/repositories", MainRepo()))
-            .Content.ReadFromJsonAsync<RepositoryResource>();
+        var created = await (await owner.PostAsJsonAsync("/api/workspaces", MainRepo()))
+            .Content.ReadFromJsonAsync<WorkspaceResource>();
 
-        var response = await stranger.PutAsJsonAsync($"/api/repositories/{created!.Id}",
-            new UpdateRepositoryResource("Hijacked", new Dictionary<string, string>()));
+        var response = await stranger.PutAsJsonAsync($"/api/workspaces/{created!.Id}",
+            new UpdateWorkspaceResource("Hijacked", new Dictionary<string, string>()));
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden),
             "editing is owner-or-manager");
@@ -126,7 +126,7 @@ public sealed class RepositoryAdminTests : CoreApiComponentTestBase
     {
         var user = await UserClientAsync();
 
-        var response = await user.PostAsJsonAsync("/api/repositories", MainRepo(ResourceScope.Company));
+        var response = await user.PostAsJsonAsync("/api/workspaces", MainRepo(ResourceScope.Company));
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
     }

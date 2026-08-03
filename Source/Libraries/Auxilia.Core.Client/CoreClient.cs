@@ -256,23 +256,33 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
 
     // --- Repositories ---
 
-    public Task<IReadOnlyList<RepositoryResource>> ListRepositoriesAsync(CancellationToken ct = default)
-        => GetAsync<IReadOnlyList<RepositoryResource>>("/api/repositories", ct);
+    public Task<IReadOnlyList<WorkspaceResource>> ListWorkspacesAsync(CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<WorkspaceResource>>("/api/workspaces", ct);
 
-    public Task<RepositoryResource?> GetRepositoryAsync(Guid id, CancellationToken ct = default)
-        => GetOrNullAsync<RepositoryResource>($"/api/repositories/{id:D}", ct);
+    public Task<WorkspaceResource?> GetWorkspaceAsync(Guid id, CancellationToken ct = default)
+        => GetOrNullAsync<WorkspaceResource>($"/api/workspaces/{id:D}", ct);
 
-    public Task<RepositoryResource> CreateRepositoryAsync(CreateRepositoryResource request, CancellationToken ct = default)
-        => PostAsync<CreateRepositoryResource, RepositoryResource>("/api/repositories", request, ct);
+    public Task<WorkspaceResource> CreateWorkspaceAsync(CreateWorkspaceResource request, CancellationToken ct = default)
+        => PostAsync<CreateWorkspaceResource, WorkspaceResource>("/api/workspaces", request, ct);
 
-    public Task<RepositoryResource> UpdateRepositoryAsync(Guid id, UpdateRepositoryResource request, CancellationToken ct = default)
-        => PutAsync<UpdateRepositoryResource, RepositoryResource>($"/api/repositories/{id:D}", request, ct);
+    public Task<WorkspaceResource> UpdateWorkspaceAsync(Guid id, UpdateWorkspaceResource request, CancellationToken ct = default)
+        => PutAsync<UpdateWorkspaceResource, WorkspaceResource>($"/api/workspaces/{id:D}", request, ct);
 
-    public Task DeleteRepositoryAsync(Guid id, CancellationToken ct = default)
-        => DeleteAsync($"/api/repositories/{id:D}", ct);
+    public Task DeleteWorkspaceAsync(Guid id, CancellationToken ct = default)
+        => DeleteAsync($"/api/workspaces/{id:D}", ct);
 
-    public Task SetRepositoryGrantsAsync(Guid id, SetRepositoryGrants request, CancellationToken ct = default)
-        => PostAsync($"/api/repositories/{id:D}/grants", request, ct);
+    public Task SetWorkspaceGrantsAsync(Guid id, SetWorkspaceGrants request, CancellationToken ct = default)
+        => PostAsync($"/api/workspaces/{id:D}/grants", request, ct);
+
+    // --- Platform settings ---
+
+    public Task<IReadOnlyList<PlatformSettingDto>> ListPlatformSettingsAsync(CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<PlatformSettingDto>>("/api/platform-settings", ct);
+
+    public Task<PlatformSettingDto> SetPlatformSettingAsync(
+        string key, SetPlatformSetting request, CancellationToken ct = default)
+        => PutAsync<SetPlatformSetting, PlatformSettingDto>(
+            $"/api/platform-settings/{Uri.EscapeDataString(key)}", request, ct);
 
     // --- Environment bases ---
 

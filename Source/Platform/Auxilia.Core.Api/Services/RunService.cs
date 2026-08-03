@@ -21,7 +21,7 @@ public sealed class RunService(
     SlotCredentialResolver credentialResolver,
     ConnectorAccessPolicy connectorAccess,
     ConnectorService connectors,
-    RepositoryResourceService repositoryResources,
+    WorkspaceResourceService workspaceResources,
     RunnerLivenessTracker runnerLiveness,
     TimeProvider clock,
     IOptions<CoreApiSettings> settings,
@@ -149,24 +149,24 @@ public sealed class RunService(
         foreach (var boundSlot in slotBindings)
         {
             var binding = boundSlot;
-            // A repository reference expands LIVE at dispatch: the stored resource supplies the
-            // provider type, settings, and credential connector — so editing the repository once
+            // A workspace reference expands LIVE at dispatch: the stored resource supplies the
+            // provider type, settings, and credential connector — so editing the workspace once
             // (branch, setup script, …) applies to every configuration referencing it. Binding-
             // level settings/connector override per use; access is gated like connectors.
-            if (binding.RepositoryId is { } repositoryId)
+            if (binding.WorkspaceId is { } workspaceId)
             {
-                var repository = await repositoryResources.GetAsync(repositoryId, ct)
-                    ?? throw new KeyNotFoundException($"repository '{repositoryId:D}' does not exist");
-                if (!await repositoryResources.CanUseAsync(repositoryId, triggeredBy, ct))
+                var workspace = await workspaceResources.GetAsync(workspaceId, ct)
+                    ?? throw new KeyNotFoundException($"workspace '{workspaceId:D}' does not exist");
+                if (!await workspaceResources.CanUseAsync(workspaceId, triggeredBy, ct))
                     throw new InvalidOperationException(
-                        $"not permitted to use repository '{repository.Name}'");
-                var mergedSettings = new Dictionary<string, string>(repository.Settings);
+                        $"not permitted to use workspace '{workspace.Name}'");
+                var mergedSettings = new Dictionary<string, string>(workspace.Settings);
                 foreach (var (key, value) in binding.Settings ?? new Dictionary<string, string>())
                     mergedSettings[key] = value;
                 binding = binding with
                 {
-                    ProviderType = repository.ProviderType,
-                    ConnectorId = binding.ConnectorId ?? repository.ConnectorId,
+                    ProviderType = workspace.ProviderType,
+                    ConnectorId = binding.ConnectorId ?? workspace.ConnectorId,
                     Settings = mergedSettings,
                 };
             }

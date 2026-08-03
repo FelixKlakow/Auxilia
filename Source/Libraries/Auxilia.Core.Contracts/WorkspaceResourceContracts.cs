@@ -5,11 +5,11 @@ namespace Auxilia.Core.Contracts;
 /// NON-secret settings (clone URL, branch, working directory, cache/push policy, commit
 /// identity, post-binding setup script — keyed by the provider's setting keys) plus an optional
 /// credential connector reference. Configurations reference it by id
-/// (<see cref="SlotBinding.RepositoryId"/>), so editing the repository once applies to every
+/// (<see cref="SlotBinding.WorkspaceId"/>), so editing the repository once applies to every
 /// configuration using it — no per-configuration re-entry. Shared like connectors:
 /// Personal (owner + grants) or Company.
 /// </summary>
-public sealed record RepositoryResource(
+public sealed record WorkspaceResource(
     Guid Id,
     string Name,
     string ProviderType,
@@ -21,7 +21,7 @@ public sealed record RepositoryResource(
     IReadOnlyList<AccessGrant>? Grants = null);
 
 /// <summary>Creates a repository resource; a Company-scoped one requires the manage permission.</summary>
-public sealed record CreateRepositoryResource(
+public sealed record CreateWorkspaceResource(
     string Name,
     string ProviderType,
     IReadOnlyDictionary<string, string> Settings,
@@ -29,10 +29,10 @@ public sealed record CreateRepositoryResource(
     string Scope = ResourceScope.Personal);
 
 /// <summary>Full replacement of a repository's name, settings, and connector reference.</summary>
-public sealed record UpdateRepositoryResource(
+public sealed record UpdateWorkspaceResource(
     string Name,
     IReadOnlyDictionary<string, string> Settings,
     Guid? ConnectorId = null);
 
 /// <summary>Replaces a personal repository's access grants (owner, or a manager).</summary>
-public sealed record SetRepositoryGrants(IReadOnlyList<AccessGrant> Grants);
+public sealed record SetWorkspaceGrants(IReadOnlyList<AccessGrant> Grants);

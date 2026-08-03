@@ -92,8 +92,8 @@ public sealed class FailoverMonitorTests
                     new InMemoryDataAccess<Auxilia.PlatformData.Entities.PrincipalRecord>(),
                     new InMemoryDataAccess<Auxilia.PlatformData.Entities.GroupMembershipRecord>())),
             connectors,
-            new RepositoryResourceService(
-                new InMemoryDataAccess<CoreRepositoryRecord>(),
+            new WorkspaceResourceService(
+                new InMemoryDataAccess<CoreWorkspaceRecord>(),
                 new AccessGrantEvaluator(
                     new InMemoryDataAccess<Auxilia.PlatformData.Entities.PrincipalRecord>(),
                     new InMemoryDataAccess<Auxilia.PlatformData.Entities.GroupMembershipRecord>()),

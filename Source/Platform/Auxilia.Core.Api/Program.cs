@@ -36,7 +36,9 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddPlatformEntity<CoreRunConfigurationRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreConnectorRecord>(platformData);
 // First-class repository/workspace resources (non-secret settings + connector reference).
-builder.Services.AddPlatformEntity<CoreRepositoryRecord>(platformData);
+builder.Services.AddPlatformEntity<CoreWorkspaceRecord>(platformData);
+// Runtime platform settings (admin-changeable security knobs; unset keys fall back to config).
+builder.Services.AddPlatformEntity<PlatformSettingRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreRunRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreRunViewRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreDashboardPinRecord>(platformData);
@@ -104,7 +106,8 @@ builder.Services.AddSingleton<ConnectorBrowseService>();
 builder.Services.AddSingleton<ConnectorTokenRefresher>();
 builder.Services.AddSingleton<AccessGrantEvaluator>();
 builder.Services.AddSingleton<ConnectorAccessPolicy>();
-builder.Services.AddSingleton<RepositoryResourceService>();
+builder.Services.AddSingleton<WorkspaceResourceService>();
+builder.Services.AddSingleton<PlatformSettingsService>();
 builder.Services.AddSingleton<DelegatedTokenStore>();
 builder.Services.AddSingleton<RunConfigurationService>();
 builder.Services.AddSingleton<RunService>();
@@ -259,7 +262,7 @@ app.MapPost("/auth/token", (HttpContext http, UserBearerTokenService tokens) =>
 // hold the password to renew.
 app.MapPost("/auth/login", async (
         PasswordLoginRequest request, Auxilia.Governance.Identity.IIdentityProvider identity,
-        UserBearerTokenService tokens, IOptions<CoreSecuritySettings> security, AuditLog audit,
+        UserBearerTokenService tokens, PlatformSettingsService platformSettings, AuditLog audit,
         CancellationToken ct) =>
 {
     var username = request.Username?.Trim() ?? "";
@@ -269,7 +272,7 @@ app.MapPost("/auth/login", async (
         await audit.AppendAsync(username, "auth.login", username, "denied", ct: ct);
         return Results.Json(new { error = "invalid credentials" }, statusCode: StatusCodes.Status401Unauthorized);
     }
-    var lifetime = TimeSpan.FromMinutes(Math.Max(1, security.Value.LoginTokenLifetimeMinutes));
+    var lifetime = await platformSettings.GetLoginTokenLifetimeAsync(ct);
     var (token, expiresUtc) = tokens.Issue(session.PrincipalId, lifetime);
     await audit.AppendAsync(
         session.PrincipalId.ToString(), "auth.login", session.PrincipalId.ToString(), "granted", ct: ct);
@@ -1391,12 +1394,41 @@ app.MapPost("/api/connectors/{id:guid}/grants", async (
         : Results.NotFound();
 }).RequireAuthorization();
 
+// --- Platform settings: runtime security knobs (policy.administer; writes step-up-gated) ---
+app.MapGet("/api/platform-settings", async (
+        HttpContext http, IPolicyEngine policy, PlatformSettingsService svc, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PolicyAdminister, ct) is { } fail)
+        return fail;
+    return Results.Ok(await svc.ListAsync(ct));
+}).RequireAuthorization();
+
+app.MapPut("/api/platform-settings/{key}", async (
+        string key, SetPlatformSetting request, HttpContext http, IPolicyEngine policy,
+        ElevationTicketService elevation, PlatformSettingsService svc, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PolicyAdminister, ct) is { } fail)
+        return fail;
+    // Settings shape the security posture (session lifetimes) — a fresh step-up is demanded,
+    // exactly like admin-role grants and principal disables.
+    if (RequireElevation(http, elevation) is { } denied)
+        return denied;
+    try
+    {
+        return Results.Ok(await svc.SetAsync(CoreClaims.PrincipalIdOf(http.User), key, request.Value, ct));
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+}).RequireAuthorization();
+
 // --- Repositories: first-class workspace resources (settings are NON-secret, so reads return
 //     them; the credential stays a connector reference). Personal = self-serve, Company gated
 //     like company connectors; edits apply live to every configuration referencing the id. ---
-app.MapPost("/api/repositories", async (
-        CreateRepositoryResource request, HttpContext http, IPolicyEngine policy,
-        RepositoryResourceService svc, AuditLog audit, CancellationToken ct) =>
+app.MapPost("/api/workspaces", async (
+        CreateWorkspaceResource request, HttpContext http, IPolicyEngine policy,
+        WorkspaceResourceService svc, AuditLog audit, CancellationToken ct) =>
 {
     if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
         return Results.Unauthorized();
@@ -1406,7 +1438,7 @@ app.MapPost("/api/repositories", async (
     try
     {
         var created = await svc.CreateAsync(request, principalId, ct);
-        await audit.AppendAsync(principalId.ToString(), "repository.created", created.Id.ToString(), created.Name, ct: ct);
+        await audit.AppendAsync(principalId.ToString(), "workspace.created", created.Id.ToString(), created.Name, ct: ct);
         return Results.Ok(created);
     }
     catch (ArgumentException ex)
@@ -1415,22 +1447,22 @@ app.MapPost("/api/repositories", async (
     }
 }).RequireAuthorization();
 
-app.MapGet("/api/repositories", async (
-        HttpContext http, RepositoryResourceService svc, CancellationToken ct) =>
+app.MapGet("/api/workspaces", async (
+        HttpContext http, WorkspaceResourceService svc, CancellationToken ct) =>
     Results.Ok(await svc.ListVisibleAsync(CoreClaims.PrincipalIdOf(http.User), ct)))
     .RequireAuthorization();
 
-app.MapGet("/api/repositories/{id:guid}", async (
-        Guid id, HttpContext http, RepositoryResourceService svc, CancellationToken ct) =>
+app.MapGet("/api/workspaces/{id:guid}", async (
+        Guid id, HttpContext http, WorkspaceResourceService svc, CancellationToken ct) =>
     await svc.GetAsync(id, ct) is { } repository
     && await svc.CanUseAsync(id, CoreClaims.PrincipalIdOf(http.User), ct)
         ? Results.Ok(repository)
         : Results.NotFound())
     .RequireAuthorization();
 
-app.MapPut("/api/repositories/{id:guid}", async (
-        Guid id, UpdateRepositoryResource request, HttpContext http, IPolicyEngine policy,
-        RepositoryResourceService svc, AuditLog audit, CancellationToken ct) =>
+app.MapPut("/api/workspaces/{id:guid}", async (
+        Guid id, UpdateWorkspaceResource request, HttpContext http, IPolicyEngine policy,
+        WorkspaceResourceService svc, AuditLog audit, CancellationToken ct) =>
 {
     if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
         return Results.Unauthorized();
@@ -1442,7 +1474,7 @@ app.MapPut("/api/repositories/{id:guid}", async (
     try
     {
         var updated = await svc.UpdateAsync(id, request, ct);
-        await audit.AppendAsync(principalId.ToString(), "repository.updated", id.ToString(), request.Name, ct: ct);
+        await audit.AppendAsync(principalId.ToString(), "workspace.updated", id.ToString(), request.Name, ct: ct);
         return Results.Ok(updated);
     }
     catch (ArgumentException ex)
@@ -1451,8 +1483,8 @@ app.MapPut("/api/repositories/{id:guid}", async (
     }
 }).RequireAuthorization();
 
-app.MapDelete("/api/repositories/{id:guid}", async (
-        Guid id, HttpContext http, IPolicyEngine policy, RepositoryResourceService svc,
+app.MapDelete("/api/workspaces/{id:guid}", async (
+        Guid id, HttpContext http, IPolicyEngine policy, WorkspaceResourceService svc,
         AuditLog audit, CancellationToken ct) =>
 {
     if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
@@ -1463,13 +1495,13 @@ app.MapDelete("/api/repositories/{id:guid}", async (
         && await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.SlotConfigWrite, ct) is { } fail)
         return fail;
     await svc.DeleteAsync(id, ct);
-    await audit.AppendAsync(principalId.ToString(), "repository.deleted", id.ToString(), repository.Name, ct: ct);
+    await audit.AppendAsync(principalId.ToString(), "workspace.deleted", id.ToString(), repository.Name, ct: ct);
     return Results.NoContent();
 }).RequireAuthorization();
 
-app.MapPost("/api/repositories/{id:guid}/grants", async (
-        Guid id, SetRepositoryGrants request, HttpContext http, IPolicyEngine policy,
-        RepositoryResourceService svc, CancellationToken ct) =>
+app.MapPost("/api/workspaces/{id:guid}/grants", async (
+        Guid id, SetWorkspaceGrants request, HttpContext http, IPolicyEngine policy,
+        WorkspaceResourceService svc, CancellationToken ct) =>
 {
     if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
         return Results.Unauthorized();
@@ -1479,7 +1511,7 @@ app.MapPost("/api/repositories/{id:guid}/grants", async (
         && await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.SlotConfigWrite, ct) is { } fail)
         return fail;
     return await svc.SetGrantsAsync(id, request.Grants, ct)
-        ? Results.Accepted($"/api/repositories/{id}")
+        ? Results.Accepted($"/api/workspaces/{id}")
         : Results.NotFound();
 }).RequireAuthorization();
 
