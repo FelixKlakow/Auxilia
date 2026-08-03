@@ -27,6 +27,14 @@ internal static class WorkspaceMountRoles
     /// </summary>
     public const string AllowPush = "allow-push";
 
+    /// <summary>
+    /// Post-binding setup script announced to the container (never run by the runner): the SDK
+    /// executes it in the mount's root before the application starts. Whoever may bind the
+    /// mount already controls the repository content the workflow will act on — the script adds
+    /// no authority beyond it, and runs under the run's egress policy.
+    /// </summary>
+    public const string SetupScript = "setup-script";
+
     /// <summary>Commit author name configured on the clone (local git config).</summary>
     public const string CommitName = "commit-name";
 

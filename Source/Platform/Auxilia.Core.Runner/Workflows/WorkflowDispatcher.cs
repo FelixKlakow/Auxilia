@@ -368,6 +368,11 @@ public sealed class WorkflowDispatcher(
             if (!string.IsNullOrWhiteSpace(workingDirectory))
                 mountRoot = $"{mountRoot}/{workingDirectory.Trim('/', '\\')}";
             env[$"{WorkflowEnvironmentVariables.WorkspaceMountPrefix}{mount.MountId.ToUpperInvariant()}"] = mountRoot;
+
+            // A bound setup script is announced beside the root; the SDK runs it in-container
+            // before the application (the runner never executes it).
+            if (mount.SettingsByRole.GetValueOrDefault(WorkspaceMountRoles.SetupScript) is { Length: > 0 } setupScript)
+                env[$"{WorkflowEnvironmentVariables.WorkspaceMountSetupPrefix}{mount.MountId.ToUpperInvariant()}"] = setupScript;
         }
         if (repositories.Count > 0)
         {

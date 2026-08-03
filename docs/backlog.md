@@ -103,6 +103,16 @@ access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing di
   layer's base rides its catalog entry.)
 - **Trust keys in real deployments** — `WorkflowDispatcher__TrustedEnvironmentSigningKeys`
   is empty (permissive) in dev; any real deployment needs the key material story.
+- **Versioned bases and layers (2026-08-03).** A base is today a single open-vocabulary
+  string (`linux`/`windows`) and each capability is one record (`IdFor(providerType)` —
+  upsert overwrites), with `Version` a dormant label. Direction: (a) make bases an
+  admin-managed catalog of their own — base name + version → concrete image reference
+  (tag or digest), so "linux" can mean several pinned, configurable images and runs/layers
+  can select or default-latest; (b) let a capability exist in multiple versions (identity
+  becomes provider type + version, each with its own catalog entry, e.g. `dotnet-10` /
+  `dotnet-8` — or one provider with a version axis), with layers optionally declaring a
+  compatible base name + minimum base version. Stays an open vocabulary (no enums);
+  content-addressed composed-image tags already absorb this for free.
 - **Build-time hardening (context, 2026-08-02).** Environment composition runs `docker build`
   on a generated one-file Dockerfile (context = that file only; nothing from the host leaks
   in). The RUN steps execute in ordinary build containers: root inside, NO egress policy
@@ -113,6 +123,19 @@ access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing di
   memory/CPU caps in `ImageBuildParameters`.
 
 ## Generic binding pipeline
+- **Persistent workspaces — reset semantics (design note, 2026-08-03).** Today nothing
+  persists per-run: every run gets an isolated copy materialized from the host-only warm
+  repo cache (never bind-mounted) and the run root is deleted at terminal state, so
+  cross-run leaks are impossible by construction. If a persistent/reusable workspace ever
+  becomes first-class, the leak-proof reset is *re-materialization* (discard the run copy,
+  copy afresh from the warm cache), not in-place `git clean`/`reset` — untracked/ignored
+  files and hook side effects make in-place cleaning a leak channel. Any persistent
+  workspace must be scoped to one owning identity (never shared across principals).
+- ~~Post-binding setup scripts~~ — DONE 2026-08-03 (ARCHITECTURE §9): manifest-declared
+  `RequiresRepository(..., setupScript:)` plus the mount-bound `setup-script` role; the runner
+  announces (`Workflow__WorkspaceMountSetup__<ID>`), the SDK executes inside the container in
+  the mount's root before the application, fail-fast, under the run's egress policy. Open:
+  a Docker system test exercising a real in-container setup script.
 
 ## CI validation — Docker system tests (not runnable locally)
 - Email slot **plugin-dependency loading** (highest risk — MailKit/MimeKit/BouncyCastle

@@ -73,9 +73,12 @@ public interface IWorkflowBuilder
     /// <summary>
     /// Declares a repository this workflow needs in its workspace (ARCHITECTURE §9); the
     /// platform prepares a per-run copy at <c>/workspace/repos/&lt;id&gt;</c> before launch.
+    /// An optional <paramref name="setupScript"/> runs inside the container in that copy's
+    /// root before the application starts (fail-fast; the run fails on a non-zero exit).
     /// </summary>
     IWorkflowBuilder RequiresRepository(
-        string id, string cloneUrl, string? branch = null, bool noCache = false);
+        string id, string cloneUrl, string? branch = null, bool noCache = false,
+        string? setupScript = null);
 
     IWorkflowBuilder DeclaresSignal<TPayload>(string name, string? description = null);
 

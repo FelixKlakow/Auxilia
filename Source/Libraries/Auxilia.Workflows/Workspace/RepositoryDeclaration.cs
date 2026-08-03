@@ -20,4 +20,12 @@ public sealed record RepositoryDeclaration(
     public string? CommitName { get; init; }
 
     public string? CommitEmail { get; init; }
+
+    /// <summary>
+    /// Post-binding setup (restore, codegen, bootstrap) the repository needs before the workflow
+    /// can act on it. Runs INSIDE the workflow container in the repository's root, after the
+    /// workspace is bound and before the application — under the run's egress policy. Part of
+    /// the signed manifest, so signature trust covers it.
+    /// </summary>
+    public string? SetupScript { get; init; }
 }

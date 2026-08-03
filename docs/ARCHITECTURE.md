@@ -506,6 +506,16 @@ graph TB
     WF_A -.->|cannot reach| CACHE
 ```
 
+**Post-binding setup scripts (2026-08-03).** A repository may need repo-specific setup
+(restore, codegen, bootstrap) before the workflow can act on it. Two sources, one executor:
+a manifest-declared script (`RequiresRepository(..., setupScript:)` — part of the signed
+package, so signature trust covers it) and a mount-bound `setup-script` setting role (whoever
+may bind the mount already controls the repository content the run acts on, so the script adds
+no authority; the runner only *announces* it as `Workflow__WorkspaceMountSetup__<ID>`, never
+executes it). The SDK runs every script INSIDE the workflow container — in the mount's root,
+after the workspace is bound, before the application, under the run's egress policy — and a
+non-zero exit fails the run fail-fast.
+
 **Multi-source repository support:**
 - A workflow manifest declares all required repositories with their source system and identifier
 - Each repository is fetched and cached independently using the correct Account Bundle for its source

@@ -24,6 +24,13 @@ public static class WorkflowEnvironmentVariables
     public const string WorkspaceMountPrefix = "Workflow__WorkspaceMount__";
 
     /// <summary>
+    /// Prefix of one variable per workspace mount (suffixed like
+    /// <see cref="WorkspaceMountPrefix"/>) carrying the mount's post-binding setup script; the
+    /// SDK executes it in the mount's root, inside the container, before the application.
+    /// </summary>
+    public const string WorkspaceMountSetupPrefix = "Workflow__WorkspaceMountSetup__";
+
+    /// <summary>
     /// The single workspace mount's effective root (per-mount working directory included), or
     /// null when the run carries no mount — or more than one, where no single directory can be
     /// the obvious working root and callers fall back to the workspace root.

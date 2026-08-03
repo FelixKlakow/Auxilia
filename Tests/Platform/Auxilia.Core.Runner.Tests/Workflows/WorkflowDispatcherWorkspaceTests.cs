@@ -277,6 +277,45 @@ public class WorkflowDispatcherWorkspaceTests
             "An unresolvable repo credential must fail the run pre-flight, not launch.");
     }
 
+    [Test]
+    public async Task WhenMountBindsSetupScript_ItIsAnnouncedToTheContainer_NeverRunByTheRunner()
+    {
+        WorkflowLaunchRequest? captured = null;
+        _mockLauncher
+            .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
+            .ReturnsAsync(new WorkflowLaunchResult());
+
+        var command = new RunWorkflowCommand(
+            Guid.NewGuid(), WorkflowType, "docker://workspace-workflow:test",
+            new Dictionary<string, string>(),
+            WorkspaceMounts:
+            [
+                new WorkspaceMountDispatch("main", "git-repository",
+                    new Dictionary<string, string>
+                    {
+                        ["clone-url"] = _originRepo,
+                        ["setup-script"] = "dotnet restore"
+                    })
+            ]);
+
+        await _capturedHandler!(command, CancellationToken.None);
+
+        Assert.That(captured, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                captured!.EnvironmentVariables[WorkflowEnvironmentVariables.WorkspaceMountSetupPrefix + "MAIN"],
+                Is.EqualTo("dotnet restore"),
+                "The bound setup script rides to the container as an announcement.");
+            Assert.That(
+                captured.EnvironmentVariables[WorkflowEnvironmentVariables.WorkspaceMountPrefix + "MAIN"],
+                Is.EqualTo("/workspace/repos/main"));
+        });
+        Assert.That(File.Exists(Path.Combine(captured!.WorkspaceDirectoryBind!, "repos", "main", "setup-ran.txt")),
+            Is.False, "The runner must never execute the script host-side.");
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private Task SeedSchemaAsync(params RepositoryDeclaration[] repositories)

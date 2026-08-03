@@ -143,13 +143,17 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     }
 
     public IWorkflowBuilder RequiresRepository(
-        string id, string cloneUrl, string? branch = null, bool noCache = false)
+        string id, string cloneUrl, string? branch = null, bool noCache = false,
+        string? setupScript = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(id);
         ArgumentException.ThrowIfNullOrEmpty(cloneUrl);
         if (_repositories.Any(r => r.Id == id))
             throw new InvalidOperationException($"A repository with id '{id}' has already been declared.");
-        _repositories.Add(new Workspace.RepositoryDeclaration(id, cloneUrl, branch, noCache));
+        _repositories.Add(new Workspace.RepositoryDeclaration(id, cloneUrl, branch, noCache)
+        {
+            SetupScript = setupScript
+        });
         return this;
     }
 
@@ -312,6 +316,12 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 ResourceProxyClient? resourceProxyClient = null;
                 try
                 {
+                    // Post-binding workspace setup (ARCHITECTURE §9): declared repository setup
+                    // scripts and mount-announced 'setup-script' roles run here, inside the
+                    // container, before anything of the application — fail-fast on a non-zero exit.
+                    await Workspace.WorkspaceSetup.RunDeclaredAsync(
+                        _repositories.AsReadOnly(), context.Logger, cts.Token);
+
                     resourceProxyClient = new ResourceProxyClient(
                         context.MessageBus, instanceId, instanceToken,
                         System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.ResourceProxyQueue)
