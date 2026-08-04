@@ -1,0 +1,23 @@
+@* Sticky warning shown while the page's data source (poll loop or SSE stream) is disconnected
+   from the Core. Renders nothing when connected — pages keep their stale data visible behind it. *@
+
+@if (!Connected)
+{
+    <div class="connection-banner" role="alert">
+        <span class="connection-banner-dot"></span>
+        <span>
+            Connection to the Core lost — retrying automatically.
+            Data below may be stale@(LastUpdatedUtc is { } last ? $" (last updated {TimeText.Relative(last)})" : "").
+        </span>
+        @if (Detail is { Length: > 0 })
+        {
+            <span class="connection-banner-detail" title="@Detail">@Detail</span>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public bool Connected { get; set; } = true;
+    [Parameter] public string? Detail { get; set; }
+    [Parameter] public DateTimeOffset? LastUpdatedUtc { get; set; }
+}

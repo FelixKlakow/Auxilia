@@ -517,7 +517,7 @@ app.MapPost("/api/runs/{id:guid}/rerun", async (
 app.MapGet("/api/runs/{id:guid}/stream", async (
         Guid id, HttpContext http, IPolicyEngine policy, RunStreamBroker broker,
         RunStreamPublisher streamPublisher, Auxilia.UniversalDataAccess.IDataAccess<CoreRunRecord> runRecords,
-        CancellationToken ct) =>
+        Microsoft.Extensions.Options.IOptions<CoreApiSettings> apiSettings, CancellationToken ct) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.RunObserve, ct) is { } fail)
     {
@@ -532,11 +532,15 @@ app.MapGet("/api/runs/{id:guid}/stream", async (
     // The id may be the dispatch COMMAND id rather than the runner's instance id. Selective
     // routing binds by key, so resolve the pairing from the tracked runs and prime the alias —
     // a late subscriber cannot rely on observing the claim transition on the bus.
-    if (await runRecords.ReadAsync(id, ct) is null)
+    var record = await runRecords.ReadAsync(id, ct);
+    if (record is null)
     {
         var byCommand = (await runRecords.ReadAsync(ct)).FirstOrDefault(r => r.CommandId == id);
         if (byCommand is not null)
+        {
             await streamPublisher.RegisterAliasAsync(id, byCommand.Id, ct);
+            record = byCommand;
+        }
     }
 
     using var subscription = await broker.SubscribeAsync(id, ct);
@@ -546,14 +550,29 @@ app.MapGet("/api/runs/{id:guid}/stream", async (
 
     try
     {
-        await foreach (var evt in subscription.Reader.ReadAllAsync(ct))
+        // SNAPSHOT first frame: the tracked record's current state, so a (re)subscriber never
+        // depends on a future transition to learn where the run stands — after a Core restart a
+        // reconnecting client is current immediately. Subscribe-before-snapshot ordering means a
+        // transition racing the read is duplicated at worst, never lost. No record (subscribe
+        // before dispatch) → no snapshot, the stream just stays open.
+        if (record is not null)
         {
-            await http.Response.WriteAsync(
-                $"data: {System.Text.Json.JsonSerializer.Serialize(evt, System.Text.Json.JsonSerializerOptions.Web)}\n\n", ct);
-            await http.Response.Body.FlushAsync(ct);
-            if (evt.Kind == RunStreamEvent.StatusKind && CoreRunStates.IsTerminalStatus(evt.PayloadJson))
-                break;
+            var snapshot = new Auxilia.Workflows.Messaging.Messages.WorkflowStatusEvent(
+                record.Id, record.WorkflowType, record.State, record.ErrorMessage,
+                record.UpdatedUtc, record.OwnerServiceId, record.CommandId, record.TerminalEndpoint);
+            await SseWriter.WriteEventAsync(http.Response, new RunStreamEvent(
+                RunStreamEvent.StatusKind, id, 0,
+                System.Text.Json.JsonSerializer.Serialize(snapshot, System.Text.Json.JsonSerializerOptions.Web),
+                record.UpdatedUtc), ct);
+            if (CoreRunStates.IsTerminal(record.State))
+                return;
         }
+
+        await SseWriter.PumpAsync(
+            http.Response, subscription.Reader,
+            TimeSpan.FromSeconds(apiSettings.Value.SseKeepaliveSeconds),
+            evt => evt.Kind == RunStreamEvent.StatusKind && CoreRunStates.IsTerminalStatus(evt.PayloadJson),
+            ct);
     }
     catch (OperationCanceledException)
     {
@@ -734,7 +753,8 @@ app.MapGet("/api/runs/{id:guid}/views", async (
 // --- Artifacts (client surface; metadata mirrored from the bus, payloads from the shared backend) ---
 
 app.MapGet("/api/artifacts", async (
-        string? artifactType, string? workItemId, Guid? runId, HttpContext http, IPolicyEngine policy,
+        string? artifactType, string? workItemId, Guid? runId, DateTimeOffset? createdAfterUtc,
+        HttpContext http, IPolicyEngine policy,
         Auxilia.UniversalDataAccess.IDataAccess<CoreArtifactRecord> artifacts,
         CancellationToken ct, int skip = 0, int take = 50) =>
 {
@@ -747,7 +767,13 @@ app.MapGet("/api/artifacts", async (
         all = all.Where(a => string.Equals(a.WorkItemId, workItemId, StringComparison.Ordinal));
     if (runId is { } run)
         all = all.Where(a => a.RunInstanceId == run);
-    var ordered = all.OrderByDescending(a => a.CreatedUtc).ToList();
+    if (createdAfterUtc is { } after)
+        all = all.Where(a => a.CreatedUtc > after);
+    // The catch-up shape (createdAfterUtc) pages oldest-first so a reconnecting consumer drains
+    // the gap deterministically; the browse shape stays newest-first.
+    var ordered = createdAfterUtc is null
+        ? all.OrderByDescending(a => a.CreatedUtc).ToList()
+        : all.OrderBy(a => a.CreatedUtc).ToList();
     var effectiveTake = take <= 0 ? 50 : take;
     var page = ordered.Skip(skip).Take(effectiveTake).Select(a => new ArtifactDto(
         a.Id, a.ArtifactType, a.WorkflowType, a.WorkItemId, a.RunInstanceId,
@@ -797,7 +823,8 @@ app.MapGet("/api/artifacts/{id:guid}/content", async (
 // replacement for a bus subscription — chaining libraries react to artifacts through this.
 app.MapGet("/api/artifacts/stream", async (
         string? artifactType, string? workItemId, HttpContext http, IPolicyEngine policy,
-        ArtifactStreamBroker broker, CancellationToken ct) =>
+        ArtifactStreamBroker broker,
+        Microsoft.Extensions.Options.IOptions<CoreApiSettings> apiSettings, CancellationToken ct) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ArtifactConsume, ct) is { } fail)
     {
@@ -816,12 +843,10 @@ app.MapGet("/api/artifacts/stream", async (
 
     try
     {
-        await foreach (var evt in subscription.Reader.ReadAllAsync(ct))
-        {
-            await http.Response.WriteAsync(
-                $"data: {System.Text.Json.JsonSerializer.Serialize(evt, System.Text.Json.JsonSerializerOptions.Web)}\n\n", ct);
-            await http.Response.Body.FlushAsync(ct);
-        }
+        await SseWriter.PumpAsync(
+            http.Response, subscription.Reader,
+            TimeSpan.FromSeconds(apiSettings.Value.SseKeepaliveSeconds),
+            isTerminal: _ => false, ct);
     }
     catch (OperationCanceledException)
     {

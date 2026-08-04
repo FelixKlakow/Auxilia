@@ -31,6 +31,15 @@ public sealed class WorkflowInstanceTokenRegistry(
         return new IssuedInstanceToken(instanceId, token);
     }
 
+    /// <summary>
+    /// Restores a re-adopted instance's token after a runner restart so the in-container SDK
+    /// keeps authenticating. Registered instances (Running/Draining) keep their credential
+    /// alive until terminal; unregistered ones get a fresh launch→registration window.
+    /// </summary>
+    public void Restore(Guid workflowInstanceId, string token, string workflowType, bool registered)
+        => _entries[workflowInstanceId] =
+            new Entry(token, workflowType, timeProvider.GetUtcNow()) { Registered = registered };
+
     /// <summary>Valid token for an instance that has not yet registered or is registered.</summary>
     public bool Validate(Guid workflowInstanceId, string? token)
     {

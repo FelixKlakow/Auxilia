@@ -88,6 +88,40 @@ public sealed class WorkflowInstanceRegistry(
             await dataAccess.SaveAsync(record with { TerminalEndpoint = endpoint }, ct);
     }
 
+    /// <summary>
+    /// Persists the created container's identity + protected instance token — the re-adoption
+    /// anchor: a restarted runner maps containers back to runs through this.
+    /// </summary>
+    public async Task SetContainerAsync(
+        Guid instanceId, string containerId, string protectedInstanceToken, CancellationToken ct = default)
+    {
+        var record = await dataAccess.ReadAsync(instanceId, ct);
+        if (record is not null)
+            await dataAccess.SaveAsync(record with
+            {
+                ContainerId = containerId,
+                ProtectedInstanceToken = protectedInstanceToken
+            }, ct);
+    }
+
+    /// <summary>Re-stamps ownership on re-adoption (the restarted runner has a fresh ServiceId).</summary>
+    public async Task SetOwnerAsync(Guid instanceId, Guid ownerServiceId, CancellationToken ct = default)
+    {
+        var record = await dataAccess.ReadAsync(instanceId, ct);
+        if (record is not null)
+            await dataAccess.SaveAsync(record with { OwnerServiceId = ownerServiceId }, ct);
+    }
+
+    /// <summary>Every record not in a terminal state — the re-adoption candidates.</summary>
+    public async Task<IReadOnlyList<WorkflowInstanceRecord>> GetNonTerminalAsync(CancellationToken ct = default)
+    {
+        var query = await dataAccess.ReadAsync(ct);
+        return query
+            .Where(r => r.State != "Success" && r.State != "Failed"
+                        && r.State != "Cancelled" && r.State != "PreFlightFailed")
+            .ToList();
+    }
+
     /// <summary>Records a terminal or intermediate state; returns false for unknown instances.</summary>
     public async Task<bool> SetStateAsync(
         Guid instanceId, string state, string? errorMessage = null, CancellationToken ct = default)

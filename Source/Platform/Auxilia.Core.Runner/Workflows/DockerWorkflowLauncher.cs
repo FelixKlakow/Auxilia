@@ -18,7 +18,7 @@ namespace Auxilia.Core.Runner.Workflows;
 public sealed class DockerWorkflowLauncher(
     IOptions<DockerWorkflowLauncherSettings> settingsOptions,
     IDockerClientFactory clientFactory,
-    ILogger<DockerWorkflowLauncher> logger) : IWorkflowLauncher
+    ILogger<DockerWorkflowLauncher> logger) : IWorkflowLauncher, IWorkflowContainerHost
 {
 
     public async Task<WorkflowLaunchResult> LaunchAsync(WorkflowLaunchRequest request, CancellationToken ct = default)
@@ -49,6 +49,11 @@ public sealed class DockerWorkflowLauncher(
         logger.LogInformation(
             "Workflow container created. ContainerId={ContainerId}",
             created.ID[..Math.Min(12, created.ID.Length)]);
+
+        // Persist the container↔run mapping BEFORE start: a crash from here on must leave a
+        // record the re-adoption pass can match, never an anonymous container.
+        if (request.OnContainerCreated is { } onCreated)
+            await onCreated(created.ID);
 
         // Pre-flight linker check (baked images): every member a plugin references on a shared
         // assembly must exist in the image's copy — build skew fails HERE with a clear message,
@@ -401,41 +406,66 @@ public sealed class DockerWorkflowLauncher(
         return removed;
     }
 
-    /// <summary>
-    /// Every workflow container is labeled so startup reaping (and any operator tooling) can
-    /// find Auxilia's containers WITHOUT touching anything else on the Docker host.
-    /// </summary>
-    internal static readonly Dictionary<string, string> WorkflowContainerLabels =
-        new() { ["auxilia.workflow"] = "1" };
+    internal const string WorkflowLabel = "auxilia.workflow";
+    internal const string InstanceIdLabel = "auxilia.instance-id";
 
     /// <summary>
-    /// Removes leftover workflow containers from a previous runner process. A runner restart
-    /// orphans its containers (exit watchers die with the process, and the fresh ServiceId
-    /// never re-adopts them) — reaping them at startup pairs with the Core's zombie sweep so
-    /// neither the run record nor the container lingers. NOTE: single-runner-per-host
+    /// Every workflow container is labeled so the re-adoption pass (and any operator tooling)
+    /// can find Auxilia's containers WITHOUT touching anything else on the Docker host, and map
+    /// each one back to its run via <see cref="InstanceIdLabel"/>. Single-runner-per-host
     /// assumption; a shared host would need per-runner ownership labels with stable ids.
     /// </summary>
-    public async Task<int> ReapOrphanedContainersAsync(CancellationToken ct = default)
+    internal static Dictionary<string, string> BuildContainerLabels(WorkflowLaunchRequest request)
+    {
+        var labels = new Dictionary<string, string> { [WorkflowLabel] = "1" };
+        if (request.InstanceId is { } instanceId)
+            labels[InstanceIdLabel] = instanceId.ToString("D");
+        return labels;
+    }
+
+    /// <summary>All workflow containers on this host (running AND exited), for re-adoption.</summary>
+    public async Task<IReadOnlyList<WorkflowContainerInfo>> ListWorkflowContainersAsync(CancellationToken ct = default)
     {
         var settings = settingsOptions.Value;
         using var client = clientFactory.CreateClient(settings.DockerSocketPath);
-        var leftovers = await client.Containers.ListContainersAsync(new ContainersListParameters
+        var containers = await client.Containers.ListContainersAsync(new ContainersListParameters
         {
             All = true,
             Filters = new Dictionary<string, IDictionary<string, bool>>
             {
-                ["label"] = new Dictionary<string, bool> { ["auxilia.workflow=1"] = true },
+                ["label"] = new Dictionary<string, bool> { [$"{WorkflowLabel}=1"] = true },
             },
         }, ct);
-        foreach (var container in leftovers)
+        return containers.Select(c => new WorkflowContainerInfo(
+            c.ID,
+            c.Labels is not null
+            && c.Labels.TryGetValue(InstanceIdLabel, out var raw)
+            && Guid.TryParse(raw, out var id) ? id : null,
+            string.Equals(c.State, "running", StringComparison.OrdinalIgnoreCase))).ToList();
+    }
+
+    /// <summary>
+    /// Re-attaches the exit watcher to an existing container (re-adoption after a restart).
+    /// For an already-exited container the wait returns immediately, so its REAL exit code and
+    /// log tail are collected instead of a generic failure.
+    /// </summary>
+    public void AttachExitWatcher(string containerId, Func<ContainerExit, Task> onExited)
+        => _ = Task.Run(() => WatchContainerAsync(settingsOptions.Value, containerId, onExited));
+
+    /// <summary>Clean-kill primitive: force-removes a container that cannot be re-adopted.</summary>
+    public async Task RemoveContainerAsync(string containerId, CancellationToken ct = default)
+    {
+        var settings = settingsOptions.Value;
+        using var client = clientFactory.CreateClient(settings.DockerSocketPath);
+        try
         {
-            logger.LogWarning(
-                "Reaping orphaned workflow container {ContainerId} ({Image}, state {State}) from a previous runner.",
-                container.ID[..Math.Min(12, container.ID.Length)], container.Image, container.State);
             await client.Containers.RemoveContainerAsync(
-                container.ID, new ContainerRemoveParameters { Force = true }, ct);
+                containerId, new ContainerRemoveParameters { Force = true }, ct);
         }
-        return leftovers.Count;
+        catch (DockerContainerNotFoundException)
+        {
+            // Already gone — fine.
+        }
     }
 
     /// <summary>
@@ -482,7 +512,7 @@ public sealed class DockerWorkflowLauncher(
             Image = settings.RuntimeImage,
             Cmd = [executablePath],
             Env = env,
-            Labels = WorkflowContainerLabels,
+            Labels = BuildContainerLabels(request),
             HostConfig = new HostConfig
             {
                 // No AutoRemove: the exit watcher collects the exit code + log tail first,
@@ -532,7 +562,7 @@ public sealed class DockerWorkflowLauncher(
             Image = request.DockerImageUri,
             Cmd   = null,
             Env   = env,
-            Labels = WorkflowContainerLabels,
+            Labels = BuildContainerLabels(request),
             HostConfig = new HostConfig
             {
                 // No AutoRemove: the exit watcher collects the exit code + log tail first,

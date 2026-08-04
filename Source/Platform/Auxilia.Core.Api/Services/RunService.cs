@@ -23,6 +23,8 @@ public sealed class RunService(
     ConnectorService connectors,
     WorkspaceResourceService workspaceResources,
     RunnerLivenessTracker runnerLiveness,
+    Auxilia.UniversalDataAccess.IDataAccess<Data.CoreRunRecord> runs,
+    Auxilia.Workflows.Messaging.WorkflowStatusPublisher statusPublisher,
     TimeProvider clock,
     IOptions<CoreApiSettings> settings,
     ILogger<RunService> logger)
@@ -99,9 +101,11 @@ public sealed class RunService(
             WorkflowPackageUri = packageUri,
             Context = context,
         };
+        var rerunCommandJson = System.Text.Json.JsonSerializer.Serialize(command);
         await credentialResolver.StashAsync(
             commandId, resolutionToken, stash.Bindings, triggeredBy ?? stash.TriggeredBy,
-            System.Text.Json.JsonSerializer.Serialize(command), ct);
+            rerunCommandJson, ct);
+        await RecordDispatchedAsync(commandId, command.WorkflowType ?? run.WorkflowType, rerunCommandJson, ct);
         await bus.PublishAsync(settings.Value.RunCommandQueue, command, ct);
         logger.LogInformation(
             "Re-dispatched run. OriginalRunId={OriginalRunId} NewCommandId={CommandId} WorkflowType={WorkflowType}",
@@ -275,15 +279,42 @@ public sealed class RunService(
 
         // Stash the resolution context AND the dispatch command itself (keyed by CommandId), so an
         // orphaned run can be re-dispatched once on failover without the Core reading the runner's DB.
+        var commandJson = System.Text.Json.JsonSerializer.Serialize(command);
         await credentialResolver.StashAsync(
-            commandId, resolutionToken, stashedBindings, triggeredBy,
-            System.Text.Json.JsonSerializer.Serialize(command), ct);
+            commandId, resolutionToken, stashedBindings, triggeredBy, commandJson, ct);
+        await RecordDispatchedAsync(commandId, workflowType, commandJson, ct);
 
         await bus.PublishAsync(settings.Value.RunCommandQueue, command, ct);
         logger.LogInformation(
             "Dispatched run. CommandId={CommandId} WorkflowType={WorkflowType} WorkspaceMounts={MountCount}",
             commandId, workflowType, mounts.Count);
         return new RunAccepted(commandId, commandId);
+    }
+
+    /// <summary>
+    /// The run exists from the moment it is accepted: a <see cref="RunStates.Dispatched"/> record
+    /// keyed by the command id (the only id that exists before a runner claims) makes a
+    /// never-claimed dispatch visible to every read surface and to the failover monitor's
+    /// claim-timeout sweep, instead of leaving no trace. The runner's claim event rekeys it to the
+    /// instance id. Record before bus publish: a publish that never happens still leaves a
+    /// sweepable Dispatched row, never a silent loss.
+    /// </summary>
+    private async Task RecordDispatchedAsync(
+        Guid commandId, string workflowType, string commandJson, CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        await runs.SaveAsync(new Data.CoreRunRecord
+        {
+            Id = commandId,
+            WorkflowType = workflowType,
+            State = RunStates.Dispatched,
+            CreatedUtc = now,
+            UpdatedUtc = now,
+            CommandId = commandId,
+            DispatchCommandJson = commandJson
+        }, ct);
+        await statusPublisher.PublishAsync(
+            commandId, workflowType, RunStates.Dispatched, commandId: commandId, ct: ct);
     }
 
     /// <summary>Rejects bindings whose provider type falls outside the slot's declared narrowing.</summary>

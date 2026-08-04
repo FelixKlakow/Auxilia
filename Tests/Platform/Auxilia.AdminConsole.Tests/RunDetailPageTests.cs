@@ -104,6 +104,62 @@ public sealed class RunDetailPageTests
     }
 
     [Test]
+    public void RunDetail_ReconnectingFrame_ShowsTheBanner_AndKeepsRenderedData()
+    {
+        var runId = Guid.NewGuid();
+        var core = new FakeCoreClient();
+        core.Runs.Add(new RunStatus(runId, "impl", "Running", null, DateTimeOffset.UtcNow, null, null));
+        core.StreamFrames.Add(new StreamConnectionFrame<RunStreamEvent>(StreamConnectionState.Connected, 1));
+        core.StreamFrames.Add(new StreamEventFrame<RunStreamEvent>(View(runId, "progress", 1, "{\"message\":\"still-here\"}")));
+        core.StreamFrames.Add(new StreamConnectionFrame<RunStreamEvent>(
+            StreamConnectionState.Reconnecting, 1, TimeSpan.FromSeconds(1), new IOException("boom")));
+        using var ctx = NewContext(core);
+
+        var cut = ctx.Render<RunDetail>(p => p.Add(c => c.Id, runId));
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(cut.Markup, Does.Contain("connection-banner"),
+                    "a reconnecting stream must be visible — never a silently frozen page");
+                Assert.That(cut.Markup, Does.Contain("still-here"),
+                    "already-rendered data stays visible behind the banner");
+            });
+        });
+    }
+
+    [Test]
+    public void RunDetail_Reconnect_ClearsTheBanner_AndRefetchesRunAndViews()
+    {
+        var runId = Guid.NewGuid();
+        var core = new FakeCoreClient();
+        core.Runs.Add(new RunStatus(runId, "impl", "Running", null, DateTimeOffset.UtcNow, null, null));
+        core.RunViews.Add(new RunViewItem("progress", 1, "{\"message\":\"caught-up\"}", DateTimeOffset.UtcNow));
+        core.StreamFrames.Add(new StreamConnectionFrame<RunStreamEvent>(StreamConnectionState.Connected, 1));
+        core.StreamFrames.Add(new StreamConnectionFrame<RunStreamEvent>(
+            StreamConnectionState.Reconnecting, 1, TimeSpan.Zero, new IOException("boom")));
+        core.StreamFrames.Add(new StreamConnectionFrame<RunStreamEvent>(StreamConnectionState.Connected, 2));
+        using var ctx = NewContext(core);
+
+        var cut = ctx.Render<RunDetail>(p => p.Add(c => c.Id, runId));
+
+        cut.WaitForAssertion(() =>
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(cut.Markup, Does.Not.Contain("connection-banner"),
+                    "the banner clears once the stream is re-established");
+                Assert.That(core.GetRunCalls, Is.GreaterThanOrEqualTo(2),
+                    "a reconnect refetches the run — the state may have jumped while offline");
+                Assert.That(core.GetRunViewsCalls, Is.GreaterThanOrEqualTo(2),
+                    "a reconnect re-runs the persisted-view backfill");
+                Assert.That(cut.Markup, Does.Contain("caught-up"));
+            });
+        });
+    }
+
+    [Test]
     public void RunDetail_TerminalStatus_EndsLiveBadge()
     {
         var runId = Guid.NewGuid();

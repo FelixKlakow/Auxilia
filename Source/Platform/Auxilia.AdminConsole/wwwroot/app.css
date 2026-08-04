@@ -1407,3 +1407,44 @@ select { cursor: pointer; }
     gap: 0.4rem;
     cursor: pointer;
 }
+
+/* Connection-lost banner: sticky above page content while a poll loop or SSE stream is
+   reconnecting; stale data stays rendered behind it. */
+.connection-banner {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 1rem;
+    padding: 0.55rem 0.9rem;
+    border: 1px solid var(--warning-border, #b58a2e);
+    border-radius: 8px;
+    background: var(--warning-bg, rgba(181, 138, 46, 0.12));
+    color: var(--warning-text, #c9a44a);
+    font-size: 0.85rem;
+}
+
+.connection-banner-dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 50%;
+    background: currentColor;
+    animation: connection-banner-pulse 1.2s ease-in-out infinite;
+    flex-shrink: 0;
+}
+
+.connection-banner-detail {
+    margin-left: auto;
+    max-width: 28rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: 0.75;
+}
+
+@keyframes connection-banner-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+}

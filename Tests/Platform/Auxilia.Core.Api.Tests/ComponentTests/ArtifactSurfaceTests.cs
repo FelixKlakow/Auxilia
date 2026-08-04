@@ -63,6 +63,31 @@ public sealed class ArtifactSurfaceTests : CoreApiComponentTestBase
     }
 
     [Test]
+    public async Task Query_CreatedAfterUtc_ReturnsOnlyNewerArtifacts_OldestFirst()
+    {
+        // The reconnect catch-up shape: everything persisted after the consumer's last-seen
+        // timestamp, paged OLDEST-first so the gap drains deterministically.
+        var client = CreateClient();
+        var t0 = DateTimeOffset.UtcNow;
+        await MessageBus.SimulateReceivedAsync(ArtifactPersistedEvent.ExchangeName,
+            new ArtifactPersistedEvent(Guid.NewGuid(), "report", "wf", "WI-1",
+                Guid.NewGuid(), 1, "H", 1, t0 - TimeSpan.FromMinutes(10)));
+        await MessageBus.SimulateReceivedAsync(ArtifactPersistedEvent.ExchangeName,
+            new ArtifactPersistedEvent(Guid.NewGuid(), "report", "wf", "WI-2",
+                Guid.NewGuid(), 1, "H", 1, t0 - TimeSpan.FromMinutes(2)));
+        await MessageBus.SimulateReceivedAsync(ArtifactPersistedEvent.ExchangeName,
+            new ArtifactPersistedEvent(Guid.NewGuid(), "report", "wf", "WI-3",
+                Guid.NewGuid(), 1, "H", 1, t0 - TimeSpan.FromMinutes(1)));
+
+        var cutoff = Uri.EscapeDataString((t0 - TimeSpan.FromMinutes(5)).ToString("O"));
+        var page = await client.GetFromJsonAsync<PagedResult<ArtifactDto>>(
+            $"/api/artifacts?artifactType=report&createdAfterUtc={cutoff}");
+
+        Assert.That(page!.Items.Select(a => a.WorkItemId), Is.EqualTo(new[] { "WI-2", "WI-3" }),
+            "only artifacts after the cutoff, ordered oldest-first for deterministic paging");
+    }
+
+    [Test]
     public async Task GetById_ReturnsTheMirroredArtifact_Or404()
     {
         var client = CreateClient();
@@ -120,18 +145,17 @@ public sealed class ArtifactSurfaceTests : CoreApiComponentTestBase
         await using var stream = core
             .StreamArtifactEventsAsync(artifactType: "code-review-result", ct: cts.Token)
             .GetAsyncEnumerator(cts.Token);
-        var first = stream.MoveNextAsync();
 
-        // The enumerator subscribes inside MoveNextAsync (after SendAsync completes). Re-publish a
-        // matching event until the first frame is delivered — proof the subscription is live.
-        while (!first.IsCompleted)
-        {
-            await MessageBus.SimulateReceivedAsync(ArtifactPersistedEvent.ExchangeName,
-                Persisted(artifactType: "code-review-result", workItemId: "WI-live"));
-            await Task.Yield();
-        }
-        Assert.That(await first, Is.True);
-        Assert.That(stream.Current.Artifact.ArtifactType, Is.EqualTo("code-review-result"));
+        // The Connected frame arrives once the server flushed headers — i.e. AFTER the broker
+        // subscription is registered — so everything published below is guaranteed delivered.
+        Assert.That(await stream.MoveNextAsync(), Is.True);
+        Assert.That(stream.Current,
+            Is.InstanceOf<StreamConnectionFrame<ArtifactStreamEvent>>()
+                .With.Property("State").EqualTo(StreamConnectionState.Connected));
+
+        await MessageBus.SimulateReceivedAsync(ArtifactPersistedEvent.ExchangeName,
+            Persisted(artifactType: "code-review-result", workItemId: "WI-live"));
+        Assert.That((await NextEventAsync(stream)).Artifact.ArtifactType, Is.EqualTo("code-review-result"));
 
         // A non-matching event must be filtered SERVER-side; the next matching one arrives instead.
         await MessageBus.SimulateReceivedAsync(ArtifactPersistedEvent.ExchangeName,
@@ -139,14 +163,23 @@ public sealed class ArtifactSurfaceTests : CoreApiComponentTestBase
         await MessageBus.SimulateReceivedAsync(ArtifactPersistedEvent.ExchangeName,
             Persisted(artifactType: "code-review-result", workItemId: "WI-match"));
 
-        Assert.That(await stream.MoveNextAsync(), Is.True);
+        var next = await NextEventAsync(stream);
         Assert.Multiple(() =>
         {
-            Assert.That(stream.Current.Artifact.ArtifactType, Is.EqualTo("code-review-result"),
+            Assert.That(next.Artifact.ArtifactType, Is.EqualTo("code-review-result"),
                 "the design-doc event must never reach this subscriber");
-            Assert.That(stream.Current.Artifact.WorkItemId, Is.Not.EqualTo("WI-noise"));
+            Assert.That(next.Artifact.WorkItemId, Is.Not.EqualTo("WI-noise"));
         });
         cts.Cancel();
+    }
+
+    private static async Task<ArtifactStreamEvent> NextEventAsync(
+        IAsyncEnumerator<ClientStreamFrame<ArtifactStreamEvent>> stream)
+    {
+        while (await stream.MoveNextAsync())
+            if (stream.Current is StreamEventFrame<ArtifactStreamEvent> frame)
+                return frame.Event;
+        throw new InvalidOperationException("the stream ended without the expected event");
     }
 
     [Test]

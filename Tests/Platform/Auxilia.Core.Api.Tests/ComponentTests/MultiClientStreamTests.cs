@@ -32,7 +32,7 @@ public sealed class MultiClientStreamTests : CoreApiComponentTestBase
         // Five clients per artifact type, each its own HttpClient + typed CoreClient — real
         // parallel consumers, not one shared connection.
         var received = new ConcurrentDictionary<int, List<ArtifactStreamEvent>>();
-        var ready = new List<(int Client, string Type, IAsyncEnumerator<ArtifactStreamEvent> Stream)>();
+        var ready = new List<(int Client, string Type, IAsyncEnumerator<ClientStreamFrame<ArtifactStreamEvent>> Stream)>();
         for (var i = 0; i < clientCount; i++)
         {
             var type = i % 2 == 0 ? "type-even" : "type-odd";
@@ -43,16 +43,12 @@ public sealed class MultiClientStreamTests : CoreApiComponentTestBase
             received[i] = [];
         }
 
-        // Prove every subscription is live before the measured burst: each client must see one
-        // hello event of its type (the enumerator subscribes lazily inside the first MoveNextAsync).
-        var hellos = ready.Select(r => r.Stream.MoveNextAsync().AsTask()).ToList();
-        while (hellos.Any(h => !h.IsCompleted))
+        // Prove every subscription is live before the measured burst: the Connected frame is
+        // yielded once the server flushed headers, i.e. after the broker subscription registered.
+        foreach (var r in ready)
         {
-            await MessageBus.SimulateReceivedAsync(ArtifactPersistedEvent.ExchangeName,
-                Persisted("type-even", "hello", Guid.NewGuid()));
-            await MessageBus.SimulateReceivedAsync(ArtifactPersistedEvent.ExchangeName,
-                Persisted("type-odd", "hello", Guid.NewGuid()));
-            await Task.Yield();
+            Assert.That(await r.Stream.MoveNextAsync(), Is.True);
+            Assert.That(r.Stream.Current, Is.InstanceOf<StreamConnectionFrame<ArtifactStreamEvent>>());
         }
 
         // The measured burst: four concurrent publishers interleaving both types.
@@ -64,13 +60,14 @@ public sealed class MultiClientStreamTests : CoreApiComponentTestBase
             PublishAllAsync("type-odd", oddIds.Take(eventsPerType / 2)),
             PublishAllAsync("type-odd", oddIds.Skip(eventsPerType / 2)));
 
-        // Drain: every client reads until it holds the full set for its type (minus hellos).
+        // Drain: every client reads until it holds the full set for its type.
         await Task.WhenAll(ready.Select(async r =>
         {
             var mine = new List<ArtifactStreamEvent>();
             while (mine.Count(e => e.Artifact.WorkItemId == "burst") < eventsPerType
                    && await r.Stream.MoveNextAsync())
-                mine.Add(r.Stream.Current);
+                if (r.Stream.Current is StreamEventFrame<ArtifactStreamEvent> frame)
+                    mine.Add(frame.Event);
             received[r.Client] = mine;
         }));
 

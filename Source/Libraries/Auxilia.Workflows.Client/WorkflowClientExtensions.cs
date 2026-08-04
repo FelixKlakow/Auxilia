@@ -5,11 +5,13 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Auxilia.Workflows.Client;
 
-/// <summary>Engine pacing knobs; the defaults suit a server host.</summary>
+/// <summary>
+/// Engine pacing knobs; the defaults suit a server host. (Stream reconnect/backoff knobs live in
+/// <c>CoreClientOptions</c> — the Core client owns stream resilience.)
+/// </summary>
 public sealed class WorkflowClientOptions
 {
     public int SchedulerIntervalSeconds { get; set; } = 10;
-    public int StreamReconnectMaxBackoffSeconds { get; set; } = 30;
 }
 
 public static class WorkflowClientExtensions

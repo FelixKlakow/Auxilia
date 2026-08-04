@@ -18,9 +18,7 @@ public sealed class ArtifactChainingEngineTests
     {
         _core = new FakeCoreClient();
         _store = new InMemoryTriggerStore();
-        _engine = new ArtifactChainingEngine(_store, _core,
-            Options.Create(new WorkflowClientOptions { StreamReconnectMaxBackoffSeconds = 1 }),
-            NullLogger<ArtifactChainingEngine>.Instance);
+        _engine = new ArtifactChainingEngine(_store, _core, NullLogger<ArtifactChainingEngine>.Instance);
     }
 
     [TearDown]
@@ -135,6 +133,39 @@ public sealed class ArtifactChainingEngineTests
         await WaitUntilAsync(() => _core.ConfigurationRuns.Count == 1);
         Assert.That(_core.ConfigurationRuns, Has.Count.EqualTo(1),
             "after a dropped stream the engine must reconnect and keep chaining");
+    }
+
+    [Test]
+    public async Task Reconnect_CatchesUpOnArtifactsPersistedDuringTheGap_WithoutDoubleDispatch()
+    {
+        await _store.SaveAsync(new ArtifactTriggerDefinition
+        {
+            ArtifactType = "review", ConfigurationId = Guid.NewGuid()
+        });
+        await _engine.StartAsync(CancellationToken.None);
+        await WaitForSubscriptionsAsync(1);
+
+        // One live event establishes the consumer's last-seen cursor.
+        var live = Event("review");
+        _core.PublishArtifact(live);
+        await WaitUntilAsync(() => _core.ConfigurationRuns.Count == 1);
+
+        // The Core "recycles"; an artifact lands while this consumer is disconnected.
+        var missed = new ArtifactDto(Guid.NewGuid(), "review", "producer-wf", "WI-9", Guid.NewGuid(),
+            1, "HASH", 5, live.Artifact.CreatedUtc + TimeSpan.FromSeconds(30));
+        _core.StoredArtifacts.Add(live.Artifact);
+        _core.StoredArtifacts.Add(missed);
+        _core.DropAllStreams();
+
+        // The resilient stream reconnects; the engine's catch-up dispatches the missed artifact.
+        await WaitUntilAsync(() => _core.ConfigurationRuns.Count == 2);
+
+        // The same artifact also arriving live (catch-up/live overlap) must NOT dispatch again.
+        _core.PublishArtifact(new ArtifactStreamEvent(missed, missed.CreatedUtc));
+        _core.PublishArtifact(Event("review", "WI-new"));
+        await WaitUntilAsync(() => _core.ConfigurationRuns.Count == 3);
+        Assert.That(_core.ConfigurationRuns, Has.Count.EqualTo(3),
+            "the missed artifact dispatches exactly once (dedupe), fresh live events keep flowing");
     }
 
     [Test]

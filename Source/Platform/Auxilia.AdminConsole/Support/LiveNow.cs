@@ -9,10 +9,7 @@ namespace Auxilia.AdminConsole.Support;
 /// </summary>
 public static class LiveNow
 {
-    private static readonly string[] ActiveStates = ["Queued", "Running", "Draining"];
-
-    public static bool IsActive(string state)
-        => ActiveStates.Contains(state, StringComparer.Ordinal);
+    public static bool IsActive(string state) => RunStates.IsActive(state);
 
     /// <summary>Active runs only, newest first.</summary>
     public static IReadOnlyList<RunStatus> ActiveOf(IEnumerable<RunStatus> runs)

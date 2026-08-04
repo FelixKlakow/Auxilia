@@ -63,14 +63,43 @@ internal sealed class FakeCoreClient : ICoreClient
             subscription.Channel.Writer.TryComplete();
     }
 
-    public async IAsyncEnumerable<ArtifactStreamEvent> StreamArtifactEventsAsync(
+    /// <summary>
+    /// Emulates the RESILIENT client contract: a dropped subscription (channel completed via
+    /// <see cref="DropAllStreams"/>) yields a Reconnecting frame and re-subscribes with the next
+    /// attempt number — the enumerable itself never ends on a drop, exactly like CoreClient.
+    /// </summary>
+    public async IAsyncEnumerable<ClientStreamFrame<ArtifactStreamEvent>> StreamArtifactEventsAsync(
         string? artifactType = null, string? workItemId = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var channel = Channel.CreateUnbounded<ArtifactStreamEvent>();
-        StreamSubscriptions.Enqueue(new StreamSubscription(artifactType, workItemId, channel));
-        await foreach (var evt in channel.Reader.ReadAllAsync(ct))
-            yield return evt;
+        var attempt = 0;
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            attempt++;
+            var channel = Channel.CreateUnbounded<ArtifactStreamEvent>();
+            StreamSubscriptions.Enqueue(new StreamSubscription(artifactType, workItemId, channel));
+            yield return new StreamConnectionFrame<ArtifactStreamEvent>(StreamConnectionState.Connected, attempt);
+            await foreach (var evt in channel.Reader.ReadAllAsync(ct))
+                yield return new StreamEventFrame<ArtifactStreamEvent>(evt);
+            yield return new StreamConnectionFrame<ArtifactStreamEvent>(
+                StreamConnectionState.Reconnecting, attempt, TimeSpan.Zero);
+        }
+    }
+
+    // --- Artifact store (the catch-up query surface) ---
+    public List<ArtifactDto> StoredArtifacts { get; } = [];
+
+    public Task<PagedResult<ArtifactDto>> QueryArtifactsAsync(ArtifactQuery query, CancellationToken ct = default)
+    {
+        var filtered = StoredArtifacts
+            .Where(a => query.ArtifactType is null || a.ArtifactType == query.ArtifactType)
+            .Where(a => query.WorkItemId is null || a.WorkItemId == query.WorkItemId)
+            .Where(a => query.CreatedAfterUtc is not { } after || a.CreatedUtc > after)
+            .OrderBy(a => a.CreatedUtc)
+            .ToList();
+        var page = filtered.Skip(query.Skip).Take(query.Take).ToList();
+        return Task.FromResult(new PagedResult<ArtifactDto>(page, filtered.Count, query.Skip, query.Take));
     }
 
     // --- Authoring surface ---
@@ -105,7 +134,7 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task<PagedResult<RunStatus>> QueryRunsAsync(RunQuery query, CancellationToken ct = default) => Nope<Task<PagedResult<RunStatus>>>();
     public Task CancelRunAsync(Guid id, CancellationToken ct = default) => Nope<Task>();
     public Task<RunAccepted> RerunAsync(Guid id, CancellationToken ct = default) => Nope<Task<RunAccepted>>();
-    public IAsyncEnumerable<RunStreamEvent> StreamRunAsync(Guid runId, CancellationToken ct = default) => Nope<IAsyncEnumerable<RunStreamEvent>>();
+    public IAsyncEnumerable<ClientStreamFrame<RunStreamEvent>> StreamRunAsync(Guid runId, CancellationToken ct = default) => Nope<IAsyncEnumerable<ClientStreamFrame<RunStreamEvent>>>();
     public Task<PagedResult<RunViewItem>> GetRunViewsAsync(Guid runId, string? view = null, int skip = 0, int take = 200, CancellationToken ct = default) => Nope<Task<PagedResult<RunViewItem>>>();
     public Task<RunStats> GetRunStatsAsync(CancellationToken ct = default) => Nope<Task<RunStats>>();
     public Task<IReadOnlyList<DashboardPin>> ListDashboardPinsAsync(CancellationToken ct = default) => Nope<Task<IReadOnlyList<DashboardPin>>>();
@@ -114,7 +143,6 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task ProvideInputAsync(Guid runId, string payloadJson, CancellationToken ct = default) => Nope<Task>();
     public Task<TerminalTicket> OpenTerminalAsync(Guid runId, CancellationToken ct = default) => Nope<Task<TerminalTicket>>();
     public Task<int> ClearFinishedRunsAsync(CancellationToken ct = default) => Nope<Task<int>>();
-    public Task<PagedResult<ArtifactDto>> QueryArtifactsAsync(ArtifactQuery query, CancellationToken ct = default) => Nope<Task<PagedResult<ArtifactDto>>>();
     public Task<ArtifactDto?> GetArtifactAsync(Guid id, CancellationToken ct = default) => Nope<Task<ArtifactDto?>>();
     public Task<Stream?> OpenArtifactContentAsync(Guid id, CancellationToken ct = default) => Nope<Task<Stream?>>();
     public Task<PagedResult<AuditEntry>> QueryAuditAsync(AuditQuery query, CancellationToken ct = default) => Nope<Task<PagedResult<AuditEntry>>>();

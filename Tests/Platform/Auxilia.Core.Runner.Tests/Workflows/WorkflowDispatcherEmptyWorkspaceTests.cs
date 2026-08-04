@@ -107,6 +107,7 @@ public class WorkflowDispatcherEmptyWorkspaceTests
             _mockRepoAuth.Object,
             new AuditLog(_auditRecords, TimeProvider.System),
             TestStores.NewInstanceInfo(),
+            new Auxilia.PlatformData.Protection.NullSettingsProtector(),
             NullLogger<WorkflowDispatcher>.Instance);
 
         await _sut.StartAsync(CancellationToken.None);

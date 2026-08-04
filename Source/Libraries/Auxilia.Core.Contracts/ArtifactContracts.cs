@@ -16,11 +16,16 @@ public sealed record ArtifactDto(
     long SizeBytes,
     DateTimeOffset CreatedUtc);
 
-/// <summary>Typed filter for artifact queries; all filters optional and combined with AND.</summary>
+/// <summary>
+/// Typed filter for artifact queries; all filters optional and combined with AND. Results are
+/// newest-first, EXCEPT when <see cref="CreatedAfterUtc"/> is set — the catch-up shape pages
+/// oldest-first so a reconnecting consumer drains a gap deterministically.
+/// </summary>
 public sealed record ArtifactQuery(
     string? ArtifactType = null,
     string? WorkItemId = null,
     Guid? RunId = null,
+    DateTimeOffset? CreatedAfterUtc = null,
     int Skip = 0,
     int Take = 50);
 

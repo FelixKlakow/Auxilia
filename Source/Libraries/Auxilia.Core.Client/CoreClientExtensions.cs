@@ -11,6 +11,24 @@ public sealed class CoreClientOptions
 
     /// <summary>An API key issued by the Core for this integration (sent as a bearer token).</summary>
     public string ApiKey { get; set; } = "";
+
+    /// <summary>First reconnect delay of a dropped stream; doubles per attempt.</summary>
+    public int StreamReconnectInitialBackoffSeconds { get; set; } = 1;
+
+    /// <summary>Reconnect backoff cap; the delay resets to the initial value on every received event.</summary>
+    public int StreamReconnectMaxBackoffSeconds { get; set; } = 30;
+
+    /// <summary>
+    /// A stream silent for longer than this (no events AND no server keepalive pings) is treated
+    /// as a dead connection and reconnected. Must exceed the Core's SseKeepaliveSeconds; 0 disables.
+    /// </summary>
+    public int StreamIdleTimeoutSeconds { get; set; } = 90;
+
+    /// <summary>
+    /// Per-call timeout of non-streaming requests. Replaces <see cref="HttpClient.Timeout"/>,
+    /// which the client disables because it would sever long-lived SSE streams. 0 disables.
+    /// </summary>
+    public int UnaryTimeoutSeconds { get; set; } = 100;
 }
 
 public static class CoreClientExtensions
@@ -35,11 +53,12 @@ public static class CoreClientExtensions
         var options = new CoreClientOptions();
         configure(options);
         return services.AddHttpClient<ICoreClient, CoreClient>(http =>
-        {
-            http.BaseAddress = new Uri(options.BaseAddress);
-            if (!string.IsNullOrEmpty(options.ApiKey))
-                http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
-        });
+            {
+                http.BaseAddress = new Uri(options.BaseAddress);
+                if (!string.IsNullOrEmpty(options.ApiKey))
+                    http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", options.ApiKey);
+            })
+            .AddTypedClient<ICoreClient>(http => new CoreClient(http, options));
     }
 
     /// <summary>
@@ -63,10 +82,12 @@ public static class CoreClientExtensions
                 http.BaseAddress = new Uri(options.BaseAddress);
                 // No static Authorization header — CoreCallerTokenHandler sets it per request.
             })
+            .AddTypedClient<ICoreClient>(http => new CoreClient(http, options))
             .AddHttpMessageHandler(sp =>
                 new CoreCallerTokenHandler(tokenProviderFactory(sp), options.ApiKey));
     }
 
     /// <summary>Wraps an existing (already-authenticated) HttpClient — for tests and simple hosts.</summary>
-    public static ICoreClient Create(HttpClient http) => new CoreClient(http);
+    public static ICoreClient Create(HttpClient http, CoreClientOptions? options = null)
+        => new CoreClient(http, options);
 }

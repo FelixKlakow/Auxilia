@@ -22,6 +22,7 @@ public sealed class FailoverMonitor(
     IMessageBusClient bus,
     RunnerLivenessTracker liveness,
     IDataAccess<CoreRunRecord> runs,
+    IDataAccess<CoreRunResolutionRecord> resolutions,
     RunService runService,
     WorkflowStatusPublisher statusPublisher,
     AuditLog auditLog,
@@ -36,6 +37,7 @@ public sealed class FailoverMonitor(
     private CancellationTokenSource? _loopCts;
     private Task? _loop;
     private DateTimeOffset _startedAt;
+    private DateTimeOffset _lastResolutionPurge = DateTimeOffset.MinValue;
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -94,9 +96,13 @@ public sealed class FailoverMonitor(
         var cutoff = now - timeout;
         var dead = liveness.DeadSince(cutoff);
         var graceElapsed = now - _startedAt >= timeout;
+
+        var allRuns = (await runs.ReadAsync(ct)).ToList();
+        await SweepUnclaimedDispatchesAsync(allRuns, now, ct);
+        await PurgeExpiredResolutionRecordsAsync(now, ct);
+
         if (dead.Count == 0 && !graceElapsed)
             return;
-        var allRuns = (await runs.ReadAsync(ct)).ToList();
         var handled = new HashSet<Guid>();
         foreach (var serviceId in dead)
         {
@@ -128,6 +134,9 @@ public sealed class FailoverMonitor(
         var zombies = allRuns
             .Where(r => !handled.Contains(r.Id)
                         && !CoreRunStates.IsTerminal(r.State)
+                        // Dispatched runs have no owner BY DESIGN (nothing claimed them yet) —
+                        // they belong to the claim-timeout sweep, with its own window + message.
+                        && r.State != Auxilia.Core.Contracts.RunStates.Dispatched
                         && r.UpdatedUtc < cutoff
                         && (r.OwnerServiceId is not { } owner || !liveness.IsKnown(owner)))
             .ToList();
@@ -138,6 +147,72 @@ public sealed class FailoverMonitor(
                 zombie.Id, zombie.State, zombie.OwnerServiceId, zombie.UpdatedUtc);
             await FailOverAsync(zombie, ct);
         }
+    }
+
+    /// <summary>
+    /// Fails over dispatches no runner ever claimed. With the run record born at dispatch time
+    /// (keyed by the command id), a command lost before its "Received" claim is visible here
+    /// instead of leaving no trace. Skipped under <c>AllowDispatchWithoutRunner</c>, which exists
+    /// precisely to queue deliberately while no runner is attached.
+    /// </summary>
+    private async Task SweepUnclaimedDispatchesAsync(
+        List<CoreRunRecord> allRuns, DateTimeOffset now, CancellationToken ct)
+    {
+        if (settings.Value.AllowDispatchWithoutRunner)
+            return;
+        var claimCutoff = now - TimeSpan.FromSeconds(settings.Value.DispatchClaimTimeoutSeconds);
+        var unclaimed = allRuns
+            .Where(r => r.State == Auxilia.Core.Contracts.RunStates.Dispatched && r.UpdatedUtc < claimCutoff)
+            .ToList();
+        foreach (var run in unclaimed)
+        {
+            logger.LogWarning(
+                "Run {RunId} was dispatched at {Dispatched:O} and never claimed by any runner — failing it over.",
+                run.Id, run.UpdatedUtc);
+
+            // Re-dispatch BEFORE the stash is deleted below — RerunAsync reads it.
+            await RedispatchAsync(run, ct);
+
+            await runs.SaveAsync(run with
+            {
+                State = "Failed",
+                ErrorMessage = "dispatch-never-claimed",
+                UpdatedUtc = now
+            }, ct);
+            await auditLog.AppendAsync("core-api", "workflow.dispatch-timeout",
+                run.Id.ToString(), "dispatch-never-claimed", ct: ct);
+            await statusPublisher.PublishAsync(run.Id, run.WorkflowType, "Failed",
+                "dispatch-never-claimed", commandId: run.CommandId, ct: ct);
+
+            // Delete the stale command's resolution stash: if a late runner ever dequeues the
+            // original command, JIT credential resolution fails and the launch dies pre-flight —
+            // the anti-duplicate-execution measure behind the terminal-sink guard.
+            await resolutions.RemoveAsync(run.Id, ct);
+        }
+    }
+
+    /// <summary>
+    /// Low-frequency retention purge of dispatch resolution records (they otherwise accumulate
+    /// one per dispatch, forever). Rerun only works within the retention window — callers get
+    /// the existing graceful "resolution context is no longer stored" error beyond it.
+    /// </summary>
+    private async Task PurgeExpiredResolutionRecordsAsync(DateTimeOffset now, CancellationToken ct)
+    {
+        var retentionDays = settings.Value.ResolutionRecordRetentionDays;
+        if (retentionDays <= 0 || now - _lastResolutionPurge < TimeSpan.FromHours(1))
+            return;
+        _lastResolutionPurge = now;
+        var cutoff = now - TimeSpan.FromDays(retentionDays);
+        var expired = (await resolutions.ReadAsync(ct))
+            .Where(r => r.CreatedUtc < cutoff)
+            .Select(r => r.Id)
+            .ToList();
+        foreach (var id in expired)
+            await resolutions.RemoveAsync(id, ct);
+        if (expired.Count > 0)
+            logger.LogInformation(
+                "Purged {Count} dispatch resolution record(s) older than {Days} day(s).",
+                expired.Count, retentionDays);
     }
 
     private async Task FailOverAsync(CoreRunRecord orphan, CancellationToken ct)
@@ -157,6 +232,16 @@ public sealed class FailoverMonitor(
         await statusPublisher.PublishAsync(orphan.Id, orphan.WorkflowType, "Failed",
             "steering-instance-lost", ct: ct);
 
+        await RedispatchAsync(orphan, ct);
+    }
+
+    /// <summary>
+    /// One guarded re-dispatch of a failed-over run through the SAME machinery as an operator
+    /// rerun: a fresh command id + resolution token with the bindings re-stashed under them —
+    /// re-publishing the old token under a new id could never resolve credentialed slots.
+    /// </summary>
+    private async Task RedispatchAsync(CoreRunRecord orphan, CancellationToken ct)
+    {
         if (!settings.Value.RedispatchOnFailover || orphan.DispatchCommandJson is null)
             return;
 
@@ -171,9 +256,6 @@ public sealed class FailoverMonitor(
             return;
         }
 
-        // The re-dispatch goes through the SAME machinery as an operator rerun: a fresh command
-        // id + resolution token with the bindings re-stashed under them — re-publishing the old
-        // token under a new id could never resolve credentialed slots.
         try
         {
             var accepted = await runService.RerunAsync(

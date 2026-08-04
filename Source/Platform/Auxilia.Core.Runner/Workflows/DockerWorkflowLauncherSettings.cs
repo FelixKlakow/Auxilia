@@ -56,10 +56,11 @@ public sealed class DockerWorkflowLauncherSettings
     public Dictionary<string, string> SlotPackages { get; set; } = new();
 
     /// <summary>
-    /// Remove leftover labeled workflow containers from a previous runner process at startup
-    /// (single-runner-per-host assumption). Pairs with the Core's zombie-run sweep.
+    /// Re-adopt the previous runner process's workflow containers at startup: re-attach exit
+    /// watchers to running ones, collect the real exit of ones that died in the downtime, and
+    /// clean-kill only what cannot be matched to a live run (single-runner-per-host assumption).
     /// </summary>
-    public bool ReapWorkflowContainersOnStart { get; set; } = true;
+    public bool ReadoptContainersOnStart { get; set; } = true;
 
     /// <summary>
     /// Composed environment images (<c>auxilia-env:&lt;hash&gt;</c>) older than this and not used

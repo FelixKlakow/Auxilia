@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Auxilia.Core.Contracts;
 using Auxilia.Workflows.Messaging.Messages;
 
 namespace Auxilia.Core.Api.Services;
@@ -6,9 +7,7 @@ namespace Auxilia.Core.Api.Services;
 /// <summary>Lifecycle-state helpers shared across the Core run surface.</summary>
 public static class CoreRunStates
 {
-    private static readonly string[] Terminal = ["Success", "Failed", "Cancelled", "PreFlightFailed"];
-
-    public static bool IsTerminal(string? state) => state is not null && Terminal.Contains(state);
+    public static bool IsTerminal(string? state) => RunStates.IsTerminal(state);
 
     /// <summary>True when the serialized <see cref="WorkflowStatusEvent"/> is a terminal transition.</summary>
     public static bool IsTerminalStatus(string statusPayloadJson)

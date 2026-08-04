@@ -7,9 +7,33 @@ using Auxilia.Core.Contracts;
 
 namespace Auxilia.Core.Client;
 
-/// <summary>HTTP implementation of <see cref="ICoreClient"/> over the Core REST API.</summary>
-public sealed class CoreClient(HttpClient http) : ICoreClient
+/// <summary>
+/// HTTP implementation of <see cref="ICoreClient"/> over the Core REST API. Streams reconnect
+/// internally (backoff + idle detection) and yield <see cref="ClientStreamFrame{TEvent}"/>s;
+/// unary calls are bounded by <see cref="CoreClientOptions.UnaryTimeoutSeconds"/> because the
+/// underlying <see cref="HttpClient.Timeout"/> is disabled (it would sever long-lived streams).
+/// </summary>
+public sealed class CoreClient : ICoreClient
 {
+    private readonly HttpClient http;
+    private readonly CoreClientOptions options;
+
+    public CoreClient(HttpClient http, CoreClientOptions? options = null)
+    {
+        this.http = http;
+        this.options = options ?? new CoreClientOptions();
+        try
+        {
+            // SSE streams must outlive the 100s HttpClient default timeout; per-call unary
+            // timeouts (linked CTS in the transport helpers) take over the watchdog role.
+            http.Timeout = Timeout.InfiniteTimeSpan;
+        }
+        catch (InvalidOperationException)
+        {
+            // The HttpClient was already used (shared test client) — its timeout stands.
+        }
+    }
+
     // --- Run configurations ---
 
     public Task<RunConfiguration> CreateConfigurationAsync(CreateRunConfiguration request, CancellationToken ct = default)
@@ -65,25 +89,13 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
     public Task<RunAccepted> RerunAsync(Guid id, CancellationToken ct = default)
         => PostAsync<RunAccepted>($"/api/runs/{id}/rerun", ct);
 
-    public async IAsyncEnumerable<RunStreamEvent> StreamRunAsync(
-        Guid runId, [EnumeratorCancellation] CancellationToken ct = default)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/runs/{runId}/stream");
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
-        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-        await EnsureSuccessAsync(response, ct);
-
-        await using var stream = await response.Content.ReadAsStreamAsync(ct);
-        using var reader = new StreamReader(stream);
-        while (await reader.ReadLineAsync(ct) is { } line)
-        {
-            if (!line.StartsWith("data: ", StringComparison.Ordinal))
-                continue;
-            var evt = JsonSerializer.Deserialize<RunStreamEvent>(line["data: ".Length..], JsonSerializerOptions.Web);
-            if (evt is not null)
-                yield return evt;
-        }
-    }
+    public IAsyncEnumerable<ClientStreamFrame<RunStreamEvent>> StreamRunAsync(
+        Guid runId, CancellationToken ct = default)
+        => StreamResilientAsync<RunStreamEvent>(
+            () => NewSseRequest($"/api/runs/{runId}/stream"),
+            isTerminal: evt => evt.Kind == RunStreamEvent.StatusKind && RunStates.IsTerminal(StatusStateOf(evt)),
+            sequenceOf: evt => evt.Kind == RunStreamEvent.ViewKind ? evt.Sequence : null,
+            ct);
 
     public Task<PagedResult<RunViewItem>> GetRunViewsAsync(
         Guid runId, string? view = null, int skip = 0, int take = 200, CancellationToken ct = default)
@@ -119,9 +131,10 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
 
     public async Task<int> ClearFinishedRunsAsync(CancellationToken ct = default)
     {
-        using var response = await http.DeleteAsync("/api/runs", ct);
-        await EnsureSuccessAsync(response, ct);
-        return (await response.Content.ReadFromJsonAsync<ClearedRuns>(ct))?.Deleted ?? 0;
+        using var cts = UnaryCts(ct);
+        using var response = await http.DeleteAsync("/api/runs", cts.Token);
+        await EnsureSuccessAsync(response, cts.Token);
+        return (await response.Content.ReadFromJsonAsync<ClearedRuns>(cts.Token))?.Deleted ?? 0;
     }
 
     private sealed record ClearedRuns(int Deleted);
@@ -133,6 +146,7 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
             ("artifactType", query.ArtifactType),
             ("workItemId", query.WorkItemId),
             ("runId", query.RunId?.ToString()),
+            ("createdAfterUtc", query.CreatedAfterUtc?.ToString("O")),
             ("skip", query.Skip.ToString()),
             ("take", query.Take.ToString())), ct);
 
@@ -152,28 +166,193 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
         return await response.Content.ReadAsStreamAsync(ct);
     }
 
-    public async IAsyncEnumerable<ArtifactStreamEvent> StreamArtifactEventsAsync(
-        string? artifactType = null, string? workItemId = null,
-        [EnumeratorCancellation] CancellationToken ct = default)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/artifacts/stream?" + Query(
-            ("artifactType", artifactType),
-            ("workItemId", workItemId)));
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
-        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-        await EnsureSuccessAsync(response, ct);
+    public IAsyncEnumerable<ClientStreamFrame<ArtifactStreamEvent>> StreamArtifactEventsAsync(
+        string? artifactType = null, string? workItemId = null, CancellationToken ct = default)
+        => StreamResilientAsync<ArtifactStreamEvent>(
+            () => NewSseRequest("/api/artifacts/stream?" + Query(
+                ("artifactType", artifactType),
+                ("workItemId", workItemId))),
+            isTerminal: _ => false,
+            sequenceOf: _ => null,
+            ct);
 
-        await using var stream = await response.Content.ReadAsStreamAsync(ct);
-        using var reader = new StreamReader(stream);
-        while (await reader.ReadLineAsync(ct) is { } line)
+    // --- Resilient SSE core (reconnect + idle detection live HERE, never in callers) ---
+
+    private static HttpRequestMessage NewSseRequest(string url)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        return request;
+    }
+
+    /// <summary>
+    /// Opens the SSE endpoint and reconnects with exponential backoff on any drop — an orderly
+    /// close without a prior terminal event IS a drop (the Core recycled). A terminal event ends
+    /// the enumeration for good. Auth/not-found errors (non-transient) rethrow; every other
+    /// failure surfaces as a <see cref="StreamConnectionFrame{TEvent}"/> and is retried. Events
+    /// carrying a sequence are deduped across resubscribes (the server snapshot re-delivers).
+    /// Keepalive comments reset the idle watchdog; silence beyond
+    /// <see cref="CoreClientOptions.StreamIdleTimeoutSeconds"/> counts as a drop.
+    /// </summary>
+    private async IAsyncEnumerable<ClientStreamFrame<TEvent>> StreamResilientAsync<TEvent>(
+        Func<HttpRequestMessage> requestFactory,
+        Func<TEvent, bool> isTerminal,
+        Func<TEvent, long?> sequenceOf,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        var attempt = 0;
+        var initialBackoff = TimeSpan.FromSeconds(Math.Max(0, options.StreamReconnectInitialBackoffSeconds));
+        var maxBackoff = TimeSpan.FromSeconds(Math.Max(1, options.StreamReconnectMaxBackoffSeconds));
+        var idleTimeout = TimeSpan.FromSeconds(options.StreamIdleTimeoutSeconds);
+        var backoff = initialBackoff;
+        long maxSeenSequence = -1;
+
+        while (true)
         {
-            if (!line.StartsWith("data: ", StringComparison.Ordinal))
-                continue;
-            var evt = JsonSerializer.Deserialize<ArtifactStreamEvent>(line["data: ".Length..], JsonSerializerOptions.Web);
-            if (evt is not null)
-                yield return evt;
+            ct.ThrowIfCancellationRequested();
+            attempt++;
+            HttpResponseMessage? response = null;
+            Exception? failure = null;
+            try
+            {
+                using var request = requestFactory();
+                response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+                await EnsureSuccessAsync(response, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                response?.Dispose();
+                throw;
+            }
+            catch (CoreApiException ex) when (!IsTransient(ex.StatusCode))
+            {
+                // 401/403/404: retrying cannot help — the caller must handle it.
+                response?.Dispose();
+                throw;
+            }
+            catch (Exception ex) when (ex is HttpRequestException or IOException or CoreApiException or TaskCanceledException)
+            {
+                failure = ex;
+                response?.Dispose();
+                response = null;
+            }
+
+            if (response is not null)
+            {
+                var terminal = false;
+                using (response)
+                {
+                    yield return new StreamConnectionFrame<TEvent>(StreamConnectionState.Connected, attempt);
+
+                    Stream? body = null;
+                    try
+                    {
+                        body = await response.Content.ReadAsStreamAsync(ct);
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception ex) when (ex is HttpRequestException or IOException)
+                    {
+                        failure = ex;
+                    }
+
+                    if (body is not null)
+                    {
+                        using var reader = new StreamReader(body);
+                        while (true)
+                        {
+                            string? line;
+                            try
+                            {
+                                line = await ReadLineWithIdleTimeoutAsync(reader, idleTimeout, ct);
+                            }
+                            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                            catch (Exception ex)
+                            {
+                                failure = ex;
+                                break;
+                            }
+                            if (line is null)
+                                break; // orderly close — without a terminal event this is a drop
+                            if (!line.StartsWith("data: ", StringComparison.Ordinal))
+                                continue; // ": ping" keepalives and blank lines reset the watchdog
+
+                            TEvent? evt;
+                            try
+                            {
+                                evt = JsonSerializer.Deserialize<TEvent>(
+                                    line["data: ".Length..], JsonSerializerOptions.Web);
+                            }
+                            catch (JsonException)
+                            {
+                                continue;
+                            }
+                            if (evt is null)
+                                continue;
+
+                            if (sequenceOf(evt) is { } sequence)
+                            {
+                                if (sequence <= maxSeenSequence)
+                                    continue; // resubscribe overlap — already delivered
+                                maxSeenSequence = sequence;
+                            }
+
+                            backoff = initialBackoff; // a live event proves the link — reset
+                            yield return new StreamEventFrame<TEvent>(evt);
+                            if (isTerminal(evt))
+                            {
+                                terminal = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (terminal)
+                    yield break;
+            }
+
+            yield return new StreamConnectionFrame<TEvent>(
+                StreamConnectionState.Reconnecting, attempt, backoff, failure);
+            if (backoff > TimeSpan.Zero)
+                await Task.Delay(backoff, ct);
+            backoff = TimeSpan.FromTicks(Math.Min(maxBackoff.Ticks, Math.Max(1, backoff.Ticks) * 2));
         }
     }
+
+    private static async Task<string?> ReadLineWithIdleTimeoutAsync(
+        StreamReader reader, TimeSpan idleTimeout, CancellationToken ct)
+    {
+        if (idleTimeout <= TimeSpan.Zero)
+            return await reader.ReadLineAsync(ct);
+        var readTask = reader.ReadLineAsync(ct).AsTask();
+        var winner = await Task.WhenAny(readTask, Task.Delay(idleTimeout, ct));
+        if (winner != readTask)
+        {
+            // Observe the abandoned read's eventual fault (the caller disposes the stream).
+            _ = readTask.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+            throw new TimeoutException(
+                $"The SSE stream was silent for {idleTimeout.TotalSeconds:0}s (keepalives included) — treating the connection as dead.");
+        }
+        return await readTask;
+    }
+
+    private static bool IsTransient(HttpStatusCode status)
+        => (int)status >= 500
+           || status is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests;
+
+    private static string? StatusStateOf(RunStreamEvent evt)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<StatusPayload>(
+                evt.PayloadJson, JsonSerializerOptions.Web)?.State;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private sealed record StatusPayload(string? State);
 
     // --- Audit ---
 
@@ -441,65 +620,84 @@ public sealed class CoreClient(HttpClient http) : ICoreClient
 
     public async Task<bool> CheckHealthAsync(CancellationToken ct = default)
     {
-        using var response = await http.GetAsync("/health", ct);
+        using var cts = UnaryCts(ct);
+        using var response = await http.GetAsync("/health", cts.Token);
         return response.IsSuccessStatusCode;
     }
 
     // --- Transport helpers (every non-success surfaces as CoreApiException) ---
+    // Unary calls run under a linked per-call timeout: HttpClient.Timeout is disabled for the
+    // sake of the SSE streams, so this is the only watchdog against a hung request.
+
+    private CancellationTokenSource UnaryCts(CancellationToken ct)
+    {
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        if (options.UnaryTimeoutSeconds > 0)
+            cts.CancelAfter(TimeSpan.FromSeconds(options.UnaryTimeoutSeconds));
+        return cts;
+    }
 
     private async Task<TResult> PostAsync<TRequest, TResult>(string url, TRequest body, CancellationToken ct)
     {
-        using var response = await http.PostAsJsonAsync(url, body, ct);
-        await EnsureSuccessAsync(response, ct);
-        return (await response.Content.ReadFromJsonAsync<TResult>(ct))!;
+        using var cts = UnaryCts(ct);
+        using var response = await http.PostAsJsonAsync(url, body, cts.Token);
+        await EnsureSuccessAsync(response, cts.Token);
+        return (await response.Content.ReadFromJsonAsync<TResult>(cts.Token))!;
     }
 
     private async Task<TResult> PutAsync<TRequest, TResult>(string url, TRequest body, CancellationToken ct)
     {
-        using var response = await http.PutAsJsonAsync(url, body, ct);
-        await EnsureSuccessAsync(response, ct);
-        return (await response.Content.ReadFromJsonAsync<TResult>(ct))!;
+        using var cts = UnaryCts(ct);
+        using var response = await http.PutAsJsonAsync(url, body, cts.Token);
+        await EnsureSuccessAsync(response, cts.Token);
+        return (await response.Content.ReadFromJsonAsync<TResult>(cts.Token))!;
     }
 
     private async Task<TResult> PostAsync<TResult>(string url, CancellationToken ct)
     {
-        using var response = await http.PostAsync(url, null, ct);
-        await EnsureSuccessAsync(response, ct);
-        return (await response.Content.ReadFromJsonAsync<TResult>(ct))!;
+        using var cts = UnaryCts(ct);
+        using var response = await http.PostAsync(url, null, cts.Token);
+        await EnsureSuccessAsync(response, cts.Token);
+        return (await response.Content.ReadFromJsonAsync<TResult>(cts.Token))!;
     }
 
     private async Task PostAsync<TRequest>(string url, TRequest body, CancellationToken ct)
     {
-        using var response = await http.PostAsJsonAsync(url, body, ct);
-        await EnsureSuccessAsync(response, ct);
+        using var cts = UnaryCts(ct);
+        using var response = await http.PostAsJsonAsync(url, body, cts.Token);
+        await EnsureSuccessAsync(response, cts.Token);
     }
 
     private async Task PostAsync(string url, CancellationToken ct)
     {
-        using var response = await http.PostAsync(url, null, ct);
-        await EnsureSuccessAsync(response, ct);
+        using var cts = UnaryCts(ct);
+        using var response = await http.PostAsync(url, null, cts.Token);
+        await EnsureSuccessAsync(response, cts.Token);
     }
 
     private async Task<TResult> GetAsync<TResult>(string url, CancellationToken ct)
     {
-        using var response = await http.GetAsync(url, ct);
-        await EnsureSuccessAsync(response, ct);
-        return (await response.Content.ReadFromJsonAsync<TResult>(ct))!;
+        using var cts = UnaryCts(ct);
+        using var response = await http.GetAsync(url, cts.Token);
+        await EnsureSuccessAsync(response, cts.Token);
+        return (await response.Content.ReadFromJsonAsync<TResult>(cts.Token))!;
     }
 
     private async Task<TResult?> GetOrNullAsync<TResult>(string url, CancellationToken ct) where TResult : class
     {
-        using var response = await http.GetAsync(url, ct);
+        using var cts = UnaryCts(ct);
+        using var response = await http.GetAsync(url, cts.Token);
         if (response.StatusCode == HttpStatusCode.NotFound)
             return null;
-        await EnsureSuccessAsync(response, ct);
-        return await response.Content.ReadFromJsonAsync<TResult>(ct);
+        await EnsureSuccessAsync(response, cts.Token);
+        return await response.Content.ReadFromJsonAsync<TResult>(cts.Token);
     }
 
     private async Task DeleteAsync(string url, CancellationToken ct)
     {
-        using var response = await http.DeleteAsync(url, ct);
-        await EnsureSuccessAsync(response, ct);
+        using var cts = UnaryCts(ct);
+        using var response = await http.DeleteAsync(url, cts.Token);
+        await EnsureSuccessAsync(response, cts.Token);
     }
 
     private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken ct)

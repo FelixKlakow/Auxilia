@@ -2,10 +2,15 @@
 @attribute [Authorize]
 @implements IDisposable
 @inject ICoreClient Core
+@inject ILogger<Runs> Logger
 
 <PageTitle>Runs — Auxilia</PageTitle>
 
 <PageHeader Title="Runs" Subtitle="Every workflow execution on this platform, newest first."/>
+
+<ConnectionBanner Connected="@(_poller?.IsHealthy ?? true)"
+                  Detail="@_poller?.LastError"
+                  LastUpdatedUtc="_poller?.LastSuccessUtc"/>
 
 @if (!_loaded)
 {
@@ -124,7 +129,7 @@ else
     private readonly Dictionary<Guid, string> _configurationNames = new();
 
     private readonly CancellationTokenSource _cts = new();
-    private PeriodicTimer? _timer;
+    private PagePoller? _poller;
 
     private static string ShortId(Guid id) => id.ToString("N")[..8];
 
@@ -137,30 +142,29 @@ else
         return "—";
     }
 
-    protected override Task OnInitializedAsync() => LoadAsync(reset: true);
-
-    protected override void OnAfterRender(bool firstRender)
-    {
-        if (!firstRender || _timer is not null || _denied)
-            return;
-        _timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
-        _ = PollAsync();
-    }
-
-    private async Task PollAsync()
+    protected override async Task OnInitializedAsync()
     {
         try
         {
-            while (await _timer!.WaitForNextTickAsync(_cts.Token))
-            {
-                await LoadAsync(reset: true);
-                await InvokeAsync(StateHasChanged);
-            }
+            await LoadAsync(reset: true);
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Component disposed — polling ends.
+            // Core unreachable during prerender — the poller keeps retrying and the banner shows.
+            _error = ex.Message;
+            _loaded = true;
         }
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender || _poller is not null || _denied)
+            return;
+        // A PagePoller instead of a raw timer loop: a transport exception (Core restart) must
+        // never kill the polling permanently — it flips the banner and keeps retrying.
+        _poller = new PagePoller(TimeSpan.FromSeconds(5), _ => LoadAsync(reset: true), Logger);
+        _poller.StateChanged += () => _ = InvokeAsync(StateHasChanged);
+        _poller.Start();
     }
 
     private Task ApplyStateAsync(string state)
@@ -177,31 +181,32 @@ else
 
     private async Task LoadAsync(bool reset)
     {
-        if (reset)
-        {
-            _skip = 0;
-            _runs = [];
-        }
-
+        var skip = reset ? 0 : _skip;
         var query = new RunQuery(
             State: _stateFilter == "All" ? null : _stateFilter,
             WorkflowType: string.IsNullOrWhiteSpace(_workflowType) ? null : _workflowType.Trim(),
-            Skip: _skip,
+            Skip: skip,
             Take: PageSize);
 
         try
         {
+            // Query FIRST, mutate on success — a failing refresh keeps the stale table rendered
+            // (behind the connection banner) instead of blanking the page.
             var page = await Core.QueryRunsAsync(query, _cts.Token);
             _denied = false;
             _error = null;
             _total = page.Total;
-            _runs.AddRange(page.Items);
-            _skip += page.Items.Count;
+            if (reset)
+                _runs = page.Items.ToList();
+            else
+                _runs.AddRange(page.Items);
+            _skip = skip + page.Items.Count;
             _liveCount = LiveNow.ActiveOf(_runs).Count;
             await ResolveConfigurationNamesAsync();
         }
         catch (CoreApiException ex)
         {
+            // Page semantics stay here; raw transport exceptions bubble to the PagePoller.
             _denied = ex.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
             _error = ex.ErrorDetail ?? ex.Message;
         }
@@ -258,7 +263,7 @@ else
     {
         _cts.Cancel();
         _cts.Dispose();
-        _timer?.Dispose();
+        _poller?.Dispose();
     }
 
 }

@@ -34,11 +34,16 @@ public interface ICoreClient
     Task<RunAccepted> RerunAsync(Guid id, CancellationToken ct = default);
 
     /// <summary>
-    /// Live-view stream for a run: status transitions and view items as discriminated
-    /// <see cref="RunStreamEvent"/>s, over Server-Sent Events. The sequence completes when the run
-    /// reaches a terminal state or <paramref name="ct"/> is cancelled.
+    /// Live-view stream for a run over Server-Sent Events, RESILIENT: the client reconnects
+    /// internally with backoff and yields <see cref="StreamConnectionFrame{TEvent}"/>s around
+    /// <see cref="StreamEventFrame{TEvent}"/> payloads (status transitions + view items as
+    /// discriminated <see cref="RunStreamEvent"/>s). The first frame after every (re)subscribe is
+    /// the server's status snapshot, so completion of the sequence reliably means the run reached
+    /// a terminal state (or <paramref name="ct"/> was cancelled). Non-transient HTTP errors
+    /// (401/403/404) throw <see cref="CoreApiException"/>; transport errors never escape.
+    /// View frames are deduped across resubscribes by sequence; status frames are idempotent.
     /// </summary>
-    IAsyncEnumerable<RunStreamEvent> StreamRunAsync(Guid runId, CancellationToken ct = default);
+    IAsyncEnumerable<ClientStreamFrame<RunStreamEvent>> StreamRunAsync(Guid runId, CancellationToken ct = default);
 
     /// <summary>A run's persisted view items (outputs) — the read-later counterpart of the stream.</summary>
     Task<PagedResult<RunViewItem>> GetRunViewsAsync(
@@ -78,9 +83,13 @@ public interface ICoreClient
     /// <summary>
     /// Artifact events over Server-Sent Events, SERVER-SIDE FILTERED by artifact type and/or work
     /// item — the client-surface way to chain on artifacts (no message-bus access required).
-    /// Runs until <paramref name="ct"/> is cancelled.
+    /// RESILIENT: reconnects internally and yields connection frames (see
+    /// <see cref="StreamRunAsync"/>); events published during a disconnect window are NOT
+    /// replayed — catch up via <see cref="QueryArtifactsAsync"/> with
+    /// <see cref="ArtifactQuery.CreatedAfterUtc"/> on the reconnected frame. Runs until
+    /// <paramref name="ct"/> is cancelled.
     /// </summary>
-    IAsyncEnumerable<ArtifactStreamEvent> StreamArtifactEventsAsync(
+    IAsyncEnumerable<ClientStreamFrame<ArtifactStreamEvent>> StreamArtifactEventsAsync(
         string? artifactType = null, string? workItemId = null, CancellationToken ct = default);
 
     // --- Audit ---

@@ -19,9 +19,12 @@ Triggers fire only while some host embedding this library runs.
 - **Every dispatch goes through the Core Run API** on behalf of the trigger's run-as
   principal, passing the same policy checks as a manual run. One failing trigger is logged
   and skipped; engines never die from a single bad dispatch.
-- Stream drops reconnect with exponential backoff (`WorkflowClientOptions`); the Core is the
-  durable side. Adding a trigger for a NEW artifact type needs `RefreshAsync` to open its
-  filtered stream; edits to existing triggers apply per event without a restart.
+- **Stream reconnect lives in `Auxilia.Core.Client`**, not here — the engine consumes the
+  resilient frame stream and adds what only it can: on every reconnect it CATCHES UP via
+  `QueryArtifactsAsync(CreatedAfterUtc: lastSeen)` (events during the gap are not replayed by
+  the stream) and dedupes catch-up/live overlap by artifact id (bounded memory). Adding a
+  trigger for a NEW artifact type needs `RefreshAsync` to open its filtered stream; edits to
+  existing triggers apply per event without a restart.
 
 ## Integrating
 ```csharp

@@ -13,14 +13,18 @@ namespace Auxilia.Workflows.Client.Triggers;
 /// workflow with the artifact reference in its context. Triggers are re-read from the store
 /// per event, so edits apply without a restart; ADDING a trigger for a NEW artifact type needs
 /// <see cref="RefreshAsync"/> (or a host restart) to open its stream.
-/// Stream drops reconnect with exponential backoff — the Core is the durable side.
+/// Reconnect lives INSIDE <see cref="ICoreClient"/>; on every reconnected frame this engine
+/// CATCHES UP via <see cref="ICoreClient.QueryArtifactsAsync"/> (artifacts persisted during the
+/// disconnect window are not replayed by the stream) and dedupes against double delivery.
 /// </summary>
 public sealed class ArtifactChainingEngine(
     ITriggerStore store,
     ICoreClient core,
-    IOptions<WorkflowClientOptions> options,
     ILogger<ArtifactChainingEngine> logger) : IHostedService, IDisposable
 {
+    /// <summary>Dispatched-artifact-id memory per consumer, bounding the catch-up/live dedupe.</summary>
+    internal const int DedupeCapacity = 512;
+
     private readonly object _gate = new();
     private readonly Dictionary<string, (CancellationTokenSource Cts, Task Consumer)> _consumers = new(StringComparer.Ordinal);
     private CancellationTokenSource? _lifetime;
@@ -64,39 +68,96 @@ public sealed class ArtifactChainingEngine(
 
     private async Task ConsumeAsync(string artifactType, CancellationToken ct)
     {
-        var backoff = TimeSpan.FromSeconds(1);
-        while (!ct.IsCancellationRequested)
+        // The client stream reconnects internally; this loop only reacts to its frames. Track the
+        // newest handled CreatedUtc so a reconnect can query the gap, and remember recently
+        // dispatched artifact ids so catch-up overlapping the live stream dispatches once.
+        DateTimeOffset? lastSeenUtc = null;
+        var dispatched = new HashSet<Guid>();
+        var dispatchedOrder = new Queue<Guid>();
+
+        try
         {
+            await foreach (var frame in core.StreamArtifactEventsAsync(artifactType, ct: ct))
+            {
+                switch (frame)
+                {
+                    case StreamEventFrame<ArtifactStreamEvent> evt:
+                        if (Remember(evt.Event.Artifact.Id))
+                        {
+                            lastSeenUtc = Max(lastSeenUtc, evt.Event.Artifact.CreatedUtc);
+                            await HandleAsync(evt.Event, ct);
+                        }
+                        break;
+
+                    case StreamConnectionFrame<ArtifactStreamEvent> { State: StreamConnectionState.Reconnecting } down:
+                        logger.LogWarning(down.Cause,
+                            "Artifact stream for '{ArtifactType}' dropped — the client retries in {Backoff}s.",
+                            artifactType, down.RetryDelay?.TotalSeconds ?? 0);
+                        break;
+
+                    case StreamConnectionFrame<ArtifactStreamEvent> { State: StreamConnectionState.Connected, Attempt: > 1 }:
+                        await CatchUpAsync(ct);
+                        break;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Engine stop.
+        }
+        catch (Exception ex)
+        {
+            // Non-transient (auth/permission) — retrying cannot help; surface loudly and stop
+            // this consumer. RefreshAsync/restart re-opens it once the deployment is fixed.
+            logger.LogError(ex,
+                "Artifact stream consumer for '{ArtifactType}' stopped on a non-recoverable error.",
+                artifactType);
+        }
+        return;
+
+        bool Remember(Guid artifactId)
+        {
+            if (!dispatched.Add(artifactId))
+                return false;
+            dispatchedOrder.Enqueue(artifactId);
+            if (dispatchedOrder.Count > DedupeCapacity)
+                dispatched.Remove(dispatchedOrder.Dequeue());
+            return true;
+        }
+
+        static DateTimeOffset? Max(DateTimeOffset? a, DateTimeOffset b) => a is { } x && x > b ? x : b;
+
+        // Artifacts persisted while disconnected: page the store oldest-first from the last
+        // handled timestamp and run them through the same trigger dispatch (deduped above).
+        async Task CatchUpAsync(CancellationToken innerCt)
+        {
+            if (lastSeenUtc is not { } since)
+                return; // nothing handled yet — no gap to define
             try
             {
-                await foreach (var evt in core.StreamArtifactEventsAsync(artifactType, ct: ct))
+                while (true)
                 {
-                    backoff = TimeSpan.FromSeconds(1);
-                    await HandleAsync(evt, ct);
+                    var page = await core.QueryArtifactsAsync(
+                        new ArtifactQuery(artifactType, CreatedAfterUtc: since, Take: 200), innerCt);
+                    foreach (var artifact in page.Items)
+                    {
+                        lastSeenUtc = Max(lastSeenUtc, artifact.CreatedUtc);
+                        if (Remember(artifact.Id))
+                            await HandleAsync(new ArtifactStreamEvent(artifact, artifact.CreatedUtc), innerCt);
+                    }
+                    if (page.Items.Count == 0 || lastSeenUtc is not { } advanced || advanced <= since)
+                        break;
+                    since = advanced;
                 }
-                // An orderly end of the stream (e.g. the Core recycled) — reconnect.
+                logger.LogInformation(
+                    "Artifact stream for '{ArtifactType}' reconnected — catch-up complete.", artifactType);
             }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                return;
-            }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 logger.LogWarning(ex,
-                    "Artifact stream for '{ArtifactType}' dropped — reconnecting in {Backoff}s.",
-                    artifactType, backoff.TotalSeconds);
+                    "Catch-up query for '{ArtifactType}' failed — live events continue; the gap retries on the next reconnect.",
+                    artifactType);
             }
-
-            try
-            {
-                await Task.Delay(backoff, ct);
-            }
-            catch (OperationCanceledException)
-            {
-                return;
-            }
-            var max = TimeSpan.FromSeconds(Math.Max(1, options.Value.StreamReconnectMaxBackoffSeconds));
-            backoff = backoff * 2 > max ? max : backoff * 2;
         }
     }
 

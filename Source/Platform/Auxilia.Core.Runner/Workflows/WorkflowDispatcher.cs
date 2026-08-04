@@ -48,6 +48,7 @@ public sealed class WorkflowDispatcher(
     IRepositoryAuthResolver repositoryAuthResolver,
     AuditLog auditLog,
     CoreRunnerInfo instanceInfo,
+    Auxilia.PlatformData.Protection.ISettingsProtector settingsProtector,
     ILogger<WorkflowDispatcher> logger)
 {
     private IAsyncDisposable? _subscription;
@@ -419,6 +420,11 @@ public sealed class WorkflowDispatcher(
         // A crashed container must fail its run visibly — never leave it stuck in Queued/Running.
         Func<ContainerExit, Task> onContainerExited =
             exit => HandleContainerExitAsync(instanceId, workflowType, exit);
+        // Persist container id + protected instance token at creation: the re-adoption anchor a
+        // restarted runner needs to re-attach watchers and keep the SDK's token validating.
+        Func<string, Task> onContainerCreated =
+            containerId => instanceRegistry.SetContainerAsync(
+                instanceId, containerId, settingsProtector.Protect(issued.Token), CancellationToken.None);
 
         // docker:// URI — skip download/verify/extract; use baked image
         if (packageUri.StartsWith("docker://", StringComparison.OrdinalIgnoreCase))
@@ -437,7 +443,9 @@ public sealed class WorkflowDispatcher(
                         WorkspaceDirectoryBind = workspaceRoot,
                         PublishTerminalPort = terminalPort,
                         TerminalContainerName = terminalContainerName,
-                        OnExited = onContainerExited
+                        OnExited = onContainerExited,
+                        InstanceId = instanceId,
+                        OnContainerCreated = onContainerCreated
                     },
                     ct);
             }
@@ -505,7 +513,9 @@ public sealed class WorkflowDispatcher(
             WorkspaceDirectoryBind = workspaceRoot,
             PublishTerminalPort = terminalPort,
             TerminalContainerName = terminalContainerName,
-            OnExited = onContainerExited
+            OnExited = onContainerExited,
+            InstanceId = instanceId,
+            OnContainerCreated = onContainerCreated
         }, ct);
         await StampTerminalEndpointAsync(instanceId, launchResult, ct);
         await MarkQueuedAsync(instanceId, workflowType, packageUri, launchResult.TerminalEndpoint, ct);

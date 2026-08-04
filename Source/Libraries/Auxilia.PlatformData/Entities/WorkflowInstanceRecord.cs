@@ -31,4 +31,17 @@ public sealed record WorkflowInstanceRecord : IEntity
     /// workflows declaring one; the dashboard proxies it — authenticated — to the run owner.
     /// </summary>
     public string? TerminalEndpoint { get; init; }
+
+    /// <summary>
+    /// Docker container id, persisted at creation so a restarted runner can RE-ADOPT a still
+    /// running container (re-attach its exit watcher) instead of killing it.
+    /// </summary>
+    public string? ContainerId { get; init; }
+
+    /// <summary>
+    /// The instance token, protected via <see cref="Protection.ISettingsProtector"/> — restored
+    /// into the in-memory token registry on re-adoption so the in-container SDK's registration
+    /// and JIT slot activations keep validating across a runner restart. Never stored plaintext.
+    /// </summary>
+    public string? ProtectedInstanceToken { get; init; }
 }

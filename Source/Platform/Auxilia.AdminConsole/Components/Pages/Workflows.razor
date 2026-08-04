@@ -213,7 +213,7 @@ else
         try
         {
             var accepted = await Core.RunConfigurationAsync(configuration.Id, ct: _cts.Token);
-            _notice = $"Run of \"{configuration.Name}\" dispatched ({accepted.RunId.ToString("N")[..8]}) — it appears under Runs shortly.";
+            _notice = $"Run of \"{configuration.Name}\" dispatched ({accepted.RunId.ToString("N")[..8]}) — see it under Runs.";
         }
         catch (CoreApiException ex)
         {

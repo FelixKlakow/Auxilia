@@ -109,6 +109,9 @@ try
     builder.Services.AddSingleton<SignalDispatcher>();
     builder.Services.AddSingleton<WorkflowAnnouncementHandler>();
     builder.Services.AddSingleton<WorkflowDispatcher>();
+    builder.Services.AddSingleton<WorkflowReadoptionService>();
+    builder.Services.AddSingleton<IWorkflowContainerHost>(sp =>
+        (DockerWorkflowLauncher)sp.GetRequiredService<IWorkflowLauncher>());
     builder.Services.AddSingleton<WorkflowCancelDispatcher>();
     builder.Services.AddSingleton<WorkflowStateHandler>();
     builder.Services.AddSingleton<Auxilia.Workflows.Messaging.WorkflowStatusPublisher>();
@@ -218,20 +221,20 @@ try
     var announcementHandler = app.Services.GetRequiredService<WorkflowAnnouncementHandler>();
     await announcementHandler.StartAsync(app.Lifetime.ApplicationStopping);
 
-    // A previous runner's containers are unmanageable (exit watchers died with it; the fresh
-    // ServiceId never re-adopts) — reap them before accepting work so no container lingers.
-    if (launcherSettings.ReapWorkflowContainersOnStart
+    // RE-ADOPT the previous runner process's containers before accepting new work: re-claim
+    // their runs under the fresh ServiceId (racing the Core's failover clock), re-attach exit
+    // watchers, restore instance tokens, collect downtime exits, clean-kill the unmatchable.
+    if (launcherSettings.ReadoptContainersOnStart
         && app.Services.GetRequiredService<IWorkflowLauncher>() is DockerWorkflowLauncher dockerLauncher)
     {
         try
         {
-            var reaped = await dockerLauncher.ReapOrphanedContainersAsync(app.Lifetime.ApplicationStopping);
-            if (reaped > 0)
-                Log.Warning("Reaped {Count} orphaned workflow container(s) at startup.", reaped);
+            await app.Services.GetRequiredService<WorkflowReadoptionService>()
+                .RunAsync(app.Lifetime.ApplicationStopping);
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "Startup container reaping failed — continuing; the Core's zombie sweep still covers the run records.");
+            Log.Warning(ex, "Startup container re-adoption failed — continuing; the Core's failover sweeps still cover the run records.");
         }
 
         // Expired composed environment images: safe to purge (content-addressed, rebuild on demand).

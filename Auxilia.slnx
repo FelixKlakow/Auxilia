@@ -70,6 +70,7 @@
   <Folder Name="/Tests/Libraries/">
     <Project Path="Tests\Libraries\Auxilia.Adapters.Email.Tests\Auxilia.Adapters.Email.Tests.csproj" />
     <Project Path="Tests\Libraries\Auxilia.Ai.Tests\Auxilia.Ai.Tests.csproj" />
+    <Project Path="Tests\Libraries\Auxilia.Core.Client.Tests\Auxilia.Core.Client.Tests.csproj" />
     <Project Path="Tests\Libraries\Auxilia.Governance.Tests\Auxilia.Governance.Tests.csproj" />
     <Project Path="Tests\Libraries\Auxilia.PlatformData.Tests\Auxilia.PlatformData.Tests.csproj" />
     <Project Path="Tests\Libraries\Auxilia.UniversalDataAccess.Tests\Auxilia.UniversalDataAccess.Tests.csproj" />

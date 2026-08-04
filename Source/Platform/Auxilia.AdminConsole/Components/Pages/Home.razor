@@ -1,6 +1,8 @@
 @page "/"
 @attribute [Authorize]
+@implements IDisposable
 @inject ICoreClient Core
+@inject ILogger<Home> Logger
 
 <PageTitle>Home — Auxilia</PageTitle>
 
@@ -52,19 +54,44 @@ else
     private bool _loaded;
     private bool _healthy;
     private CurrentPrincipal? _principal;
+    private PagePoller? _poller;
 
     protected override async Task OnInitializedAsync()
     {
-        _healthy = await Core.CheckHealthAsync();
+        await CheckHealthTickAsync(CancellationToken.None);
         try
         {
             _principal = await Core.GetCurrentPrincipalAsync();
         }
-        catch (CoreApiException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _principal = null;
         }
         _loaded = true;
     }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender || _poller is not null)
+            return;
+        // The health dot stays live — a Core outage/restart flips it without a page reload.
+        _poller = new PagePoller(TimeSpan.FromSeconds(15), CheckHealthTickAsync, Logger);
+        _poller.StateChanged += () => _ = InvokeAsync(StateHasChanged);
+        _poller.Start();
+    }
+
+    private async Task CheckHealthTickAsync(CancellationToken ct)
+    {
+        try
+        {
+            _healthy = await Core.CheckHealthAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _healthy = false;
+        }
+    }
+
+    public void Dispose() => _poller?.Dispose();
 
 }

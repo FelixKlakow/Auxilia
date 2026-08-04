@@ -80,4 +80,20 @@ public sealed class DashboardPageTests
             Assert.That(cut.Markup, Does.Contain($"runs/{running.RunId}"), "runs link to the run-detail page");
         });
     }
+
+    [Test]
+    public void Dashboard_RawTransportError_ShowsTheConnectionBanner_AndDoesNotCrash()
+    {
+        // The Core-restart failure mode: a raw HttpRequestException (not a CoreApiException).
+        // The page must render with the connection banner and keep polling — this exact case
+        // used to fault the poll task and freeze the page permanently.
+        var core = new FakeCoreClient { RunsError = new HttpRequestException("connection refused") };
+        using var ctx = NewContext(core);
+
+        var cut = ctx.Render<Dashboard>();
+
+        cut.WaitForAssertion(() =>
+            Assert.That(cut.Markup, Does.Contain("connection-banner"),
+                "a transport failure must be visible as a connection problem, not a dead page"));
+    }
 }

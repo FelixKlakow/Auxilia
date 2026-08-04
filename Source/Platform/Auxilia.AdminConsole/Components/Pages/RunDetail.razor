@@ -4,6 +4,7 @@
 @using Auxilia.Workflows.Messaging.Messages
 @implements IDisposable
 @inject ICoreClient Core
+@inject ILogger<RunDetail> Logger
 
 <PageTitle>@(_run is null ? "Run" : $"{_run.WorkflowType} · run {ShortId}") — Auxilia</PageTitle>
 
@@ -36,6 +37,8 @@ else
         </h1>
         <p class="page-subtitle run-id-line" title="Full run ID — select to copy">@Id</p>
     </header>
+
+    <ConnectionBanner Connected="_connected" Detail="@_connectionDetail" LastUpdatedUtc="_lastEventUtc"/>
 
     @if (!IsTerminal)
     {
@@ -114,6 +117,9 @@ else
     private bool _denied;
     private bool _busy;
     private bool _streamStarted;
+    private bool _connected = true;
+    private string? _connectionDetail;
+    private DateTimeOffset? _lastEventUtc;
     private string? _error;
     private string? _cancelNotice;
     private RunStatus? _run;
@@ -183,6 +189,11 @@ else
             _error = ex.ErrorDetail ?? ex.Message;
             await InvokeAsync(StateHasChanged);
         }
+        catch (Exception ex)
+        {
+            // A transient transport failure mid-backfill: the reconnect path re-runs the backfill.
+            Logger.LogWarning(ex, "Persisted-view backfill failed for run {RunId}.", Id);
+        }
     }
 
     private ViewDataRecord ToRecord(RunViewItem item) => new()
@@ -195,13 +206,38 @@ else
         TimestampUtc = item.TimestampUtc
     };
 
+    /// <summary>
+    /// Consumes the resilient client stream. The client reconnects internally and re-delivers the
+    /// current state as a snapshot frame, so normal completion of the enumeration reliably means
+    /// the run reached a terminal state. Reconnecting/Connected frames drive the banner; a
+    /// reconnect refetches the run and re-runs the persisted-view backfill (the sequence-keyed
+    /// buffers merge without duplicates).
+    /// </summary>
     private async Task ConsumeStreamAsync()
     {
         try
         {
-            await foreach (var evt in Core.StreamRunAsync(Id, _cts.Token))
+            await foreach (var frame in Core.StreamRunAsync(Id, _cts.Token))
             {
-                Apply(evt);
+                switch (frame)
+                {
+                    case StreamEventFrame<RunStreamEvent> evt:
+                        Apply(evt.Event);
+                        _lastEventUtc = evt.Event.TimestampUtc;
+                        break;
+
+                    case StreamConnectionFrame<RunStreamEvent> { State: StreamConnectionState.Reconnecting } down:
+                        _connected = false;
+                        _connectionDetail = down.Cause?.Message;
+                        break;
+
+                    case StreamConnectionFrame<RunStreamEvent> { State: StreamConnectionState.Connected } up:
+                        _connected = true;
+                        _connectionDetail = null;
+                        if (up.Attempt > 1)
+                            await RefreshAfterReconnectAsync();
+                        break;
+                }
                 await InvokeAsync(StateHasChanged);
             }
         }
@@ -214,6 +250,32 @@ else
             _error = ex.ErrorDetail ?? ex.Message;
             await InvokeAsync(StateHasChanged);
         }
+        catch (Exception ex)
+        {
+            // Defensive: the client wraps transport errors, so anything landing here is a bug —
+            // surface it instead of leaving an unobserved faulted task and a frozen page.
+            Logger.LogError(ex, "Run stream consumer failed for run {RunId}.", Id);
+            _error = ex.Message;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>State may have jumped while disconnected — refetch the run and backfill views.</summary>
+    private async Task RefreshAfterReconnectAsync()
+    {
+        try
+        {
+            if (await Core.GetRunAsync(Id, _cts.Token) is { } run)
+            {
+                _run = run;
+                _state = run.State;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Post-reconnect refetch failed for run {RunId}.", Id);
+        }
+        _ = LoadPersistedViewsAsync();
     }
 
     /// <summary>Decode one SSE frame: a status transition updates run state; a view frame buffers an item.</summary>
@@ -268,7 +330,9 @@ else
     {
         try
         {
-            return JsonSerializer.Deserialize<T>(json);
+            // The Core serializes frame payloads with the Web defaults (camelCase) — decoding
+            // with the case-sensitive defaults would silently null every field.
+            return JsonSerializer.Deserialize<T>(json, JsonSerializerOptions.Web);
         }
         catch (JsonException)
         {

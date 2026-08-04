@@ -2,10 +2,15 @@
 @attribute [Authorize]
 @implements IDisposable
 @inject ICoreClient Core
+@inject ILogger<Dashboard> Logger
 
 <PageTitle>Dashboard — Auxilia</PageTitle>
 
 <PageHeader Title="Dashboard" Subtitle="What is running now, and what ran recently."/>
+
+<ConnectionBanner Connected="@(_poller?.IsHealthy ?? true)"
+                  Detail="@_poller?.LastError"
+                  LastUpdatedUtc="_poller?.LastSuccessUtc"/>
 
 @if (!_loaded)
 {
@@ -158,54 +163,55 @@ else
     private readonly Dictionary<Guid, IReadOnlyList<ViewDataRecord>> _pinnedItems = new();
 
     private readonly CancellationTokenSource _cts = new();
-    private PeriodicTimer? _timer;
+    private PagePoller? _poller;
 
     private int StatOf(string state) => _stats?.ByState.GetValueOrDefault(state) ?? _all.Count(r => r.State == state);
 
-    protected override Task OnInitializedAsync() => LoadAsync();
-
-    protected override void OnAfterRender(bool firstRender)
-    {
-        if (!firstRender || _timer is not null || _denied)
-            return;
-        _timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
-        _ = PollAsync();
-    }
-
-    private async Task PollAsync()
+    protected override async Task OnInitializedAsync()
     {
         try
         {
-            while (await _timer!.WaitForNextTickAsync(_cts.Token))
-            {
-                await LoadAsync();
-                await InvokeAsync(StateHasChanged);
-            }
+            await LoadAsync(_cts.Token);
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Component disposed — polling ends.
+            // Core unreachable during prerender — the poller keeps retrying and the banner shows.
+            _error = ex.Message;
+            _loaded = true;
         }
     }
 
-    private async Task LoadAsync()
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender || _poller is not null || _denied)
+            return;
+        // A PagePoller instead of a raw timer loop: a transport exception (Core restart) must
+        // never kill the polling permanently — it flips the banner and keeps retrying.
+        _poller = new PagePoller(TimeSpan.FromSeconds(5), LoadAsync, Logger);
+        _poller.StateChanged += () => _ = InvokeAsync(StateHasChanged);
+        _poller.Start();
+    }
+
+    private async Task LoadAsync(CancellationToken ct)
     {
         try
         {
             // Tiles come from the server-side stats endpoint; the recent-window query still
             // drives the live/recent tables.
-            _stats = await Core.GetRunStatsAsync(_cts.Token);
-            var page = await Core.QueryRunsAsync(new RunQuery(Skip: 0, Take: Window), _cts.Token);
+            _stats = await Core.GetRunStatsAsync(ct);
+            var page = await Core.QueryRunsAsync(new RunQuery(Skip: 0, Take: Window), ct);
             _denied = false;
             _error = null;
             _total = page.Total;
             _all = page.Items.ToList();
             _active = LiveNow.ActiveOf(_all);
             _recent = _all.Where(r => !LiveNow.IsActive(r.State)).Take(10).ToList();
-            await LoadPinsAsync();
+            await LoadPinsAsync(ct);
         }
         catch (CoreApiException ex)
         {
+            // Page semantics (denied / API error) stay here; raw transport exceptions bubble to
+            // the PagePoller, which flips the banner and keeps polling.
             _denied = ex.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
             _error = ex.ErrorDetail ?? ex.Message;
         }
@@ -214,12 +220,12 @@ else
     }
 
     /// <summary>Loads the caller's pins and each pin's persisted view items (newest-first cards).</summary>
-    private async Task LoadPinsAsync()
+    private async Task LoadPinsAsync(CancellationToken ct)
     {
-        _pins = await Core.ListDashboardPinsAsync(_cts.Token);
+        _pins = await Core.ListDashboardPinsAsync(ct);
         foreach (var pin in _pins)
         {
-            var page = await Core.GetRunViewsAsync(pin.RunId, pin.ViewName, ct: _cts.Token);
+            var page = await Core.GetRunViewsAsync(pin.RunId, pin.ViewName, ct: ct);
             _pinnedItems[pin.Id] = page.Items
                 .Select(i => new ViewDataRecord
                 {
@@ -252,7 +258,7 @@ else
     {
         _cts.Cancel();
         _cts.Dispose();
-        _timer?.Dispose();
+        _poller?.Dispose();
     }
 
 }

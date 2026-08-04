@@ -154,6 +154,7 @@ public class WorkflowDispatcherTests
             Mock.Of<IRepositoryAuthResolver>(),
             new AuditLog(_auditRecords, TimeProvider.System),
             TestStores.NewInstanceInfo(),
+            new Auxilia.PlatformData.Protection.NullSettingsProtector(),
             NullLogger<WorkflowDispatcher>.Instance);
 
         await _sut.StartAsync(CancellationToken.None);
@@ -373,6 +374,7 @@ public class WorkflowDispatcherTests
             Mock.Of<IRepositoryAuthResolver>(),
             new AuditLog(_auditRecords, TimeProvider.System),
             TestStores.NewInstanceInfo(),
+            new Auxilia.PlatformData.Protection.NullSettingsProtector(),
             NullLogger<WorkflowDispatcher>.Instance);
         await _sut.StartAsync(CancellationToken.None);
 
@@ -462,6 +464,7 @@ public class WorkflowDispatcherTests
             Mock.Of<IRepositoryAuthResolver>(),
             new AuditLog(_auditRecords, TimeProvider.System),
             TestStores.NewInstanceInfo(),
+            new Auxilia.PlatformData.Protection.NullSettingsProtector(),
             NullLogger<WorkflowDispatcher>.Instance);
         await _sut.StartAsync(CancellationToken.None);
 

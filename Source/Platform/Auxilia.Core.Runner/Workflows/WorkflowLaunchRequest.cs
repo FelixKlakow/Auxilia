@@ -57,6 +57,19 @@ public sealed record WorkflowLaunchRequest(
     /// reporting a terminal state — a crash must never leave a run stuck in Queued/Running.
     /// </summary>
     public Func<ContainerExit, Task>? OnExited { get; init; }
+
+    /// <summary>
+    /// The run's instance id, stamped as the <c>auxilia.instance-id</c> container label so a
+    /// restarted runner can map containers back to runs for re-adoption.
+    /// </summary>
+    public Guid? InstanceId { get; init; }
+
+    /// <summary>
+    /// Invoked with the container id right after creation and BEFORE start — the dispatcher
+    /// persists the container↔run mapping here, so even a crash between create and start
+    /// leaves a matched record.
+    /// </summary>
+    public Func<string, Task>? OnContainerCreated { get; init; }
 }
 
 /// <summary>How a workflow container ended: the exit code and the last lines it wrote.</summary>

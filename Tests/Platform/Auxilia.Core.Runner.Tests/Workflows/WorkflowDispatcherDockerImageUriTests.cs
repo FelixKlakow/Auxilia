@@ -85,6 +85,7 @@ public class WorkflowDispatcherDockerImageUriTests
             Mock.Of<IRepositoryAuthResolver>(),
             TestStores.NewAuditLog(),
             TestStores.NewInstanceInfo(),
+            new Auxilia.PlatformData.Protection.NullSettingsProtector(),
             NullLogger<WorkflowDispatcher>.Instance);
     }
 

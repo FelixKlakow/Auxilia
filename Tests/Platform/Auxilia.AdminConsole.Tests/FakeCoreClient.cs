@@ -220,7 +220,8 @@ internal sealed class FakeCoreClient : ICoreClient
     public List<RunConfiguration> Configurations { get; } = [];
     public RunQuery? LastRunQuery { get; private set; }
     public List<Guid> CancelledRuns { get; } = [];
-    public CoreApiException? RunsError { get; set; }
+    /// <summary>Thrown by <see cref="QueryRunsAsync"/> — a CoreApiException OR a raw transport exception.</summary>
+    public Exception? RunsError { get; set; }
 
     public Task<PagedResult<RunStatus>> QueryRunsAsync(RunQuery query, CancellationToken ct = default)
     {
@@ -307,25 +308,39 @@ internal sealed class FakeCoreClient : ICoreClient
     }
 
     // --- Run detail: GetRunAsync + scripted SSE stream ---
-    /// <summary>Scripted SSE frames yielded by <see cref="StreamRunAsync"/> (in order) for any run id.</summary>
+    /// <summary>Scripted SSE events yielded by <see cref="StreamRunAsync"/> (in order) for any run id.</summary>
     public List<RunStreamEvent> StreamEvents { get; } = [];
+
+    /// <summary>
+    /// Optional FULL-frame script (connection + event frames); when non-empty it wins over
+    /// <see cref="StreamEvents"/>. Lets tests drive the reconnect UX deterministically.
+    /// </summary>
+    public List<ClientStreamFrame<RunStreamEvent>> StreamFrames { get; } = [];
+
     public CoreApiException? GetRunError { get; set; }
+    public int GetRunCalls { get; private set; }
 
     public Task<RunStatus?> GetRunAsync(Guid id, CancellationToken ct = default)
     {
+        GetRunCalls++;
         if (GetRunError is { } error)
             throw error;
         return Task.FromResult(Runs.FirstOrDefault(r => r.RunId == id));
     }
 
-    public async IAsyncEnumerable<RunStreamEvent> StreamRunAsync(
+    public async IAsyncEnumerable<ClientStreamFrame<RunStreamEvent>> StreamRunAsync(
         Guid runId, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
-        foreach (var evt in StreamEvents)
+        var frames = StreamFrames.Count > 0
+            ? StreamFrames.ToList()
+            : new List<ClientStreamFrame<RunStreamEvent>> { new StreamConnectionFrame<RunStreamEvent>(StreamConnectionState.Connected, 1) }
+                .Concat(StreamEvents.Select(e => (ClientStreamFrame<RunStreamEvent>)new StreamEventFrame<RunStreamEvent>(e)))
+                .ToList();
+        foreach (var frame in frames)
         {
             ct.ThrowIfCancellationRequested();
             await Task.CompletedTask;
-            yield return evt;
+            yield return frame;
         }
     }
 
@@ -408,7 +423,7 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task<PagedResult<ArtifactDto>> QueryArtifactsAsync(ArtifactQuery query, CancellationToken ct = default) => Nope<Task<PagedResult<ArtifactDto>>>();
     public Task<ArtifactDto?> GetArtifactAsync(Guid id, CancellationToken ct = default) => Nope<Task<ArtifactDto?>>();
     public Task<Stream?> OpenArtifactContentAsync(Guid id, CancellationToken ct = default) => Nope<Task<Stream?>>();
-    public IAsyncEnumerable<ArtifactStreamEvent> StreamArtifactEventsAsync(string? artifactType = null, string? workItemId = null, CancellationToken ct = default) => Nope<IAsyncEnumerable<ArtifactStreamEvent>>();
+    public IAsyncEnumerable<ClientStreamFrame<ArtifactStreamEvent>> StreamArtifactEventsAsync(string? artifactType = null, string? workItemId = null, CancellationToken ct = default) => Nope<IAsyncEnumerable<ClientStreamFrame<ArtifactStreamEvent>>>();
     public Task<GroupDto> CreateGroupAsync(CreateGroupRequest request, CancellationToken ct = default) => Nope<Task<GroupDto>>();
     public Task<IReadOnlyList<GroupDto>> ListGroupsAsync(CancellationToken ct = default) => Nope<Task<IReadOnlyList<GroupDto>>>();
     public Task AddGroupMemberAsync(Guid groupId, AddGroupMemberRequest request, CancellationToken ct = default) => Nope<Task>();
@@ -466,9 +481,12 @@ internal sealed class FakeCoreClient : ICoreClient
         return Task.CompletedTask;
     }
 
+    public int GetRunViewsCalls { get; private set; }
+
     public Task<PagedResult<RunViewItem>> GetRunViewsAsync(
         Guid runId, string? view = null, int skip = 0, int take = 200, CancellationToken ct = default)
     {
+        GetRunViewsCalls++;
         var matching = RunViews.Where(v => view is null || v.ViewName == view).ToList();
         var page = matching.Skip(skip).Take(take).ToList();
         return Task.FromResult(new PagedResult<RunViewItem>(page, matching.Count, skip, take));

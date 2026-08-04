@@ -24,6 +24,31 @@
 - **Session terminal remainders** — a console-mode Docker system test (stub CLI under tmux)
   and an AdminConsole terminal surface.
 
+## Hardening wave 2026-08-04 — dispatch truth, container re-adoption, stream/UI resilience
+Delivered (see ARCHITECTURE §6/§14.2/§15): dispatch-time `Dispatched` run record + claim-timeout
+sweep (`dispatch-never-claimed`) + rekey-on-claim + terminal sink; SSE snapshot-first-frame +
+keepalives + `createdAfterUtc` artifact catch-up filter; resilient `Auxilia.Core.Client` streams
+(`ClientStreamFrame` union, reconnect/backoff/idle-timeout/dedupe inside the client, unary
+timeouts replacing `HttpClient.Timeout` — fixed the latent 100s stream-death); AdminConsole
+`PagePoller`/`ConnectionBanner` (poll loops survive transport errors; RunDetail reconnects and
+refetches; fixed the camelCase payload-decode bug); `ArtifactChainingEngine` catch-up + dedupe;
+runner **container re-adoption** on restart (persisted container id + protected instance token,
+re-claim before the failover clock, real exit collection, clean-kill fallback,
+`ReadoptContainersOnStart` replaces `ReapWorkflowContainersOnStart`). Remaining follow-ups:
+- **System tests (Docker + real RabbitMQ)** for the wave: `Dispatched` event reaching a
+  command-id-keyed SSE subscriber (topic routing — the fake bus over-delivers by design);
+  runner kill/restart → run re-claimed (no failover) and completes; container-exited-during-
+  downtime → Failed with the real exit code; unmatched container → clean-killed + roots removed.
+- **steering client follow-ups (in the steering client's own repo)**: recompile against the new `Auxilia.Core.Client`;
+  adapt `await foreach` sites to `ClientStreamFrame` (delete hand-rolled retry loops);
+  reconnect banner/toast off the connection frames, stale data kept visible; refetch run +
+  run lists on `Connected(Attempt>1)`; stream completion now reliably means terminal (drop
+  "stream ended, poll why" workarounds); terminal sessions must be re-opened after a Core
+  restart (proxy pumps are in-memory); optionally tune `CoreClientOptions` stream knobs.
+- **Live verification against the dev stack** (dispatch with runner stopped → `Dispatched` →
+  `dispatch-never-claimed`; mid-run Core restart → RunDetail banner + snapshot resume;
+  mid-run runner restart → re-claimed run completes).
+
 ## Implementation workflow  ·  see `docs/implementation-workflow-design.md`
 - **Real Copilot console events** — the Copilot CLI has no hooks; it does support
   `--log-dir`/`--log-level`. Run one real authenticated console session, inspect the log

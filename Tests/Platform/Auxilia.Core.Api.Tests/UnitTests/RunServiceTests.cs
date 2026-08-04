@@ -21,6 +21,7 @@ public sealed class RunServiceTests
 {
     private ProviderCatalogService _providerCatalog = null!;
     private WorkspaceResourceService _repositories = null!;
+    private InMemoryDataAccess<CoreRunRecord> _runs = null!;
 
     private (RunService Service, FakeMessageBusClient Bus, RunConfigurationService Configs,
         WorkflowTypeRegistryService Registry, RunnerLivenessTracker Liveness) New(bool allowDispatchWithoutRunner = true)
@@ -75,6 +76,8 @@ public sealed class RunServiceTests
         var service = new RunService(
             bus, configs, registry, new WorkflowSchemaReadService(typeStore),
             providerCatalog, resolver, accessPolicy, connectors, repositories, liveness,
+            _runs = new InMemoryDataAccess<CoreRunRecord>(),
+            new Auxilia.Workflows.Messaging.WorkflowStatusPublisher(bus, TimeProvider.System),
             TimeProvider.System,
             Options.Create(new CoreApiSettings { AllowDispatchWithoutRunner = allowDispatchWithoutRunner }),
             NullLogger<RunService>.Instance);
@@ -114,6 +117,40 @@ public sealed class RunServiceTests
             "The Core is the auth authority and dispatches with RequestedBy=null.");
         Assert.That(command.ResolutionToken, Is.Not.Null.And.Not.Empty,
             "Every dispatch mints a run-scoped resolution token for JIT credential resolution.");
+    }
+
+    [Test]
+    public async Task RunInline_WritesTheDispatchedRecord_BeforePublishingTheCommand()
+    {
+        var (service, bus, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+
+        var accepted = await service.RunInlineAsync(
+            new RunRequest("wt", new Dictionary<string, string>()),
+            triggeredBy: null, CancellationToken.None);
+
+        var record = await _runs.ReadAsync(accepted.RunId);
+        Assert.Multiple(() =>
+        {
+            Assert.That(record, Is.Not.Null, "The run must exist from the moment it is accepted.");
+            Assert.That(record!.State, Is.EqualTo(RunStates.Dispatched));
+            Assert.That(record.CommandId, Is.EqualTo(accepted.RunId));
+            Assert.That(record.DispatchCommandJson, Is.Not.Null.And.Not.Empty,
+                "The stored command is what the claim-timeout sweep re-dispatches from.");
+        });
+
+        var messages = bus.PublishedMessages.Select(m => m.Message).ToList();
+        var statusIndex = messages.FindIndex(m =>
+            m is WorkflowStatusEvent e && e.State == RunStates.Dispatched);
+        var commandIndex = messages.FindIndex(m => m is RunWorkflowCommand);
+        Assert.Multiple(() =>
+        {
+            Assert.That(statusIndex, Is.GreaterThanOrEqualTo(0),
+                "Dispatch must surface a Dispatched status event for pre-subscribed watchers.");
+            Assert.That(commandIndex, Is.GreaterThanOrEqualTo(0));
+            Assert.That(statusIndex, Is.LessThan(commandIndex),
+                "The record + status precede the bus command: a lost publish still leaves a sweepable row.");
+        });
     }
 
     [Test]

@@ -33,6 +33,7 @@ public sealed class FailoverMonitorTests
     private FakeMessageBusClient _bus = null!;
     private RunnerLivenessTracker _liveness = null!;
     private IDataAccess<CoreRunRecord> _runs = null!;
+    private IDataAccess<CoreRunResolutionRecord> _resolutions = null!;
     private IDataAccess<AuditRecord> _audit = null!;
     private CoreApiSettings _settings = null!;
     private SlotCredentialResolver _resolver = null!;
@@ -46,6 +47,7 @@ public sealed class FailoverMonitorTests
         _bus = new FakeMessageBusClient();
         _liveness = new RunnerLivenessTracker();
         _runs = new InMemoryDataAccess<CoreRunRecord>();
+        _resolutions = new InMemoryDataAccess<CoreRunResolutionRecord>();
         _audit = new InMemoryDataAccess<AuditRecord>();
         _settings = new CoreApiSettings { HeartbeatTimeoutSeconds = 30, FailoverScanIntervalSeconds = 3600 };
 
@@ -55,7 +57,7 @@ public sealed class FailoverMonitorTests
         var connectorStore = new InMemoryDataAccess<CoreConnectorRecord>();
         var connectors = new ConnectorService(connectorStore, protector, _time);
         _resolver = new SlotCredentialResolver(
-            new InMemoryDataAccess<CoreRunResolutionRecord>(), connectors,
+            _resolutions, connectors,
             new ConnectorTokenRefresher(
                 connectors,
                 new ProviderCatalogService(
@@ -98,11 +100,12 @@ public sealed class FailoverMonitorTests
                     new InMemoryDataAccess<Auxilia.PlatformData.Entities.PrincipalRecord>(),
                     new InMemoryDataAccess<Auxilia.PlatformData.Entities.GroupMembershipRecord>()),
                 _time),
-            new RunnerLivenessTracker(), _time,
+            new RunnerLivenessTracker(), _runs,
+            new WorkflowStatusPublisher(_bus, _time), _time,
             Options.Create(_settings), NullLogger<RunService>.Instance);
 
         _sut = new FailoverMonitor(
-            _bus, _liveness, _runs, runService,
+            _bus, _liveness, _runs, _resolutions, runService,
             new WorkflowStatusPublisher(_bus, _time),
             new AuditLog(_audit, _time),
             _time, Options.Create(_settings),
@@ -113,6 +116,7 @@ public sealed class FailoverMonitorTests
     public void TearDown()
     {
         (_runs as IDisposable)?.Dispose();
+        (_resolutions as IDisposable)?.Dispose();
         (_audit as IDisposable)?.Dispose();
     }
 
@@ -288,6 +292,118 @@ public sealed class FailoverMonitorTests
 
         Assert.That((await _runs.ReadAsync(fresh.Id))!.State, Is.EqualTo("Running"),
             "A recently updated run may simply not have been claimed/beaten yet.");
+    }
+
+    /// <summary>Seeds exactly what a real dispatch leaves behind: a Dispatched record keyed by the
+    /// command id, the stashed resolution context, and an Active registry entry.</summary>
+    private async Task<CoreRunRecord> SeedDispatchedRunAsync(
+        TimeSpan age, IReadOnlyDictionary<string, string>? commandContext = null)
+    {
+        var commandId = Guid.NewGuid();
+        var command = new RunWorkflowCommand(
+            commandId, "wf-type", "docker://wf:test",
+            commandContext ?? new Dictionary<string, string>(), ResolutionToken: "token-d");
+        await _registry.EnsureSeededAsync(
+            new StaticWorkflowType { WorkflowType = "wf-type", PackageUri = "docker://wf:test" },
+            CancellationToken.None);
+        await _resolver.StashAsync(commandId, "token-d", [], triggeredBy: null);
+        var run = new CoreRunRecord
+        {
+            Id = commandId,
+            WorkflowType = "wf-type",
+            State = Auxilia.Core.Contracts.RunStates.Dispatched,
+            CreatedUtc = _time.Now - age,
+            UpdatedUtc = _time.Now - age,
+            CommandId = commandId,
+            DispatchCommandJson = JsonSerializer.Serialize(command)
+        };
+        await _runs.SaveAsync(run);
+        return run;
+    }
+
+    [Test]
+    public async Task DispatchedNeverClaimed_PastTimeout_IsFailedRedispatchedAndStashDeleted()
+    {
+        var run = await SeedDispatchedRunAsync(TimeSpan.FromSeconds(_settings.DispatchClaimTimeoutSeconds + 1));
+
+        await _sut.ScanOnceAsync(CancellationToken.None);
+
+        var updated = await _runs.ReadAsync(run.Id);
+        Assert.Multiple(() =>
+        {
+            Assert.That(updated!.State, Is.EqualTo("Failed"));
+            Assert.That(updated.ErrorMessage, Is.EqualTo("dispatch-never-claimed"));
+            Assert.That(_bus.PublishedMessages.Any(p =>
+                p.Message is WorkflowStatusEvent e && e.State == "Failed" && e.WorkflowInstanceId == run.Id), Is.True,
+                "The timeout must be surfaced as a status event.");
+        });
+
+        var redispatch = _bus.PublishedMessages
+            .Where(p => p.Topic == _settings.RunCommandQueue)
+            .Select(p => p.Message).OfType<RunWorkflowCommand>().SingleOrDefault();
+        Assert.That(redispatch, Is.Not.Null, "An unclaimed dispatch is re-dispatched once, guarded.");
+        Assert.That(redispatch!.Context.ContainsKey(FailoverMonitor.FailoverContextKey), Is.True);
+
+        Assert.That(await _resolutions.ReadAsync(run.Id), Is.Null,
+            "The stale command's stash must be deleted so a late launch cannot resolve credentials.");
+        Assert.That((await _audit.ReadAsync()).Any(a => a.Action == "workflow.dispatch-timeout"), Is.True);
+    }
+
+    [Test]
+    public async Task DispatchedRun_WithinClaimWindow_IsUntouched()
+    {
+        var run = await SeedDispatchedRunAsync(TimeSpan.FromSeconds(10));
+
+        await _sut.ScanOnceAsync(CancellationToken.None);
+
+        Assert.That((await _runs.ReadAsync(run.Id))!.State,
+            Is.EqualTo(Auxilia.Core.Contracts.RunStates.Dispatched));
+    }
+
+    [Test]
+    public async Task DispatchedSweep_IsSkipped_UnderAllowDispatchWithoutRunner()
+    {
+        _settings.AllowDispatchWithoutRunner = true;
+        var run = await SeedDispatchedRunAsync(TimeSpan.FromHours(2));
+
+        await _sut.ScanOnceAsync(CancellationToken.None);
+
+        Assert.That((await _runs.ReadAsync(run.Id))!.State,
+            Is.EqualTo(Auxilia.Core.Contracts.RunStates.Dispatched),
+            "AllowDispatchWithoutRunner exists precisely to queue deliberately — never sweep under it.");
+    }
+
+    [Test]
+    public async Task DispatchedRun_IsExcludedFromTheZombieSweep()
+    {
+        _sut.MarkStarted(_time.Now - TimeSpan.FromMinutes(10));
+        // Older than the 30s heartbeat window (zombie-eligible) but inside the claim window.
+        var run = await SeedDispatchedRunAsync(TimeSpan.FromSeconds(60));
+
+        await _sut.ScanOnceAsync(CancellationToken.None);
+
+        var updated = await _runs.ReadAsync(run.Id);
+        Assert.Multiple(() =>
+        {
+            Assert.That(updated!.State, Is.EqualTo(Auxilia.Core.Contracts.RunStates.Dispatched),
+                "Dispatched runs belong to the claim-timeout sweep, not the zombie sweep.");
+            Assert.That(updated.ErrorMessage, Is.Null);
+        });
+    }
+
+    [Test]
+    public async Task ResolutionRecords_PastRetention_ArePurged()
+    {
+        _time.Now -= TimeSpan.FromDays(40);
+        await _resolver.StashAsync(Guid.NewGuid(), "old-token", [], triggeredBy: null);
+        _time.Now += TimeSpan.FromDays(40);
+        await _resolver.StashAsync(Guid.NewGuid(), "fresh-token", [], triggeredBy: null);
+
+        await _sut.ScanOnceAsync(CancellationToken.None);
+
+        var remaining = (await _resolutions.ReadAsync()).ToList();
+        Assert.That(remaining, Has.Count.EqualTo(1));
+        Assert.That(remaining[0].ResolutionToken, Is.EqualTo("fresh-token"));
     }
 
     [Test]

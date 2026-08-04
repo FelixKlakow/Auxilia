@@ -31,6 +31,15 @@ public sealed class CoreApiSettings
     public bool RedispatchOnFailover { get; set; } = true;
 
     /// <summary>
+    /// A run still Dispatched (no runner ever claimed the command) after this many seconds is
+    /// failed over as <c>dispatch-never-claimed</c>. Ignored under <see cref="AllowDispatchWithoutRunner"/>.
+    /// </summary>
+    public int DispatchClaimTimeoutSeconds { get; set; } = 120;
+
+    /// <summary>Days a dispatch's resolution record (the rerun context) is retained; 0 keeps forever.</summary>
+    public int ResolutionRecordRetentionDays { get; set; } = 30;
+
+    /// <summary>
     /// When false (default), a dispatch is rejected with a clear error while no live Core.Runner
     /// heartbeat is known — a run nobody can execute would otherwise queue silently. True restores
     /// pure queue-until-a-runner-arrives semantics (test rigs, deliberate buffering deployments).
@@ -77,6 +86,12 @@ public sealed class CoreApiSettings
 
     /// <summary>Per-run cap on Core-persisted view items; items beyond it are dropped and logged.</summary>
     public int MaxPersistedViewItemsPerRun { get; set; } = 1000;
+
+    /// <summary>
+    /// Quiet-period after which the SSE streams emit a <c>: ping</c> comment so clients can tell
+    /// an idle stream from a dead connection. 0 disables keepalives.
+    /// </summary>
+    public int SseKeepaliveSeconds { get; set; } = 15;
 }
 
 /// <summary>Where the email approval handler notifies the signing authority.</summary>

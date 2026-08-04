@@ -295,19 +295,13 @@ public sealed class RunStreamTests : CoreApiComponentTestBase
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         await using var stream = core.StreamRunAsync(runId, cts.Token).GetAsyncEnumerator(cts.Token);
-        var first = stream.MoveNextAsync();
 
-        // The enumerator subscribes inside MoveNextAsync (after SendAsync completes). Re-publish a
-        // heartbeat status until the first frame is delivered — proof the subscription is live —
-        // then the later publishes are guaranteed to land.
-        while (!first.IsCompleted)
-        {
-            await MessageBus.SimulateReceivedAsync(WorkflowStatusEvent.ExchangeName,
-                new WorkflowStatusEvent(runId, DummyType, "Running", null, DateTimeOffset.UtcNow));
-            await Task.Yield();
-        }
-        Assert.That(await first, Is.True);
-        Assert.That(stream.Current.Kind, Is.EqualTo(RunStreamEvent.StatusKind));
+        // The Connected frame arrives once the server flushed headers — the broker subscription
+        // is registered, so every publish below is guaranteed delivered.
+        Assert.That(await stream.MoveNextAsync(), Is.True);
+        Assert.That(stream.Current,
+            Is.InstanceOf<StreamConnectionFrame<RunStreamEvent>>()
+                .With.Property("State").EqualTo(StreamConnectionState.Connected));
 
         await MessageBus.SimulateReceivedAsync(ViewDataMessage.ExchangeName,
             new ViewDataMessage(runId, "log", 1, """{"line":"hi"}"""));
@@ -316,7 +310,8 @@ public sealed class RunStreamTests : CoreApiComponentTestBase
 
         var rest = new List<RunStreamEvent>();
         while (await stream.MoveNextAsync())
-            rest.Add(stream.Current);
+            if (stream.Current is StreamEventFrame<RunStreamEvent> frame)
+                rest.Add(frame.Event);
 
         Assert.Multiple(() =>
         {
@@ -325,12 +320,94 @@ public sealed class RunStreamTests : CoreApiComponentTestBase
             Assert.That(rest.Any(e =>
                 e.Kind == RunStreamEvent.StatusKind &&
                 JsonSerializer.Deserialize<WorkflowStatusEvent>(e.PayloadJson, JsonSerializerOptions.Web)!.State == "Success"),
-                Is.True, "The terminal status must be delivered and close the stream.");
+                Is.True, "The terminal status must be delivered and close the stream (no reconnect).");
         });
+    }
+
+    [Test]
+    public async Task Stream_SnapshotFrame_DeliversCurrentState_ToALateSubscriber()
+    {
+        // The reconnect-after-restart scenario: the run advanced while nobody was subscribed.
+        // A fresh subscriber must learn the current state from the snapshot frame instead of
+        // waiting (forever) for the next live transition.
+        var client = CreateClient();
+        var runId = Guid.NewGuid();
+        await MessageBus.SimulateReceivedAsync(WorkflowStatusEvent.ExchangeName,
+            new WorkflowStatusEvent(runId, DummyType, "Running", null, DateTimeOffset.UtcNow));
+
+        using var response = await client.GetAsync(
+            $"/api/runs/{runId}/stream", HttpCompletionOption.ResponseHeadersRead);
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        await using var body = await response.Content.ReadAsStreamAsync();
+        using var reader = new StreamReader(body);
+        var firstData = await ReadNextDataLineAsync(reader).WaitAsync(TimeSpan.FromSeconds(10));
+        var snapshot = JsonSerializer.Deserialize<RunStreamEvent>(firstData!, JsonSerializerOptions.Web)!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(snapshot.Kind, Is.EqualTo(RunStreamEvent.StatusKind));
+            Assert.That(JsonSerializer.Deserialize<WorkflowStatusEvent>(
+                snapshot.PayloadJson, JsonSerializerOptions.Web)!.State, Is.EqualTo("Running"));
+        });
+    }
+
+    [Test]
+    public async Task Stream_TerminalRecord_SnapshotThenImmediateClose()
+    {
+        var client = CreateClient();
+        var runId = Guid.NewGuid();
+        await MessageBus.SimulateReceivedAsync(WorkflowStatusEvent.ExchangeName,
+            new WorkflowStatusEvent(runId, DummyType, "Success", null, DateTimeOffset.UtcNow));
+
+        using var response = await client.GetAsync(
+            $"/api/runs/{runId}/stream", HttpCompletionOption.ResponseHeadersRead);
+        var frames = ParseFrames(await response.Content.ReadAsStringAsync());
+
+        Assert.That(frames, Has.Count.EqualTo(1),
+            "a finished run yields exactly its terminal snapshot and the stream closes");
+        Assert.That(JsonSerializer.Deserialize<WorkflowStatusEvent>(
+            frames[0].PayloadJson, JsonSerializerOptions.Web)!.State, Is.EqualTo("Success"));
+    }
+
+    [Test]
+    public async Task Run_IsVisibleAsDispatched_ImmediatelyAfterAccept()
+    {
+        // The bug this wave fixes: "dispatched" used to be a client-side notice with no record
+        // behind it. Now the accept itself creates the run — visible in the API and as an SSE
+        // snapshot — before any runner claims it.
+        var client = CreateClient();
+        await RegisterActiveTypeAsync(client, DummyType);
+
+        var accept = await client.PostAsJsonAsync("/api/runs",
+            new RunRequest(DummyType, new Dictionary<string, string>()));
+        Assert.That(accept.IsSuccessStatusCode, Is.True, await accept.Content.ReadAsStringAsync());
+        var accepted = (await accept.Content.ReadFromJsonAsync<RunAccepted>())!;
+
+        var status = await client.GetFromJsonAsync<RunStatus>($"/api/runs/{accepted.RunId}");
+        Assert.That(status!.State, Is.EqualTo(RunStates.Dispatched));
+
+        using var response = await client.GetAsync(
+            $"/api/runs/{accepted.RunId}/stream", HttpCompletionOption.ResponseHeadersRead);
+        await using var body = await response.Content.ReadAsStreamAsync();
+        using var reader = new StreamReader(body);
+        var firstData = await ReadNextDataLineAsync(reader).WaitAsync(TimeSpan.FromSeconds(10));
+        var snapshot = JsonSerializer.Deserialize<RunStreamEvent>(firstData!, JsonSerializerOptions.Web)!;
+        Assert.That(JsonSerializer.Deserialize<WorkflowStatusEvent>(
+            snapshot.PayloadJson, JsonSerializerOptions.Web)!.State, Is.EqualTo(RunStates.Dispatched),
+            "a subscriber by the accepted run id sees the Dispatched snapshot immediately");
+    }
+
+    private static async Task<string?> ReadNextDataLineAsync(StreamReader reader)
+    {
+        while (await reader.ReadLineAsync() is { } line)
+            if (line.StartsWith("data: ", StringComparison.Ordinal))
+                return line["data: ".Length..];
+        return null;
     }
 
     private static List<RunStreamEvent> ParseFrames(string body) =>
         body.Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+            .Where(f => !f.StartsWith(':'))
             .Select(f => f.StartsWith("data: ", StringComparison.Ordinal) ? f["data: ".Length..] : f)
             .Select(f => JsonSerializer.Deserialize<RunStreamEvent>(f, JsonSerializerOptions.Web)!)
             .ToList();
