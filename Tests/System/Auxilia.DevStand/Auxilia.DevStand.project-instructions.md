@@ -45,4 +45,5 @@ Browser provisioning is automatic: before booting containers the harness invokes
 - It must stay a pure consumer: no test assertions, no `[Test]` fixtures (it references the
   system test suite, but `dotnet test` ignores it because it carries no test SDK).
 - First start builds Docker images unless the `.prebuilt-images` marker exists in the repo
-  root (same mechanic as the system test suite).
+  root AND no build input was written after it — a stale marker triggers an automatic
+  rebuild and is renewed by it (`TestImages`, same mechanic as the system test suite).

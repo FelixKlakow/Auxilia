@@ -71,15 +71,20 @@ public sealed class CodeReviewDispatchSystemTests
         response.EnsureSuccessStatusCode();
         var accepted = (await response.Content.ReadFromJsonAsync<RunAccepted>(cancellationToken))!;
 
-        // The claim transition carries the originating command id — that pins the instance,
-        // so a concurrent run of the same workflow type can never be confused with this one.
+        // The claim transition carries the originating command id AND the real instance id —
+        // that pins the instance, so a concurrent run of the same workflow type can never be
+        // confused with this one. The Core-authored Dispatched event also matches the command
+        // id but is KEYED by it (instance id == command id until the claim rekeys the record),
+        // so it must not be mistaken for the claim.
         WorkflowStatusEvent? terminal = null;
         while (terminal is null)
         {
             cancellationToken.ThrowIfCancellationRequested();
             await Task.Delay(500, cancellationToken);
             var instanceId = statusEvents
-                .FirstOrDefault(e => e.CommandId == accepted.CommandId)?.WorkflowInstanceId;
+                .FirstOrDefault(e => e.CommandId == accepted.CommandId
+                                     && e.WorkflowInstanceId != accepted.CommandId)
+                ?.WorkflowInstanceId;
             if (instanceId is null)
                 continue;
             terminal = statusEvents.FirstOrDefault(e =>

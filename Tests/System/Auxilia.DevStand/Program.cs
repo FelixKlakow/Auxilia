@@ -34,7 +34,7 @@ var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 
 Console.WriteLine("Booting the full Auxilia platform stack ...");
-Console.WriteLine("(first run builds Docker images — several minutes; a .prebuilt-images marker in the repo root skips that)");
+Console.WriteLine("(first run builds Docker images — several minutes; a fresh .prebuilt-images marker in the repo root skips that, a stale one auto-rebuilds)");
 Console.WriteLine();
 
 var environment = new EndToEndEnvironment();

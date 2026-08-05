@@ -111,68 +111,8 @@ public class WorkflowDispatchEnvironment
         await _network.DisposeAsync();
     }
 
-    internal static async Task BuildImageAsync(string tag, string dockerfilePath)
-    {
-        // Local opt-out: when the runner has already built all system-test images from
-        // current source (docker builds spawned from the test process can hang on a wedged
-        // Docker Desktop daemon), it signals that via the env var or a marker file in the
-        // repo root. CI leaves both unset so images are always rebuilt from local source.
-        if (System.Environment.GetEnvironmentVariable("AUXILIA_PREBUILT_IMAGES") == "1" ||
-            File.Exists(Path.Combine(RepoRoot, ".prebuilt-images")))
-        {
-            await Console.Out.WriteLineAsync($"Prebuilt-images opt-out active — skipping docker build for {tag}.");
-            return;
-        }
-
-        // The Docker Desktop daemon occasionally wedges under suite load and a build then
-        // hangs forever at ~0 CPU. Bound each attempt and retry once instead of hanging.
-        try
-        {
-            await BuildImageOnceAsync(tag, dockerfilePath, TimeSpan.FromMinutes(8));
-        }
-        catch (TimeoutException)
-        {
-            await Console.Error.WriteLineAsync(
-                $"docker build for {tag} timed out — retrying once (daemon may have been wedged).");
-            await BuildImageOnceAsync(tag, dockerfilePath, TimeSpan.FromMinutes(8));
-        }
-    }
-
-    private static async Task BuildImageOnceAsync(string tag, string dockerfilePath, TimeSpan timeout)
-    {
-        var psi = new ProcessStartInfo("docker",
-            $"build -t {tag} -f {dockerfilePath} .")
-        {
-            WorkingDirectory = RepoRoot,
-            RedirectStandardOutput = true,
-            RedirectStandardError  = true,
-            UseShellExecute  = false
-        };
-
-        using var process = Process.Start(psi)
-                            ?? throw new InvalidOperationException("Failed to start docker build.");
-
-        var stdoutTask = process.StandardOutput.ReadToEndAsync();
-        var stderrTask = process.StandardError.ReadToEndAsync();
-
-        using var cts = new CancellationTokenSource(timeout);
-        try
-        {
-            await process.WaitForExitAsync(cts.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            try { process.Kill(entireProcessTree: true); } catch { /* already gone */ }
-            throw new TimeoutException($"docker build for {tag} exceeded {timeout.TotalMinutes:0} minutes.");
-        }
-
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
-
-        if (process.ExitCode != 0)
-            throw new InvalidOperationException(
-                $"docker build failed for {tag} (exit {process.ExitCode}):\n{stdout}\n{stderr}");
-    }
+    internal static Task BuildImageAsync(string tag, string dockerfilePath)
+        => TestImages.BuildImageAsync(tag, dockerfilePath);
 }
 
 

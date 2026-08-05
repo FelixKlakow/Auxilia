@@ -57,7 +57,7 @@ internal static class ScreenshotHarness
         }
 
         Console.WriteLine("Booting the full Auxilia platform stack ...");
-        Console.WriteLine("(first run builds Docker images — several minutes; a .prebuilt-images marker in the repo root skips that)");
+        Console.WriteLine("(first run builds Docker images — several minutes; a fresh .prebuilt-images marker in the repo root skips that, a stale one auto-rebuilds)");
 
         var environment = new EndToEndEnvironment();
         await environment.OneTimeSetUp();

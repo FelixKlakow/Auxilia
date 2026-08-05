@@ -11,7 +11,8 @@
     Review (dashboard login there: admin / e2e-admin-pw).
 
     Docker images are rebuilt by the suite itself unless the .prebuilt-images
-    marker exists in the repository root (see TestStrategy.md).
+    marker exists in the repository root and is still fresh — source written
+    after the marker triggers an automatic rebuild (see TestStrategy.md).
 
 .PARAMETER Filter
     dotnet test --filter expression. Defaults to the EndToEnd acceptance test,

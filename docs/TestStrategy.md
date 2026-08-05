@@ -99,7 +99,12 @@ are replaced with in-process abstractions / stubs.
 **Rules:**
 
 - Docker must be running on the host.
-- The latest image is always built from the local source before containers are started (no stale images).
+- The latest image is always built from the local source before containers are started (no stale
+  images). Locally, a `.prebuilt-images` marker in the repo root (or `AUXILIA_PREBUILT_IMAGES=1`)
+  skips the in-test builds — but only while the marker is FRESH: `TestImages` compares it against
+  the newest build-input write (`Source/`, `Tests/`, `Scripts/`, root files; `bin`/`obj`/
+  `core-data` excluded), auto-rebuilds every image when stale, and renews the marker on success.
+  CI leaves both unset.
 - Tests are time-bounded (20–30 s per assertion).
 - NUnit `[Category("System")]` attribute on every fixture.
 
