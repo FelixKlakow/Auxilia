@@ -1,7 +1,7 @@
-# steering client ⇄ Auxilia Core — Steering Integration (Corrected Architecture)
+# Steering client ⇄ Auxilia Core — Steering Integration (Corrected Architecture)
 
 > **Status:** For confirmation · 2026-07-26 · Felix Klakow
-> **Single source of truth for steering.** Supersedes `delivered/human-steering-design.md` (kept for history) and replaces my overnight the steering client build, which put the steering server in the wrong place over the wrong transport.
+> **Single source of truth for steering.** Supersedes the earlier human-steering design and replaces the earlier overnight steering-server build, which put the steering server in the wrong place over the wrong transport.
 
 ---
 
@@ -14,7 +14,7 @@ Three layers, and the Core is the **dumb** one:
 | **Core** (Api + Runner) | containers, principals, connectors, policy, audit — **not workflows** | Configure & start/stop containers correctly (egress policy, mounts, capability clamps, JIT credential delivery). Administer slots/connectors and enable/disable them per user & group. Own identity, RBAC, **policy, audit**. **It never interprets a workflow's process and never influences it.** |
 | **Core *API*** | the *connection* between a client and a running run | A **broker**: it lets an authorized client (a) deliver an **opaque** input to a running run and (b) subscribe to a run's **opaque** output stream. It carries payloads it does **not** understand. This is what "allows the steering scenario" without the Core knowing what steering is. |
 | **Workflow** (a container) | its own domain + the steering **semantics** | Decides what's in-mandate, what to propose, when to block for a human. Emits proposals/output as opaque items; blocks awaiting an opaque decision. **The decision logic and the "hold" live here.** |
-| **steering client** (the steering client) | the steering **UX** | A pure **`Auxilia.Core.Client`** consumer. It speaks to the Core *only* through that library; it uses a shared steering-protocol codec to encode/decode the opaque payloads Core.Client carries. |
+| **Steering client** (a desktop/CLI operator app) | the steering **UX** | A pure **`Auxilia.Core.Client`** consumer. It speaks to the Core *only* through that library; it uses a shared steering-protocol codec to encode/decode the opaque payloads Core.Client carries. |
 
 **What the Core does NOT get:** no `/pending-actions` endpoint, no `/decide` endpoint, no decision store, no "mandate," no approval semantics. **Decisions are workflow-bound.** The Core moves opaque bytes between a client and a run, authorizes *who* may do so, and audits it.
 
@@ -26,7 +26,7 @@ So your Q2 instinct holds: the **hold is workflow-bound**. The Core needs only t
 
 ```mermaid
 graph TB
-    subgraph steering client["steering client (WPF)"]
+    subgraph Client["Steering client (WPF)"]
         UI["steering client UI: configure workflows, start run,<br/>live view, decision cards, guidance, halt"]
         CODEC1["steering-protocol codec (shared lib)"]
         CC["Auxilia.Core.Client"]
@@ -62,7 +62,7 @@ The **steering protocol** (proposal / decision / guidance / scope shapes) is a s
 
 ## 3. The flows (judge the split here)
 
-Participants: **steering client** (the steering client) · **Core.Api** · **Core.Runner** · **Workflow**. Watch the **opaque** notes — everywhere the Core touches a steering payload, it carries bytes it does not interpret.
+Participants: **Steering client** · **Core.Api** · **Core.Runner** · **Workflow**. Watch the **opaque** notes — everywhere the Core touches a steering payload, it carries bytes it does not interpret.
 
 ### Flow 0 — Start a steering run (already exists in the Core)
 

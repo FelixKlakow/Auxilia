@@ -10,8 +10,8 @@
   unredeemed entries expire after 2 minutes and never outlive the token. No raw-token fallback.
 - ~~AdminConsole step-up prompt~~ — DONE 2026-08-03: `elevation-required` now opens an inline
   re-authentication panel on the Principals page; the successful step-up retries the pending
-  mutation (the elevation header rides the circuit's client). Still open: the steering client's
-  type-to-confirm pattern, and tags administration UI (steering client-only today).
+  mutation (the elevation header rides the circuit's client). Still open: an AdminConsole
+  tags administration UI.
 - **Workflow-type registry administration** — full client surface exists on `ICoreClient`
   (register/approve/deny/unregister), and the steering client ships a registry-administration panel
   (2026-08-02, permission-gated on `workflow-type.manage`/`workflow-type.sign`).
@@ -39,12 +39,6 @@ re-claim before the failover clock, real exit collection, clean-kill fallback,
   command-id-keyed SSE subscriber (topic routing — the fake bus over-delivers by design);
   runner kill/restart → run re-claimed (no failover) and completes; container-exited-during-
   downtime → Failed with the real exit code; unmatched container → clean-killed + roots removed.
-- **steering client follow-ups (in the steering client's own repo)**: recompile against the new `Auxilia.Core.Client`;
-  adapt `await foreach` sites to `ClientStreamFrame` (delete hand-rolled retry loops);
-  reconnect banner/toast off the connection frames, stale data kept visible; refetch run +
-  run lists on `Connected(Attempt>1)`; stream completion now reliably means terminal (drop
-  "stream ended, poll why" workarounds); terminal sessions must be re-opened after a Core
-  restart (proxy pumps are in-memory); optionally tune `CoreClientOptions` stream knobs.
 - **Live verification against the dev stack** (dispatch with runner stopped → `Dispatched` →
   `dispatch-never-claimed`; mid-run Core restart → RunDetail banner + snapshot resume;
   mid-run runner restart → re-claimed run completes).
@@ -102,7 +96,7 @@ re-claim before the failover clock, real exit collection, clean-kill fallback,
   Dependabot alerts, secret-scanning push protection; restrict Actions to the two
   used action publishers + read-only default GITHUB_TOKEN; a main ruleset blocking
   force-push/deletion with admin bypass; disable Wiki/Projects.
-- ~~steering client desktop per-user sign-in~~ — DONE 2026-08-03 for the password path: the Core's
+- ~~Steering-client desktop per-user sign-in~~ — DONE 2026-08-03 for the password path: the Core's
   `POST /auth/login` (username+password → the same per-user bearer the browser mints, desktop
   lifetime `CoreSecurity:LoginTokenLifetimeMinutes`, default one workday, audited both ways)
   plus the steering client sign-in overlay/header buttons (never a silent fallback to the service key

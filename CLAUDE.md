@@ -19,7 +19,7 @@ Every project directory has a `<ProjectName>.project-instructions.md` beside its
 - **`docs/implementation-workflow-design.md`** — the full assisted-delivery workflow (story → plan → implement → review → push → story state).
 - **`docs/view-data-design.md`** — live views and status fan-out.
 
-**Delivered / historical (`docs/delivered/` — context only, not live design):** core-platform-separation-plan, security-consolidation-plan, governance-rbac-design, enterprise-login-design, goal-v1, workflow-dispatch-test-strategy, and human-steering-design (superseded by the steering doc above).
+**Delivered / historical (`docs/delivered/` — context only, not live design):** core-platform-separation-plan, security-consolidation-plan, governance-rbac-design, enterprise-login-design, goal-v1, and workflow-dispatch-test-strategy.
 
 ## Stack & commands
 
