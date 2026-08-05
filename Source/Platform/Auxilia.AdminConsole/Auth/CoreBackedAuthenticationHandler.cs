@@ -36,6 +36,13 @@ public sealed class CoreBackedAuthenticationHandler(
         {
             return AuthenticateResult.NoResult();
         }
+        catch (HttpRequestException ex)
+        {
+            // An unreachable Core degrades the request to anonymous (login redirect / banner) —
+            // it must never 500 every request of the console, static assets included.
+            Logger.LogWarning(ex, "Core unreachable while authenticating the request.");
+            return AuthenticateResult.NoResult();
+        }
     }
 
     protected override Task HandleChallengeAsync(AuthenticationProperties properties)

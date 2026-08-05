@@ -507,6 +507,11 @@ button { font: inherit; }
 
 .badge-role { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-soft-border); }
 
+/* Free-form classification tags on principals — neutral, distinct from RBAC roles. */
+.badge-tag { background: var(--surface-muted); color: var(--muted); border-color: var(--border-strong); }
+
+.tag-add { display: inline-flex; gap: 0.3rem; align-items: center; margin-left: 0.3rem; }
+
 .badge-secret { font-family: var(--mono); font-size: 0.74rem; }
 
 /* View rendering-kind chip (table / log / markdown). */

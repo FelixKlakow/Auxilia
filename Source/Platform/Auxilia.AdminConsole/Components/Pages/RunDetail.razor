@@ -2,9 +2,12 @@
 @attribute [Authorize]
 @using System.Text.Json
 @using Auxilia.Workflows.Messaging.Messages
+@using Microsoft.JSInterop
 @implements IDisposable
 @inject ICoreClient Core
 @inject ILogger<RunDetail> Logger
+@inject IJSRuntime JS
+@inject CoreClientOptions CoreOptions
 
 <PageTitle>@(_run is null ? "Run" : $"{_run.WorkflowType} · run {ShortId}") — Auxilia</PageTitle>
 
@@ -43,6 +46,12 @@ else
     @if (!IsTerminal)
     {
         <div class="button-row rerun-row">
+            @if (_run.HasTerminal)
+            {
+                <button class="btn btn-secondary" disabled="@_busy" @onclick="OpenTerminalAsync">
+                    Open terminal
+                </button>
+            }
             <button class="btn btn-danger" disabled="@_busy" @onclick="CancelAsync">Cancel this run</button>
         </div>
     }
@@ -352,6 +361,30 @@ else
         catch (CoreApiException ex)
         {
             _error = ex.ErrorDetail ?? ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Mints a short-lived terminal ticket and opens the Core's ticketed proxy in a new tab —
+    /// the browser talks to the Core only; the container itself is never reachable.
+    /// </summary>
+    private async Task OpenTerminalAsync()
+    {
+        _error = null;
+        _busy = true;
+        try
+        {
+            var ticket = await Core.OpenTerminalAsync(Id, _cts.Token);
+            var url = CoreOptions.BaseAddress.TrimEnd('/') + ticket.Url;
+            await JS.InvokeVoidAsync("open", url, "_blank");
+        }
+        catch (CoreApiException ex)
+        {
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+        finally
+        {
+            _busy = false;
         }
     }
 

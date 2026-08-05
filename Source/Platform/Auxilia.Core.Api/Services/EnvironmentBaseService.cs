@@ -15,12 +15,22 @@ public sealed class EnvironmentBaseService(
     AuditLog auditLog,
     TimeProvider clock)
 {
-    public async Task<IReadOnlyList<EnvironmentBaseDto>> ListAsync(CancellationToken ct)
+    public async Task<IReadOnlyList<EnvironmentBaseDto>> ListAsync(string? search, CancellationToken ct)
         => (await bases.ReadAsync(ct))
+            .Where(b => Matches(b, search))
             .OrderBy(b => b.Name, StringComparer.Ordinal)
             .ThenBy(b => b.Version, StringComparer.Ordinal)
             .Select(ToDto)
             .ToList();
+
+    private static bool Matches(EnvironmentBaseRecord record, string? search)
+        => string.IsNullOrWhiteSpace(search)
+           || Contains(record.Name, search)
+           || Contains(record.Version, search)
+           || Contains(record.Description, search);
+
+    private static bool Contains(string? value, string search)
+        => value?.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase) == true;
 
     public async Task<bool> ExistsAsync(string name, string version, CancellationToken ct)
         => await bases.ReadAsync(

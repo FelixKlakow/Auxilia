@@ -160,7 +160,7 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task<ProviderCatalogEntry> RegisterProviderAsync(RegisterSlotProvider request, CancellationToken ct = default) => Nope<Task<ProviderCatalogEntry>>();
     public Task<ProviderCatalogEntry> SetProviderAvailabilityAsync(string providerType, bool available, CancellationToken ct = default) => Nope<Task<ProviderCatalogEntry>>();
     public Task<ProviderCatalogEntry> SetProviderSettingDisabledAsync(string providerType, string settingKey, bool disabled, CancellationToken ct = default) => Nope<Task<ProviderCatalogEntry>>();
-    public Task<IReadOnlyList<EnvironmentLayerDto>> ListEnvironmentLayersAsync(CancellationToken ct = default) => Nope<Task<IReadOnlyList<EnvironmentLayerDto>>>();
+    public Task<IReadOnlyList<EnvironmentLayerDto>> ListEnvironmentLayersAsync(string? search = null, CancellationToken ct = default) => Nope<Task<IReadOnlyList<EnvironmentLayerDto>>>();
     public Task<EnvironmentLayerDto?> GetEnvironmentLayerAsync(string providerType, CancellationToken ct = default) => Nope<Task<EnvironmentLayerDto?>>();
     public Task<EnvironmentLayerDto> UpsertEnvironmentLayerAsync(UpsertEnvironmentLayer request, CancellationToken ct = default) => Nope<Task<EnvironmentLayerDto>>();
     public Task<PagedResult<WorkflowTypeDto>> ListWorkflowTypesAsync(WorkflowTypeQuery query, CancellationToken ct = default) => Nope<Task<PagedResult<WorkflowTypeDto>>>();
@@ -198,7 +198,7 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task DeleteConnectorAsync(Guid id, CancellationToken ct = default) => Nope<Task>();
     public Task DeleteProviderAsync(string providerType, CancellationToken ct = default) => Nope<Task>();
     public Task DeleteEnvironmentLayerAsync(string providerType, CancellationToken ct = default) => Nope<Task>();
-    public Task<IReadOnlyList<EnvironmentBaseDto>> ListEnvironmentBasesAsync(CancellationToken ct = default) => Nope<Task<IReadOnlyList<EnvironmentBaseDto>>>();
+    public Task<IReadOnlyList<EnvironmentBaseDto>> ListEnvironmentBasesAsync(string? search = null, CancellationToken ct = default) => Nope<Task<IReadOnlyList<EnvironmentBaseDto>>>();
     public Task<IReadOnlyList<PlatformSettingDto>> ListPlatformSettingsAsync(CancellationToken ct = default) => Nope<Task<IReadOnlyList<PlatformSettingDto>>>();
     public Task<PlatformSettingDto> SetPlatformSettingAsync(string key, SetPlatformSetting request, CancellationToken ct = default) => Nope<Task<PlatformSettingDto>>();
     public Task<IReadOnlyList<WorkspaceResource>> ListWorkspacesAsync(CancellationToken ct = default) => Nope<Task<IReadOnlyList<WorkspaceResource>>>();

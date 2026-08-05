@@ -68,6 +68,34 @@ public sealed class RepositoryAuthResolverTests
     }
 
     [Test]
+    public async Task Resolve_PushToken_RidesTheAuth_WhenTheConnectorCarriesOne()
+    {
+        var resolver = new RepositoryAuthResolver(ClientReturning(new Dictionary<string, string>
+        {
+            ["token"] = "FULL", ["Push-Token"] = "PUSH-ONLY"
+        }));
+
+        var auth = await resolver.ResolveAsync(Guid.NewGuid(), "tok", "repo-auth:main", CancellationToken.None);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(auth!.Token, Is.EqualTo("FULL"));
+            Assert.That(auth.PushToken, Is.EqualTo("PUSH-ONLY"), "setting keys match case-insensitively");
+        });
+    }
+
+    [Test]
+    public async Task Resolve_WithoutPushToken_LeavesItNull()
+    {
+        var resolver = new RepositoryAuthResolver(
+            ClientReturning(new Dictionary<string, string> { ["token"] = "PAT" }));
+
+        var auth = await resolver.ResolveAsync(Guid.NewGuid(), "tok", "repo-auth:main", CancellationToken.None);
+
+        Assert.That(auth!.PushToken, Is.Null);
+    }
+
+    [Test]
     public async Task Resolve_WhenCoreReturnsNothing_YieldsNull()
         => Assert.That(
             await new RepositoryAuthResolver(ClientReturning(null))

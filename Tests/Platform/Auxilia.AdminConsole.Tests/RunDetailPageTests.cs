@@ -21,8 +21,10 @@ public sealed class RunDetailPageTests
     private static BunitContext NewContext(FakeCoreClient core)
     {
         var ctx = new BunitContext();
+        ctx.JSInterop.Mode = JSRuntimeMode.Loose;
         ctx.Services.AddSingleton<ICoreClient>(core);
         ctx.Services.AddSingleton(new ViewRendererRegistry([]));
+        ctx.Services.AddSingleton(new CoreClientOptions { BaseAddress = "https://core.test" });
         return ctx;
     }
 
@@ -101,6 +103,45 @@ public sealed class RunDetailPageTests
         cut.WaitForAssertion(() =>
             Assert.That(cut.Markup, Does.Contain("replayed-history"),
                 "a finished run replays its persisted views without any stream events"));
+    }
+
+    [Test]
+    public void RunDetail_TerminalHostingRun_OpensTheTicketedProxyInANewTab()
+    {
+        var runId = Guid.NewGuid();
+        var core = new FakeCoreClient();
+        core.Runs.Add(new RunStatus(
+            runId, "coding-session", "Running", null, DateTimeOffset.UtcNow, null, null, HasTerminal: true));
+        using var ctx = NewContext(core);
+
+        var cut = ctx.Render<RunDetail>(p => p.Add(c => c.Id, runId));
+
+        cut.WaitForAssertion(() =>
+            Assert.That(cut.FindAll("button").Any(b => b.TextContent.Trim() == "Open terminal"), Is.True,
+                "a live run hosting a terminal offers the button"));
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Open terminal").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            var open = ctx.JSInterop.VerifyInvoke("open");
+            Assert.That(open.Arguments[0],
+                Is.EqualTo($"https://core.test/api/runs/{runId}/terminal/?ticket=fake"),
+                "the ticketed proxy URL is the CORE's — the container is never reachable directly");
+        });
+    }
+
+    [Test]
+    public void RunDetail_WithoutTerminal_OffersNoTerminalButton()
+    {
+        var runId = Guid.NewGuid();
+        var core = new FakeCoreClient();
+        core.Runs.Add(new RunStatus(runId, "impl", "Running", null, DateTimeOffset.UtcNow, null, null));
+        using var ctx = NewContext(core);
+
+        var cut = ctx.Render<RunDetail>(p => p.Add(c => c.Id, runId));
+
+        cut.WaitForAssertion(() =>
+            Assert.That(cut.FindAll("button").Any(b => b.TextContent.Trim() == "Open terminal"), Is.False));
     }
 
     [Test]

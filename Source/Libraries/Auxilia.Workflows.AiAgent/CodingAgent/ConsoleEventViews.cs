@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+using Auxilia.Steering.Codec;
 using Auxilia.Workflows.Views;
 
 namespace Auxilia.Workflows.AiAgent.CodingAgent;
@@ -19,7 +19,7 @@ public sealed class ConsoleEventViews(IViewPublisher views, TimeProvider time)
         {
             case ConsoleSessionEvent.Attention:
                 await views.PublishAsync(
-                    Steering.OperatorChannel.ViewName, new AttentionWire("attention", evt.Message), ct);
+                    Steering.OperatorChannel.ViewName, new SteeringAttention(evt.Message), ct);
                 await PublishChatAsync(new AgentChatEntry(
                     AgentChatRole.System, evt.Message, time.GetUtcNow(),
                     Label: "Waiting for you"), ct);
@@ -30,7 +30,7 @@ public sealed class ConsoleEventViews(IViewPublisher views, TimeProvider time)
                         AgentChatRole.Assistant, evt.Message, time.GetUtcNow()), ct);
                 await views.PublishAsync(
                     Steering.OperatorChannel.ViewName,
-                    new TurnEndedWire("turn-ended", ++_turns, Summarize(evt.Message)), ct);
+                    new SteeringTurnEnded(++_turns, Summarize(evt.Message)), ct);
                 break;
             case ConsoleSessionEvent.PlanUpdated:
                 if (Deserialize(evt.DetailJson) is { Count: > 0 } plan)
@@ -69,12 +69,4 @@ public sealed class ConsoleEventViews(IViewPublisher views, TimeProvider time)
         }
     }
 
-    private sealed record AttentionWire(
-        [property: JsonPropertyName("$type")] string Type,
-        [property: JsonPropertyName("message")] string Message);
-
-    private sealed record TurnEndedWire(
-        [property: JsonPropertyName("$type")] string Type,
-        [property: JsonPropertyName("turn")] int Turn,
-        [property: JsonPropertyName("summary")] string? Summary);
 }

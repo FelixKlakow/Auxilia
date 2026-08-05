@@ -34,6 +34,7 @@
     <Project Path="Source\Libraries\Auxilia.Governance\Auxilia.Governance.csproj" />
     <Project Path="Source\Libraries\Auxilia.Messaging\Auxilia.Messaging.csproj" />
     <Project Path="Source\Libraries\Auxilia.PlatformData\Auxilia.PlatformData.csproj" />
+    <Project Path="Source\Libraries\Auxilia.Steering.Codec\Auxilia.Steering.Codec.csproj" />
     <Project Path="Source\Libraries\Auxilia.UniversalDataAccess\Auxilia.UniversalDataAccess.csproj" />
     <Project Path="Source\Libraries\Auxilia.Workflows\Auxilia.Workflows.csproj" />
     <Project Path="Source\Libraries\Auxilia.Workflows.AiAgent\Auxilia.Workflows.AiAgent.csproj" />
@@ -73,6 +74,7 @@
     <Project Path="Tests\Libraries\Auxilia.Core.Client.Tests\Auxilia.Core.Client.Tests.csproj" />
     <Project Path="Tests\Libraries\Auxilia.Governance.Tests\Auxilia.Governance.Tests.csproj" />
     <Project Path="Tests\Libraries\Auxilia.PlatformData.Tests\Auxilia.PlatformData.Tests.csproj" />
+    <Project Path="Tests\Libraries\Auxilia.Steering.Codec.Tests\Auxilia.Steering.Codec.Tests.csproj" />
     <Project Path="Tests\Libraries\Auxilia.UniversalDataAccess.Tests\Auxilia.UniversalDataAccess.Tests.csproj" />
     <Project Path="Tests\Libraries\Auxilia.Workflows.Client.Tests\Auxilia.Workflows.Client.Tests.csproj" />
     <Project Path="Tests\Libraries\Auxilia.Workflows.Packer.Tests\Auxilia.Workflows.Packer.Tests.csproj" />

@@ -120,6 +120,8 @@ builder.Services.AddHttpClient();
 builder.Services.AddSingleton<WorkflowTypeRegistryService>();
 builder.Services.AddSingleton<WorkflowTypeApprovalPipeline>();
 builder.Services.AddSingleton<IWorkflowTypeApprovalHandler, EmailApprovalNotificationHandler>();
+builder.Services.AddSingleton<IVerdictRunDispatcher, RunServiceVerdictRunDispatcher>();
+builder.Services.AddSingleton<IWorkflowTypeApprovalHandler, VerdictWorkflowApprovalHandler>();
 builder.Services.AddSingleton<ConnectorService>();
 builder.Services.AddSingleton<ConnectorBrowseService>();
 builder.Services.AddSingleton<ConnectorTokenRefresher>();
@@ -129,6 +131,7 @@ builder.Services.AddSingleton<WorkspaceResourceService>();
 builder.Services.AddSingleton<PlatformSettingsService>();
 builder.Services.AddSingleton<DelegatedTokenStore>();
 builder.Services.AddSingleton<RunConfigurationService>();
+builder.Services.AddSingleton<RunQuotaService>();
 builder.Services.AddSingleton<RunService>();
 builder.Services.AddSingleton<RunReadService>();
 builder.Services.AddSingleton<DashboardPinService>();
@@ -403,6 +406,10 @@ app.MapPost("/api/runs", async (
                 $"{{\"workflowType\":\"{request.WorkflowType}\",\"runId\":\"{accepted.RunId}\"}}", ct);
         return Results.Ok(accepted);
     }
+    catch (RunQuotaExceededException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status429TooManyRequests);
+    }
     catch (ConnectorAccessDeniedException ex)
     {
         return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status403Forbidden);
@@ -500,6 +507,10 @@ app.MapPost("/api/runs/{id:guid}/rerun", async (
         await audit.AppendAsync(principalId.ToString(), "workflow.rerun",
             record.Id.ToString(), accepted.RunId.ToString(), ct: ct);
         return Results.Ok(accepted);
+    }
+    catch (RunQuotaExceededException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status429TooManyRequests);
     }
     catch (InvalidOperationException ex)
     {
@@ -1012,6 +1023,10 @@ app.MapPost("/api/configurations/{id:guid}/run", async (
                 $"{{\"configurationId\":\"{id}\",\"runId\":\"{accepted.RunId}\"}}", ct);
         return Results.Ok(accepted);
     }
+    catch (RunQuotaExceededException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status429TooManyRequests);
+    }
     catch (ConnectorAccessDeniedException ex)
     {
         return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status403Forbidden);
@@ -1128,11 +1143,11 @@ app.MapPost("/api/provider-catalog/{providerType}/settings", async (
 // --- Environment layers (admin-managed session software; composes onto workflow images) ---
 // Managing layers rides the provider-catalog permission: an environment IS a catalog entry.
 app.MapGet("/api/environment-layers", async (
-        HttpContext http, IPolicyEngine policy, EnvironmentLayerService svc, CancellationToken ct) =>
+        string? search, HttpContext http, IPolicyEngine policy, EnvironmentLayerService svc, CancellationToken ct) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ProviderCatalogManage, ct) is { } fail)
         return fail;
-    return Results.Ok(await svc.ListAsync(ct));
+    return Results.Ok(await svc.ListAsync(search, ct));
 }).RequireAuthorization();
 
 app.MapGet("/api/environment-layers/{providerType}", async (
@@ -1173,11 +1188,11 @@ app.MapDelete("/api/environment-layers/{providerType}", async (
 
 // --- Environment bases (the configurable (name, version) vocabulary layers build on) ---
 app.MapGet("/api/environment-bases", async (
-        HttpContext http, IPolicyEngine policy, EnvironmentBaseService svc, CancellationToken ct) =>
+        string? search, HttpContext http, IPolicyEngine policy, EnvironmentBaseService svc, CancellationToken ct) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ProviderCatalogManage, ct) is { } fail)
         return fail;
-    return Results.Ok(await svc.ListAsync(ct));
+    return Results.Ok(await svc.ListAsync(search, ct));
 }).RequireAuthorization();
 
 app.MapPost("/api/environment-bases", async (

@@ -50,6 +50,35 @@ public class CoreApiDispatchSystemTests
     }
 
     [Test]
+    [CancelAfter(60_000)]
+    public async Task AuditEndpoint_ServesCamelCasePagedResult(CancellationToken cancellationToken)
+    {
+        // The bootstrap authentication above (and every dispatch in this suite) writes audit
+        // entries; the endpoint's PagedResult must serialize camelCase like the rest of the API —
+        // clients bind { items, total } and each entry's { actor, action, … } case-sensitively.
+        var response = await Client.GetAsync("/api/audit?take=5", cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        using var doc = System.Text.Json.JsonDocument.Parse(
+            await response.Content.ReadAsStringAsync(cancellationToken));
+        Assert.Multiple(() =>
+        {
+            Assert.That(doc.RootElement.TryGetProperty("items", out var items), Is.True,
+                "PagedResult.Items must serialize as 'items'");
+            Assert.That(doc.RootElement.TryGetProperty("total", out _), Is.True,
+                "PagedResult.Total must serialize as 'total'");
+            Assert.That(items.ValueKind, Is.EqualTo(System.Text.Json.JsonValueKind.Array));
+            if (items.GetArrayLength() > 0)
+            {
+                var entry = items[0];
+                Assert.That(entry.TryGetProperty("action", out _), Is.True,
+                    "audit entries must carry camelCase properties");
+                Assert.That(entry.TryGetProperty("actor", out _), Is.True);
+            }
+        });
+    }
+
+    [Test]
     [CancelAfter(150_000)]
     public async Task StaticConfiguration_RunsDummyWorkflowToSuccess(CancellationToken cancellationToken)
     {

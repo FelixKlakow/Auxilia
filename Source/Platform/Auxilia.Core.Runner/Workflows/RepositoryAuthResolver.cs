@@ -3,8 +3,12 @@ using Auxilia.Workflows.Crypto;
 
 namespace Auxilia.Core.Runner.Workflows;
 
-/// <summary>A repository's resolved clone credential: the token and an optional username.</summary>
-public sealed record RepositoryAuth(string? Username, string Token);
+/// <summary>
+/// A repository's resolved clone credential: the token, an optional username, and — when the
+/// connector carries one — a separate push-scoped token (e.g. a fine-grained PAT limited to
+/// this repository's contents) that narrows what a push-enabled clone can do.
+/// </summary>
+public sealed record RepositoryAuth(string? Username, string Token, string? PushToken = null);
 
 public interface IRepositoryAuthResolver
 {
@@ -24,6 +28,7 @@ public sealed class RepositoryAuthResolver(ICoreCredentialClient credentialClien
 {
     private static readonly string[] TokenKeys = ["token", "pat", "password", "accessToken"];
     private static readonly string[] UsernameKeys = ["username", "user"];
+    private static readonly string[] PushTokenKeys = ["push-token", "pushToken", "push-pat"];
 
     public async Task<RepositoryAuth?> ResolveAsync(
         Guid coreRunId, string resolutionToken, string authSlotName, CancellationToken ct)
@@ -38,7 +43,9 @@ public sealed class RepositoryAuthResolver(ICoreCredentialClient credentialClien
                            keyPair.Decrypt(resolved.EncryptedSettings))
                        ?? new Dictionary<string, string>();
         var token = Find(settings, TokenKeys);
-        return token is null ? null : new RepositoryAuth(Find(settings, UsernameKeys), token);
+        return token is null
+            ? null
+            : new RepositoryAuth(Find(settings, UsernameKeys), token, Find(settings, PushTokenKeys));
     }
 
     private static string? Find(Dictionary<string, string> settings, string[] keys)

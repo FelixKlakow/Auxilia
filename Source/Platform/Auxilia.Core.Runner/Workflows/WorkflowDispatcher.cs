@@ -328,6 +328,10 @@ public sealed class WorkflowDispatcher(
             if (mount.SettingsByRole.TryGetValue(WorkspaceMountRoles.CloneUrl, out var cloneUrl)
                 && !string.IsNullOrWhiteSpace(cloneUrl))
             {
+                var allowPush = string.Equals(
+                    mount.SettingsByRole.GetValueOrDefault(WorkspaceMountRoles.AllowPush),
+                    "true", StringComparison.OrdinalIgnoreCase);
+                string? pushCloneUrl = null;
                 if (mount.AuthSlotName is { } authSlotName)
                 {
                     if (string.IsNullOrEmpty(command.ResolutionToken))
@@ -344,20 +348,22 @@ public sealed class WorkflowDispatcher(
                             $"could not resolve the credential for workspace mount '{mount.MountId}'", ct);
                         return;
                     }
+                    // A connector-provided push-scoped token becomes the ONLY credential the
+                    // container-visible remote carries; the full clone credential never rides in.
+                    if (allowPush && auth.PushToken is { Length: > 0 } pushToken)
+                        pushCloneUrl = RepositoryCloneUrl.WithCredentials(cloneUrl, auth.Username, pushToken);
                     cloneUrl = RepositoryCloneUrl.WithCredentials(cloneUrl, auth.Username, auth.Token);
                 }
                 var branch = mount.SettingsByRole.GetValueOrDefault(WorkspaceMountRoles.Branch);
                 var noCache = string.Equals(
                     mount.SettingsByRole.GetValueOrDefault(WorkspaceMountRoles.NoCache),
                     "true", StringComparison.OrdinalIgnoreCase);
-                var allowPush = string.Equals(
-                    mount.SettingsByRole.GetValueOrDefault(WorkspaceMountRoles.AllowPush),
-                    "true", StringComparison.OrdinalIgnoreCase);
                 repositories.Add(new RepositoryDeclaration(
                     mount.MountId, cloneUrl,
                     string.IsNullOrWhiteSpace(branch) ? null : branch, noCache)
                 {
                     AllowPush = allowPush,
+                    PushCloneUrl = pushCloneUrl,
                     CommitName = mount.SettingsByRole.GetValueOrDefault(WorkspaceMountRoles.CommitName),
                     CommitEmail = mount.SettingsByRole.GetValueOrDefault(WorkspaceMountRoles.CommitEmail),
                 });

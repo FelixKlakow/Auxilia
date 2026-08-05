@@ -90,6 +90,7 @@ else
                     <th>Kind</th>
                     <th>Status</th>
                     <th>Roles</th>
+                    <th>Tags</th>
                     <th>Actions</th>
                 </tr>
                 </thead>
@@ -125,6 +126,22 @@ else
                                     }
                                 </span>
                             }
+                        </td>
+                        <td>
+                            @foreach (var tag in principal.Tags.OrderBy(t => t, StringComparer.OrdinalIgnoreCase))
+                            {
+                                <span class="badge badge-tag">
+                                    @tag
+                                    <button class="chip-x" title="Remove tag"
+                                            @onclick="() => RemoveTagAsync(principal, tag)">✕</button>
+                                </span>
+                            }
+                            <span class="tag-add">
+                                <input class="input-inline" placeholder="add tag"
+                                       @bind="_tagInputs[principal.Id]" @bind:event="oninput"/>
+                                <button class="btn btn-secondary btn-sm" @onclick="() => AddTagAsync(principal)"
+                                        disabled="@(_busy || string.IsNullOrWhiteSpace(TagInputOf(principal.Id)))">Add</button>
+                            </span>
                         </td>
                         <td>
                             <div class="cell-actions">
@@ -288,6 +305,7 @@ else
     {
         foreach (var principal in _principals)
         {
+            _tagInputs.TryAdd(principal.Id, "");
             var held = principal.Roles.Select(r => r.RoleName).ToHashSet(StringComparer.Ordinal);
             var assignable = BuiltInRoles.Except(held).ToList();
             if (!_roleSelections.TryGetValue(principal.Id, out var selected) || !assignable.Contains(selected))
@@ -342,6 +360,31 @@ else
 
     private Task SetEnabledAsync(Guid id, bool enabled)
         => MutateAsync(() => Core.SetPrincipalEnabledAsync(id, new SetPrincipalEnabledRequest(enabled)));
+
+    // --- Tags: the admin-managed classification axis (e.g. "ai-agent", a team, an environment).
+    private readonly Dictionary<Guid, string> _tagInputs = new();
+
+    private string TagInputOf(Guid id) => _tagInputs.TryGetValue(id, out var value) ? value : "";
+
+    private Task AddTagAsync(PrincipalDto principal)
+    {
+        var tag = TagInputOf(principal.Id).Trim();
+        if (tag.Length == 0 || principal.Tags.Contains(tag, StringComparer.OrdinalIgnoreCase))
+        {
+            _tagInputs[principal.Id] = "";
+            return Task.CompletedTask;
+        }
+        return MutateAsync(async () =>
+        {
+            await Core.SetPrincipalTagsAsync(principal.Id,
+                new SetPrincipalTagsRequest([.. principal.Tags, tag]));
+            _tagInputs[principal.Id] = "";
+        });
+    }
+
+    private Task RemoveTagAsync(PrincipalDto principal, string tag)
+        => MutateAsync(() => Core.SetPrincipalTagsAsync(principal.Id,
+            new SetPrincipalTagsRequest(principal.Tags.Where(t => t != tag).ToList())));
 
     // --- Step-up re-authentication: the Core rejects admin-role grant/revoke and principal
     // disable with 'elevation-required' until the operator re-proves their OWN credential.

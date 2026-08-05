@@ -17,6 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Auxilia.AI\Auxilia.AI.csproj" />
     <ProjectReference Include="..\Auxilia.Messaging\Auxilia.Messaging.csproj" />
+    <ProjectReference Include="..\Auxilia.Steering.Codec\Auxilia.Steering.Codec.csproj" />
   </ItemGroup>
 
   <ItemGroup>

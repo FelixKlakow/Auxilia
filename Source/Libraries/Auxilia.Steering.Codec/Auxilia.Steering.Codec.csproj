@@ -7,29 +7,22 @@
     </PropertyGroup>
 
     <PropertyGroup Label="Packaging">
-        <PackageId>Auxilia.Workflows.Client</PackageId>
+        <PackageId>Auxilia.Steering.Codec</PackageId>
         <Version>0.1.0</Version>
         <Authors>Felix Klakow</Authors>
-        <Description>The Auxilia workflow-domain library on top of Auxilia.Core.Client: schema-validated authoring, interval triggers, and artifact chaining over the Core's filtered artifact event stream. Embed it in a server service or a desktop app — triggers fire while your host runs.</Description>
+        <Description>The steering wire protocol shared by Auxilia workflows and steering clients: typed frames of the run's steering view (questions, turn boundaries, session vocabulary) and of the operator's opaque inputs (guidance, answers, halt). Dependency-free — desktop clients decode steering payloads without the full contracts surface.</Description>
         <RepositoryUrl>https://github.com/FelixKlakow/Auxilia</RepositoryUrl>
         <PackageProjectUrl>https://github.com/FelixKlakow/Auxilia</PackageProjectUrl>
+        <!-- BUSL-1.1 is not an OSI-approved SPDX expression, so the license ships as a file. -->
         <PackageLicenseFile>LICENSE</PackageLicenseFile>
         <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
         <IncludeSymbols>true</IncludeSymbols>
         <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-        <PackageTags>auxilia;workflow;triggers;chaining;authoring</PackageTags>
+        <PackageTags>auxilia;workflow;steering;protocol</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>
         <None Include="..\..\..\LICENSE" Pack="true" PackagePath="" Visible="false" />
-    </ItemGroup>
-
-    <ItemGroup>
-        <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.10" />
-    </ItemGroup>
-
-    <ItemGroup>
-        <ProjectReference Include="..\Auxilia.Core.Client\Auxilia.Core.Client.csproj" />
     </ItemGroup>
 
 </Project>

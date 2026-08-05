@@ -179,6 +179,22 @@ public class WorkspaceManagerTests
         });
     }
 
+    [Test]
+    public async Task Prepare_AllowPushWithPushScopedUrl_TheRemoteCarriesOnlyThePushCredential()
+    {
+        // The push URL points at the same repository — in production it differs only in the
+        // credential userinfo (push-scoped token instead of the full one).
+        var pushUrl = _originRepo.Replace('\\', '/');
+        var runRoot = await _sut.PrepareAsync(
+            Guid.NewGuid(),
+            [new RepositoryDeclaration("push", _originRepo) { AllowPush = true, PushCloneUrl = pushUrl }],
+            ct: CancellationToken.None);
+
+        Assert.That(GitOutput(Path.Combine(runRoot!, "repos", "push"), "remote", "get-url", "origin"),
+            Is.EqualTo(pushUrl),
+            "The container-visible remote must hold the push-scoped credential, not the clone one.");
+    }
+
     // ------------------------------------------------------------------ failure
 
     [Test]

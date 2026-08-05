@@ -517,7 +517,8 @@ public sealed class DockerWorkflowLauncher(
             {
                 // No AutoRemove: the exit watcher collects the exit code + log tail first,
                 // then removes the container — a crash must leave evidence, not vanish.
-                Binds = binds
+                Binds = binds,
+                ExtraHosts = settings.MapHostGateway ? ["host.docker.internal:host-gateway"] : null
             }
         };
 
@@ -567,7 +568,8 @@ public sealed class DockerWorkflowLauncher(
             {
                 // No AutoRemove: the exit watcher collects the exit code + log tail first,
                 // then removes the container — a crash must leave evidence, not vanish.
-                Binds      = binds
+                Binds      = binds,
+                ExtraHosts = settings.MapHostGateway ? ["host.docker.internal:host-gateway"] : null
             }
         };
 

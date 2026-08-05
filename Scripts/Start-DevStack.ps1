@@ -1,8 +1,8 @@
 # Starts the local dev stack the steering client connects to: Core.Api on http://localhost:5280 and a
 # Core.Runner wired for real Docker workflow runs (slot plugins, environment layers, dev mode).
 # State lives in Source/Platform/Auxilia.Core.Api/core-data (JSON backend) and survives restarts.
-# Requires: the auxilia-rabbitmq container running, Docker Desktop, a prior solution build
-# (pass -Build to build first).
+# Requires: Docker Desktop and a prior solution build (pass -Build to build first). The
+# auxilia-rabbitmq container and the sim git-server image are started/built here if missing.
 #
 # By default the services run HIDDEN, logging to .devstack\api.log / runner.log.
 # Stop them with -Stop; pass -Windowed to get the old one-visible-window-per-service behavior.
@@ -30,6 +30,13 @@ if ($Stop) {
 if ($Build) {
     dotnet build "$repo\Auxilia.slnx"
     if ($LASTEXITCODE -ne 0) { throw "Build failed." }
+}
+
+# Fresh machine: the broker both services connect to (idempotent; scoped to the auxilia- name).
+if (-not (docker ps --format "{{.Names}}" | Select-String -Quiet "^auxilia-rabbitmq$")) {
+    docker rm -f auxilia-rabbitmq 2>$null | Out-Null
+    docker run -d --name auxilia-rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:4-management | Out-Null
+    Write-Host "auxilia-rabbitmq started (localhost:5672, guest/guest)."
 }
 
 $runnerEnv = @{
@@ -104,6 +111,13 @@ if (-not $Windowed) {
 # stack always comes up simulation-ready.
 
 if (-not (docker ps --format "{{.Names}}" | Select-String -Quiet "^auxilia-sim-git$")) {
+    docker image inspect auxilia-git-server:system-test 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        # Fresh machine: the image only exists after a system-test run or the demo script.
+        Write-Host "Building auxilia-git-server:system-test..."
+        docker build -t auxilia-git-server:system-test -f "$repo\Tests\System\Auxilia.SystemTestSuite\GitServer\Dockerfile" $repo
+        if ($LASTEXITCODE -ne 0) { throw "The git-server image build failed." }
+    }
     docker rm -f auxilia-sim-git 2>$null | Out-Null
     docker run -d --name auxilia-sim-git -p 8418:80 auxilia-git-server:system-test | Out-Null
     Write-Host "auxilia-sim-git started (http://localhost:8418, builduser/the-pat)."

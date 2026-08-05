@@ -334,8 +334,11 @@ public sealed class CoreClientSurfaceSystemTests
         var upserted = await Admin.UpsertEnvironmentBaseAsync(
             new UpsertEnvironmentBase("linux", "client-surface-24.04", "probe base"), ct);
         Assert.That(upserted.Version, Is.EqualTo("client-surface-24.04"));
-        Assert.That((await Admin.ListEnvironmentBasesAsync(ct)).Select(b => b.Version),
+        Assert.That((await Admin.ListEnvironmentBasesAsync(ct: ct)).Select(b => b.Version),
             Does.Contain("client-surface-24.04"));
+        Assert.That((await Admin.ListEnvironmentBasesAsync("client-surface", ct)).Select(b => b.Version),
+            Does.Contain("client-surface-24.04"), "search rides the query string end to end");
+        Assert.That(await Admin.ListEnvironmentBasesAsync("no-such-base-anywhere", ct), Is.Empty);
         await Admin.DeleteEnvironmentBaseAsync("linux", "client-surface-24.04", ct);
 
         const string layerType = "client-surface-probe-env";
@@ -343,7 +346,9 @@ public sealed class CoreClientSurfaceSystemTests
             new UpsertEnvironmentLayer(layerType, "probe env", "echo layer-setup"), ct);
         Assert.That(layer.SetupScript, Is.EqualTo("echo layer-setup"));
         Assert.That((await Admin.GetEnvironmentLayerAsync(layerType, ct))!.BaseEnvironment, Is.EqualTo("linux"));
-        Assert.That((await Admin.ListEnvironmentLayersAsync(ct)).Select(l => l.ProviderType), Does.Contain(layerType));
+        Assert.That((await Admin.ListEnvironmentLayersAsync(ct: ct)).Select(l => l.ProviderType), Does.Contain(layerType));
+        Assert.That((await Admin.ListEnvironmentLayersAsync("probe-env", ct)).Select(l => l.ProviderType),
+            Does.Contain(layerType));
         await Admin.DeleteEnvironmentLayerAsync(layerType, ct);
     }
 

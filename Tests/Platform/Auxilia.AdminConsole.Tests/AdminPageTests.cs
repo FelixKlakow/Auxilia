@@ -98,6 +98,30 @@ public sealed class AdminPageTests
     }
 
     [Test]
+    public void Admin_Tags_AddAndRemove_ReplaceTheFullTagList()
+    {
+        var core = new FakeCoreClient();
+        var principal = new PrincipalDto(
+            Guid.NewGuid(), "Service", "ci-bot", "Active", null, [], ["ai-agent"]);
+        core.Principals.Add(principal);
+        using var ctx = NewContext(core);
+        var cut = ctx.Render<Admin>();
+
+        Assert.That(cut.Markup, Does.Contain("ai-agent"), "existing tags render as chips");
+
+        cut.Find("input[placeholder='add tag']").Input("team-platform");
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Add").Click();
+        Assert.That(core.TagChanges, Has.Count.EqualTo(1));
+        Assert.That(core.TagChanges[0].Tags, Is.EqualTo(new[] { "ai-agent", "team-platform" }),
+            "add sends the FULL replacement list — the endpoint replaces, not appends");
+
+        // The only chip-x on this row is the tag's (no Direct roles) — clicking it removes the tag.
+        cut.FindAll(".chip-x").First().Click();
+        Assert.That(core.TagChanges, Has.Count.EqualTo(2));
+        Assert.That(core.TagChanges[1].Tags, Is.Empty, "remove sends the list without the tag");
+    }
+
+    [Test]
     public void Admin_ShowsAccessDenied_OnForbidden()
     {
         var core = new FakeCoreClient

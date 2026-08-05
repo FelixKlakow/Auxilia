@@ -31,9 +31,30 @@ try {
 
 # Availability is deny-by-default - make sure every provider the configuration binds is offered.
 $catalogItems = (Invoke-RestMethod "http://localhost:5280/api/provider-catalog" -Headers $headers).items
+
+# git-repository is a DATA-ONLY mount provider (no plugin) - register it here so this script
+# works on a fresh stack without the demo script having run first. The role-tagged settings
+# are what the runner's workspace materializer interprets.
+if ($catalogItems.providerType -notcontains "git-repository") {
+    Invoke-RestMethod -Method Post "http://localhost:5280/api/provider-catalog" -Headers $headers -ContentType "application/json" -Body (@{
+        providerType = "git-repository"; category = "workspace"
+        description = "A git repository materialized into the run's workspace."
+        contracts = @("Auxilia.Workflows.SourceControl.ISourceControlAccess")
+        requiredCredentialContract = "git-credential"
+        mountsIntoWorkspace = $true
+        settings = @(
+            @{ key = "CloneUrl"; label = "Repository"; kind = "Text"; required = $true; role = "clone-url" },
+            @{ key = "Branch"; label = "Branch"; kind = "Text"; role = "branch" },
+            @{ key = "NoCache"; label = "Fresh clone per run"; kind = "Boolean"; role = "no-cache" },
+            @{ key = "AllowPush"; label = "Allow pushing"; kind = "Boolean"; role = "allow-push" })
+    } | ConvertTo-Json -Depth 5) | Out-Null
+    Write-Host "Provider git-repository registered."
+    $catalogItems = (Invoke-RestMethod "http://localhost:5280/api/provider-catalog" -Headers $headers).items
+}
+
 foreach ($type in "tfs-account", "git-repository", "claude-code-cli", "coding-session-workspace") {
     $entry = $catalogItems | Where-Object providerType -eq $type
-    if (-not $entry) { throw "Provider '$type' is not in the catalog - run the stack once so the runner registers its slot plugins." }
+    if (-not $entry) { throw "Provider '$type' is not in the catalog - it is registered by the runner's plugin scan on the first run; make sure the dev-stack runner started (Scripts/Start-DevStack.ps1, .devstack/runner.log)." }
     if ($entry.available -ne $true) {
         Invoke-RestMethod -Method Post "http://localhost:5280/api/provider-catalog/$type/availability" `
             -Headers $headers -ContentType "application/json" -Body '{"available":true}' | Out-Null

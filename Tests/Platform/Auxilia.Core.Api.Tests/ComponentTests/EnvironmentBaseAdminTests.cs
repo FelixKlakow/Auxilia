@@ -48,6 +48,38 @@ public sealed class EnvironmentBaseAdminTests : CoreApiComponentTestBase
     }
 
     [Test]
+    public async Task List_WithSearch_FiltersBothCatalogs()
+    {
+        var admin = CreateClient();
+        await admin.PostAsJsonAsync("/api/environment-bases", new UpsertEnvironmentBase("linux", "ubuntu-24.04", "Noble LTS"));
+        await admin.PostAsJsonAsync("/api/environment-bases", new UpsertEnvironmentBase("windows", "server-2022"));
+        await admin.PostAsJsonAsync("/api/environment-layers",
+            new UpsertEnvironmentLayer("dotnet-10", ".NET SDK", "apt-get install -y dotnet-sdk-10.0"));
+        await admin.PostAsJsonAsync("/api/environment-layers",
+            new UpsertEnvironmentLayer("blender", "3D tooling", "apt-get install -y blender"));
+
+        var byVersion = await admin.GetFromJsonAsync<IReadOnlyList<EnvironmentBaseDto>>(
+            "/api/environment-bases?search=UBUNTU");
+        var byDescription = await admin.GetFromJsonAsync<IReadOnlyList<EnvironmentBaseDto>>(
+            "/api/environment-bases?search=noble");
+        var layersByType = await admin.GetFromJsonAsync<IReadOnlyList<EnvironmentLayerDto>>(
+            "/api/environment-layers?search=dotnet");
+        var layersByDescription = await admin.GetFromJsonAsync<IReadOnlyList<EnvironmentLayerDto>>(
+            "/api/environment-layers?search=3d tooling");
+        var noMatch = await admin.GetFromJsonAsync<IReadOnlyList<EnvironmentLayerDto>>(
+            "/api/environment-layers?search=nothing-here");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(byVersion!.Single().Version, Is.EqualTo("ubuntu-24.04"), "search is case-insensitive");
+            Assert.That(byDescription!.Single().Description, Is.EqualTo("Noble LTS"));
+            Assert.That(layersByType!.Single().ProviderType, Is.EqualTo("dotnet-10"));
+            Assert.That(layersByDescription!.Single().ProviderType, Is.EqualTo("blender"));
+            Assert.That(noMatch, Is.Empty);
+        });
+    }
+
+    [Test]
     public async Task Upsert_WithoutNameOrVersion_IsRejected()
     {
         var admin = CreateClient();

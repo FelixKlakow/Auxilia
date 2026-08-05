@@ -554,7 +554,7 @@ it lives in the run root and is deleted at terminal state.
 | Cross-run filesystem | Linux mount namespaces — a container can only see its own mounted snapshots |
 | UID isolation | Each container runs as a distinct unprivileged UID; snapshot ownership prevents cross-run reads even if namespace fails |
 | Warm cache protection | Cache directory is host-only, owned by the Workspace Manager, never bind-mounted into any container |
-| Write-back control | **Model B (decided 2026-07-27):** a binding with `AllowPush` keeps its scoped credential on the per-run clone (always a fresh clone — a tokened clone never enters the warm cache); each `git push` is intercepted through the agent's permission loop and governed by the per-action `push-policy` (ask/auto, independent of the general mode, live-changeable) |
+| Write-back control | **Model B (decided 2026-07-27):** a binding with `AllowPush` keeps its scoped credential on the per-run clone (always a fresh clone — a tokened clone never enters the warm cache); each `git push` is intercepted through the agent's permission loop and governed by the per-action `push-policy` (ask/auto, independent of the general mode, live-changeable). **Push-scoped token (2026-08-05):** a connector may carry an optional `push-token` secret (e.g. a fine-grained PAT limited to that repository's contents) — the runner then clones with the full credential but rewrites the container-visible remote to carry ONLY the push-scoped token, so the run can push and nothing more |
 
 **Environment capabilities (2026-07-27).** A run's container environment is COMPOSED from
 capability selections, bound like everything else: catalog entries declaring

@@ -122,8 +122,13 @@ internal sealed class FakeCoreClient : ICoreClient
         return Task.CompletedTask;
     }
 
+    public List<(Guid Id, IReadOnlyList<string> Tags)> TagChanges { get; } = [];
+
     public Task SetPrincipalTagsAsync(Guid id, SetPrincipalTagsRequest request, CancellationToken ct = default)
-        => Task.CompletedTask;
+    {
+        TagChanges.Add((id, request.Tags));
+        return Task.CompletedTask;
+    }
 
     public Task<UserBearerToken> LoginAsync(PasswordLoginRequest request, CancellationToken ct = default)
         => Task.FromResult(new UserBearerToken("auxu_fake", DateTimeOffset.UtcNow.AddHours(8)));
@@ -498,7 +503,7 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task DeleteConfigurationAsync(Guid id, CancellationToken ct = default) => Task.CompletedTask;
     public Task DeleteProviderAsync(string providerType, CancellationToken ct = default) => Task.CompletedTask;
 
-    public Task<IReadOnlyList<EnvironmentLayerDto>> ListEnvironmentLayersAsync(CancellationToken ct = default)
+    public Task<IReadOnlyList<EnvironmentLayerDto>> ListEnvironmentLayersAsync(string? search = null, CancellationToken ct = default)
         => Nope<Task<IReadOnlyList<EnvironmentLayerDto>>>();
     public Task<EnvironmentLayerDto?> GetEnvironmentLayerAsync(string providerType, CancellationToken ct = default)
         => Nope<Task<EnvironmentLayerDto?>>();
@@ -521,7 +526,7 @@ internal sealed class FakeCoreClient : ICoreClient
         => Nope<Task<IReadOnlyList<PlatformSettingDto>>>();
     public Task<PlatformSettingDto> SetPlatformSettingAsync(string key, SetPlatformSetting request, CancellationToken ct = default)
         => Nope<Task<PlatformSettingDto>>();
-    public Task<IReadOnlyList<EnvironmentBaseDto>> ListEnvironmentBasesAsync(CancellationToken ct = default)
+    public Task<IReadOnlyList<EnvironmentBaseDto>> ListEnvironmentBasesAsync(string? search = null, CancellationToken ct = default)
         => Nope<Task<IReadOnlyList<EnvironmentBaseDto>>>();
     public Task<EnvironmentBaseDto> UpsertEnvironmentBaseAsync(UpsertEnvironmentBase request, CancellationToken ct = default)
         => Nope<Task<EnvironmentBaseDto>>();

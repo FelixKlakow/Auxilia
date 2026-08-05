@@ -1,6 +1,5 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Threading.Channels;
+using Auxilia.Steering.Codec;
 using Auxilia.Workflows.Views;
 
 namespace Auxilia.Workflows.Steering;
@@ -80,9 +79,11 @@ public sealed class OperatorChannel : IAsyncDisposable
         IReadOnlyList<string>? extraCapabilities = null)
     {
         var channel = new OperatorChannel(views, inputs, lifetime);
-        string[] baseline = ["guidance", "form-answer", "halt", "setting"];
+        string[] baseline = [
+            SteeringGuidance.TypeName, SteeringFormAnswer.TypeName,
+            SteeringHalt.TypeName, SteeringSetting.TypeName];
         await views.PublishAsync(ViewName,
-            new CapabilitiesWire("capabilities", [.. baseline, .. extraCapabilities ?? []]), lifetime);
+            new SteeringCapabilities([.. baseline, .. extraCapabilities ?? []]), lifetime);
         return channel;
     }
 
@@ -102,18 +103,18 @@ public sealed class OperatorChannel : IAsyncDisposable
         lock (_gate)
             _pendingForms[requestId] = tcs;
 
-        await _views.PublishAsync(ViewName, new FormRequestedWire(
-            "form-requested", requestId,
-            questions.Select(q => new FormQuestionWire(
+        await _views.PublishAsync(ViewName, new SteeringFormRequested(
+            requestId,
+            questions.Select(q => new SteeringFormQuestion(
                 q.Id, q.Prompt,
-                q.Options.Select(o => new OptionWire(o.Id, o.Label, o.Description)).ToList(),
+                q.Options.Select(o => new SteeringFormOption(o.Id, o.Label, o.Description)).ToList(),
                 q.MultiSelect, q.AllowFreeText, q.Detail, q.DetailFormat)).ToList()), cancellationToken);
 
         try
         {
             using var abort = cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken));
             var answers = await tcs.Task;
-            await _views.PublishAsync(ViewName, new FormResolvedWire("form-resolved", requestId), cancellationToken);
+            await _views.PublishAsync(ViewName, new SteeringFormResolved(requestId), cancellationToken);
             return answers;
         }
         finally
@@ -133,14 +134,14 @@ public sealed class OperatorChannel : IAsyncDisposable
 
     /// <summary>Announces the end of the session — observers drop every pending decision card.</summary>
     public Task EndSessionAsync(bool success, string? error, CancellationToken cancellationToken)
-        => _views.PublishAsync(ViewName, new SessionEndedWire("session-ended", success, error), cancellationToken);
+        => _views.PublishAsync(ViewName, new SteeringSessionEnded(success, error), cancellationToken);
 
     /// <summary>
     /// Announces that one agent turn finished and the session is idle awaiting operator input —
     /// the steering client's cue to notify the user.
     /// </summary>
     public Task PublishTurnEndedAsync(int turn, string? summary, CancellationToken cancellationToken)
-        => _views.PublishAsync(ViewName, new TurnEndedWire("turn-ended", turn, summary), cancellationToken);
+        => _views.PublishAsync(ViewName, new SteeringTurnEnded(turn, summary), cancellationToken);
 
     /// <summary>
     /// Announces the session's live vocabulary — switchable models with their reasoning
@@ -149,9 +150,8 @@ public sealed class OperatorChannel : IAsyncDisposable
     public Task PublishSessionVocabularyAsync(
         IReadOnlyList<(string Id, string Label, IReadOnlyList<string> Efforts, string? DefaultEffort)> models,
         CancellationToken cancellationToken)
-        => _views.PublishAsync(ViewName, new SessionVocabularyWire(
-            "session-vocabulary",
-            models.Select(m => new VocabularyModelWire(m.Id, m.Label, m.Efforts, m.DefaultEffort)).ToList()),
+        => _views.PublishAsync(ViewName, new SteeringSessionVocabulary(
+            models.Select(m => new SteeringVocabularyModel(m.Id, m.Label, m.Efforts, m.DefaultEffort)).ToList()),
             cancellationToken);
 
     public ValueTask DisposeAsync() => _pump.DisposeAsync();
@@ -170,73 +170,41 @@ public sealed class OperatorChannel : IAsyncDisposable
                 return;
             }
 
-            try
-            {
-                Dispatch(payload);
-            }
-            catch (JsonException)
-            {
-                // Unparseable operator input is dropped — the protocol is additive, never fatal.
-            }
+            Dispatch(payload);
         }
     }
 
     private void Dispatch(string payload)
     {
-        using var doc = JsonDocument.Parse(payload);
-        var root = doc.RootElement;
-        switch (root.TryGetProperty("$type", out var t) ? t.GetString() : null)
+        // Unparseable or unknown operator input decodes to null and is dropped — the
+        // protocol is additive, never fatal.
+        switch (SteeringCodec.Decode(payload))
         {
-            case "guidance":
-                if (root.TryGetProperty("text", out var text) && text.GetString() is { Length: > 0 } guidance)
-                    _guidance.Writer.TryWrite(guidance);
+            case SteeringGuidance { Text.Length: > 0 } guidance:
+                _guidance.Writer.TryWrite(guidance.Text);
                 break;
 
-            case "halt":
+            case SteeringHalt:
                 _halt.Cancel();
                 break;
 
-            case "end":
+            case SteeringEnd:
                 _end.Cancel();
                 break;
 
-            case "setting":
-                if (root.TryGetProperty("key", out var key) && key.GetString() is { Length: > 0 } settingKey
-                    && root.TryGetProperty("value", out var v) && v.GetString() is { } settingValue)
-                    _settings.Writer.TryWrite(new OperatorSetting(settingKey, settingValue));
+            case SteeringSetting { Key.Length: > 0 } setting:
+                _settings.Writer.TryWrite(new OperatorSetting(setting.Key, setting.Value));
                 break;
 
-            case "form-answer":
-                var requestId = root.TryGetProperty("requestId", out var id) ? id.GetString() : null;
-                if (requestId is null)
-                    break;
+            case SteeringFormAnswer formAnswer:
                 TaskCompletionSource<IReadOnlyList<OperatorAnswer>>? tcs;
                 lock (_gate)
-                    _pendingForms.TryGetValue(requestId, out tcs);
-                tcs?.TrySetResult(ParseAnswers(root));
+                    _pendingForms.TryGetValue(formAnswer.RequestId, out tcs);
+                tcs?.TrySetResult(formAnswer.Answers
+                    .Select(a => new OperatorAnswer(a.QuestionId, a.SelectedIds, a.FreeText))
+                    .ToList());
                 break;
         }
-    }
-
-    private static List<OperatorAnswer> ParseAnswers(JsonElement root)
-    {
-        var answers = new List<OperatorAnswer>();
-        if (!root.TryGetProperty("answers", out var array) || array.ValueKind != JsonValueKind.Array)
-            return answers;
-        foreach (var answer in array.EnumerateArray())
-        {
-            var questionId = answer.TryGetProperty("questionId", out var q) ? q.GetString() : null;
-            if (questionId is null)
-                continue;
-            var selected = new List<string>();
-            if (answer.TryGetProperty("selectedIds", out var ids) && ids.ValueKind == JsonValueKind.Array)
-                selected.AddRange(ids.EnumerateArray()
-                    .Select(i => i.GetString())
-                    .Where(i => i is { Length: > 0 })!);
-            var freeText = answer.TryGetProperty("freeText", out var f) ? f.GetString() : null;
-            answers.Add(new OperatorAnswer(questionId, selected, freeText));
-        }
-        return answers;
     }
 
     private sealed record Pump(CancellationTokenSource Cts, Task Task) : IAsyncDisposable
@@ -255,52 +223,4 @@ public sealed class OperatorChannel : IAsyncDisposable
             Cts.Dispose();
         }
     }
-
-    // Wire shapes of the steering protocol (discriminator "$type" is the first property).
-    private sealed record CapabilitiesWire(
-        [property: JsonPropertyName("$type")] string Type,
-        [property: JsonPropertyName("accepts")] IReadOnlyList<string> Accepts);
-
-    private sealed record OptionWire(
-        [property: JsonPropertyName("id")] string Id,
-        [property: JsonPropertyName("label")] string Label,
-        [property: JsonPropertyName("description")] string? Description);
-
-    private sealed record FormQuestionWire(
-        [property: JsonPropertyName("id")] string Id,
-        [property: JsonPropertyName("prompt")] string Prompt,
-        [property: JsonPropertyName("options")] IReadOnlyList<OptionWire> Options,
-        [property: JsonPropertyName("multiSelect")] bool MultiSelect,
-        [property: JsonPropertyName("allowFreeText")] bool AllowFreeText,
-        [property: JsonPropertyName("detail")] string? Detail,
-        [property: JsonPropertyName("detailFormat")] string? DetailFormat = null);
-
-    private sealed record FormRequestedWire(
-        [property: JsonPropertyName("$type")] string Type,
-        [property: JsonPropertyName("requestId")] string RequestId,
-        [property: JsonPropertyName("questions")] IReadOnlyList<FormQuestionWire> Questions);
-
-    private sealed record FormResolvedWire(
-        [property: JsonPropertyName("$type")] string Type,
-        [property: JsonPropertyName("requestId")] string RequestId);
-
-    private sealed record SessionEndedWire(
-        [property: JsonPropertyName("$type")] string Type,
-        [property: JsonPropertyName("success")] bool Success,
-        [property: JsonPropertyName("error")] string? Error);
-
-    private sealed record TurnEndedWire(
-        [property: JsonPropertyName("$type")] string Type,
-        [property: JsonPropertyName("turn")] int Turn,
-        [property: JsonPropertyName("summary")] string? Summary);
-
-    private sealed record VocabularyModelWire(
-        [property: JsonPropertyName("id")] string Id,
-        [property: JsonPropertyName("label")] string Label,
-        [property: JsonPropertyName("efforts")] IReadOnlyList<string> Efforts,
-        [property: JsonPropertyName("defaultEffort")] string? DefaultEffort);
-
-    private sealed record SessionVocabularyWire(
-        [property: JsonPropertyName("$type")] string Type,
-        [property: JsonPropertyName("models")] IReadOnlyList<VocabularyModelWire> Models);
 }

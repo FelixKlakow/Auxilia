@@ -10,8 +10,14 @@
   unredeemed entries expire after 2 minutes and never outlive the token. No raw-token fallback.
 - ~~AdminConsole step-up prompt~~ — DONE 2026-08-03: `elevation-required` now opens an inline
   re-authentication panel on the Principals page; the successful step-up retries the pending
-  mutation (the elevation header rides the circuit's client). Still open: an AdminConsole
-  tags administration UI.
+  mutation (the elevation header rides the circuit's client).
+  ~~AdminConsole tags administration UI~~ — DONE 2026-08-05: the Principals page carries a
+  Tags column (chip per tag with remove, inline add) over `SetPrincipalTagsAsync`, riding the
+  same mutation/step-up seam as the other principal actions.
+- ~~Environment catalog search~~ — DONE 2026-08-05: `GET /api/environment-layers` and
+  `GET /api/environment-bases` accept `?search=` (case-insensitive substring over
+  type/name, version(s), base, description), wired through `ICoreClient` and covered by
+  component + client-surface system tests.
 - **Workflow-type registry administration** — full client surface exists on `ICoreClient`
   (register/approve/deny/unregister), and the steering client ships a registry-administration panel
   (2026-08-02, permission-gated on `workflow-type.manage`/`workflow-type.sign`).
@@ -19,10 +25,22 @@
   status/tags/lifetime, registration detail, register by package URI, approve/deny-with-reason
   gated on `workflow-type.sign`, enable/disable/unregister-with-confirm gated on
   `workflow-type.manage`; nav entry appears with either permission). No step-up panel: the Core
-  does not elevation-gate registry mutations (only principal admin does). The AI safety-check
-  approval handler (static workflow over the submitted package) remains designed but unbuilt.
-- **Session terminal remainders** — a console-mode Docker system test (stub CLI under tmux)
-  and an AdminConsole terminal surface.
+  does not elevation-gate registry mutations (only principal admin does).
+  ~~AI safety-check approval handler~~ — DONE 2026-08-05 as the semantics-blind
+  `verdict-workflow` pipeline handler: `CoreApi:ApprovalVerdictWorkflow` names an ACTIVE
+  workflow type that is dispatched over each pending registration (context:
+  `approval-workflow-type` / `approval-package-uri` / `approval-publisher-key` /
+  `approval-registered-by`); the handler awaits the run and applies its `approval-verdict`
+  artifact (`{"decision":"approve|deny","reason":…}`). Everything inconclusive (unconfigured,
+  run failed, timeout, no/bad verdict) DEFERS to the human signing authority. The safety-check
+  WORKFLOW itself (the AI review over the package) is authored like any other workflow —
+  nothing Core-side remains. Note: a `core://`-stored pending package is not yet fetchable by
+  the verdict run (no download authorization path); https/docker coordinates work today.
+- **Session terminal remainders** — a console-mode Docker system test (stub CLI under tmux).
+  ~~AdminConsole terminal surface~~ — DONE 2026-08-05: RunDetail shows "Open terminal" for a
+  live terminal-hosting run (`RunStatus.HasTerminal`), mints the short-lived ticket via
+  `OpenTerminalAsync`, and opens the Core's ticketed proxy URL in a new tab — the browser
+  only ever talks to the Core.
 
 ## Hardening wave 2026-08-04 — dispatch truth, container re-adoption, stream/UI resilience
 Delivered (see ARCHITECTURE §6/§14.2/§15): dispatch-time `Dispatched` run record + claim-timeout
@@ -49,12 +67,16 @@ re-claim before the failover clock, real exit collection, clean-kill fallback,
   which could hang the next resubscribe (the read is now properly cancelled); (5) a cancel
   racing the workflow's startup was published UNROUTED and silently dropped — the runner now
   declares the instance cancel queue before publishing, so the "hard stop" parks instead of
-  vanishing. Still open: runner kill/restart → re-claimed run completes;
-  container-exited-during-downtime → Failed with the real exit code; unmatched container →
-  clean-killed + roots removed.
-- **Live verification against the dev stack** (dispatch with runner stopped → `Dispatched` →
-  `dispatch-never-claimed`; mid-run Core restart → RunDetail banner + snapshot resume;
-  mid-run runner restart → re-claimed run completes).
+  vanishing. ~~Runner kill/restart, exit collection, clean-kill~~ — DONE 2026-08-05, all
+  passing on real Docker: `ReAdoptionSystemTests` (runner restart mid-run → the SAME instance
+  is re-adopted and completes; container SIGKILLed while the runner is down → Failed with the
+  REAL exit code 137; a labeled container no record knows → clean-killed on restart) and
+  `DispatchTimeoutSystemTests` (runner heartbeating but not consuming → `Dispatched` visible
+  immediately, swept as `dispatch-never-claimed`).
+- ~~Live verification against the dev stack~~ — superseded 2026-08-05: every scenario is now
+  an automated system test (see above; mid-run Core restart → snapshot resume was already
+  covered by the `CoreClientSurface` reconnect fixtures). Residual: a one-glance visual check
+  of the RunDetail banner during a real Core restart — falls out of normal dev-stack use.
 
 ## Implementation workflow  ·  see `docs/implementation-workflow-design.md`
 - **Real Copilot console events** — the Copilot CLI has no hooks; it does support
@@ -76,8 +98,12 @@ re-claim before the failover clock, real exit collection, clean-kill fallback,
   needs a Copilot-entitled token.
 - **Unexercised interactive paths** — an ask-mode permission card with suggestions, and a
   real-CLI push interception (unit/component-verified; needs a push-enabled repo binding).
-- **Push-scoped token** — push currently uses the connector's token as-is; a token scoped to
-  push (e.g. fine-grained PATs) would narrow the blast radius.
+- ~~Push-scoped token~~ — DONE 2026-08-05: connectors may carry an optional `push-token`
+  secret (declared on `tfs-account`; any git-credential connector setting keyed
+  `push-token`/`pushToken`/`push-pat` is honored — the resolver is key-based, no vendor
+  logic). For an `AllowPush` mount the runner clones with the full credential and rewrites
+  the container-visible origin to carry only the push-scoped token (ARCHITECTURE §9
+  write-back control). Without a push token, behavior is unchanged.
 - ~~Per-mount working directory in the agent context~~ — DONE 2026-08-02: a single mount's
   `Workflow__WorkspaceMount__<ID>` root (working-directory subpath included) is now the
   authoritative cwd in all three agent workflows; the repository slot's `WorkingPath` remains
@@ -85,9 +111,15 @@ re-claim before the failover clock, real exit collection, clean-kill fallback,
 
 ## Client libraries & packaging
 - **Publish the NuGet packages** — pack metadata is done for `Auxilia.Core.Contracts`,
-  `Auxilia.Core.Client`, and `Auxilia.Workflows.Client` (v0.1.0, BUSL license file, snupkg);
-  open: pick the feed (nuget.org vs private) and extract the steering codec into its own
-  package so desktop clients don't need the full contracts surface.
+  `Auxilia.Core.Client`, `Auxilia.Workflows.Client`, and `Auxilia.Steering.Codec`
+  (v0.1.0, BUSL license file, snupkg); all four verified with `dotnet pack` 2026-08-05
+  (which caught and fixed a broken relative LICENSE path in every csproj — packing had
+  never actually been run). Open: pick the feed (nuget.org vs private).
+- ~~Steering codec extraction~~ — DONE 2026-08-05: `Auxilia.Steering.Codec` is the
+  dependency-free wire-protocol library (typed `SteeringFrame` records + tolerant
+  `SteeringCodec.Encode/Decode`); `OperatorChannel` and `ConsoleEventViews` now speak it
+  instead of private wire records (wire JSON unchanged — locked by literal protocol tests),
+  and desktop clients can reference it without the full contracts surface.
 - **Go-public pre-flight** (repo is otherwise publish-ready: rewritten noreply-only history,
   single `main`, licenses + pricing incl. free personal tier; licensing contact is EMAIL —
   a public issue would expose the inquirer's company details). **Mailbox RESOLVED 2026-08-03
@@ -190,7 +222,8 @@ access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing di
 ## CI validation — Docker system tests (not runnable locally)
 - Email slot **plugin-dependency loading** (highest risk — MailKit/MimeKit/BouncyCastle
   copied alongside the provider DLL).
-- `/api/audit` response shape (camelCase `PagedResult`).
+- ~~`/api/audit` response shape~~ — DONE 2026-08-05: `AuditEndpoint_ServesCamelCasePagedResult`
+  in the CoreApiDispatch suite (passing locally).
 - (2026-08-02: the whole system suite runs locally again. The Failover test reads the owner
   from the claim transition per the preserve-last-non-null contract; the legacy
   `CodeReviewWorkflow` fixture — dead since the seed-subsystem removal in `d582b5d` — was
@@ -208,10 +241,14 @@ access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing di
   authenticated without a browser session — and the harness captures the console's twelve
   pages (`01-dashboard.png` … `12-audit.png`, dashboard live while the mail-triggered run is
   Running); the dev stand prints/opens the console URL again.)
-- **AdminConsole under `dotnet run` serves broken static assets** — the Debug static-asset
-  manifest's runtime-patching handler 500s on the packaged BlazorAgentView css and serves
-  0-byte compressed bodies for `app.css` (page renders unstyled). The published build
-  (`dotnet publish`) is correct — visual checks must run the published output.
+- ~~AdminConsole under `dotnet run` serves broken static assets~~ — FIXED 2026-08-05: the
+  project had no `launchSettings.json`, so `dotnet run` started in the Production
+  environment where the static-web-assets dev manifest is never loaded — the Debug
+  runtime-patching handler then 500'd on packaged `_content` files and served 0-byte
+  `app.css`. A Development launch profile (`https://localhost:7299;http://localhost:5299`)
+  fixes `dotnet run`; published output was and stays correct. Bonus hardening from the same
+  investigation: `CoreBackedAuthenticationHandler` now degrades to anonymous instead of
+  500-ing every request (static assets included) while the Core is unreachable.
 
 ## Core scalability — path to ~100k simultaneous clients
 The shape is right (stateless Core.Api, SSE per node, competing-consumer runners, clients
@@ -232,4 +269,14 @@ rules) remains a note for the ASB backend. Remaining:
 ## Deeper platform consolidation (from the separation plan)
 - Core.Api + Core.Runner shared **Core DB tier** (currently separate DBs; several features
   bridge the split over the bus).
-- Endpoint-granular network-policy enforcement + **Run-API quotas** (hardening).
+- **Endpoint-granular network-policy enforcement** — the resolver computes per-run
+  `AllowedEndpoints` and the launcher realizes only the no-egress case at the Docker level
+  (`--internal` network); per-endpoint enforcement needs the future EGRESS PROXY (a per-run
+  HTTP(S)/DNS forward proxy the container's only route points at, filtering on the allowed
+  list) — a design of its own, not an increment.
+- ~~Run-API quotas~~ — DONE 2026-08-05: `CoreApi:RunQuotas` — `MaxActiveRuns` (platform-wide
+  cap on non-terminal runs) and `MaxDispatchesPerPrincipalPerMinute` (per-principal fixed
+  window; system dispatches without a principal — failover redispatch, the approval
+  pipeline — are exempt). Enforced at the `RunService` dispatch chokepoint (inline, stored
+  configuration, and rerun paths), rejected with 429 + a `run.quota-exceeded` audit entry;
+  0 = unlimited (the default).

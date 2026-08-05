@@ -84,6 +84,14 @@ public sealed class DockerWorkflowLauncherSettings
     public Dictionary<string, string>? ExtraEnvironmentVariables { get; set; }
 
     /// <summary>
+    /// Adds <c>host.docker.internal:host-gateway</c> to every workflow container so the name
+    /// resolves on PLAIN Linux Docker exactly like it does under Docker Desktop (where the
+    /// entry is redundant but harmless) — the dev stack's RabbitMQ/clone URLs rely on it.
+    /// Grants no connectivity by itself; the run's network policy still governs egress.
+    /// </summary>
+    public bool MapHostGateway { get; set; } = true;
+
+    /// <summary>
     /// How a declared interactive terminal is made reachable for the Core's proxy.
     /// "loopback" (default) publishes the container port to an ephemeral 127.0.0.1 host port —
     /// right when Core.Api runs as a host process beside this runner. "container-network"

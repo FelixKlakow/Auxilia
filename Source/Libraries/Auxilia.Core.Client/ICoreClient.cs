@@ -118,7 +118,8 @@ public interface ICoreClient
     Task<ProviderCatalogEntry> SetProviderSettingDisabledAsync(string providerType, string settingKey, bool disabled, CancellationToken ct = default);
 
     // --- Environment layers (admin-managed session software; requires provider-catalog.manage) ---
-    Task<IReadOnlyList<EnvironmentLayerDto>> ListEnvironmentLayersAsync(CancellationToken ct = default);
+    /// <summary>Lists layers; <paramref name="search"/> filters by type, base, version, or description.</summary>
+    Task<IReadOnlyList<EnvironmentLayerDto>> ListEnvironmentLayersAsync(string? search = null, CancellationToken ct = default);
     Task<EnvironmentLayerDto?> GetEnvironmentLayerAsync(string providerType, CancellationToken ct = default);
     /// <summary>Creates or updates a layer AND its (available) catalog entry.</summary>
     Task<EnvironmentLayerDto> UpsertEnvironmentLayerAsync(UpsertEnvironmentLayer request, CancellationToken ct = default);
@@ -137,7 +138,8 @@ public interface ICoreClient
     Task<PlatformSettingDto> SetPlatformSettingAsync(string key, SetPlatformSetting request, CancellationToken ct = default);
 
     // --- Environment bases (the configurable (name, version) vocabulary layers build on) ---
-    Task<IReadOnlyList<EnvironmentBaseDto>> ListEnvironmentBasesAsync(CancellationToken ct = default);
+    /// <summary>Lists base versions; <paramref name="search"/> filters by name, version, or description.</summary>
+    Task<IReadOnlyList<EnvironmentBaseDto>> ListEnvironmentBasesAsync(string? search = null, CancellationToken ct = default);
     Task<EnvironmentBaseDto> UpsertEnvironmentBaseAsync(UpsertEnvironmentBase request, CancellationToken ct = default);
     Task DeleteEnvironmentBaseAsync(string name, string version, CancellationToken ct = default);
 

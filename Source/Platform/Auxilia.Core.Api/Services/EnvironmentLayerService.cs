@@ -31,11 +31,23 @@ public sealed class EnvironmentLayerService(
 
     public const string Category = "environment";
 
-    public async Task<IReadOnlyList<EnvironmentLayerDto>> ListAsync(CancellationToken ct)
+    public async Task<IReadOnlyList<EnvironmentLayerDto>> ListAsync(string? search, CancellationToken ct)
         => (await layers.ReadAsync(ct))
+            .Where(l => Matches(l, search))
             .OrderBy(l => l.ProviderType, StringComparer.Ordinal)
             .Select(ToDto)
             .ToList();
+
+    private static bool Matches(EnvironmentLayerRecord record, string? search)
+        => string.IsNullOrWhiteSpace(search)
+           || Contains(record.ProviderType, search)
+           || Contains(record.Description, search)
+           || Contains(record.BaseEnvironment, search)
+           || Contains(record.BaseVersion, search)
+           || Contains(record.Version, search);
+
+    private static bool Contains(string? value, string search)
+        => value?.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase) == true;
 
     public async Task<EnvironmentLayerDto?> FindAsync(string providerType, CancellationToken ct)
         => await layers.ReadAsync(EnvironmentLayerRecord.IdFor(providerType), ct) is { } record

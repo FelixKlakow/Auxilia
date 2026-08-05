@@ -91,6 +91,69 @@ public sealed class RepositoryWorkspaceSystemTests
             $"Repository run ended {state.State}. Error: {state.ErrorMessage}");
     }
 
+    [Test]
+    [CancelAfter(180_000)]
+    public async Task MountBoundSetupScript_RunsInTheContainer_BeforeTheApplication(CancellationToken cancellationToken)
+    {
+        // The provider additionally declares the 'setup-script' role: the runner ANNOUNCES the
+        // script to the container and the SDK executes it in the mount's root before the
+        // application — the runner itself never runs it (ARCHITECTURE §9).
+        var registerProvider = new RegisterSlotProvider(
+            ProviderType: "git-repository-setup",
+            Category: "workspace",
+            Description: "A git repository with a post-binding setup script.",
+            Contracts: ["Auxilia.Workflows.SourceControl.ISourceControlAccess"],
+            Settings:
+            [
+                new RegisterProviderSetting("CloneUrl", "Repository", "Text", Required: true, Role: "clone-url"),
+                new RegisterProviderSetting("NoCache", "Fresh clone per run", "Boolean", Role: "no-cache"),
+                new RegisterProviderSetting("SetupScript", "Setup script", "Text", Role: "setup-script"),
+            ],
+            RequiredCredentialContract: "git-credential",
+            MountsIntoWorkspace: true);
+        (await Client.PostAsJsonAsync("/api/provider-catalog", registerProvider, cancellationToken))
+            .EnsureSuccessStatusCode();
+
+        var connectorResp = await Client.PostAsJsonAsync("/api/connectors", new CreateConnector(
+            Name: "git-auth-setup-" + Guid.NewGuid().ToString("N"),
+            ProviderType: "azure-devops",
+            Settings: new Dictionary<string, string>
+            {
+                ["username"] = CoreApiDispatchEnvironment.GitUsername,
+                ["token"] = CoreApiDispatchEnvironment.GitPassword
+            }), cancellationToken);
+        connectorResp.EnsureSuccessStatusCode();
+        var connector = await connectorResp.Content.ReadFromJsonAsync<Connector>(cancellationToken);
+
+        await using var success = await SubscribeSuccessAsync(cancellationToken);
+
+        // Success requires the file the SETUP SCRIPT generates — proof it ran in-container,
+        // in the mount root, before the verifier application looked.
+        var run = new RunRequest(
+            WorkflowType: CoreApiDispatchEnvironment.RepositoryWorkflowType,
+            Context: new Dictionary<string, string>
+            {
+                ["WORKFLOW_NAME"] = CoreApiDispatchEnvironment.RepositoryWorkflowType,
+                ["EXPECTED_REPO_FILE"] = "repos/main/setup-generated.txt",
+                ["EXPECTED_REPO_CONTENT"] = "from-setup-script"
+            },
+            SlotBindings:
+            [
+                new SlotBinding("main", ProviderType: "git-repository-setup", ConnectorId: connector!.Id,
+                    Settings: new Dictionary<string, string>
+                    {
+                        ["CloneUrl"] = CoreApiDispatchEnvironment.RepositoryCloneUrl,
+                        ["NoCache"] = "true",
+                        ["SetupScript"] = "printf 'from-setup-script' > setup-generated.txt"
+                    })
+            ]);
+        (await Client.PostAsJsonAsync("/api/runs", run, cancellationToken)).EnsureSuccessStatusCode();
+
+        var state = await success.Task.WaitAsync(TimeSpan.FromSeconds(150), cancellationToken);
+        Assert.That(state.State, Is.EqualTo(WorkflowState.Success),
+            $"Setup-script run ended {state.State}. Error: {state.ErrorMessage}");
+    }
+
     private static async Task<SuccessWaiter> SubscribeSuccessAsync(CancellationToken ct)
     {
         const string stateExchange = "workflow.state";

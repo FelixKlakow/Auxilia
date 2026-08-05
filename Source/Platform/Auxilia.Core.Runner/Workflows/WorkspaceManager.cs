@@ -161,8 +161,17 @@ public sealed class WorkspaceManager(
         // EXCEPTION (Model B, decided 2026-07-27): a push-enabled mount keeps its scoped
         // credential on the per-run clone so the agent can push; each push is governed by the
         // agent's per-action permission policy, and the clone never enters the warm cache.
+        // When the connector supplied a push-scoped token, THAT replaces the clone credential
+        // on the remote — the container holds push authority only, not the full token.
         if (repository.AllowPush)
+        {
+            if (repository.PushCloneUrl is { Length: > 0 } pushUrl
+                && !string.Equals(pushUrl, repository.CloneUrl, StringComparison.Ordinal))
+                await RunGitAsync(
+                    ["-C", targetDirectory, "remote", "set-url", "origin", pushUrl],
+                    repository.CloneUrl, ct);
             return;
+        }
         var stripped = StripUserInfo(repository.CloneUrl);
         if (!string.Equals(stripped, repository.CloneUrl, StringComparison.Ordinal))
             await RunGitAsync(

@@ -423,8 +423,12 @@ public sealed class CoreClient : ICoreClient
 
     // --- Environment layers ---
 
-    public Task<IReadOnlyList<EnvironmentLayerDto>> ListEnvironmentLayersAsync(CancellationToken ct = default)
-        => GetAsync<IReadOnlyList<EnvironmentLayerDto>>("/api/environment-layers", ct);
+    public Task<IReadOnlyList<EnvironmentLayerDto>> ListEnvironmentLayersAsync(
+        string? search = null, CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<EnvironmentLayerDto>>(
+            string.IsNullOrWhiteSpace(search)
+                ? "/api/environment-layers"
+                : $"/api/environment-layers?search={Uri.EscapeDataString(search)}", ct);
 
     public Task<EnvironmentLayerDto?> GetEnvironmentLayerAsync(string providerType, CancellationToken ct = default)
         => GetOrNullAsync<EnvironmentLayerDto>(
@@ -469,8 +473,12 @@ public sealed class CoreClient : ICoreClient
 
     // --- Environment bases ---
 
-    public Task<IReadOnlyList<EnvironmentBaseDto>> ListEnvironmentBasesAsync(CancellationToken ct = default)
-        => GetAsync<IReadOnlyList<EnvironmentBaseDto>>("/api/environment-bases", ct);
+    public Task<IReadOnlyList<EnvironmentBaseDto>> ListEnvironmentBasesAsync(
+        string? search = null, CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<EnvironmentBaseDto>>(
+            string.IsNullOrWhiteSpace(search)
+                ? "/api/environment-bases"
+                : $"/api/environment-bases?search={Uri.EscapeDataString(search)}", ct);
 
     public Task<EnvironmentBaseDto> UpsertEnvironmentBaseAsync(
         UpsertEnvironmentBase request, CancellationToken ct = default)

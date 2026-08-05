@@ -27,7 +27,8 @@ public sealed class RunService(
     Auxilia.Workflows.Messaging.WorkflowStatusPublisher statusPublisher,
     TimeProvider clock,
     IOptions<CoreApiSettings> settings,
-    ILogger<RunService> logger)
+    ILogger<RunService> logger,
+    RunQuotaService? quotas = null)
 {
     /// <summary>Prefix of the synthetic slot a workspace mount's auth connector is stashed under.</summary>
     internal const string MountAuthSlotPrefix = "mount-auth:";
@@ -68,6 +69,8 @@ public sealed class RunService(
         Data.CoreRunRecord run, Guid? triggeredBy, CancellationToken ct,
         IReadOnlyDictionary<string, string>? contextOverlay = null)
     {
+        if (quotas is not null)
+            await quotas.EnsureCanDispatchAsync(triggeredBy, ct);
         if (run.DispatchCommandJson is not { Length: > 0 } commandJson
             || System.Text.Json.JsonSerializer.Deserialize<RunWorkflowCommand>(commandJson) is not { } original
             || run.CommandId is not { } originalCommandId)
@@ -124,6 +127,9 @@ public sealed class RunService(
         string workflowType, Dictionary<string, string> context,
         IReadOnlyList<SlotBinding> slotBindings, Guid? triggeredBy, CancellationToken ct)
     {
+        if (quotas is not null)
+            await quotas.EnsureCanDispatchAsync(triggeredBy, ct);
+
         // Fail fast when nobody can execute the run: runners announce themselves over bus
         // heartbeats, so a dispatch with no live runner would queue silently and the caller would
         // watch a dead stream. Runners are deployment-owned — the Core never starts one itself.

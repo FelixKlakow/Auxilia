@@ -20,6 +20,13 @@
       "Kind": "Secret",
       "Required": true,
       "HelpText": "PAT with work-item read/write scope; stored encrypted at rest and never displayed back."
+    },
+    {
+      "Key": "push-token",
+      "Label": "Push token (scoped)",
+      "Kind": "Secret",
+      "Required": false,
+      "HelpText": "Optional separate PAT scoped to code push only. When set, a push-enabled workspace clone carries THIS token instead of the full one — the run can push, nothing more."
     }
   ]
 }

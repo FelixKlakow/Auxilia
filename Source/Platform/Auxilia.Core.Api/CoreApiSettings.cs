@@ -84,14 +84,57 @@ public sealed class CoreApiSettings
     /// <summary>SMTP settings of the email approval notifier; unconfigured means it silently defers.</summary>
     public ApprovalEmailSettings ApprovalEmail { get; set; } = new();
 
+    /// <summary>
+    /// The "verdict-workflow" approval handler: which (Active) workflow type is dispatched over a
+    /// pending registration and how its verdict comes back. Unconfigured means the handler defers.
+    /// </summary>
+    public ApprovalVerdictWorkflowSettings ApprovalVerdictWorkflow { get; set; } = new();
+
     /// <summary>Per-run cap on Core-persisted view items; items beyond it are dropped and logged.</summary>
     public int MaxPersistedViewItemsPerRun { get; set; } = 1000;
+
+    /// <summary>Run-API quotas — backpressure on dispatch (0 = unlimited, the default).</summary>
+    public RunQuotaSettings RunQuotas { get; set; } = new();
 
     /// <summary>
     /// Quiet-period after which the SSE streams emit a <c>: ping</c> comment so clients can tell
     /// an idle stream from a dead connection. 0 disables keepalives.
     /// </summary>
     public int SseKeepaliveSeconds { get; set; } = 15;
+}
+
+/// <summary>
+/// Quotas of the Run API. Exceeding one rejects the dispatch with 429 and an audit entry —
+/// the run is never silently queued past the platform's capacity envelope.
+/// </summary>
+public sealed class RunQuotaSettings
+{
+    /// <summary>Dispatch attempts one principal may make per minute (fixed window); 0 = unlimited.</summary>
+    public int MaxDispatchesPerPrincipalPerMinute { get; set; }
+
+    /// <summary>Platform-wide cap on simultaneously active (non-terminal) runs; 0 = unlimited.</summary>
+    public int MaxActiveRuns { get; set; }
+}
+
+/// <summary>
+/// Configuration of the verdict-workflow approval handler. The Core stays semantics-blind:
+/// it dispatches the configured type with the registration's coordinates as context, waits for
+/// the run, and applies the verdict artifact — what the check actually does (an AI safety
+/// review, a license scan, …) is entirely the workflow's business.
+/// </summary>
+public sealed class ApprovalVerdictWorkflowSettings
+{
+    /// <summary>The Active workflow type run over each pending registration; empty disables the handler.</summary>
+    public string WorkflowType { get; set; } = "";
+
+    /// <summary>Artifact type carrying the verdict JSON (<c>{"decision":"approve|deny","reason":"…"}</c>).</summary>
+    public string ArtifactType { get; set; } = "approval-verdict";
+
+    /// <summary>The handler defers when the verdict run has not finished within this window.</summary>
+    public int TimeoutSeconds { get; set; } = 900;
+
+    /// <summary>How often the verdict run's state is polled.</summary>
+    public int PollIntervalSeconds { get; set; } = 2;
 }
 
 /// <summary>Where the email approval handler notifies the signing authority.</summary>
