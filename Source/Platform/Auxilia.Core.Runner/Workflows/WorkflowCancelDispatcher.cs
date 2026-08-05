@@ -31,6 +31,10 @@ public sealed class WorkflowCancelDispatcher(
         }
 
         var topic = $"workflow-cancel-{command.WorkflowInstanceId}";
+        // Declare-before-publish: a cancel racing the workflow's startup must PARK on the queue
+        // until the instance subscribes — published unrouted it is silently dropped, and a
+        // "hard stop" that can vanish is no hard stop (caught by the client-surface system test).
+        await messageBus.DeclareQueueAsync(topic, ct);
         await messageBus.PublishAsync(topic, command, ct);
 
         logger.LogInformation(

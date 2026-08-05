@@ -323,16 +323,20 @@ public sealed class CoreClient : ICoreClient
     {
         if (idleTimeout <= TimeSpan.Zero)
             return await reader.ReadLineAsync(ct);
-        var readTask = reader.ReadLineAsync(ct).AsTask();
-        var winner = await Task.WhenAny(readTask, Task.Delay(idleTimeout, ct));
-        if (winner != readTask)
+        // CANCEL the read on idle timeout — never abandon it: disposing the response with a
+        // read still in flight can wedge the connection teardown, and the NEXT subscribe then
+        // hangs in SendAsync forever (observed against a live Core).
+        using var idle = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        idle.CancelAfter(idleTimeout);
+        try
         {
-            // Observe the abandoned read's eventual fault (the caller disposes the stream).
-            _ = readTask.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+            return await reader.ReadLineAsync(idle.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
             throw new TimeoutException(
                 $"The SSE stream was silent for {idleTimeout.TotalSeconds:0}s (keepalives included) — treating the connection as dead.");
         }
-        return await readTask;
     }
 
     private static bool IsTransient(HttpStatusCode status)

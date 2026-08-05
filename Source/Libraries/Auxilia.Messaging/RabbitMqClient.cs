@@ -279,7 +279,12 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
             await channel.QueueBindAsync(queueName, exchangeName, routingKey, null, cancellationToken: cancellationToken);
 
         var consumerTag = await AttachConsumerAsync(channel, queueName, exchangeName, handler, cancellationToken);
-        return new TopicSubscriptionHandle(channel, consumerTag, queueName, exchangeName);
+        // Binding mutations get their OWN channel: a channel is not safe for concurrent
+        // operations, and the consumer channel acks deliveries concurrently with late
+        // Add/RemoveBinding calls — sharing it can wedge the channel (deliveries and RPC
+        // replies stop, silently). The queue is the shared identity; the channel is not.
+        var bindChannel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken);
+        return new TopicSubscriptionHandle(channel, bindChannel, consumerTag, queueName, exchangeName);
     }
 
     public async Task<IAsyncDisposable> SubscribeToTopicExchangeSharedAsync<T>(
@@ -430,10 +435,12 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
     }
 
     private sealed class TopicSubscriptionHandle(
-        IChannel channel, string consumerTag, string queueName, string exchangeName) : ITopicSubscription
+        IChannel channel, IChannel bindChannel, string consumerTag, string queueName, string exchangeName)
+        : ITopicSubscription
     {
-        // Binding mutations arrive from concurrent SSE opens/closes; a channel is not safe for
-        // concurrent operations, so they are serialized here.
+        // Binding mutations arrive from concurrent SSE opens/closes; they are serialized here
+        // and ride the DEDICATED bind channel — never the consumer channel, whose concurrent
+        // acks would race them (a channel is not safe for concurrent operations).
         private readonly SemaphoreSlim _gate = new(1, 1);
 
         public async Task AddBindingAsync(string routingKey, CancellationToken cancellationToken = default)
@@ -441,7 +448,7 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
             await _gate.WaitAsync(cancellationToken);
             try
             {
-                await channel.QueueBindAsync(
+                await bindChannel.QueueBindAsync(
                     queueName, exchangeName, routingKey, null, cancellationToken: cancellationToken);
             }
             finally { _gate.Release(); }
@@ -452,7 +459,7 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
             await _gate.WaitAsync(cancellationToken);
             try
             {
-                await channel.QueueUnbindAsync(
+                await bindChannel.QueueUnbindAsync(
                     queueName, exchangeName, routingKey, null, cancellationToken);
             }
             finally { _gate.Release(); }
@@ -462,6 +469,7 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
         {
             await channel.BasicCancelAsync(consumerTag);
             await channel.DisposeAsync();
+            await bindChannel.DisposeAsync();
             _gate.Dispose();
         }
     }

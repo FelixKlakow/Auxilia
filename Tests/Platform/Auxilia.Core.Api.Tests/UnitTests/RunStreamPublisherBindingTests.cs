@@ -24,7 +24,10 @@ public sealed class RunStreamPublisherBindingTests
     {
         _bus = new BindingRecordingBus();
         _broker = new RunStreamBroker();
-        _publisher = new RunStreamPublisher(_bus, _broker, NullLogger<RunStreamPublisher>.Instance);
+        _publisher = new RunStreamPublisher(
+            _bus, _broker,
+            new Auxilia.UniversalDataAccess.Implementations.InMemoryDataAccess<Auxilia.Core.Api.Data.CoreRunRecord>(),
+            NullLogger<RunStreamPublisher>.Instance);
         await _publisher.StartAsync(CancellationToken.None);
     }
 
