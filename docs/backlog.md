@@ -35,10 +35,23 @@ refetches; fixed the camelCase payload-decode bug); `ArtifactChainingEngine` cat
 runner **container re-adoption** on restart (persisted container id + protected instance token,
 re-claim before the failover clock, real exit collection, clean-kill fallback,
 `ReadoptContainersOnStart` replaces `ReapWorkflowContainersOnStart`). Remaining follow-ups:
-- **System tests (Docker + real RabbitMQ)** for the wave: `Dispatched` event reaching a
-  command-id-keyed SSE subscriber (topic routing — the fake bus over-delivers by design);
-  runner kill/restart → run re-claimed (no failover) and completes; container-exited-during-
-  downtime → Failed with the real exit code; unmatched container → clean-killed + roots removed.
+- **System tests (Docker + real RabbitMQ)** for the wave — PARTIALLY DONE 2026-08-05: the new
+  `CoreClientSurface` fixtures cover the command-id-keyed SSE subscriber over real topic
+  routing, snapshot-first, keepalive survival past 100s idle, and reconnect across a real
+  Core.Api container restart. They immediately caught and fixed five real defects the fake
+  bus can never show: (1) topic-binding RPCs shared the consumer's channel and could wedge it
+  (bindings now ride a dedicated channel); (2) the run-stream publisher awaited the bind gate
+  on the bus dispatch path (alias binds now drain through a worker); (3) a claim event beating
+  a fresh command-keyed subscription orphaned the stream FOREVER — a periodic sweep now
+  re-resolves unpaired command-id audiences from the run store and replays the record's
+  current state, including terminal states (keepalives otherwise hold the orphan open);
+  (4) the client's idle-timeout ABANDONED the in-flight read before disposing the response,
+  which could hang the next resubscribe (the read is now properly cancelled); (5) a cancel
+  racing the workflow's startup was published UNROUTED and silently dropped — the runner now
+  declares the instance cancel queue before publishing, so the "hard stop" parks instead of
+  vanishing. Still open: runner kill/restart → re-claimed run completes;
+  container-exited-during-downtime → Failed with the real exit code; unmatched container →
+  clean-killed + roots removed.
 - **Live verification against the dev stack** (dispatch with runner stopped → `Dispatched` →
   `dispatch-never-claimed`; mid-run Core restart → RunDetail banner + snapshot resume;
   mid-run runner restart → re-claimed run completes).

@@ -88,6 +88,16 @@ are replaced with in-process abstractions / stubs.
 | `IdentityImportEnvironment`   | OpenLDAP + MongoDB                                               | `IdentityImportSystemTests`                                                      |
 | `FailoverEnvironment`         | RabbitMQ + Mongo + **Core.Api** (failover monitor) + two Core.Runners | `FailoverSystemTests`                                                       |
 | `EndToEndEnvironment`         | GreenMail + RabbitMQ + Mongo + Core.Runner + **Core.Api** + **TriggerHost** | `EndToEndSystemTests`, `ClaudeCodeWorkflowSystemTests`                 |
+| `CoreClientEnvironment`       | RabbitMQ + Core.Runner + **Core.Api** (JSON store, survives container restarts; short SSE keepalive) | `CoreClientSurfaceSystemTests`, `CoreClientStreamSystemTests` |
+
+> **The client library is first-class here:** the `CoreClientSurface` fixtures drive the Core
+> EXCLUSIVELY through `ICoreClient` over real sockets — the full typed surface (identity,
+> principals + step-up, groups/mappings, password login, configurations, runs/views/stats/pins,
+> steering deliver-input, registry lifecycle, provider catalog/layers/bases, connectors,
+> workspaces, platform settings, artifacts over real topic routing, audit) plus the stream
+> resilience only a real network can prove: snapshot-first subscribes, keepalives carrying a
+> >100s-idle SSE stream (the class the latent `HttpClient.Timeout` stream-death was in), and
+> internal reconnect across a real Core.Api container restart.
 
 > **BackendService retirement (Phase 4):** the BackendService-only environments (`SingleBackendService`,
 > `DualBackend`) were removed — they tested BackendService-local plumbing (queue declaration, identification

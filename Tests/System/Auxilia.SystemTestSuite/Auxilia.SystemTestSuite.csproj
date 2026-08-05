@@ -25,6 +25,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\..\..\Source\Libraries\Auxilia.Adapters.Email\Auxilia.Adapters.Email.csproj"/>
+        <ProjectReference Include="..\..\..\Source\Libraries\Auxilia.Core.Client\Auxilia.Core.Client.csproj"/>
         <ProjectReference Include="..\..\..\Source\Libraries\Auxilia.Core.Contracts\Auxilia.Core.Contracts.csproj"/>
         <ProjectReference Include="..\..\..\Source\Libraries\Auxilia.Governance\Auxilia.Governance.csproj"/>
         <ProjectReference Include="..\..\..\Source\Libraries\Auxilia.PlatformData\Auxilia.PlatformData.csproj"/>
