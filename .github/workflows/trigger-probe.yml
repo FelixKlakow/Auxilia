@@ -1,0 +1,11 @@
+# TEMPORARY diagnostic — proves whether push events reach Actions at all. Deleted after use.
+name: trigger-probe
+
+on:
+  push:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "push event fired for ${{ github.ref }}"
