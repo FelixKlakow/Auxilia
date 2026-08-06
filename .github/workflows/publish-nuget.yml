@@ -1,8 +1,8 @@
 # Packs and publishes the client-library packages to nuget.org via TRUSTED PUBLISHING:
 # no long-lived API key — the job authenticates with its GitHub OIDC token and NuGet/login
-# exchanges it for a short-lived key. Register this file on nuget.org under
-# Trusted Publishing as: owner FelixKlakow, repository Auxilia,
-# workflow file publish-nuget.yml (environment: none).
+# exchanges it for a short-lived key. Registered on nuget.org under Trusted
+# Publishing as: package owner FelixK, repository owner FelixKlakow,
+# repository Auxilia, workflow file publish-nuget.yml (environment: none).
 #
 # Runs only when a version tag (v0.1.0, v0.2.1, ...) is pushed — never on ordinary commits.
 name: publish-nuget
@@ -36,7 +36,7 @@ jobs:
         uses: NuGet/login@v1
         id: nuget-login
         with:
-          user: FelixKlakow
+          user: FelixK # the nuget.org account owning the Trusted Publishing policy
 
       - name: Push to nuget.org
         run: >
