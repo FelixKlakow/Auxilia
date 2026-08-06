@@ -72,6 +72,35 @@ public sealed class IdentityImportAdminTests : CoreApiComponentTestBase
     }
 
     [Test]
+    public async Task ListGetDelete_RoundTripsThroughTheTypedClient()
+    {
+        ICoreClient core = new CoreClient(CreateClient());
+        var name = "csv-" + Guid.NewGuid().ToString("N");
+        var saved = await core.SaveIdentitySourceAsync(CsvSource(name));
+
+        var listed = await core.ListIdentitySourcesAsync();
+        Assert.That(listed.Select(s => s.Id), Does.Contain(saved.Id));
+
+        var fetched = await core.GetIdentitySourceAsync(saved.Id);
+        Assert.That(fetched, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(fetched!.Name, Is.EqualTo(name));
+            Assert.That(fetched.ConnectorType, Is.EqualTo("csv"));
+            Assert.That(fetched.GroupRoleMappings["reviewers"], Is.EqualTo("Operator"));
+        });
+
+        await core.DeleteIdentitySourceAsync(saved.Id);
+
+        Assert.Multiple(async () =>
+        {
+            Assert.That(await core.GetIdentitySourceAsync(saved.Id), Is.Null);
+            Assert.That((await core.ListIdentitySourcesAsync()).Select(s => s.Id),
+                Does.Not.Contain(saved.Id));
+        });
+    }
+
+    [Test]
     public async Task TestConnection_OnCsvSource_ReportsUserCount()
     {
         ICoreClient core = new CoreClient(CreateClient());
