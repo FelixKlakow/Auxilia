@@ -22,5 +22,23 @@
     "PrincipalId": "05912de4-c3bc-404b-af49-d178aecfd579",
     "RoleName": "User",
     "Source": "Direct"
+  },
+  {
+    "Id": "eb46143e-e534-51f3-83c2-935fd4e0dd76",
+    "PrincipalId": "8b25a956-d707-457d-a0c1-3d9a7d9269d4",
+    "RoleName": "User",
+    "Source": "Direct"
+  },
+  {
+    "Id": "6927c110-698f-5276-8534-63ce0084f3af",
+    "PrincipalId": "ef69ffa9-c4e4-41fb-b5f8-1c7784f4982e",
+    "RoleName": "User",
+    "Source": "Direct"
+  },
+  {
+    "Id": "5d0d2178-2f74-5375-bd25-1e041c21cb11",
+    "PrincipalId": "d8d3e117-6735-4186-abe5-83ccb08049ad",
+    "RoleName": "Administrator",
+    "Source": "Direct"
   }
 ]

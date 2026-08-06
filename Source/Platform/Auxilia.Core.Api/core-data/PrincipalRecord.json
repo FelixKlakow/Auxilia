@@ -6,7 +6,8 @@
     "DisplayName": "core-bootstrap",
     "ExternalSubject": null,
     "Status": "Active",
-    "DirectoryGroupsJson": "[]"
+    "DirectoryGroupsJson": "[]",
+    "TagsJson": "[]"
   },
   {
     "Id": "fb2427ca-42aa-4cbb-bccd-cc681c1c9735",
@@ -15,7 +16,8 @@
     "DisplayName": "core-bootstrap",
     "ExternalSubject": null,
     "Status": "Active",
-    "DirectoryGroupsJson": "[]"
+    "DirectoryGroupsJson": "[]",
+    "TagsJson": "[]"
   },
   {
     "Id": "144a1084-be63-4cb4-99a2-8ece2f21ffbd",
@@ -24,7 +26,8 @@
     "DisplayName": "perm-check-user #test",
     "ExternalSubject": null,
     "Status": "Disabled",
-    "DirectoryGroupsJson": "[]"
+    "DirectoryGroupsJson": "[]",
+    "TagsJson": "[]"
   },
   {
     "Id": "05912de4-c3bc-404b-af49-d178aecfd579",
@@ -33,6 +36,37 @@
     "DisplayName": "perm-check-user2 #test",
     "ExternalSubject": null,
     "Status": "Disabled",
-    "DirectoryGroupsJson": "[]"
+    "DirectoryGroupsJson": "[]",
+    "TagsJson": "[]"
+  },
+  {
+    "Id": "8b25a956-d707-457d-a0c1-3d9a7d9269d4",
+    "TenantId": "d3fa017e-0000-4000-8000-000000000001",
+    "Kind": "Human",
+    "DisplayName": "Felix (test sign-in) #test",
+    "ExternalSubject": null,
+    "Status": "Disabled",
+    "DirectoryGroupsJson": "[]",
+    "TagsJson": "[]"
+  },
+  {
+    "Id": "ef69ffa9-c4e4-41fb-b5f8-1c7784f4982e",
+    "TenantId": "d3fa017e-0000-4000-8000-000000000001",
+    "Kind": "Human",
+    "DisplayName": "Felix (test sign-in) #test",
+    "ExternalSubject": null,
+    "Status": "Active",
+    "DirectoryGroupsJson": "[]",
+    "TagsJson": "[]"
+  },
+  {
+    "Id": "d8d3e117-6735-4186-abe5-83ccb08049ad",
+    "TenantId": "d3fa017e-0000-4000-8000-000000000001",
+    "Kind": "Service",
+    "DisplayName": "core-bootstrap",
+    "ExternalSubject": null,
+    "Status": "Active",
+    "DirectoryGroupsJson": "[]",
+    "TagsJson": "[]"
   }
 ]

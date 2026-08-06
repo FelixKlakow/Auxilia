@@ -61,5 +61,12 @@
     "Available": true,
     "Category": "",
     "DescriptorOverridesJson": "[]"
+  },
+  {
+    "Id": "d675ac13-05b9-5e89-8011-018a3e35a3ab",
+    "ProviderType": "empty-workspace",
+    "Available": true,
+    "Category": "",
+    "DescriptorOverridesJson": "[]"
   }
 ]
