@@ -110,12 +110,15 @@ re-claim before the failover clock, real exit collection, clean-kill fallback,
   the seam for mount-less providers, and multi-mount runs fall back to the workspace root.
 
 ## Client libraries & packaging
-- **Publish the NuGet packages** — pack metadata is done for `Auxilia.Core.Contracts`,
-  `Auxilia.Core.Client`, `Auxilia.Workflows.Client`, and `Auxilia.Steering.Codec`
-  (v0.1.0, BUSL license file, snupkg); all four verified with `dotnet pack` 2026-08-05
-  (which caught and fixed a broken relative LICENSE path in every csproj — packing had
-  never actually been run). Feed DECIDED 2026-08-06: **nuget.org** (public) — publishing
-  rides the go-public pre-flight below (Trusted Publishing workflow, tag-triggered `v*`).
+- ~~Publish the NuGet packages~~ — DONE 2026-08-06: all four packages
+  (`Auxilia.Core.Contracts`, `Auxilia.Core.Client`, `Auxilia.Workflows.Client`,
+  `Auxilia.Steering.Codec`) are live on **nuget.org** at v0.1.0 (+snupkg), published from
+  tag `v0.1.0` via Trusted Publishing (policy "Auxilia-Publisher", nuget.org user `FelixK`,
+  activated by first use). Follow-ups: (1) the tag-PUSH trigger never fires on this repo
+  (Actions enabled, zero runs from two tag pushes) — publishing ran via the new
+  `workflow_dispatch` trigger (`gh workflow run publish-nuget --ref v<version>`), diagnose
+  the push-event oddity eventually; (2) add `PackageReadmeFile` readmes to all four
+  packages (nuget.org warns; first impression on the gallery page).
 - ~~Steering codec extraction~~ — DONE 2026-08-05: `Auxilia.Steering.Codec` is the
   dependency-free wire-protocol library (typed `SteeringFrame` records + tolerant
   `SteeringCodec.Encode/Decode`); `OperatorChannel` and `ConsoleEventViews` now speak it
