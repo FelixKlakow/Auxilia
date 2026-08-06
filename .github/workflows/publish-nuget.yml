@@ -10,6 +10,7 @@ name: publish-nuget
 on:
   push:
     tags: ['v*']
+  workflow_dispatch: # manual re-publish; --skip-duplicate makes it idempotent
 
 permissions:
   contents: read
