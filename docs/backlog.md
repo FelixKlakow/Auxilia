@@ -114,7 +114,8 @@ re-claim before the failover clock, real exit collection, clean-kill fallback,
   `Auxilia.Core.Client`, `Auxilia.Workflows.Client`, and `Auxilia.Steering.Codec`
   (v0.1.0, BUSL license file, snupkg); all four verified with `dotnet pack` 2026-08-05
   (which caught and fixed a broken relative LICENSE path in every csproj — packing had
-  never actually been run). Open: pick the feed (nuget.org vs private).
+  never actually been run). Feed DECIDED 2026-08-06: **nuget.org** (public) — publishing
+  rides the go-public pre-flight below (Trusted Publishing workflow, tag-triggered `v*`).
 - ~~Steering codec extraction~~ — DONE 2026-08-05: `Auxilia.Steering.Codec` is the
   dependency-free wire-protocol library (typed `SteeringFrame` records + tolerant
   `SteeringCodec.Encode/Decode`); `OperatorChannel` and `ConsoleEventViews` now speak it
@@ -122,13 +123,13 @@ re-claim before the failover clock, real exit collection, clean-kill fallback,
   and desktop clients can reference it without the full contracts surface.
 - **Go-public pre-flight** (repo is otherwise publish-ready: rewritten noreply-only history,
   single `main`, licenses + pricing incl. free personal tier; licensing contact is EMAIL —
-  a public issue would expose the inquirer's company details). **Mailbox RESOLVED 2026-08-03
-  (the flagged felix.klakow.github@gmail.com account is recovered/done). Remaining gate:
-  Felix verifies the forward + send-as loop with a test mail himself and then explicitly
-  decides to publish — do NOT flip public before that go.** (Pre-flight re-verified 2026-08-03: single `main`, noreply-only
+  a public issue would expose the inquirer's company details). **Mailbox VERIFIED 2026-08-06
+  (Felix confirmed the mail loop works; the flagged felix.klakow.github@gmail.com account was
+  recovered 2026-08-03). Remaining gate: Felix explicitly decides to publish — do NOT flip
+  public before that go.** (Pre-flight re-verified 2026-08-03: single `main`, noreply-only
   history, no product-external names in tracked files, no real secrets — only fake test
   tokens; `Start-Presentation.bat` is already retired and the stale "via Studio" DevStand
-  string is fixed. The mailbox is the ONE open gate.) Then: optionally ask GitHub Support
+  string is fixed.) Then: optionally ask GitHub Support
   to GC the pre-rewrite objects, then flip the repository public. On flipping: set the repo
   description ("Self-hosted platform for governed AI agent workflows — signed containers,
   just-in-time scoped credentials, live operator steering, full REST + MCP parity") and
