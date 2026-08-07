@@ -124,12 +124,12 @@ re-claim before the failover clock, real exit collection, clean-kill fallback,
   (`Auxilia.Core.Contracts`, `Auxilia.Core.Client`, `Auxilia.Workflows.Client`,
   `Auxilia.Steering.Codec`) are live on **nuget.org** at v0.1.0 (+snupkg), published from
   tag `v0.1.0` via Trusted Publishing (policy "Auxilia-Publisher", nuget.org user `FelixK`,
-  activated by first use). Follow-ups: (1) the dead tag-PUSH trigger was the GitHub Actions
-  **major outage of 2026-08-06** (event-triggered runs never created platform-wide;
-  `workflow_dispatch` worked: `gh workflow run publish-nuget --ref v<version>`) — once the
-  incident is cleared, push a probe commit to confirm the `v*` trigger fires and DELETE the
-  temporary `.github/workflows/trigger-probe.yml`; (2) ~~PackageReadmeFile readmes~~ —
-  DONE 2026-08-06: all four packages republished as **0.1.1** with gallery readmes.
+  activated by first use). Follow-ups — both closed: (1) ~~the dead tag-PUSH trigger~~ —
+  RESOLVED 2026-08-07: it was the GitHub Actions **major outage of 2026-08-06** (event-triggered
+  runs never created platform-wide; `workflow_dispatch` worked). After the incident cleared, a
+  probe workflow confirmed both branch- and tag-push events fire again (probe tag + workflow
+  deleted); the `v*` trigger will run on the next version tag. (2) ~~PackageReadmeFile
+  readmes~~ — DONE 2026-08-06: all four packages republished as **0.1.1** with gallery readmes.
 - ~~Steering codec extraction~~ — DONE 2026-08-05: `Auxilia.Steering.Codec` is the
   dependency-free wire-protocol library (typed `SteeringFrame` records + tolerant
   `SteeringCodec.Encode/Decode`); `OperatorChannel` and `ConsoleEventViews` now speak it
