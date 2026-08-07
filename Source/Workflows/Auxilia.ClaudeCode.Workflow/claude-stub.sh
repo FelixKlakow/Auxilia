@@ -78,4 +78,12 @@ sleep 0.1
 echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done - I noted my findings in STUB_NOTES.md."}]}}'
 sleep 0.2
 echo '{"type":"result","subtype":"success","is_error":false,"duration_ms":1800,"num_turns":3,"result":"Stub session completed: findings written to STUB_NOTES.md.","total_cost_usd":0.0042}'
+
+# Console-mode tests need the tmux session to outlive the transcript (the ticketed-terminal
+# window under test); headless runs never set the context variable and are unaffected.
+DWELL="${WORKFLOW_CONTEXT__STUB_DWELL_SECONDS:-0}"
+case "$DWELL" in
+  ''|*[!0-9]*) ;;
+  *) [ "$DWELL" -gt 0 ] && sleep "$DWELL" ;;
+esac
 exit 0

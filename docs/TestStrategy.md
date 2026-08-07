@@ -68,11 +68,11 @@ are replaced with in-process abstractions / stubs.
 
 **Structure:**
 
-- Each environment is a `[SetUpFixture]` class in its own namespace under `Environments/`. The fixture starts all
+- One folder = one namespace = one scenario: a `[SetUpFixture]` `*Environment` class starts all
   required containers, exposes shared clients, and tears everything down in `[OneTimeTearDown]`.
-- Test classes in the corresponding namespace under `SystemTests/` share that environment automatically via NUnit's
+- Test classes in the same namespace share that environment automatically via NUnit's
   namespace-scoped `[SetUpFixture]`.
-- Running a single environment's tests: `dotnet test --filter "namespace=Auxilia.SystemTestSuite.SystemTests"`
+- Running a single scenario's tests: `dotnet test Tests/System/Auxilia.SystemTestSuite/ --filter "FullyQualifiedName~EndToEnd"`
 - Running all system tests: `dotnet test Tests/System/Auxilia.SystemTestSuite/`
 
 **Current environments:**
@@ -80,14 +80,14 @@ are replaced with in-process abstractions / stubs.
 | Environment                   | Containers                                                        | Test class(es)                                                                  |
 |-------------------------------|------------------------------------------------------------------|---------------------------------------------------------------------------------|
 | `MongoDbEnvironment`          | MongoDB                                                           | `MongoDbSystemTests`                                                             |
-| `WorkflowDispatchEnvironment` | RabbitMQ + Core.Runner                                            | `WorkflowDispatchSystemTests`, `MessageBusFanoutSystemTests`                     |
-| `CoreApiDispatchEnvironment`  | RabbitMQ + Core.Api + Core.Runner (+ git server)                 | `CoreApiDispatchSystemTests`, `CredentialResolutionSystemTests`, `RepositoryWorkspaceSystemTests` |
-| `CodeReviewWorkflowEnvironment`   | RabbitMQ + Core.Runner + baked code-review image             | `CodeReviewWorkflowSystemTests`                                                  |
-| `ImplementationWorkflowEnvironment` | RabbitMQ + Core.Runner + baked implementation image        | `ImplementationWorkflowSystemTests`                                             |
+| `WorkflowDispatchEnvironment` | RabbitMQ + Core.Runner                                            | `WorkflowDispatchSystemTests`, `MessageBusFanoutSystemTests`, `MessageBusTopicRoutingSystemTests` |
+| `CoreApiDispatchEnvironment`  | RabbitMQ + Core.Api + Core.Runner (+ git server)                 | `CoreApiDispatchSystemTests`, `CredentialResolutionSystemTests`, `RepositoryWorkspaceSystemTests` (per-run repository, empty workspace, setup scripts) |
 | `EmailAdapterEnvironment`     | GreenMail                                                        | `EmailAdapterSystemTests`                                                        |
 | `IdentityImportEnvironment`   | OpenLDAP + MongoDB                                               | `IdentityImportSystemTests`                                                      |
 | `FailoverEnvironment`         | RabbitMQ + Mongo + **Core.Api** (failover monitor) + two Core.Runners | `FailoverSystemTests`                                                       |
-| `EndToEndEnvironment`         | GreenMail + RabbitMQ + Mongo + Core.Runner + **Core.Api** + **TriggerHost** | `EndToEndSystemTests`, `ClaudeCodeWorkflowSystemTests`                 |
+| `ReAdoptionEnvironment`       | RabbitMQ + Mongo + Core.Api + Core.Runner                        | `ReAdoptionSystemTests` (runner restart → same instance re-adopted; real exit codes; clean-kill) |
+| *(fixture-owned setup)*       | RabbitMQ + Mongo + Core.Api + Core.Runner                        | `DispatchTimeoutSystemTests` (`Dispatched` truth + `dispatch-never-claimed` sweep) |
+| `EndToEndEnvironment`         | GreenMail + RabbitMQ + Mongo + git server + Core.Runner + **Core.Api** + **TriggerHost** + **AdminConsole** | `EndToEndSystemTests`, `ClaudeCodeWorkflowSystemTests`, `ConsoleSessionTerminalSystemTests` (ticketed terminal proxy), `EmailPluginDependencySystemTests` (bundled mail stack in-container), `ImplementationWorkflowSystemTests`, `CodeReviewDispatchSystemTests` |
 | `CoreClientEnvironment`       | RabbitMQ + Core.Runner + **Core.Api** (JSON store, survives container restarts; short SSE keepalive) | `CoreClientSurfaceSystemTests`, `CoreClientStreamSystemTests` |
 
 > **The client library is first-class here:** the `CoreClientSurface` fixtures drive the Core

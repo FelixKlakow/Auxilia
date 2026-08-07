@@ -154,6 +154,94 @@ public sealed class RepositoryWorkspaceSystemTests
             $"Setup-script run ended {state.State}. Error: {state.ErrorMessage}");
     }
 
+    [Test]
+    [CancelAfter(180_000)]
+    public async Task EmptyWorkspace_SetupScript_SeedsTheScratchDirectory(CancellationToken cancellationToken)
+    {
+        // The empty-workspace shape: a mount provider WITHOUT a clone-url role and WITHOUT a
+        // credential contract — the runner materializes a fresh scratch directory, and the
+        // SDK runs the announced setup script in it before the application (ARCHITECTURE §9).
+        await RegisterEmptyWorkspaceProviderAsync("empty-workspace", cancellationToken);
+
+        await using var success = await SubscribeSuccessAsync(cancellationToken);
+
+        var run = new RunRequest(
+            WorkflowType: CoreApiDispatchEnvironment.RepositoryWorkflowType,
+            Context: new Dictionary<string, string>
+            {
+                ["WORKFLOW_NAME"] = CoreApiDispatchEnvironment.RepositoryWorkflowType,
+                ["EXPECTED_REPO_FILE"] = "repos/main/seeded.txt",
+                ["EXPECTED_REPO_CONTENT"] = "from-setup-script"
+            },
+            SlotBindings:
+            [
+                new SlotBinding("main", ProviderType: "empty-workspace",
+                    Settings: new Dictionary<string, string>
+                    {
+                        ["SetupScript"] = "printf 'from-setup-script' > seeded.txt"
+                    })
+            ]);
+        (await Client.PostAsJsonAsync("/api/runs", run, cancellationToken)).EnsureSuccessStatusCode();
+
+        var state = await success.Task.WaitAsync(TimeSpan.FromSeconds(150), cancellationToken);
+        Assert.That(state.State, Is.EqualTo(WorkflowState.Success),
+            $"Empty-workspace setup run ended {state.State}. Error: {state.ErrorMessage}");
+    }
+
+    [Test]
+    [CancelAfter(180_000)]
+    public async Task FailingSetupScript_FailsTheRun_BeforeTheApplication(CancellationToken cancellationToken)
+    {
+        // Fail-fast contract: a non-zero setup-script exit fails the run before the
+        // application starts — never a silent Success over a half-prepared workspace.
+        await RegisterEmptyWorkspaceProviderAsync("empty-workspace-failing", cancellationToken);
+
+        await using var terminal = await SubscribeSuccessAsync(cancellationToken);
+
+        var run = new RunRequest(
+            WorkflowType: CoreApiDispatchEnvironment.RepositoryWorkflowType,
+            Context: new Dictionary<string, string>
+            {
+                // The verifier would PASS on this expectation — only the setup script's
+                // failure can fail the run, which pins the failure to the fail-fast path.
+                ["WORKFLOW_NAME"] = CoreApiDispatchEnvironment.RepositoryWorkflowType,
+                ["EXPECTED_REPO_FILE"] = "repos/main/seeded.txt",
+                ["EXPECTED_REPO_CONTENT"] = "from-setup-script"
+            },
+            SlotBindings:
+            [
+                new SlotBinding("main", ProviderType: "empty-workspace-failing",
+                    Settings: new Dictionary<string, string>
+                    {
+                        ["SetupScript"] = "printf 'from-setup-script' > seeded.txt; echo boom >&2; exit 7"
+                    })
+            ]);
+        (await Client.PostAsJsonAsync("/api/runs", run, cancellationToken)).EnsureSuccessStatusCode();
+
+        var state = await terminal.Task.WaitAsync(TimeSpan.FromSeconds(150), cancellationToken);
+        Assert.That(state.State, Is.EqualTo(WorkflowState.Failed),
+            "A non-zero setup-script exit must fail the run before the application runs.");
+    }
+
+    /// <summary>Registers an empty-workspace mount provider (no clone-url, no credential contract).</summary>
+    private static async Task RegisterEmptyWorkspaceProviderAsync(string providerType, CancellationToken ct)
+    {
+        var register = new RegisterSlotProvider(
+            ProviderType: providerType,
+            Category: "workspace",
+            Description: "A fresh scratch directory with a post-binding setup script.",
+            Contracts: [],
+            Settings:
+            [
+                new RegisterProviderSetting("WorkingDirectory", "Working directory", "Text",
+                    Required: false, Role: "working-directory"),
+                new RegisterProviderSetting("SetupScript", "Setup script", "Text",
+                    Required: false, Role: "setup-script"),
+            ],
+            MountsIntoWorkspace: true);
+        (await Client.PostAsJsonAsync("/api/provider-catalog", register, ct)).EnsureSuccessStatusCode();
+    }
+
     private static async Task<SuccessWaiter> SubscribeSuccessAsync(CancellationToken ct)
     {
         const string stateExchange = "workflow.state";

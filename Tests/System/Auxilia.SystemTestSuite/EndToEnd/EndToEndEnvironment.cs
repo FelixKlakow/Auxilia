@@ -275,6 +275,9 @@ public class EndToEndEnvironment
             .WithEnvironment("WorkflowLauncher__RabbitMqUserName", "guest")
             .WithEnvironment("WorkflowLauncher__RabbitMqPassword", "guest")
             .WithEnvironment("WorkflowLauncher__ExtraEnvironmentVariables__AUXILIA_DEVELOPER_MODE", "1")
+            // Core.Api runs as a container on this network: terminal endpoints must be
+            // container-name:port (loopback host ports are unreachable from inside it).
+            .WithEnvironment("WorkflowLauncher__TerminalPublishMode", "container-network")
             // Provider plugin DLLs the launcher copies into the workflow container per provider type.
             .WithEnvironment("WorkflowLauncher__SlotPackages__fake-code-review-happy",
                 $"{ContainerPluginsDir}/Auxilia.FakeSlots.CodeReview.Happy.slothandler.dll")

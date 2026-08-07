@@ -36,7 +36,17 @@
   WORKFLOW itself (the AI review over the package) is authored like any other workflow —
   nothing Core-side remains. Note: a `core://`-stored pending package is not yet fetchable by
   the verdict run (no download authorization path); https/docker coordinates work today.
-- **Session terminal remainders** — a console-mode Docker system test (stub CLI under tmux).
+- **Session terminal remainders** — ~~a console-mode Docker system test (stub CLI under tmux)~~
+  DONE 2026-08-07: `EndToEnd/ConsoleSessionTerminalSystemTests` drives the whole loop on real
+  Docker — console-mode dispatch (dwelling stub under tmux+ttyd,
+  `WorkflowLauncher__TerminalPublishMode=container-network`), `HasTerminal` during the session,
+  401 ticketless, ticket mint + proxied ttyd page + path-scoped cookie, run Success, and a
+  400 on post-terminal ticket minting. Remaining (found by that test): **first-dispatch schema
+  gap** — the runner's terminal decision reads the schema a workflow instance self-registers at
+  startup, so the FIRST run of a freshly registered type on a fresh runner silently loses its
+  terminal (statically registered types carry no schema Core-side either). The test warms the
+  store with one headless run; the product fix is propagating the registry's inspected schema
+  to runners at registration/approval time instead of first-run.
   ~~AdminConsole terminal surface~~ — DONE 2026-08-05: RunDetail shows "Open terminal" for a
   live terminal-hosting run (`RunStatus.HasTerminal`), mints the short-lived ticket via
   `OpenTerminalAsync`, and opens the Core's ticketed proxy URL in a new tab — the browser
@@ -114,11 +124,12 @@ re-claim before the failover clock, real exit collection, clean-kill fallback,
   (`Auxilia.Core.Contracts`, `Auxilia.Core.Client`, `Auxilia.Workflows.Client`,
   `Auxilia.Steering.Codec`) are live on **nuget.org** at v0.1.0 (+snupkg), published from
   tag `v0.1.0` via Trusted Publishing (policy "Auxilia-Publisher", nuget.org user `FelixK`,
-  activated by first use). Follow-ups: (1) the tag-PUSH trigger never fires on this repo
-  (Actions enabled, zero runs from two tag pushes) — publishing ran via the new
-  `workflow_dispatch` trigger (`gh workflow run publish-nuget --ref v<version>`), diagnose
-  the push-event oddity eventually; (2) add `PackageReadmeFile` readmes to all four
-  packages (nuget.org warns; first impression on the gallery page).
+  activated by first use). Follow-ups: (1) the dead tag-PUSH trigger was the GitHub Actions
+  **major outage of 2026-08-06** (event-triggered runs never created platform-wide;
+  `workflow_dispatch` worked: `gh workflow run publish-nuget --ref v<version>`) — once the
+  incident is cleared, push a probe commit to confirm the `v*` trigger fires and DELETE the
+  temporary `.github/workflows/trigger-probe.yml`; (2) ~~PackageReadmeFile readmes~~ —
+  DONE 2026-08-06: all four packages republished as **0.1.1** with gallery readmes.
 - ~~Steering codec extraction~~ — DONE 2026-08-05: `Auxilia.Steering.Codec` is the
   dependency-free wire-protocol library (typed `SteeringFrame` records + tolerant
   `SteeringCodec.Encode/Decode`); `OperatorChannel` and `ConsoleEventViews` now speak it
@@ -211,8 +222,12 @@ access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing di
 - ~~Post-binding setup scripts~~ — DONE 2026-08-03 (ARCHITECTURE §9): manifest-declared
   `RequiresRepository(..., setupScript:)` plus the mount-bound `setup-script` role; the runner
   announces (`Workflow__WorkspaceMountSetup__<ID>`), the SDK executes inside the container in
-  the mount's root before the application, fail-fast, under the run's egress policy. Open:
-  a Docker system test exercising a real in-container setup script.
+  the mount's root before the application, fail-fast, under the run's egress policy. ~~Open: a Docker system
+  test exercising a real in-container setup script~~ — DONE 2026-08-07 (and the entry was
+  stale: the mount-bound role was already covered by the per-run repository Docker test).
+  `RepositoryWorkspaceSystemTests` now additionally proves the empty-workspace + setup-script
+  combination end to end (script seeds the scratch directory before the application) and the
+  fail-fast contract (script `exit 7` → the run Fails before the application runs).
 
 - ~~Temporary/empty workspaces~~ — DONE 2026-08-03 (ARCHITECTURE §9): the `empty-workspace`
   provider — a data-only catalog descriptor (`mountsIntoWorkspace`, `working-directory` +
@@ -224,8 +239,11 @@ access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing di
   setup script for now; revisit with a dedicated artifact-input role if needed).
 
 ## CI validation — Docker system tests (not runnable locally)
-- Email slot **plugin-dependency loading** (highest risk — MailKit/MimeKit/BouncyCastle
-  copied alongside the provider DLL).
+- ~~Email slot **plugin-dependency loading**~~ — DONE 2026-08-07 (and runnable locally after
+  all): `EndToEnd/EmailPluginDependencySystemTests` dispatches a run bound to the real
+  `email-work-items` slot against GreenMail — the bundled MailKit/MimeKit/BouncyCastle closure
+  loads inside the workflow container and the SMTP reply (with the `[work-item: …]` marker)
+  lands back in the mailbox.
 - ~~`/api/audit` response shape~~ — DONE 2026-08-05: `AuditEndpoint_ServesCamelCasePagedResult`
   in the CoreApiDispatch suite (passing locally).
 - (2026-08-02: the whole system suite runs locally again. The Failover test reads the owner

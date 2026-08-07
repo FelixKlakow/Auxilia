@@ -8,22 +8,17 @@ Tests/System/Auxilia.SystemTestSuite/
 ├── MongoDb/                                 # MongoDB container: CRUD round-trips via MongoDbEfDataAccess
 │   ├── MongoDbEnvironment.cs
 │   └── MongoDbSystemTests.cs
-├── Messaging/                               # Real-RabbitMQ fanout routing (reuses another namespace's environment)
-│   └── MessageBusFanoutSystemTests.cs
+├── Messaging/                               # Real-RabbitMQ routing (reuses the WorkflowDispatch environment)
+│   ├── MessageBusFanoutSystemTests.cs
+│   └── MessageBusTopicRoutingSystemTests.cs
 ├── WorkflowDispatch/                        # RabbitMQ + runner: workflow run-command dispatch smoke test (no Mongo)
 │   ├── WorkflowDispatchEnvironment.cs
 │   └── WorkflowDispatchSystemTests.cs
-├── CoreApiDispatch/                         # Core.Api → runner dispatch, JIT credential resolution, per-run repository workspace
+├── CoreApiDispatch/                         # Core.Api → runner dispatch, JIT credential resolution, workspace mounts (per-run repository, empty workspace, setup scripts)
 │   ├── CoreApiDispatchEnvironment.cs
 │   ├── CoreApiDispatchSystemTests.cs
 │   ├── CredentialResolutionSystemTests.cs
 │   └── RepositoryWorkspaceSystemTests.cs
-├── CodeReviewWorkflow/                      # Baked code-review workflow image driven over the bus (happy + edge instances)
-│   ├── CodeReviewWorkflowEnvironment.cs
-│   └── CodeReviewWorkflowSystemTests.cs
-├── ImplementationWorkflow/                  # Baked implementation workflow image driven over the bus (happy + edge instances)
-│   ├── ImplementationWorkflowEnvironment.cs
-│   └── ImplementationWorkflowSystemTests.cs
 ├── EmailAdapter/                            # GreenMail (IMAP/SMTP): email task-source login + auto-created recipient accounts
 │   ├── EmailAdapterEnvironment.cs
 │   └── EmailAdapterSystemTests.cs
@@ -33,10 +28,24 @@ Tests/System/Auxilia.SystemTestSuite/
 ├── Failover/                                # Two runners on one command queue + Core.Api heartbeat-driven failover (RunnerHeartbeat + FailoverMonitor); dispatch via the Core Run API
 │   ├── FailoverEnvironment.cs
 │   └── FailoverSystemTests.cs
-├── EndToEnd/                                # goal-v1 whole-platform acceptance: GreenMail + RabbitMQ + Mongo + runner + Core.Api + TriggerHost; mail → TriggerHost email adapter → Core Run API on-behalf-of → Code Review; plus the Claude Code workflow
+├── ReAdoption/                              # Runner restart mid-run: container re-adoption, real exit collection, clean-kill of unknown labeled containers
+│   ├── ReAdoptionEnvironment.cs
+│   └── ReAdoptionSystemTests.cs
+├── DispatchTimeout/                         # Dispatched-but-never-claimed sweep (fixture owns its own setup — no *Environment class)
+│   └── DispatchTimeoutSystemTests.cs
+├── CoreClientSurface/                       # ICoreClient against the real Dockerized Core: SSE snapshot/keepalive/reconnect, run surface
+│   ├── CoreClientEnvironment.cs
+│   ├── CoreClientSurfaceSystemTests.cs
+│   ├── CoreClientStreamSystemTests.cs
+│   └── ClientStreamProbe.cs
+├── EndToEnd/                                # Whole-platform acceptance: GreenMail + RabbitMQ + Mongo + runner + Core.Api + TriggerHost + AdminConsole; mail → email adapter → Core Run API on-behalf-of → Code Review; plus the Claude Code workflow (headless + console-mode terminal), the implementation workflow, and the email plugin-dependency proof
 │   ├── EndToEndEnvironment.cs
 │   ├── EndToEndSystemTests.cs
-│   └── ClaudeCodeWorkflowSystemTests.cs
+│   ├── ClaudeCodeWorkflowSystemTests.cs
+│   ├── ConsoleSessionTerminalSystemTests.cs
+│   ├── EmailPluginDependencySystemTests.cs
+│   ├── ImplementationWorkflowSystemTests.cs
+│   └── CodeReviewDispatchSystemTests.cs
 └── GitServer/                               # Shared Dockerfile + httpd.conf for the authenticated git server used by repository scenarios
     ├── Dockerfile
     └── httpd.conf
