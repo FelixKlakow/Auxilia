@@ -57,6 +57,7 @@ Work items from external task sources trigger **signed, stateful workflow progra
 - XML doc comments (`///`) only when purpose isn't obvious from name and signature; one sentence.
 - Use Mermaid for all diagrams in markdown.
 - **Documentation hygiene:** don't create new markdown docs, READMEs, or changelogs. Update the existing doc in the map above and, if a genuinely new topic needs a home, add it to the map. Keep this file minimal — detail belongs in the linked docs.
+- **Docs travel with the feature:** a change that alters a described surface updates ALL of its descriptions in the same change — the NuGet package `README.md`s (beside each packable `.csproj`), the affected `*.project-instructions.md`, and the linked design docs. A feature isn't done while any of them still describes the old behavior.
 
 ## Commits (see `docs/CommitConventions.md`)
 
