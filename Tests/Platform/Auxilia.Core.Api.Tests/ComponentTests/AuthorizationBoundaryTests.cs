@@ -233,6 +233,30 @@ public sealed class AuthorizationBoundaryTests : CoreApiComponentTestBase
         Assert.That(response.StatusCode, Is.EqualTo(expected));
     }
 
+    // --- Platform events: event.consume → Administrator/Operator, never User/Auditor ---
+
+    [TestCase(BuiltInRoles.Administrator, HttpStatusCode.OK)]
+    [TestCase(BuiltInRoles.Operator, HttpStatusCode.OK)]
+    [TestCase(BuiltInRoles.User, HttpStatusCode.Forbidden)]
+    [TestCase(BuiltInRoles.Auditor, HttpStatusCode.Forbidden)]
+    public async Task QueryEvents_RequiresEventConsume(string role, HttpStatusCode expected)
+    {
+        var client = await ClientForRolesAsync(role);
+        var response = await client.GetAsync("/api/events");
+        Assert.That(response.StatusCode, Is.EqualTo(expected));
+    }
+
+    [TestCase(BuiltInRoles.Administrator, HttpStatusCode.OK)]
+    [TestCase(BuiltInRoles.User, HttpStatusCode.Forbidden)]
+    public async Task StreamEvents_RequiresEventConsume(string role, HttpStatusCode expected)
+    {
+        var client = await ClientForRolesAsync(role);
+        // Headers-read completion: an authorized stream stays open, so never await the body.
+        using var response = await client.GetAsync(
+            "/api/events/stream?eventType=probe", HttpCompletionOption.ResponseHeadersRead);
+        Assert.That(response.StatusCode, Is.EqualTo(expected));
+    }
+
     // --- Deny-by-default: an unroled principal is authenticated but powerless ---
 
     [Test]

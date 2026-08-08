@@ -43,6 +43,7 @@ builder.Services.AddPlatformEntity<CoreRunRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreRunViewRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreDashboardPinRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreArtifactRecord>(platformData);
+builder.Services.AddPlatformEntity<CoreEventRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreRunResolutionRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreWorkflowTypeRecord>(platformData);
 builder.Services.AddPlatformEntity<DelegatedUserTokenRecord>(platformData);
@@ -144,6 +145,7 @@ builder.Services.AddSingleton<PrincipalAdminService>();
 builder.Services.AddSingleton<SlotCredentialResolver>();
 builder.Services.AddSingleton<RunStreamBroker>();
 builder.Services.AddSingleton<ArtifactStreamBroker>();
+builder.Services.AddSingleton<EventStreamBroker>();
 // Artifact payloads come from the shared payload backend (ArtifactStore:PayloadRoot points at
 // the same location the runner writes); metadata is mirrored from the bus, never read from
 // the runner's index.
@@ -155,6 +157,7 @@ builder.Services.AddSingleton<Auxilia.PlatformData.Artifacts.IArtifactPayloadRea
 builder.Services.AddSingleton<Auxilia.Workflows.Messaging.WorkflowStatusPublisher>();
 builder.Services.AddSingleton<RunnerLivenessTracker>();
 builder.Services.AddSingleton<TerminalTicketService>();
+builder.Services.AddSingleton<PendingPackageDownloadTokenService>();
 builder.Services.AddSingleton<ElevationTicketService>();
 builder.Services.AddSingleton<TerminalProxyService>();
 builder.Services.AddSingleton<FailoverMonitor>();
@@ -166,6 +169,9 @@ builder.Services.AddSingleton<RunStreamPublisher>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RunStreamPublisher>());
 builder.Services.AddHostedService<ArtifactTrackingService>();
 builder.Services.AddHostedService<ArtifactStreamPublisher>();
+builder.Services.AddHostedService<EventTrackingService>();
+builder.Services.AddHostedService<EventStreamPublisher>();
+builder.Services.AddHostedService<RunLifecycleEventPublisher>();
 // Resolve the same FailoverMonitor instance for the hosted lifecycle (so tests can drive ScanOnceAsync).
 builder.Services.AddHostedService(sp => sp.GetRequiredService<FailoverMonitor>());
 
@@ -410,7 +416,7 @@ app.MapPost("/api/runs", async (
     {
         return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status429TooManyRequests);
     }
-    catch (ConnectorAccessDeniedException ex)
+    catch (RunAccessDeniedException ex)
     {
         return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status403Forbidden);
     }
@@ -516,7 +522,7 @@ app.MapPost("/api/runs/{id:guid}/rerun", async (
     {
         return Results.BadRequest(new { error = ex.Message });
     }
-    catch (ConnectorAccessDeniedException ex)
+    catch (RunAccessDeniedException ex)
     {
         return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status403Forbidden);
     }
@@ -865,6 +871,86 @@ app.MapGet("/api/artifacts/stream", async (
     }
 }).RequireAuthorization();
 
+// --- Platform events: queryable mirror + server-side-filtered SSE (event type / work item).
+// Published by workflows (SDK) and the platform itself (run lifecycle) — never via REST.
+app.MapGet("/api/events", async (
+        string? eventType, string? workItemId, Guid? sourceRunId, DateTimeOffset? createdAfterUtc,
+        DateTimeOffset? createdBeforeUtc,
+        HttpContext http, IPolicyEngine policy,
+        Auxilia.UniversalDataAccess.IDataAccess<CoreEventRecord> events,
+        CancellationToken ct, int skip = 0, int take = 50) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.EventConsume, ct) is { } fail)
+        return fail;
+    var all = (await events.ReadAsync(ct)).AsEnumerable();
+    if (!string.IsNullOrWhiteSpace(eventType))
+        all = all.Where(e => string.Equals(e.EventType, eventType, StringComparison.Ordinal));
+    if (!string.IsNullOrWhiteSpace(workItemId))
+        all = all.Where(e => string.Equals(e.WorkItemId, workItemId, StringComparison.Ordinal));
+    if (sourceRunId is { } run)
+        all = all.Where(e => e.SourceRunId == run);
+    if (createdAfterUtc is { } after)
+        all = all.Where(e => e.CreatedUtc > after);
+    if (createdBeforeUtc is { } before)
+        all = all.Where(e => e.CreatedUtc < before);
+    // The catch-up shape (createdAfterUtc) pages oldest-first so a reconnecting consumer drains
+    // the gap deterministically; the browse shape (incl. createdBeforeUtc) stays newest-first.
+    var ordered = createdAfterUtc is null
+        ? all.OrderByDescending(e => e.CreatedUtc).ToList()
+        : all.OrderBy(e => e.CreatedUtc).ToList();
+    var effectiveTake = take <= 0 ? 50 : take;
+    var page = ordered.Skip(skip).Take(effectiveTake).Select(e => new EventDto(
+        e.Id, e.EventType, e.WorkflowType, e.WorkItemId, e.SourceRunId, e.PayloadJson, e.CreatedUtc)).ToList();
+    return Results.Ok(new PagedResult<EventDto>(page, ordered.Count, skip, effectiveTake));
+}).RequireAuthorization();
+
+app.MapGet("/api/events/{id:guid}", async (
+        Guid id, HttpContext http, IPolicyEngine policy,
+        Auxilia.UniversalDataAccess.IDataAccess<CoreEventRecord> events, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.EventConsume, ct) is { } fail)
+        return fail;
+    return await events.ReadAsync(id, ct) is { } e
+        ? Results.Ok(new EventDto(
+            e.Id, e.EventType, e.WorkflowType, e.WorkItemId, e.SourceRunId, e.PayloadJson, e.CreatedUtc))
+        : Results.NotFound();
+}).RequireAuthorization();
+
+// Event SSE stream, SERVER-SIDE FILTERED (event type / work item): the client-surface
+// replacement for a bus subscription — event-trigger libraries react to events through this.
+app.MapGet("/api/events/stream", async (
+        string? eventType, string? workItemId, HttpContext http, IPolicyEngine policy,
+        EventStreamBroker broker,
+        Microsoft.Extensions.Options.IOptions<CoreApiSettings> apiSettings, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.EventConsume, ct) is { } fail)
+    {
+        await fail.ExecuteAsync(http);
+        return;
+    }
+
+    http.Response.Headers.ContentType = "text/event-stream";
+    http.Response.Headers.CacheControl = "no-cache";
+    http.Response.Headers["X-Accel-Buffering"] = "no";
+
+    using var subscription = await broker.SubscribeAsync(eventType, workItemId, ct);
+    // Flush headers so the client's SendAsync completes with the subscription already registered —
+    // no live event published after this point is lost.
+    await http.Response.Body.FlushAsync(ct);
+
+    try
+    {
+        await SseWriter.PumpAsync(
+            http.Response, subscription.Reader,
+            TimeSpan.FromSeconds(apiSettings.Value.SseKeepaliveSeconds),
+            isTerminal: _ => false, ct);
+    }
+    catch (OperationCanceledException)
+    {
+        // Client disconnected — expected end of an SSE stream.
+    }
+}).RequireAuthorization();
+
 // --- Internal: runner <-> Core just-in-time slot-credential resolution ---
 // Authorized by the run-scoped resolution token (header), NOT a principal API key — the runner
 // can resolve only slots of runs the Core dispatched to it. Secrets are resolved and encrypted
@@ -1027,7 +1113,7 @@ app.MapPost("/api/configurations/{id:guid}/run", async (
     {
         return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status429TooManyRequests);
     }
-    catch (ConnectorAccessDeniedException ex)
+    catch (RunAccessDeniedException ex)
     {
         return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status403Forbidden);
     }
@@ -1175,6 +1261,38 @@ app.MapPost("/api/environment-layers", async (
     }
 }).RequireAuthorization();
 
+// Who may BIND the layer into a run: empty grants = open (the default); non-empty grants are
+// enforced at dispatch against the triggering principal, like connector access.
+app.MapPut("/api/environment-layers/{providerType}/grants", async (
+        string providerType, SetEnvironmentLayerGrants request, HttpContext http, IPolicyEngine policy,
+        EnvironmentLayerService svc, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ProviderCatalogManage, ct) is { } fail)
+        return fail;
+    return await svc.SetGrantsAsync(CoreClaims.PrincipalIdOf(http.User), providerType, request.Grants, ct)
+        is { } layer
+        ? Results.Ok(layer)
+        : Results.NotFound();
+}).RequireAuthorization();
+
+// Same grant mechanism for plain slot providers (stored on the same curation record).
+app.MapPut("/api/provider-catalog/{providerType}/grants", async (
+        string providerType, SetProviderGrants request, HttpContext http, IPolicyEngine policy,
+        ProviderCatalogService svc, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ProviderCatalogManage, ct) is { } fail)
+        return fail;
+    try
+    {
+        return Results.Ok(await svc.SetGrantsAsync(
+            CoreClaims.PrincipalIdOf(http.User)?.ToString("D") ?? "core-api", providerType, request.Grants, ct));
+    }
+    catch (KeyNotFoundException)
+    {
+        return Results.NotFound();
+    }
+}).RequireAuthorization();
+
 app.MapDelete("/api/environment-layers/{providerType}", async (
         string providerType, HttpContext http, IPolicyEngine policy, EnvironmentLayerService svc,
         CancellationToken ct) =>
@@ -1316,6 +1434,66 @@ app.MapPost("/api/workflow-types/{type}/enabled", async (
         : Results.BadRequest(new { error = outcome.Error });
 }).RequireAuthorization();
 
+// --- Workflow-type access list: the Policy Engine's per-(type, action) entries. The FIRST
+// entry for an action makes the list the EXCLUSIVE grant source for that (type, action) —
+// enforced wherever the policy evaluates with a workflow type (dispatch included). This is
+// the REST twin of the MCP access tools; all gated policy.administer.
+app.MapGet("/api/workflow-types/{type}/access", async (
+        string type, HttpContext http, IPolicyEngine policy,
+        Auxilia.Governance.WorkflowTypeAccessStore accessStore, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PolicyAdminister, ct) is { } fail)
+        return fail;
+    return Results.Ok((await accessStore.ListAsync(type, ct))
+        .Select(e => new WorkflowTypeAccessEntryDto(e.Action, e.RoleName, e.PrincipalId, e.GroupId))
+        .ToList());
+}).RequireAuthorization();
+
+static IResult? ValidateAccessChange(WorkflowTypeAccessChange request)
+{
+    var subjects = new object?[] { request.RoleName, request.PrincipalId, request.GroupId }
+        .Count(s => s is string { Length: > 0 } or Guid);
+    if (subjects != 1)
+        return Results.BadRequest(new { error = "provide exactly one subject: roleName, principalId, or groupId." });
+    if (request.RoleName is { Length: > 0 } role && !Auxilia.Governance.BuiltInRoles.Exists(role))
+        return Results.BadRequest(new { error = $"unknown role '{role}'." });
+    return null;
+}
+
+app.MapPost("/api/workflow-types/{type}/access/grant", async (
+        string type, WorkflowTypeAccessChange request, HttpContext http, IPolicyEngine policy,
+        Auxilia.Governance.WorkflowTypeAccessStore accessStore, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PolicyAdminister, ct) is { } fail)
+        return fail;
+    if (ValidateAccessChange(request) is { } invalid)
+        return invalid;
+    if (request.RoleName is { Length: > 0 } role)
+        await accessStore.GrantRoleAsync(type, request.Action, role, ct);
+    else if (request.PrincipalId is { } principal)
+        await accessStore.GrantPrincipalAsync(type, request.Action, principal, ct);
+    else
+        await accessStore.GrantGroupAsync(type, request.Action, request.GroupId!.Value, ct);
+    return Results.Ok(new { granted = true });
+}).RequireAuthorization();
+
+app.MapPost("/api/workflow-types/{type}/access/revoke", async (
+        string type, WorkflowTypeAccessChange request, HttpContext http, IPolicyEngine policy,
+        Auxilia.Governance.WorkflowTypeAccessStore accessStore, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PolicyAdminister, ct) is { } fail)
+        return fail;
+    if (ValidateAccessChange(request) is { } invalid)
+        return invalid;
+    if (request.RoleName is { Length: > 0 } role)
+        await accessStore.RevokeRoleAsync(type, request.Action, role, ct);
+    else if (request.PrincipalId is { } principal)
+        await accessStore.RevokePrincipalAsync(type, request.Action, principal, ct);
+    else
+        await accessStore.RevokeGroupAsync(type, request.Action, request.GroupId!.Value, ct);
+    return Results.Ok(new { revoked = true });
+}).RequireAuthorization();
+
 app.MapPost("/api/workflow-types/{type}/approve", async (
         string type, HttpContext http, IPolicyEngine policy, WorkflowTypeRegistryService registry,
         CancellationToken ct) =>
@@ -1344,15 +1522,27 @@ app.MapPost("/api/workflow-types/{type}/deny", async (
 
 // Core-stored package download for the runner. Authorized by the run-scoped resolution token
 // (same trust as resolve-slot), NOT a principal — the runner can fetch only packages of runs the
-// Core dispatched to it, and the URL is minted per dispatch by the registry.
+// Core dispatched to it, and the URL is minted per dispatch by the registry. Alternatively, an
+// approval-scoped token (minted by the approval pipeline, passed into the verdict run's context)
+// admits ONLY that PENDING package for the evaluation window — the review can fetch what it reviews.
 app.MapGet("/api/workflow-types/{type}/package", async (
-        string type, Guid runId, string token, WorkflowTypeRegistryService registry,
+        string type, WorkflowTypeRegistryService registry,
+        PendingPackageDownloadTokenService approvalTokens,
         Auxilia.UniversalDataAccess.IDataAccess<CoreRunResolutionRecord> resolutions,
-        CancellationToken ct) =>
+        CancellationToken ct, Guid? runId = null, string? token = null, string? approvalToken = null) =>
 {
-    var resolution = await resolutions.ReadAsync(runId, ct);
-    if (resolution is null || resolution.ResolutionToken != token)
-        return Results.Json(new { error = "invalid resolution token" }, statusCode: StatusCodes.Status403Forbidden);
+    if (approvalToken is { Length: > 0 })
+    {
+        if (!approvalTokens.Validate(approvalToken, type)
+            || (await registry.GetRecordAsync(type, ct))?.Status != WorkflowTypeStatus.Pending)
+            return Results.Json(new { error = "invalid approval token" }, statusCode: StatusCodes.Status403Forbidden);
+    }
+    else
+    {
+        var resolution = runId is { } run ? await resolutions.ReadAsync(run, ct) : null;
+        if (resolution is null || string.IsNullOrEmpty(token) || resolution.ResolutionToken != token)
+            return Results.Json(new { error = "invalid resolution token" }, statusCode: StatusCodes.Status403Forbidden);
+    }
     var package = await registry.ReadStoredPackageAsync(type, ct);
     return package is null
         ? Results.NotFound()

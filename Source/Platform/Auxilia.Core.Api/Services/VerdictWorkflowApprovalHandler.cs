@@ -26,7 +26,8 @@ public sealed class RunServiceVerdictRunDispatcher(RunService runs) : IVerdictRu
 /// <summary>
 /// Approval-pipeline handler "verdict-workflow": dispatches a CONFIGURED (Active) workflow type
 /// over a pending registration — context keys <c>approval-workflow-type</c>,
-/// <c>approval-package-uri</c>, <c>approval-publisher-key</c>, <c>approval-registered-by</c> —
+/// <c>approval-package-uri</c>, <c>approval-publisher-key</c>, <c>approval-registered-by</c>,
+/// plus <c>approval-package-download-url</c> for a Core-stored (<c>core://</c>) package —
 /// waits for the run, and applies the verdict artifact it publishes
 /// (<c>{"decision":"approve"|"deny","reason":"…"}</c>). The Core never interprets the check
 /// itself (an AI safety review is just what the configured workflow happens to do). Anything
@@ -38,6 +39,7 @@ public sealed class VerdictWorkflowApprovalHandler(
     IDataAccess<CoreRunRecord> runs,
     IDataAccess<CoreArtifactRecord> artifacts,
     IArtifactPayloadReader payloads,
+    PendingPackageDownloadTokenService downloadTokens,
     IOptions<CoreApiSettings> settings,
     TimeProvider clock,
     ILogger<VerdictWorkflowApprovalHandler> logger) : IWorkflowTypeApprovalHandler
@@ -51,18 +53,26 @@ public sealed class VerdictWorkflowApprovalHandler(
         if (string.IsNullOrWhiteSpace(options.WorkflowType))
             return ApprovalHandlerResult.Deferred;
 
+        var context = new Dictionary<string, string>
+        {
+            ["approval-workflow-type"] = registration.WorkflowType,
+            ["approval-package-uri"] = registration.PackageUri ?? "",
+            ["approval-publisher-key"] = registration.PublisherKeyBase64 ?? "",
+            ["approval-registered-by"] = registration.RegisteredBy?.ToString("D") ?? "",
+        };
+        // A core:// coordinate is not fetchable from inside the verdict container (it holds no
+        // principal credential, and its own resolution token covers only its OWN package), so the
+        // pending package rides as a download URL authorized by a scoped, evaluation-window token.
+        if (registration.PackageUri?.StartsWith("core://", StringComparison.OrdinalIgnoreCase) == true
+            && settings.Value.PublicBaseAddress?.TrimEnd('/') is { Length: > 0 } baseAddress)
+            context["approval-package-download-url"] =
+                $"{baseAddress}/api/workflow-types/{Uri.EscapeDataString(registration.WorkflowType)}/package"
+                + $"?approvalToken={Uri.EscapeDataString(downloadTokens.Issue(registration.WorkflowType))}";
+
         RunAccepted accepted;
         try
         {
-            accepted = await dispatcher.DispatchAsync(new RunRequest(
-                options.WorkflowType,
-                new Dictionary<string, string>
-                {
-                    ["approval-workflow-type"] = registration.WorkflowType,
-                    ["approval-package-uri"] = registration.PackageUri ?? "",
-                    ["approval-publisher-key"] = registration.PublisherKeyBase64 ?? "",
-                    ["approval-registered-by"] = registration.RegisteredBy?.ToString("D") ?? "",
-                }), ct);
+            accepted = await dispatcher.DispatchAsync(new RunRequest(options.WorkflowType, context), ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

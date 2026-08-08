@@ -52,6 +52,7 @@ public sealed class VerdictWorkflowApprovalHandlerTests
     private InMemoryDataAccess<CoreArtifactRecord> _artifacts = null!;
     private FakePayloads _payloads = null!;
     private CoreApiSettings _settings = null!;
+    private PendingPackageDownloadTokenService _downloadTokens = null!;
 
     [SetUp]
     public void SetUp()
@@ -69,6 +70,7 @@ public sealed class VerdictWorkflowApprovalHandlerTests
                 PollIntervalSeconds = 0,
             }
         };
+        _downloadTokens = NewTokenService();
     }
 
     [TearDown]
@@ -78,8 +80,11 @@ public sealed class VerdictWorkflowApprovalHandlerTests
         _artifacts.Dispose();
     }
 
+    private PendingPackageDownloadTokenService NewTokenService() => new(
+        TimeProvider.System, new Auxilia.PlatformData.PlatformDataSettings(), Options.Create(_settings));
+
     private VerdictWorkflowApprovalHandler NewHandler() => new(
-        _dispatcher, _runs, _artifacts, _payloads, Options.Create(_settings),
+        _dispatcher, _runs, _artifacts, _payloads, _downloadTokens, Options.Create(_settings),
         TimeProvider.System, NullLogger<VerdictWorkflowApprovalHandler>.Instance);
 
     private async Task CompleteRunAsync(string state = "Success")
@@ -206,6 +211,54 @@ public sealed class VerdictWorkflowApprovalHandlerTests
         var result = await NewHandler().EvaluateAsync(Registration, CancellationToken.None);
 
         Assert.That(result.Decision, Is.EqualTo(ApprovalHandlerResult.Defer));
+    }
+
+    [Test]
+    public async Task CoreStoredPackage_PassesAScopedDownloadUrlIntoTheRunContext()
+    {
+        _settings.PublicBaseAddress = "https://core.example.com/";
+        var registration = Registration with { PackageUri = "core://under-review" };
+        await CompleteRunAsync();
+
+        await NewHandler().EvaluateAsync(registration, CancellationToken.None);
+
+        var context = _dispatcher.LastRequest!.Context!;
+        Assert.That(context.TryGetValue("approval-package-download-url", out var url), Is.True,
+            "a core:// package is not fetchable from inside the verdict container without a URL");
+        var uri = new Uri(url!);
+        Assert.Multiple(() =>
+        {
+            Assert.That(url, Does.StartWith(
+                "https://core.example.com/api/workflow-types/under-review/package?approvalToken="));
+            var token = System.Web.HttpUtility.ParseQueryString(uri.Query)["approvalToken"];
+            Assert.That(_downloadTokens.Validate(token, "under-review"), Is.True,
+                "the passed token must authorize downloading THE pending package");
+            Assert.That(_downloadTokens.Validate(token, "some-other-type"), Is.False,
+                "the token is scoped to exactly the type under review");
+        });
+    }
+
+    [Test]
+    public async Task CoreStoredPackage_WithoutPublicBaseAddress_PassesNoDownloadUrl()
+    {
+        var registration = Registration with { PackageUri = "core://under-review" };
+        await CompleteRunAsync();
+
+        await NewHandler().EvaluateAsync(registration, CancellationToken.None);
+
+        Assert.That(_dispatcher.LastRequest!.Context!.ContainsKey("approval-package-download-url"), Is.False);
+    }
+
+    [Test]
+    public async Task ExternallyHostedPackage_PassesNoDownloadUrl()
+    {
+        _settings.PublicBaseAddress = "https://core.example.com";
+        await CompleteRunAsync();
+
+        await NewHandler().EvaluateAsync(Registration, CancellationToken.None);
+
+        Assert.That(_dispatcher.LastRequest!.Context!.ContainsKey("approval-package-download-url"), Is.False,
+            "docker/https coordinates are fetchable as-is — no token is minted for them");
     }
 
     [Test]

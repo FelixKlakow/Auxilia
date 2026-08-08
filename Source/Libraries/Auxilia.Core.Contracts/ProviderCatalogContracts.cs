@@ -42,7 +42,17 @@ public sealed record ProviderCatalogEntry(
     bool ComposesEnvironment = false,
     ProviderOAuthRefresh? OAuthRefresh = null,
     string? EnvironmentBase = null,
-    string? EnvironmentBaseVersion = null);
+    string? EnvironmentBaseVersion = null)
+{
+    /// <summary>Who may bind this entry into a run; empty = everyone (dispatch-enforced).</summary>
+    public IReadOnlyList<AccessGrant> Grants { get; init; } = [];
+}
+
+/// <summary>
+/// Restricts who may bind a catalog entry (slot provider or environment layer) into a run:
+/// empty grants keep it open; non-empty grants admit only the listed subjects at dispatch.
+/// </summary>
+public sealed record SetProviderGrants(IReadOnlyList<AccessGrant> Grants);
 
 /// <summary>
 /// Declares, as pure data, how a provider's stored OAuth credential is refreshed: the Core

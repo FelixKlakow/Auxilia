@@ -93,6 +93,9 @@ public sealed class CoreApiSettings
     /// <summary>Per-run cap on Core-persisted view items; items beyond it are dropped and logged.</summary>
     public int MaxPersistedViewItemsPerRun { get; set; } = 1000;
 
+    /// <summary>Days a mirrored platform event is retained; 0 keeps forever.</summary>
+    public int EventRetentionDays { get; set; } = 30;
+
     /// <summary>Run-API quotas — backpressure on dispatch (0 = unlimited, the default).</summary>
     public RunQuotaSettings RunQuotas { get; set; } = new();
 

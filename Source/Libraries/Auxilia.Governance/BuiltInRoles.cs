@@ -40,7 +40,8 @@ public static class BuiltInRoles
                 PermissionActions.RunProvideInput,
                 PermissionActions.RunOpenTerminal,
                 PermissionActions.ViewSubscribe,
-                PermissionActions.ArtifactConsume
+                PermissionActions.ArtifactConsume,
+                PermissionActions.EventConsume
             },
             [Operator] = new HashSet<string>
             {
@@ -59,7 +60,8 @@ public static class BuiltInRoles
                 // deliberately NOT granted to User, unlike steering inputs.
                 PermissionActions.RunOpenTerminal,
                 PermissionActions.ViewSubscribe,
-                PermissionActions.ArtifactConsume
+                PermissionActions.ArtifactConsume,
+                PermissionActions.EventConsume
             },
             [User] = new HashSet<string>
             {

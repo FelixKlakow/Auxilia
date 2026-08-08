@@ -37,7 +37,8 @@ public sealed class CoreMcpTools(
     PrincipalDirectory principals,
     PrincipalAdminService principalAdmin,
     ElevationTicketService elevation,
-    Auxilia.UniversalDataAccess.IDataAccess<Data.CoreArtifactRecord> artifacts)
+    Auxilia.UniversalDataAccess.IDataAccess<Data.CoreArtifactRecord> artifacts,
+    Auxilia.UniversalDataAccess.IDataAccess<Data.CoreEventRecord> events)
 {
     private static readonly JsonSerializerOptions JsonOptions = JsonSerializerOptions.Web;
 
@@ -165,7 +166,7 @@ public sealed class CoreMcpTools(
             var accepted = await runs.RunConfigurationAsync(id, principalId, null, cancellationToken);
             return JsonResult(new { runId = accepted.RunId, commandId = accepted.CommandId });
         }
-        catch (ConnectorAccessDeniedException ex)
+        catch (RunAccessDeniedException ex)
         {
             return Error(ex.Message);
         }
@@ -400,6 +401,43 @@ public sealed class CoreMcpTools(
             : JsonResult(new ArtifactDto(
                 a.Id, a.ArtifactType, a.WorkflowType, a.WorkItemId, a.RunInstanceId,
                 a.Version, a.ContentHash, a.SizeBytes, a.CreatedUtc));
+    }
+
+    [McpServerTool(Name = "query_events")]
+    [Description("Queries platform events, newest first: events workflows declare and publish plus the " +
+                 "platform's run.* lifecycle vocabulary (run.succeeded / run.failed / run.cancelled). " +
+                 "Optional exact-match filters on event type, work item id, and source run.")]
+    public async Task<CallToolResult> QueryEventsAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Exact event type, e.g. \"review-ready\" or \"run.succeeded\".")] string? eventType = null,
+        [Description("Exact work item id.")] string? workItemId = null,
+        [Description("Source run id (GUID).")] string? sourceRunId = null,
+        [Description("Maximum events to return (default 50, max 500).")] int limit = 50,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (await DenyAsync(principalId, PermissionActions.EventConsume, eventType, cancellationToken) is { } denial)
+            return denial;
+        Guid? runFilter = null;
+        if (!string.IsNullOrWhiteSpace(sourceRunId))
+        {
+            if (!Guid.TryParse(sourceRunId, out var run))
+                return Error("sourceRunId must be a GUID.");
+            runFilter = run;
+        }
+        var all = (await events.ReadAsync(cancellationToken)).AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(eventType))
+            all = all.Where(e => string.Equals(e.EventType, eventType, StringComparison.Ordinal));
+        if (!string.IsNullOrWhiteSpace(workItemId))
+            all = all.Where(e => string.Equals(e.WorkItemId, workItemId, StringComparison.Ordinal));
+        if (runFilter is { } sourceRun)
+            all = all.Where(e => e.SourceRunId == sourceRun);
+        var page = all.OrderByDescending(e => e.CreatedUtc).Take(Math.Clamp(limit, 1, 500))
+            .Select(e => new EventDto(
+                e.Id, e.EventType, e.WorkflowType, e.WorkItemId, e.SourceRunId, e.PayloadJson, e.CreatedUtc))
+            .ToList();
+        return JsonResult(page);
     }
 
     [McpServerTool(Name = "read_audit")]

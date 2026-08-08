@@ -176,6 +176,28 @@ public sealed class CoreClient : ICoreClient
             sequenceOf: _ => null,
             ct);
 
+    // --- Events ---
+
+    public Task<PagedResult<EventDto>> QueryEventsAsync(EventQuery query, CancellationToken ct = default)
+        => GetAsync<PagedResult<EventDto>>("/api/events?" + Query(
+            ("eventType", query.EventType),
+            ("workItemId", query.WorkItemId),
+            ("sourceRunId", query.SourceRunId?.ToString()),
+            ("createdAfterUtc", query.CreatedAfterUtc?.ToString("O")),
+            ("createdBeforeUtc", query.CreatedBeforeUtc?.ToString("O")),
+            ("skip", query.Skip.ToString()),
+            ("take", query.Take.ToString())), ct);
+
+    public IAsyncEnumerable<ClientStreamFrame<EventStreamEvent>> StreamEventsAsync(
+        string? eventType = null, string? workItemId = null, CancellationToken ct = default)
+        => StreamResilientAsync<EventStreamEvent>(
+            () => NewSseRequest("/api/events/stream?" + Query(
+                ("eventType", eventType),
+                ("workItemId", workItemId))),
+            isTerminal: _ => false,
+            sequenceOf: _ => null,
+            ct);
+
     // --- Resilient SSE core (reconnect + idle detection live HERE, never in callers) ---
 
     private static HttpRequestMessage NewSseRequest(string url)
@@ -438,6 +460,16 @@ public sealed class CoreClient : ICoreClient
         UpsertEnvironmentLayer request, CancellationToken ct = default)
         => PostAsync<UpsertEnvironmentLayer, EnvironmentLayerDto>("/api/environment-layers", request, ct);
 
+    public Task<ProviderCatalogEntry> SetProviderGrantsAsync(
+        string providerType, SetProviderGrants request, CancellationToken ct = default)
+        => PutAsync<SetProviderGrants, ProviderCatalogEntry>(
+            $"/api/provider-catalog/{Uri.EscapeDataString(providerType)}/grants", request, ct);
+
+    public Task<EnvironmentLayerDto> SetEnvironmentLayerGrantsAsync(
+        string providerType, SetEnvironmentLayerGrants request, CancellationToken ct = default)
+        => PutAsync<SetEnvironmentLayerGrants, EnvironmentLayerDto>(
+            $"/api/environment-layers/{Uri.EscapeDataString(providerType)}/grants", request, ct);
+
     public Task DeleteEnvironmentLayerAsync(string providerType, CancellationToken ct = default)
         => DeleteAsync($"/api/environment-layers/{Uri.EscapeDataString(providerType)}", ct);
 
@@ -517,6 +549,21 @@ public sealed class CoreClient : ICoreClient
         => PostAsync<SetWorkflowTypeEnabledRequest, WorkflowTypeRegistrationDto>(
             $"/api/workflow-types/{Uri.EscapeDataString(workflowType)}/enabled",
             new SetWorkflowTypeEnabledRequest(enabled), ct);
+
+    public Task<IReadOnlyList<WorkflowTypeAccessEntryDto>> ListWorkflowTypeAccessAsync(
+        string workflowType, CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<WorkflowTypeAccessEntryDto>>(
+            $"/api/workflow-types/{Uri.EscapeDataString(workflowType)}/access", ct);
+
+    public Task GrantWorkflowTypeAccessAsync(
+        string workflowType, WorkflowTypeAccessChange request, CancellationToken ct = default)
+        => PostAsync<WorkflowTypeAccessChange, object>(
+            $"/api/workflow-types/{Uri.EscapeDataString(workflowType)}/access/grant", request, ct);
+
+    public Task RevokeWorkflowTypeAccessAsync(
+        string workflowType, WorkflowTypeAccessChange request, CancellationToken ct = default)
+        => PostAsync<WorkflowTypeAccessChange, object>(
+            $"/api/workflow-types/{Uri.EscapeDataString(workflowType)}/access/revoke", request, ct);
 
     public Task<WorkflowTypeRegistrationDto> ApproveWorkflowTypeAsync(string workflowType, CancellationToken ct = default)
         => PostAsync<WorkflowTypeRegistrationDto>(

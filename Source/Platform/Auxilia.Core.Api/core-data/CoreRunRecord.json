@@ -343,5 +343,20 @@
     "CommandId": "f26e227f-245d-42d9-9724-8de81de687f7",
     "DispatchCommandJson": "{\u0022CommandId\u0022:\u0022f26e227f-245d-42d9-9724-8de81de687f7\u0022,\u0022WorkflowType\u0022:\u0022claude-code\u0022,\u0022WorkflowPackageUri\u0022:\u0022docker://auxilia-claude-code-workflow:system-test\u0022,\u0022Context\u0022:{\u0022view-mode\u0022:\u0022console\u0022,\u0022multi-turn\u0022:\u0022true\u0022,\u0022permission-mode\u0022:\u0022auto-allow\u0022,\u0022push-policy\u0022:\u0022ask-operator\u0022},\u0022RequestedBy\u0022:null,\u0022WorkflowConfigurationId\u0022:null,\u0022ResolutionToken\u0022:\u00226008edf056b849d08cdc038788885de2\u0022,\u0022SlotProviderTypes\u0022:[\u0022claude-code-cli\u0022],\u0022WorkspaceMounts\u0022:[{\u0022MountId\u0022:\u0022repository\u0022,\u0022ProviderType\u0022:\u0022git-repository\u0022,\u0022SettingsByRole\u0022:{\u0022clone-url\u0022:\u0022https://github.com/FelixKlakow/Praetorium.Bridge.git\u0022,\u0022branch\u0022:\u0022master\u0022,\u0022allow-push\u0022:\u0022true\u0022},\u0022AuthSlotName\u0022:\u0022mount-auth:repository\u0022}],\u0022EnvironmentCapabilities\u0022:[\u0022dotnet-10\u0022]}",
     "TerminalEndpoint": null
+  },
+  {
+    "Id": "38fe361d-d59c-449b-b862-e8e2ba0f8d32",
+    "WorkflowType": "code-review-workflow",
+    "State": "Success",
+    "ErrorMessage": null,
+    "CreatedUtc": "2026-08-08T06:26:30.1301058+00:00",
+    "UpdatedUtc": "2026-08-08T06:26:30.1301058+00:00",
+    "CompletedUtc": "2026-08-08T06:26:30.1301058+00:00",
+    "ConfigurationId": null,
+    "ConfigurationName": null,
+    "OwnerServiceId": null,
+    "CommandId": null,
+    "DispatchCommandJson": null,
+    "TerminalEndpoint": null
   }
 ]

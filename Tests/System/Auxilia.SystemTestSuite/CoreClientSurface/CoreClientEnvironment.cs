@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Auxilia.Core.Client;
 using Auxilia.Messaging;
 using DotNet.Testcontainers.Builders;
@@ -28,18 +29,44 @@ public class CoreClientEnvironment
 
     private const string RabbitMqAlias = "rabbitmq";
     private const string CoreApiAlias = "core-api";
+    /// <summary>The Core's address ON the test network — what the runner downloads core:// packages from.</summary>
+    internal const string CoreApiInternalBaseAddress = $"http://{CoreApiAlias}:8080";
 
     private static readonly string NetworkName =
         $"auxilia-client-{Guid.NewGuid():N}".Substring(0, 30);
 
-    private INetwork _network = null!;
+    private static INetwork _network = null!;
     private RabbitMqContainer _rabbitMq = null!;
-    private IContainer _runner = null!;
+    private static IContainer _runner = null!;
     private static IContainer _coreApi = null!;
     private static readonly List<HttpClient> HttpClients = [];
 
     public static IMessageBusClient MessageBusClient { get; private set; } = null!;
     public static string CoreBaseAddress { get; private set; } = null!;
+
+    /// <summary>The test network — signing fixtures attach their package server to it.</summary>
+    internal static INetwork Network => _network;
+
+    /// <summary>
+    /// The runner's combined log so far — the observable for runner-INTERNAL steps that have no
+    /// client-visible surface (e.g. the package-extracted line between signature verification
+    /// and container launch in <c>SigningRoundtripSystemTests</c>).
+    /// </summary>
+    internal static async Task<string> GetRunnerLogAsync(CancellationToken ct = default)
+    {
+        var (stdout, stderr) = await _runner.GetLogsAsync(ct: ct);
+        return stdout + '\n' + stderr;
+    }
+
+    /// <summary>
+    /// A publisher keypair the Core is configured to TRUST (CoreApi:TrustedPublisherKeys):
+    /// packages signed with it activate immediately. Owned by the environment, per-session.
+    /// </summary>
+    internal static RSA TrustedPublisherRsa { get; private set; } = null!;
+    internal static string TrustedPublisherKeyBase64 { get; private set; } = null!;
+
+    /// <summary>The platform signing key (CoreApi:SigningKeyPemFile) — approvals re-sign with it.</summary>
+    internal static string PlatformPublicKeyBase64 { get; private set; } = null!;
 
     /// <summary>
     /// The run context every dummy-image dispatch needs: the image hosts several workflows and
@@ -87,6 +114,18 @@ public class CoreClientEnvironment
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
     {
+        // Signing material for the package-trust roundtrip (SigningRoundtripSystemTests): a
+        // trusted publisher key handed to the Core as configuration, and a platform signing
+        // key whose PEM is mapped into the Core.Api container.
+        TrustedPublisherRsa = RSA.Create(2048);
+        TrustedPublisherKeyBase64 = Convert.ToBase64String(TrustedPublisherRsa.ExportSubjectPublicKeyInfo());
+        string platformSigningPem;
+        using (var platformKey = RSA.Create(2048))
+        {
+            platformSigningPem = platformKey.ExportRSAPrivateKeyPem();
+            PlatformPublicKeyBase64 = Convert.ToBase64String(platformKey.ExportSubjectPublicKeyInfo());
+        }
+
         await Task.WhenAll(
             TestImages.BuildImageAsync(CoreApiDispatch.CoreApiDispatchEnvironment.RunnerImageName,
                 "Source/Platform/Auxilia.Core.Runner/Dockerfile"),
@@ -114,6 +153,10 @@ public class CoreClientEnvironment
             .WithEnvironment("RabbitMq__Password", "guest")
             .WithEnvironment("WorkflowDispatcher__CoreApiBaseAddress", $"http://{CoreApiAlias}:8080")
             .WithEnvironment("WorkflowLauncher__NetworkName", NetworkName)
+            // Zip-package launches bind-mount into this image; the dummy image is already built
+            // locally, so a launch never stalls on a registry pull (SigningRoundtripSystemTests).
+            .WithEnvironment("WorkflowLauncher__RuntimeImage",
+                CoreApiDispatch.CoreApiDispatchEnvironment.DummyWorkflowsImageName)
             .WithEnvironment("WorkflowLauncher__RabbitMqHost", RabbitMqAlias)
             .WithEnvironment("WorkflowLauncher__RabbitMqPort", "5672")
             .WithEnvironment("WorkflowLauncher__RabbitMqUserName", "guest")
@@ -147,6 +190,14 @@ public class CoreClientEnvironment
             .WithEnvironment("CoreApi__StaticWorkflowTypes__1__PackageUri", DummyPackageUri)
             .WithEnvironment("CoreApi__StaticWorkflowTypes__2__WorkflowType", EchoDecisionWorkflowType)
             .WithEnvironment("CoreApi__StaticWorkflowTypes__2__PackageUri", DummyPackageUri)
+            // The package-trust roundtrip: a trusted publisher key (auto-Active uploads), the
+            // platform signing key (approve-time re-sign), and the network-internal base address
+            // core:// package URIs resolve to — the RUNNER must be able to reach it.
+            .WithEnvironment("CoreApi__TrustedPublisherKeys__0", TrustedPublisherKeyBase64)
+            .WithEnvironment("CoreApi__SigningKeyPemFile", "/core-keys/platform-signing.pem")
+            .WithResourceMapping(
+                System.Text.Encoding.UTF8.GetBytes(platformSigningPem), "/core-keys/platform-signing.pem")
+            .WithEnvironment("CoreApi__PublicBaseAddress", CoreApiInternalBaseAddress)
             // An EXPLICIT free host port, not a random published one: Docker reassigns random
             // ports on container restart, and RestartCoreApiAsync must come back on the SAME
             // address for the client's internal reconnect to find it.
@@ -197,6 +248,7 @@ public class CoreClientEnvironment
 
         foreach (var http in HttpClients) http.Dispose();
         HttpClients.Clear();
+        TrustedPublisherRsa?.Dispose();
         if (MessageBusClient is IAsyncDisposable d) await d.DisposeAsync();
         if (_coreApi is not null) await _coreApi.DisposeAsync();
         if (_runner is not null) await _runner.DisposeAsync();

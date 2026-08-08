@@ -34,14 +34,16 @@ public static class WorkflowClientExtensions
         services.TryAddSingleton<WorkflowAuthoring>();
         services.TryAddSingleton<ScheduledTriggerEngine>();
         services.TryAddSingleton<ArtifactChainingEngine>();
+        services.TryAddSingleton<EventTriggerEngine>();
         return services;
     }
 
-    /// <summary>Runs both trigger engines as hosted services (server hosts).</summary>
+    /// <summary>Runs the trigger engines as hosted services (server hosts).</summary>
     public static IServiceCollection AddWorkflowClientHosting(this IServiceCollection services)
     {
         services.AddHostedService(sp => sp.GetRequiredService<ScheduledTriggerEngine>());
         services.AddHostedService(sp => sp.GetRequiredService<ArtifactChainingEngine>());
+        services.AddHostedService(sp => sp.GetRequiredService<EventTriggerEngine>());
         return services;
     }
 }

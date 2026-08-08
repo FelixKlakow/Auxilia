@@ -34,23 +34,95 @@
   artifact (`{"decision":"approve|deny","reason":…}`). Everything inconclusive (unconfigured,
   run failed, timeout, no/bad verdict) DEFERS to the human signing authority. The safety-check
   WORKFLOW itself (the AI review over the package) is authored like any other workflow —
-  nothing Core-side remains. Note: a `core://`-stored pending package is not yet fetchable by
-  the verdict run (no download authorization path); https/docker coordinates work today.
+  nothing Core-side remains. ~~Note: a `core://`-stored pending package is not yet fetchable by
+  the verdict run (no download authorization path); https/docker coordinates work today.~~
+  DONE 2026-08-08: the handler mints a scoped download token
+  (`PendingPackageDownloadTokenService`, HMAC, bound to the one pending type, valid for the
+  evaluation window) and passes `approval-package-download-url` into the verdict run's context;
+  the package endpoint honors it only while the type is still Pending.
 - **Session terminal remainders** — ~~a console-mode Docker system test (stub CLI under tmux)~~
   DONE 2026-08-07: `EndToEnd/ConsoleSessionTerminalSystemTests` drives the whole loop on real
   Docker — console-mode dispatch (dwelling stub under tmux+ttyd,
   `WorkflowLauncher__TerminalPublishMode=container-network`), `HasTerminal` during the session,
   401 ticketless, ticket mint + proxied ttyd page + path-scoped cookie, run Success, and a
-  400 on post-terminal ticket minting. Remaining (found by that test): **first-dispatch schema
+  400 on post-terminal ticket minting. ~~Remaining (found by that test): **first-dispatch schema
   gap** — the runner's terminal decision reads the schema a workflow instance self-registers at
   startup, so the FIRST run of a freshly registered type on a fresh runner silently loses its
   terminal (statically registered types carry no schema Core-side either). The test warms the
   store with one headless run; the product fix is propagating the registry's inspected schema
-  to runners at registration/approval time instead of first-run.
+  to runners at registration/approval time instead of first-run.~~ DONE 2026-08-08 (dispatch-time
+  propagation — covers runners that boot after registration, which a registration-time fanout
+  cannot): `RunWorkflowCommand.SchemaJson` carries the registry's inspected schema; the runner's
+  dispatcher reads its store first and falls back to the command seed (persisting it), so the
+  first dispatch decides terminal/network/repository questions from the registry schema.
+  Unit-tested on both sides (`WorkflowDispatcherSchemaSeedTests`, `RunServiceTests`).
   ~~AdminConsole terminal surface~~ — DONE 2026-08-05: RunDetail shows "Open terminal" for a
   live terminal-hosting run (`RunStatus.HasTerminal`), mints the short-lived ticket via
   `OpenTerminalAsync`, and opens the Core's ticketed proxy URL in a new tab — the browser
   only ever talks to the Core.
+
+## Platform events + event triggers — delivered 2026-08-08, open remainders
+Delivered (ARCHITECTURE §6 "Platform events", workflow-sdk-design "Platform events"): the
+`workflow.events` topic exchange + `WorkflowEventMessage`; SDK `DeclaresEvent`/`IEventPublisher`
+(reserved `run.` prefix, 64 KB payload cap); Core mirror (`CoreEventRecord`,
+`EventTrackingService` + retention sweep), filtered `GET /api/events(/stream)` gated
+`event.consume`, `RunLifecycleEventPublisher` (terminal states → `run.*` events, deterministic
+ids); `ICoreClient.QueryEventsAsync`/`StreamEventsAsync`; `EventTriggerDefinition` +
+`EventTriggerEngine` in `Auxilia.Workflows.Client` (hosted by TriggerHost automatically).
+System tests DELIVERED same day: `Messaging/MessageBusTopicRoutingSystemTests` proves the
+per-type `workflow.events` bindings on real RabbitMQ (incl. wildcard-neutralized type names
+never widening a binding); `CoreClientSurface/EventSurfaceSystemTests` drives the full loop
+against the real Dockerized Core — SDK publisher → topic routing → mirror/filtered SSE →
+`EventTriggerEngine` → follow-up run in a real container → its `run.succeeded` lifecycle event
+(deterministic id, exactly one).
+Open:
+- ~~`run.*` spoof-hardening~~ — DONE 2026-08-08: both ingest paths (`EventTrackingService`,
+  `EventStreamPublisher`) drop reserved-prefix events whose id is not the platform's
+  deterministic (run, type) id (`RunLifecycleEventPublisher.IsAuthentic`). Residual risk: a
+  spoofer computing the deterministic id for a run that never reached that state can still
+  plant one false event — full proofing needs per-container bus credentials (bigger program).
+- ~~Run-lifecycle events carry no `WorkItemId`~~ — DONE 2026-08-08: `RunLifecycleEventPublisher`
+  enriches each `run.*` event best-effort from the Core's own run record (dispatch context key
+  `WorkItemId` in the stored `DispatchCommandJson`, addressable by instance OR command id);
+  anything missing/malformed yields empty and never fails the translation, and the
+  deterministic event id is untouched (re-delivery may enrich differently — the mirror upsert
+  stays idempotent).
+- ~~MCP parity~~ — DONE 2026-08-08: `query_events` MCP tool (gated `event.consume`; type /
+  work-item / source-run filters, newest first).
+- ~~AdminConsole event browse UI~~ — DONE 2026-08-08: `/events` page (filterable table with
+  platform-chipped `run.*` rows, expandable payloads, source-run links, follow-live over the
+  filtered SSE stream; nav gated `event.consume`) + a RunDetail events strip
+  (`SourceRunId == run`, refreshed after terminal). Verified live against the dev stack.
+  **Trigger administration is deliberately NOT in the console**: trigger definitions are
+  host-side (`ITriggerStore`), the Core stays semantics-blind and stores none — an admin UI
+  would first need a TriggerHost REST surface (undecided).
+
+## Governance + signing follow-ups (2026-08-08 console review)
+- ~~Environment rights~~ — DONE 2026-08-08: `EnvironmentLayerRecord.GrantsJson` +
+  `PUT /api/environment-layers/{type}/grants` (gated `provider-catalog.manage`,
+  `ICoreClient.SetEnvironmentLayerGrantsAsync`); empty grants = open, non-empty enforced at
+  dispatch when the layer is bound (403 via `RunAccessDeniedException`); upserts preserve
+  grants. Component-tested (`ResourceGrantsTests`). AdminConsole grant-editing UI still open.
+- ~~Workflow-type rights~~ — RESOLVED 2026-08-08: the mechanism ALREADY existed — the Policy
+  Engine's per-(type, action) EXCLUSIVE access list (`WorkflowTypeAccessStore`, governance-rbac
+  design), enforced at every dispatch — it was just administrable via MCP only. Now exposed
+  over REST (`GET/POST /api/workflow-types/{type}/access[.../grant|/revoke]`, gated
+  `policy.administer`) and `ICoreClient`
+  (`ListWorkflowTypeAccessAsync`/`Grant…`/`RevokeWorkflowTypeAccessAsync`), component-tested
+  incl. exclusive dispatch enforcement (`ResourceGrantsTests`). No second grant mechanism was
+  added. AdminConsole access-editing UI still open.
+- **Signed-package roundtrip SYSTEM test**: DONE —
+  `CoreClientSurface/SigningRoundtripSystemTests` drives the loop over the real Dockerized
+  Core: trusted-key upload → auto-Active → dispatch (runner token-downloads the `core://`
+  package and passes verification), untrusted upload → Pending → approve → platform re-sign
+  (re-signed package verifies at dispatch), tampered upload refused, and an externally hosted
+  package swapped post-registration fails its run at the runner's signature verification.
+  (Executing a zip payload stays uncovered: the containerized runner's extraction path is not
+  daemon-resolvable — see the fixture doc.)
+- **Docker packages: pin the digest at approval.** A `docker://` image has no verifiable
+  package signature, so trust is the approval act — but the approved TAG is mutable: it can be
+  repointed after approval and the runner would run different code under the approved name.
+  Resolve the tag to `docker://image@sha256:…` at approval time and dispatch by digest.
 
 ## Hardening wave 2026-08-04 — dispatch truth, container re-adoption, stream/UI resilience
 Delivered (see ARCHITECTURE §6/§14.2/§15): dispatch-time `Dispatched` run record + claim-timeout

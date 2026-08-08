@@ -20,6 +20,9 @@ public sealed record WorkflowSchema(
     /// <summary>Trigger kinds this workflow is designed to be started by (see <see cref="TriggerDeclaration"/>).</summary>
     public IReadOnlyList<TriggerDeclaration> Triggers { get; init; } = [];
 
+    /// <summary>Event types this workflow publishes (see <see cref="Events.EventDescriptor"/>).</summary>
+    public IReadOnlyList<Events.EventDescriptor> Events { get; init; } = [];
+
     /// <summary>
     /// The run inputs this workflow reads from its dispatch context (see
     /// <see cref="WorkflowInputDescriptor"/>). Declaring none means runs start without input.
@@ -59,13 +62,16 @@ public sealed record InteractiveTerminalGate(string InputName, string EnabledVal
 /// A trigger kind a workflow declares it is driven by. The trigger itself lives OUTSIDE the
 /// workflow (wired per configuration); the declaration tells configurators what to wire.
 /// A workflow can only be triggered in ways it declares here.
-/// Kinds: <see cref="Mailbox"/>, <see cref="Schedule"/>, <see cref="Artifact"/>, <see cref="Manual"/>.
+/// Kinds: <see cref="Mailbox"/>, <see cref="Schedule"/>, <see cref="Artifact"/>, <see cref="Event"/>, <see cref="Manual"/>.
 /// </summary>
 public sealed record TriggerDeclaration(string Kind, string? Description = null)
 {
     public const string Mailbox = "mailbox";
     public const string Schedule = "schedule";
     public const string Artifact = "artifact";
+
+    /// <summary>Started when a named platform event fires (see <see cref="Events.EventDescriptor"/>).</summary>
+    public const string Event = "event";
 
     /// <summary>Started by a person from the dashboard with an instruction; needs no wiring.</summary>
     public const string Manual = "manual";

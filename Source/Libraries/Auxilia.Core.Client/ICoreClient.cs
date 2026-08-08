@@ -92,6 +92,21 @@ public interface ICoreClient
     IAsyncEnumerable<ClientStreamFrame<ArtifactStreamEvent>> StreamArtifactEventsAsync(
         string? artifactType = null, string? workItemId = null, CancellationToken ct = default);
 
+    // --- Events ---
+    /// <summary>Queries mirrored platform events (newest first); requires the event.consume permission.</summary>
+    Task<PagedResult<EventDto>> QueryEventsAsync(EventQuery query, CancellationToken ct = default);
+    /// <summary>
+    /// Platform events over Server-Sent Events, SERVER-SIDE FILTERED by event type and/or work
+    /// item — the client-surface way to trigger on events (no message-bus access required).
+    /// RESILIENT: reconnects internally and yields connection frames (see
+    /// <see cref="StreamRunAsync"/>); events published during a disconnect window are NOT
+    /// replayed — catch up via <see cref="QueryEventsAsync"/> with
+    /// <see cref="EventQuery.CreatedAfterUtc"/> on the reconnected frame. Runs until
+    /// <paramref name="ct"/> is cancelled.
+    /// </summary>
+    IAsyncEnumerable<ClientStreamFrame<EventStreamEvent>> StreamEventsAsync(
+        string? eventType = null, string? workItemId = null, CancellationToken ct = default);
+
     // --- Audit ---
     /// <summary>Queries the Core's centralized audit log (newest first); requires the audit-read permission.</summary>
     Task<PagedResult<AuditEntry>> QueryAuditAsync(AuditQuery query, CancellationToken ct = default);
@@ -123,6 +138,12 @@ public interface ICoreClient
     Task<EnvironmentLayerDto?> GetEnvironmentLayerAsync(string providerType, CancellationToken ct = default);
     /// <summary>Creates or updates a layer AND its (available) catalog entry.</summary>
     Task<EnvironmentLayerDto> UpsertEnvironmentLayerAsync(UpsertEnvironmentLayer request, CancellationToken ct = default);
+    /// <summary>Replaces who may bind the layer into a run; empty grants = everyone (dispatch-enforced).</summary>
+    Task<EnvironmentLayerDto> SetEnvironmentLayerGrantsAsync(
+        string providerType, SetEnvironmentLayerGrants request, CancellationToken ct = default);
+    /// <summary>Replaces who may bind a slot provider into a run; empty grants = everyone (dispatch-enforced).</summary>
+    Task<ProviderCatalogEntry> SetProviderGrantsAsync(
+        string providerType, SetProviderGrants request, CancellationToken ct = default);
     Task DeleteEnvironmentLayerAsync(string providerType, CancellationToken ct = default);
 
     // --- Repositories (first-class workspace resources; settings non-secret, credential = connector ref) ---
@@ -158,6 +179,19 @@ public interface ICoreClient
     Task UnregisterWorkflowTypeAsync(string workflowType, CancellationToken ct = default);
     /// <summary>Operational on/off switch: a disabled type stops dispatching until re-enabled.</summary>
     Task<WorkflowTypeRegistrationDto> SetWorkflowTypeEnabledAsync(string workflowType, bool enabled, CancellationToken ct = default);
+    /// <summary>
+    /// The type's Policy-Engine access list. The FIRST entry for an action makes the list the
+    /// EXCLUSIVE grant source for that (type, action) — no entries = role permissions decide.
+    /// All three access members require policy.administer.
+    /// </summary>
+    Task<IReadOnlyList<WorkflowTypeAccessEntryDto>> ListWorkflowTypeAccessAsync(
+        string workflowType, CancellationToken ct = default);
+    /// <summary>Adds one access-list entry (exactly one subject: role, principal, or group).</summary>
+    Task GrantWorkflowTypeAccessAsync(
+        string workflowType, WorkflowTypeAccessChange request, CancellationToken ct = default);
+    /// <summary>Removes one access-list entry (same subject addressing as the grant).</summary>
+    Task RevokeWorkflowTypeAccessAsync(
+        string workflowType, WorkflowTypeAccessChange request, CancellationToken ct = default);
     /// <summary>Signing authority: accepts a pending registration; the type becomes Active.</summary>
     Task<WorkflowTypeRegistrationDto> ApproveWorkflowTypeAsync(string workflowType, CancellationToken ct = default);
     /// <summary>Signing authority: refuses a registration with a recorded reason.</summary>

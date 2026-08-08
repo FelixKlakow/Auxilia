@@ -158,6 +158,21 @@ public sealed class ProviderCatalogService(
             .ToList();
     }
 
+    /// <summary>
+    /// Replaces who may bind the entry into a run (slot providers and environment layers
+    /// alike). Empty grants = everyone; non-empty grants are enforced at dispatch. Audited.
+    /// </summary>
+    public async Task<ProviderCatalogEntry> SetGrantsAsync(
+        string actor, string providerType, IReadOnlyList<AccessGrant> grants, CancellationToken ct)
+    {
+        var (provider, curation) = await RequireProviderAsync(providerType, ct);
+        var updated = curation with { GrantsJson = JsonSerializer.Serialize(grants) };
+        await catalog.SaveAsync(updated, ct);
+        await auditLog.AppendAsync(actor, "provider-catalog.grants-changed",
+            providerType, grants.Count == 0 ? "open" : $"{grants.Count} grant(s)", ct: ct);
+        return ToEntry(provider, updated);
+    }
+
     /// <summary>The provider's data-driven model-listing spec, or null when it declares none.</summary>
     public async Task<ProviderModelCatalog?> GetModelCatalogAsync(string providerType, CancellationToken ct)
         => await providers.ReadAsync(SlotProviderRecord.IdFor(providerType), ct) is
@@ -217,7 +232,10 @@ public sealed class ProviderCatalogService(
                 ? JsonSerializer.Deserialize<ProviderOAuthRefresh>(refreshJson)
                 : null,
             provider.EnvironmentBase,
-            provider.EnvironmentBaseVersion);
+            provider.EnvironmentBaseVersion)
+        {
+            Grants = AccessGrantEvaluator.Parse(curation.GrantsJson)
+        };
     }
 
     private static IReadOnlyList<string> ParseContracts(string? json)

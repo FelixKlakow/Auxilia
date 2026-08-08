@@ -32,11 +32,19 @@ public sealed class EnvironmentLayerService(
     public const string Category = "environment";
 
     public async Task<IReadOnlyList<EnvironmentLayerDto>> ListAsync(string? search, CancellationToken ct)
-        => (await layers.ReadAsync(ct))
+    {
+        var matched = (await layers.ReadAsync(ct))
             .Where(l => Matches(l, search))
             .OrderBy(l => l.ProviderType, StringComparer.Ordinal)
-            .Select(ToDto)
             .ToList();
+        var dtos = new List<EnvironmentLayerDto>(matched.Count);
+        foreach (var record in matched)
+            dtos.Add(await WithGrantsAsync(record, ct));
+        return dtos;
+    }
+
+    private async Task<EnvironmentLayerDto> WithGrantsAsync(EnvironmentLayerRecord record, CancellationToken ct)
+        => ToDto(record) with { Grants = (await catalog.FindAsync(record.ProviderType, ct))?.Grants ?? [] };
 
     private static bool Matches(EnvironmentLayerRecord record, string? search)
         => string.IsNullOrWhiteSpace(search)
@@ -51,7 +59,7 @@ public sealed class EnvironmentLayerService(
 
     public async Task<EnvironmentLayerDto?> FindAsync(string providerType, CancellationToken ct)
         => await layers.ReadAsync(EnvironmentLayerRecord.IdFor(providerType), ct) is { } record
-            ? ToDto(record)
+            ? await WithGrantsAsync(record, ct)
             : null;
 
     /// <summary>
@@ -161,6 +169,20 @@ public sealed class EnvironmentLayerService(
         await catalog.DeleteAsync(actorName, providerType, ct);
         await auditLog.AppendAsync(actorName, "environment-layer.deleted", providerType, "deleted", ct: ct);
         return true;
+    }
+
+    /// <summary>
+    /// Replaces who may bind the layer into a run — stored on the layer's CATALOG entry, the one
+    /// grant mechanism shared with slot providers (enforced at dispatch). Null when unmanaged.
+    /// </summary>
+    public async Task<EnvironmentLayerDto?> SetGrantsAsync(
+        Guid? actor, string providerType, IReadOnlyList<AccessGrant> grants, CancellationToken ct)
+    {
+        var record = await layers.ReadAsync(EnvironmentLayerRecord.IdFor(providerType), ct);
+        if (record is null)
+            return null;
+        var entry = await catalog.SetGrantsAsync(actor?.ToString("D") ?? "core-api", providerType, grants, ct);
+        return ToDto(record) with { Grants = entry.Grants };
     }
 
     private static EnvironmentLayerDto ToDto(EnvironmentLayerRecord record)

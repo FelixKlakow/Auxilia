@@ -9,7 +9,10 @@ Triggers fire only while some host embedding this library runs.
 - **Pure Core client.** Talks to the Core exclusively through `ICoreClient` — never the
   message bus, never a Core database. Artifact chaining consumes the Core's
   **server-side-filtered artifact SSE stream** (`StreamArtifactEventsAsync`), one consumer per
-  distinct artifact type — the library must never receive the global artifact feed.
+  distinct artifact type — the library must never receive the global artifact feed. Event
+  triggers ride the analogous **filtered event SSE stream** (`StreamEventsAsync`) under the
+  same one-consumer-per-type rule; the `run.*` types are the platform's reserved run-lifecycle
+  vocabulary.
 - **The Core registry is the only workflow-type catalog.** `WorkflowAuthoring` validates
   against `GetWorkflowSchemaAsync`; there is no library-side type store (the Studio's private
   catalog died with it). Client-side validation is the fast path — the Core re-validates on
@@ -19,12 +22,15 @@ Triggers fire only while some host embedding this library runs.
 - **Every dispatch goes through the Core Run API** on behalf of the trigger's run-as
   principal, passing the same policy checks as a manual run. One failing trigger is logged
   and skipped; engines never die from a single bad dispatch.
-- **Stream reconnect lives in `Auxilia.Core.Client`**, not here — the engine consumes the
-  resilient frame stream and adds what only it can: on every reconnect it CATCHES UP via
-  `QueryArtifactsAsync(CreatedAfterUtc: lastSeen)` (events during the gap are not replayed by
-  the stream) and dedupes catch-up/live overlap by artifact id (bounded memory). Adding a
-  trigger for a NEW artifact type needs `RefreshAsync` to open its filtered stream; edits to
-  existing triggers apply per event without a restart.
+- **Stream reconnect lives in `Auxilia.Core.Client`**, not here — the engines consume the
+  resilient frame stream and add what only they can: on every reconnect they CATCH UP via
+  the matching query (`QueryArtifactsAsync`/`QueryEventsAsync` with `CreatedAfterUtc:
+  lastSeen`; gap events are not replayed by the stream) and dedupe catch-up/live overlap by
+  id (bounded memory). Adding a trigger for a NEW artifact/event type needs `RefreshAsync` to
+  open its filtered stream; edits to existing triggers apply per event without a restart.
+- **ITriggerStore is a breaking surface by design:** a new trigger kind adds per-kind members
+  (get/save/delete); external store implementations break loudly at compile time instead of a
+  feature silently no-opping.
 
 ## Integrating
 ```csharp
@@ -43,8 +49,9 @@ Source/Libraries/Auxilia.Workflows.Client/
 ├── Authoring/
 │   └── WorkflowAuthoring.cs        # Schema-validated configure (+ ConfigureAndRunAsync)
 └── Triggers/
-    ├── TriggerDefinitions.cs       # ScheduledTriggerDefinition / ArtifactTriggerDefinition
+    ├── TriggerDefinitions.cs       # Scheduled- / Artifact- / EventTriggerDefinition
     ├── ITriggerStore.cs            # Host-pluggable persistence + InMemoryTriggerStore
     ├── ScheduledTriggerEngine.cs   # Interval sweep (hosted or manual TickAsync)
-    └── ArtifactChainingEngine.cs   # Filtered artifact-SSE consumers -> follow-up dispatches
+    ├── ArtifactChainingEngine.cs   # Filtered artifact-SSE consumers -> follow-up dispatches
+    └── EventTriggerEngine.cs       # Filtered event-SSE consumers -> follow-up dispatches
 ```

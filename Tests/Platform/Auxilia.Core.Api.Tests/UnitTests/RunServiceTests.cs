@@ -75,7 +75,10 @@ public sealed class RunServiceTests
             TimeProvider.System);
         var service = new RunService(
             bus, configs, registry, new WorkflowSchemaReadService(typeStore),
-            providerCatalog, resolver, accessPolicy, connectors, repositories, liveness,
+            providerCatalog, resolver, accessPolicy, connectors, repositories,
+            new AccessGrantEvaluator(
+                new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>()),
+            liveness,
             _runs = new InMemoryDataAccess<CoreRunRecord>(),
             new Auxilia.Workflows.Messaging.WorkflowStatusPublisher(bus, TimeProvider.System),
             TimeProvider.System,
@@ -117,6 +120,37 @@ public sealed class RunServiceTests
             "The Core is the auth authority and dispatches with RequestedBy=null.");
         Assert.That(command.ResolutionToken, Is.Not.Null.And.Not.Empty,
             "Every dispatch mints a run-scoped resolution token for JIT credential resolution.");
+    }
+
+    [Test]
+    public async Task RunInline_CarriesTheRegistrySchemaOnTheCommand()
+    {
+        var (service, bus, _, registry, _) = New();
+        var schemaJson = NarrowedSchemaJson();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img", schemaJson);
+
+        await service.RunInlineAsync(
+            new RunRequest("wt", new Dictionary<string, string>()),
+            triggeredBy: null, CancellationToken.None);
+
+        var command = bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>().Single();
+        Assert.That(command.SchemaJson, Is.EqualTo(schemaJson),
+            "the registry's inspected schema must ride the dispatch so a fresh runner's "
+            + "first run of the type already decides terminal/network/repository questions from it");
+    }
+
+    [Test]
+    public async Task RunInline_WithoutARegistrySchema_DispatchesANullSchema()
+    {
+        var (service, bus, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+
+        await service.RunInlineAsync(
+            new RunRequest("wt", new Dictionary<string, string>()),
+            triggeredBy: null, CancellationToken.None);
+
+        var command = bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>().Single();
+        Assert.That(command.SchemaJson, Is.Null);
     }
 
     [Test]

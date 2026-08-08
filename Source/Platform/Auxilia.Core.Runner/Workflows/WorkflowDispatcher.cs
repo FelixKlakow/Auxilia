@@ -299,7 +299,12 @@ public sealed class WorkflowDispatcher(
 
         // Effective network policy (ARCHITECTURE §10): manifest baseline (last stored schema)
         // merged with run-configuration extras, clamped by platform policy, audited per run.
-        var schema = await schemaStore.GetSchemaAsync(workflowType, ct);
+        // A runner that has never run this type has no stored schema yet — the command carries
+        // the registry's inspected schema as the cold-start seed, so the FIRST dispatch already
+        // decides terminal/network/repository questions correctly (backlog: first-dispatch
+        // schema gap). A run's own registration keeps refreshing the store afterwards.
+        var schema = await schemaStore.GetSchemaAsync(workflowType, ct)
+                     ?? await SeedSchemaFromCommandAsync(workflowType, command.SchemaJson, ct);
         var networkPolicy = networkPolicyResolver.Resolve(
             schema?.NetworkEndpoints ?? [], command.Context, dispatcherSettings.Value);
         await auditLog.AppendAsync(
@@ -500,31 +505,78 @@ public sealed class WorkflowDispatcher(
 
         // 3. Extract to a temp directory
         var extractedPath = Path.Combine(Path.GetTempPath(), $"auxilia-wf-{Guid.NewGuid()}");
-        Directory.CreateDirectory(extractedPath);
-        using var archive = new ZipArchive(new MemoryStream(packageBytes), ZipArchiveMode.Read);
-        archive.ExtractToDirectory(extractedPath);
-
-        logger.LogInformation(
-            "Workflow package extracted. WorkflowType={WorkflowType} Path={Path}",
-            workflowType, extractedPath);
-
-        // 4. Register for the announcement handler
-        pendingPackages.Store(workflowType, extractedPath);
-
-        // 6. Launch
-        var launchResult = await launcher.LaunchAsync(new WorkflowLaunchRequest(extractedPath, env, pluginFiles)
+        WorkflowLaunchResult launchResult;
+        try
         {
-            OutputDirectoryBind = outputDirectoryBind,
-            NetworkPolicy = networkPolicy,
-            WorkspaceDirectoryBind = workspaceRoot,
-            PublishTerminalPort = terminalPort,
-            TerminalContainerName = terminalContainerName,
-            OnExited = onContainerExited,
-            InstanceId = instanceId,
-            OnContainerCreated = onContainerCreated
-        }, ct);
+            Directory.CreateDirectory(extractedPath);
+            using var archive = new ZipArchive(new MemoryStream(packageBytes), ZipArchiveMode.Read);
+            archive.ExtractToDirectory(extractedPath);
+
+            logger.LogInformation(
+                "Workflow package extracted. WorkflowType={WorkflowType} Path={Path}",
+                workflowType, extractedPath);
+
+            // 4. Register for the announcement handler
+            pendingPackages.Store(workflowType, extractedPath);
+
+            // 6. Launch
+            launchResult = await launcher.LaunchAsync(new WorkflowLaunchRequest(extractedPath, env, pluginFiles)
+            {
+                OutputDirectoryBind = outputDirectoryBind,
+                NetworkPolicy = networkPolicy,
+                WorkspaceDirectoryBind = workspaceRoot,
+                PublishTerminalPort = terminalPort,
+                TerminalContainerName = terminalContainerName,
+                OnExited = onContainerExited,
+                InstanceId = instanceId,
+                OnContainerCreated = onContainerCreated
+            }, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Same guard as the docker:// branch: a corrupt archive or a launch that never
+            // started a container must FAIL the run visibly — never leave it stranded in
+            // Received with the exception swallowed by the bus handler.
+            logger.LogError(ex,
+                "Workflow package launch failed pre-start. CommandId={CommandId} WorkflowType={WorkflowType}",
+                command.CommandId, workflowType);
+            await FailPreFlightAsync(instanceId, workflowType, $"launch failed: {ex.Message}", ct);
+            return;
+        }
         await StampTerminalEndpointAsync(instanceId, launchResult, ct);
         await MarkQueuedAsync(instanceId, workflowType, packageUri, launchResult.TerminalEndpoint, ct);
+    }
+
+    /// <summary>
+    /// Persists the command-carried registry schema as this type's stored schema and returns it.
+    /// Registry schemas come from two writers (runner announcements = PascalCase, packer-produced
+    /// packages = camelCase), so the read is case-insensitive. A malformed payload never fails
+    /// the dispatch — the run just launches schema-less, exactly like before the seed existed.
+    /// </summary>
+    private async Task<Auxilia.Workflows.WorkflowSchema?> SeedSchemaFromCommandAsync(
+        string workflowType, string? schemaJson, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(schemaJson))
+            return null;
+        try
+        {
+            var schema = JsonSerializer.Deserialize<Auxilia.Workflows.WorkflowSchema>(
+                schemaJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (schema is null)
+                return null;
+            await schemaStore.SetSchemaAsync(workflowType, schema, ct);
+            logger.LogInformation(
+                "Seeded the schema of {WorkflowType} from the dispatch command (first run on this runner).",
+                workflowType);
+            return schema;
+        }
+        catch (JsonException ex)
+        {
+            logger.LogWarning(ex,
+                "The dispatch command's schema for {WorkflowType} is not deserializable — launching without one.",
+                workflowType);
+            return null;
+        }
     }
 
     /// <summary>The dashboard proxies this endpoint — authenticated — to the run's owner.</summary>

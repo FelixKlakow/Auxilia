@@ -35,6 +35,7 @@ Source/Libraries/Auxilia.Workflows/
 ├── Capabilities/                              # ICapability marker + NoCapabilities sentinel
 ├── Crypto/                                    # EphemeralKeyPair (RSA-4096) + SlotConfigurationCrypto (decrypt helper)
 ├── Environment/                               # IEnvironmentRequirement + Tool / Os / Port requirement records
+├── Events/                                    # DeclaresEvent descriptors + IEventPublisher/DefaultEventPublisher (workflow.events topic exchange; run.* prefix reserved for the platform; payload cap — big data goes to the artifact store)
 ├── Internal/EnvironmentBuilder.cs             # internal impl of IEnvironmentBuilder
 └── Messaging/Messages/                        # Registration request, config response, encrypted slot config records
 ```

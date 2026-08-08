@@ -102,6 +102,67 @@ internal sealed class FakeCoreClient : ICoreClient
         return Task.FromResult(new PagedResult<ArtifactDto>(page, filtered.Count, query.Skip, query.Take));
     }
 
+    // --- Event stream: one channel per subscription, keyed so tests can publish ---
+    public sealed record EventStreamSubscription(
+        string? EventType, string? WorkItemId, Channel<EventStreamEvent> Channel);
+
+    public ConcurrentQueue<EventStreamSubscription> EventStreamSubscriptions { get; } = new();
+
+    /// <summary>Publishes to every live event subscription, applying the SERVER-side filter contract.</summary>
+    public void PublishEvent(EventStreamEvent evt)
+    {
+        foreach (var subscription in EventStreamSubscriptions)
+        {
+            if (subscription.EventType is { } type && type != evt.Event.EventType)
+                continue;
+            if (subscription.WorkItemId is { } workItem && workItem != evt.Event.WorkItemId)
+                continue;
+            subscription.Channel.Writer.TryWrite(evt);
+        }
+    }
+
+    /// <summary>Completes every open event stream (as if the Core recycled) — consumers must reconnect.</summary>
+    public void DropAllEventStreams()
+    {
+        while (EventStreamSubscriptions.TryDequeue(out var subscription))
+            subscription.Channel.Writer.TryComplete();
+    }
+
+    /// <summary>Same resilient-client emulation as <see cref="StreamArtifactEventsAsync"/>.</summary>
+    public async IAsyncEnumerable<ClientStreamFrame<EventStreamEvent>> StreamEventsAsync(
+        string? eventType = null, string? workItemId = null,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var attempt = 0;
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            attempt++;
+            var channel = Channel.CreateUnbounded<EventStreamEvent>();
+            EventStreamSubscriptions.Enqueue(new EventStreamSubscription(eventType, workItemId, channel));
+            yield return new StreamConnectionFrame<EventStreamEvent>(StreamConnectionState.Connected, attempt);
+            await foreach (var evt in channel.Reader.ReadAllAsync(ct))
+                yield return new StreamEventFrame<EventStreamEvent>(evt);
+            yield return new StreamConnectionFrame<EventStreamEvent>(
+                StreamConnectionState.Reconnecting, attempt, TimeSpan.Zero);
+        }
+    }
+
+    // --- Event store (the catch-up query surface) ---
+    public List<EventDto> StoredEvents { get; } = [];
+
+    public Task<PagedResult<EventDto>> QueryEventsAsync(EventQuery query, CancellationToken ct = default)
+    {
+        var filtered = StoredEvents
+            .Where(e => query.EventType is null || e.EventType == query.EventType)
+            .Where(e => query.WorkItemId is null || e.WorkItemId == query.WorkItemId)
+            .Where(e => query.CreatedAfterUtc is not { } after || e.CreatedUtc > after)
+            .OrderBy(e => e.CreatedUtc)
+            .ToList();
+        var page = filtered.Skip(query.Skip).Take(query.Take).ToList();
+        return Task.FromResult(new PagedResult<EventDto>(page, filtered.Count, query.Skip, query.Take));
+    }
+
     // --- Authoring surface ---
     public Dictionary<string, WorkflowSchemaDto> Schemas { get; } = new(StringComparer.Ordinal);
     public HashSet<Guid> KnownConnectors { get; } = [];
@@ -163,6 +224,11 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task<IReadOnlyList<EnvironmentLayerDto>> ListEnvironmentLayersAsync(string? search = null, CancellationToken ct = default) => Nope<Task<IReadOnlyList<EnvironmentLayerDto>>>();
     public Task<EnvironmentLayerDto?> GetEnvironmentLayerAsync(string providerType, CancellationToken ct = default) => Nope<Task<EnvironmentLayerDto?>>();
     public Task<EnvironmentLayerDto> UpsertEnvironmentLayerAsync(UpsertEnvironmentLayer request, CancellationToken ct = default) => Nope<Task<EnvironmentLayerDto>>();
+    public Task<EnvironmentLayerDto> SetEnvironmentLayerGrantsAsync(string providerType, SetEnvironmentLayerGrants request, CancellationToken ct = default) => Nope<Task<EnvironmentLayerDto>>();
+    public Task<ProviderCatalogEntry> SetProviderGrantsAsync(string providerType, SetProviderGrants request, CancellationToken ct = default) => Nope<Task<ProviderCatalogEntry>>();
+    public Task<IReadOnlyList<WorkflowTypeAccessEntryDto>> ListWorkflowTypeAccessAsync(string workflowType, CancellationToken ct = default) => Nope<Task<IReadOnlyList<WorkflowTypeAccessEntryDto>>>();
+    public Task GrantWorkflowTypeAccessAsync(string workflowType, WorkflowTypeAccessChange request, CancellationToken ct = default) => Nope<Task>();
+    public Task RevokeWorkflowTypeAccessAsync(string workflowType, WorkflowTypeAccessChange request, CancellationToken ct = default) => Nope<Task>();
     public Task<PagedResult<WorkflowTypeDto>> ListWorkflowTypesAsync(WorkflowTypeQuery query, CancellationToken ct = default) => Nope<Task<PagedResult<WorkflowTypeDto>>>();
     public Task<WorkflowTypeRegistrationDto> RegisterWorkflowTypeAsync(RegisterWorkflowTypeRequest request, CancellationToken ct = default) => Nope<Task<WorkflowTypeRegistrationDto>>();
     public Task<WorkflowTypeRegistrationDto?> GetWorkflowTypeRegistrationAsync(string workflowType, CancellationToken ct = default) => Nope<Task<WorkflowTypeRegistrationDto?>>();

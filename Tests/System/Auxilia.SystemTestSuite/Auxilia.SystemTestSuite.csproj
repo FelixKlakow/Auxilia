@@ -31,6 +31,7 @@
         <ProjectReference Include="..\..\..\Source\Libraries\Auxilia.PlatformData\Auxilia.PlatformData.csproj"/>
         <ProjectReference Include="..\Auxilia.Workflows.Testing\Auxilia.Workflows.Testing.csproj" />
         <ProjectReference Include="..\..\..\Source\Libraries\Auxilia.Workflows\Auxilia.Workflows.csproj" />
+        <ProjectReference Include="..\..\..\Source\Libraries\Auxilia.Workflows.Client\Auxilia.Workflows.Client.csproj" />
         <ProjectReference Include="..\..\..\Source\Libraries\Auxilia.Messaging\Auxilia.Messaging.csproj"/>
         <ProjectReference Include="..\..\..\Source\Libraries\Auxilia.UniversalDataAccess\Auxilia.UniversalDataAccess.csproj"/>
     </ItemGroup>

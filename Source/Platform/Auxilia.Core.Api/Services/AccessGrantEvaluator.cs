@@ -15,6 +15,21 @@ public sealed class AccessGrantEvaluator(
     IDataAccess<PrincipalRecord> principals,
     IDataAccess<GroupMembershipRecord> groupMemberships)
 {
+    /// <summary>The stored grants JSON as a typed list; malformed or empty JSON reads as no grants.</summary>
+    public static IReadOnlyList<AccessGrant> Parse(string? grantsJson)
+    {
+        if (string.IsNullOrWhiteSpace(grantsJson))
+            return [];
+        try
+        {
+            return JsonSerializer.Deserialize<List<AccessGrant>>(grantsJson) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
     public async Task<bool> IsGrantedAsync(string grantsJson, Guid principalId, CancellationToken ct)
     {
         var grants = JsonSerializer.Deserialize<List<AccessGrant>>(grantsJson) ?? [];

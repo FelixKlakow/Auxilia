@@ -25,6 +25,9 @@ Standalone deployable. Drives `Auxilia.Core.Runner` over the message bus; owns i
 - `POST /api/groups`, `GET /api/groups`, `POST /api/groups/{id}/members`, `POST /api/groups/{id}/roles` (all `principal.administer`)
 - `GET/POST /api/identity/group-mappings`, `DELETE /api/identity/group-mappings/{id}` (directory group→role mappings; all `identity-source.manage`)
 - `GET /api/artifacts` (+ `/{id}`, `/{id}/content`, `/stream` SSE) — artifact metadata mirrored from the bus (`ArtifactTrackingService`), payload downloads from the shared payload backend (`ArtifactStore:PayloadRoot` must point where the runner writes), and a SERVER-SIDE-FILTERED artifact-event stream (artifactType/workItemId) so chaining clients never need bus access; all gated `artifact.consume`
+- `GET /api/events` (+ `/{id}`, `/stream` SSE) — platform events mirrored from the `workflow.events` topic exchange (`EventTrackingService`, retention `CoreApi:EventRetentionDays`) with the same SERVER-SIDE-FILTERED stream shape (eventType/workItemId); published by workflows (SDK) and by `RunLifecycleEventPublisher` (terminal run states → reserved `run.*` events with DETERMINISTIC ids, `WorkItemId` enriched best-effort from the run's stored dispatch context so `run.*` triggers can narrow by work item), never via REST; all gated `event.consume`
+- `GET/POST /api/workflow-types/{type}/access[.../grant|/revoke]` (`policy.administer`) — REST twin of the MCP workflow-type access tools over the Policy Engine's `WorkflowTypeAccessStore`: per-(type, action) entries, the FIRST entry makes the list the EXCLUSIVE grant source for that action (enforced at dispatch)
+- `PUT /api/provider-catalog/{type}/grants` and `PUT /api/environment-layers/{type}/grants` (both `provider-catalog.manage`) — who may BIND a catalog entry (slot provider / environment layer): ONE mechanism on the curation record's `GrantsJson`, one dispatch gate (`EnsureMayUseCatalogEntryAsync`, 403 `RunAccessDeniedException`); empty grants = open; upserts preserve grants
 - `GET /auth/login`, `GET /auth/callback` (anonymous — the OIDC sign-in flow), `POST /auth/logout`, `GET /auth/me` (authenticated)
 - `/mcp` (authenticated MCP twin of the above), `GET /health`
 
@@ -38,6 +41,7 @@ Source/Platform/Auxilia.Core.Api/
 │   ├── CoreRunConfigurationRecord.cs  # Stored runnable configuration (workflow type + slot bindings)
 │   ├── CoreConnectorRecord.cs         # Connector; ProtectedSettingsJson (encrypted); Scope/Owner/Grants (L3)
 │   ├── CoreRunRecord.cs               # Run-tracking row, keyed by runner instance id
+│   ├── CoreEventRecord.cs             # Platform-event mirror row, keyed by event id (idempotent upsert)
 │   └── DelegatedUserTokenRecord.cs    # Retained user access token (encrypted, principal-keyed, expiry) for OBO (L4)
 ├── Services/
 │   ├── ConnectorService.cs            # Protect on write; ResolveSettingsAsync (JIT); ToDto returns keys only; owner/scope/grants
@@ -48,7 +52,11 @@ Source/Platform/Auxilia.Core.Api/
 │   ├── RunConfigurationService.cs     # CRUD + EnsureAsync (idempotent static-config seeding)
 │   ├── RunService.cs                  # Dispatch RunWorkflowCommand (RequestedBy=null); gates connectors vs. triggering principal; CancelAsync
 │   ├── RunReadService.cs              # Filterable run queries over CoreRunRecord
-│   └── RunTrackingService.cs          # Hosted; WorkflowStatusEvent -> CoreRunRecord
+│   ├── RunTrackingService.cs          # Hosted; WorkflowStatusEvent -> CoreRunRecord
+│   ├── EventTrackingService.cs        # Hosted; WorkflowEventMessage -> CoreEventRecord + retention sweep
+│   ├── EventStreamBroker.cs           # Filtered event-SSE subscriber registry (eventType/workItemId)
+│   ├── EventStreamPublisher.cs        # Selective workflow.events ingest following the SSE audience
+│   └── RunLifecycleEventPublisher.cs  # Terminal workflow.status -> reserved run.* events (deterministic ids; WorkItemId enriched best-effort from the run's stored dispatch context)
 ├── Auth/
 │   ├── CoreApiKeyAuthenticationHandler.cs # Bearer API key -> IdentityProvider principal
 │   ├── CoreAuthExtensions.cs          # AddCoreAuthentication: API-key + Cookie + optional Entra OIDC; multi-scheme default policy; wires IDirectoryGroupResolver

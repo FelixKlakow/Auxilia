@@ -106,6 +106,20 @@ public interface IWorkflowBuilder
         string name, Views.ViewRendering rendering, Views.ViewLifecycle lifecycle,
         string? rendererKey, object? declaredData);
 
+    /// <summary>
+    /// Declares a payload-less event type this workflow publishes via
+    /// <see cref="Events.IEventPublisher"/>. Event-trigger configurators wire follow-up
+    /// workflows to declared types. Types under the platform-reserved <c>run.</c> prefix
+    /// are refused.
+    /// </summary>
+    IWorkflowBuilder DeclaresEvent(string eventType, string? description = null);
+
+    /// <summary>
+    /// Declares an event type whose payload conforms to <typeparamref name="TPayload"/>
+    /// (its JSON schema is published in the workflow schema).
+    /// </summary>
+    IWorkflowBuilder DeclaresEvent<TPayload>(string eventType, string? description = null);
+
     IWorkflowBuilder ConfigureServices(Action<IServiceCollection> configure);
 
     IWorkflowBuilder WithApplication(Func<IServiceProvider, CancellationToken, Task> run);

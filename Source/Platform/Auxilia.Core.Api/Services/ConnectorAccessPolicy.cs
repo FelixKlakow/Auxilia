@@ -28,9 +28,15 @@ public sealed class ConnectorAccessPolicy(
     }
 }
 
+/// <summary>
+/// Thrown at dispatch when the triggering principal may not use a resource the run references
+/// (a connector, the workflow type itself, an environment layer). Endpoints map it to 403.
+/// </summary>
+public class RunAccessDeniedException(string message) : Exception(message);
+
 /// <summary>Thrown at dispatch when the triggering principal may not use a connector a slot binds.</summary>
 public sealed class ConnectorAccessDeniedException(Guid connectorId)
-    : Exception($"not permitted to use connector '{connectorId:D}'")
+    : RunAccessDeniedException($"not permitted to use connector '{connectorId:D}'")
 {
     public Guid ConnectorId { get; } = connectorId;
 }

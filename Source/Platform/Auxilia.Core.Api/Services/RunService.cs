@@ -22,6 +22,7 @@ public sealed class RunService(
     ConnectorAccessPolicy connectorAccess,
     ConnectorService connectors,
     WorkspaceResourceService workspaceResources,
+    AccessGrantEvaluator grantEvaluator,
     RunnerLivenessTracker runnerLiveness,
     Auxilia.UniversalDataAccess.IDataAccess<Data.CoreRunRecord> runs,
     Auxilia.Workflows.Messaging.WorkflowStatusPublisher statusPublisher,
@@ -103,6 +104,10 @@ public sealed class RunService(
             ResolutionToken = resolutionToken,
             WorkflowPackageUri = packageUri,
             Context = context,
+            // Re-resolve the schema like the package coordinate — the registry may have a
+            // fresher one than the original dispatch carried.
+            SchemaJson = (await workflowTypes.GetRecordAsync(
+                original.WorkflowType ?? run.WorkflowType, ct))?.SchemaJson ?? original.SchemaJson,
         };
         var rerunCommandJson = System.Text.Json.JsonSerializer.Serialize(command);
         await credentialResolver.StashAsync(
@@ -114,6 +119,19 @@ public sealed class RunService(
             "Re-dispatched run. OriginalRunId={OriginalRunId} NewCommandId={CommandId} WorkflowType={WorkflowType}",
             run.Id, commandId, command.WorkflowType);
         return new RunAccepted(commandId, commandId);
+    }
+
+    /// <summary>Catalog-entry access gate: an entry with grants admits only the listed subjects.</summary>
+    private async Task EnsureMayUseCatalogEntryAsync(
+        ProviderCatalogEntry entry, Guid? triggeredBy, CancellationToken ct)
+    {
+        if (entry.Grants.Count == 0)
+            return;
+        if (triggeredBy is not { } principal
+            || !await grantEvaluator.IsGrantedAsync(
+                System.Text.Json.JsonSerializer.Serialize(entry.Grants), principal, ct))
+            throw new RunAccessDeniedException(
+                $"not permitted to use provider '{entry.ProviderType}'");
     }
 
     /// <summary>Requests cancellation of a run; the runner consumes the command and stops the container.</summary>
@@ -182,6 +200,10 @@ public sealed class RunService(
             }
 
             var entry = await ResolveCatalogEntryAsync(binding, ct);
+            // ONE grant gate for every catalog-curated resource a run binds — slot providers,
+            // environment layers, and workspace-mounting providers alike.
+            if (entry is not null)
+                await EnsureMayUseCatalogEntryAsync(entry, triggeredBy, ct);
             // Environment-composing bindings are pure selections: the provider type IS the
             // capability id — no plugin, no credential, interpreted only by the runner.
             if (entry is { ComposesEnvironment: true })
@@ -281,7 +303,11 @@ public sealed class RunService(
             RequestedBy: null, WorkflowConfigurationId: null, ResolutionToken: resolutionToken,
             SlotProviderTypes: providerTypes,
             WorkspaceMounts: mounts.Count > 0 ? mounts : null,
-            EnvironmentCapabilities: environmentCapabilities.Count > 0 ? environmentCapabilities : null);
+            EnvironmentCapabilities: environmentCapabilities.Count > 0 ? environmentCapabilities : null,
+            // The registry's inspected schema rides along so a FRESH runner decides terminal/
+            // network/repository questions from it on the type's very first dispatch — the
+            // runner-side store only fills on a run's own registration, which is too late.
+            SchemaJson: (await workflowTypes.GetRecordAsync(workflowType, ct))?.SchemaJson);
 
         // Stash the resolution context AND the dispatch command itself (keyed by CommandId), so an
         // orphaned run can be re-dispatched once on failover without the Core reading the runner's DB.

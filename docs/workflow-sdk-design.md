@@ -502,3 +502,23 @@ dispatch by the Core); an optional multi-binding `environment` slot selects envi
 capabilities (see ARCHITECTURE §9); and `RequiresInput(WorkflowInputDescriptor)` declares typed
 inputs (`Kind` = Text/Multiline/Boolean/Choice/Number, `DefaultValue`, `Choices`,
 `ChoiceLabels`) that editors render without knowing the workflow.
+
+## Platform events (2026-08-08)
+
+The SDK's emit half of the platform-event mechanism (ARCHITECTURE §6 "Platform events"):
+
+- **Declaration**: `DeclaresEvent("review-ready")` or `DeclaresEvent<TPayload>("review-ready")`
+  adds an `EventDescriptor` (event type, optional payload JSON schema, description) to the
+  schema/manifest — configurators see the wiring points for event triggers, and
+  `DeclaresTrigger(TriggerDeclaration.Event)` marks a workflow as event-startable.
+- **Publish**: the run wiring registers `Events.IEventPublisher` (a `DefaultEventPublisher`)
+  in the workflow's DI container. `PublishAsync("review-ready", payload, workItemId)`
+  validates the type is declared, serializes the payload (64 KB cap — bigger data belongs in
+  the Artifact Store, referenced from the payload), and publishes a `WorkflowEventMessage` to
+  the `workflow.events` topic exchange, routing key = the wildcard-neutralized event type.
+- **Reserved vocabulary**: types under `run.` (`WorkflowEventMessage.ReservedPlatformPrefix`)
+  are the platform's own run-lifecycle events (`run.succeeded`/`run.failed`/`run.cancelled`,
+  published Core-side); both `DeclaresEvent` and the publisher refuse them.
+
+Consumption is entirely client-side (`EventTriggerEngine` over the Core's filtered event SSE
+stream) — a workflow never subscribes to events on the bus.

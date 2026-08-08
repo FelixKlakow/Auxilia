@@ -59,4 +59,12 @@ public sealed record RunWorkflowCommand(
     /// bindings of providers that declare <c>ComposesEnvironment</c>. Opaque provider-type ids —
     /// only the runner knows how each maps onto an image layer.
     /// </summary>
-    IReadOnlyList<string>? EnvironmentCapabilities = null);
+    IReadOnlyList<string>? EnvironmentCapabilities = null,
+    /// <summary>
+    /// The registry's schema of the workflow type (serialized <see cref="WorkflowSchema"/>),
+    /// carried so a runner that has never run the type can make its pre-launch, schema-driven
+    /// decisions (interactive terminal, network baseline, declared repositories) on the FIRST
+    /// dispatch. The runner's own store — refreshed by every run's registration — still wins
+    /// when populated; this is only the cold-start seed. Null when the registry has no schema.
+    /// </summary>
+    string? SchemaJson = null);

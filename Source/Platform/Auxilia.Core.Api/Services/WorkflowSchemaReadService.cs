@@ -40,8 +40,16 @@ public sealed class WorkflowSchemaReadService(IDataAccess<CoreWorkflowTypeRecord
         return ToSchemaDto(Deserialize(schemaJson), record.WorkflowType, record.PackageUri, record.Status);
     }
 
+    // Case-INSENSITIVE: stored schemas come from two writers — runner announcements
+    // (PascalCase) and packer-produced packages (camelCase, WorkflowPackageJsonOptions) —
+    // and a case-sensitive read silently nulls every field of the latter.
+    private static readonly JsonSerializerOptions DeserializeOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
     private static WorkflowSchema Deserialize(string json)
-        => JsonSerializer.Deserialize<WorkflowSchema>(json)
+        => JsonSerializer.Deserialize<WorkflowSchema>(json, DeserializeOptions)
            ?? throw new InvalidOperationException("Stored workflow schema is not deserializable.");
 
     private static WorkflowTypeDto ToTypeDto(CoreWorkflowTypeRecord record)
@@ -84,5 +92,9 @@ public sealed class WorkflowSchemaReadService(IDataAccess<CoreWorkflowTypeRecord
             schema.InteractiveTerminalPort,
             JsonSerializer.Serialize(schema.EnvironmentRequirements, JsonOptions),
             packageUri,
-            status);
+            status)
+        {
+            Events = schema.Events.Select(e => new WorkflowEventDto(
+                e.EventType, e.PayloadSchemaJson, e.Description)).ToList()
+        };
 }

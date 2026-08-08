@@ -37,3 +37,23 @@ public sealed record ArtifactTriggerDefinition
     public Guid? RunAsPrincipalId { get; init; }
     public IReadOnlyDictionary<string, string>? Context { get; init; }
 }
+
+/// <summary>
+/// A platform-event trigger: when an event of <see cref="EventType"/> (optionally narrowed to
+/// one work item) fires — published by a workflow or by the platform itself (the reserved
+/// <c>run.*</c> lifecycle vocabulary) — dispatch the follow-up workflow with the event
+/// reference and payload in its context. Fed by the Core's filtered event SSE stream, never
+/// by the message bus.
+/// </summary>
+public sealed record EventTriggerDefinition
+{
+    public Guid Id { get; init; } = Guid.NewGuid();
+    public required string EventType { get; init; }
+    /// <summary>Optional narrowing: only events of this work item fire the trigger.</summary>
+    public string? WorkItemId { get; init; }
+    public Guid? ConfigurationId { get; init; }
+    public string? WorkflowType { get; init; }
+    public bool Enabled { get; init; } = true;
+    public Guid? RunAsPrincipalId { get; init; }
+    public IReadOnlyDictionary<string, string>? Context { get; init; }
+}

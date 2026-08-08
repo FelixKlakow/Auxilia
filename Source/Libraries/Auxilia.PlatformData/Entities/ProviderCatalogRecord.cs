@@ -19,5 +19,12 @@ public sealed record ProviderCatalogRecord : IEntity
     /// <summary>Serialized admin overrides (label/help text/default per setting key).</summary>
     public string DescriptorOverridesJson { get; init; } = "[]";
 
+    /// <summary>
+    /// Serialized <c>AccessGrant</c> list restricting who may BIND this catalog entry into a
+    /// run (slot providers and environment layers alike); empty = everyone. Distinct from
+    /// <see cref="Available"/>, the global on/off switch.
+    /// </summary>
+    public string GrantsJson { get; init; } = "[]";
+
     public static Guid IdFor(string providerType) => DeterministicGuid.For("provider-catalog", providerType);
 }

@@ -74,6 +74,25 @@ public sealed record WorkflowTypeRegistrationDto(
     DateTimeOffset UpdatedUtc);
 
 /// <summary>
+/// One entry of a workflow type's Policy-Engine access list: <see cref="Action"/> (e.g.
+/// <c>workflow.trigger</c>) granted to EXACTLY ONE subject — a role name, a principal, or a
+/// first-class group. The FIRST entry for a (type, action) makes the list the EXCLUSIVE grant
+/// source for that action on that type; no entries = the role-derived permission decides.
+/// </summary>
+public sealed record WorkflowTypeAccessEntryDto(
+    string Action,
+    string? RoleName = null,
+    Guid? PrincipalId = null,
+    Guid? GroupId = null);
+
+/// <summary>Grants or revokes one workflow-type access-list entry (exactly one subject set).</summary>
+public sealed record WorkflowTypeAccessChange(
+    string Action,
+    string? RoleName = null,
+    Guid? PrincipalId = null,
+    Guid? GroupId = null);
+
+/// <summary>
 /// One declared slot of a workflow: the config editor binds it to a connector. <see cref="Contract"/>
 /// is the capability contract the slot expects (offer only matching connectors); <see cref="CapabilitiesJson"/>
 /// carries the schema-declared capability requirement object as raw JSON. <see cref="ProviderTypes"/>
@@ -130,6 +149,9 @@ public sealed record WorkflowViewDto(
 /// <summary>A trigger kind a workflow declares it can be started by (wired per configuration).</summary>
 public sealed record WorkflowTriggerDto(string Kind, string? Description);
 
+/// <summary>An event type a workflow declares it publishes — the wiring points for event triggers.</summary>
+public sealed record WorkflowEventDto(string EventType, string? PayloadSchemaJson, string? Description);
+
 /// <summary>
 /// The full schema of a registered workflow type — everything the config editor needs to build a
 /// configuration: declared slots + their capability requirements, run inputs, views, trigger kinds,
@@ -149,4 +171,8 @@ public sealed record WorkflowSchemaDto(
     int? InteractiveTerminalPort,
     string EnvironmentRequirementsJson,
     string? PackageUri = null,
-    string Status = WorkflowTypeStatus.Active);
+    string Status = WorkflowTypeStatus.Active)
+{
+    /// <summary>Event types the workflow declares it publishes.</summary>
+    public IReadOnlyList<WorkflowEventDto> Events { get; init; } = [];
+}

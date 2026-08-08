@@ -14,7 +14,17 @@ public sealed record EnvironmentLayerDto(
     string SetupScript,
     string? Version,
     DateTimeOffset UpdatedUtc,
-    string? BaseVersion = null);
+    string? BaseVersion = null)
+{
+    /// <summary>Who may bind this layer into a run; empty = everyone.</summary>
+    public IReadOnlyList<AccessGrant> Grants { get; init; } = [];
+}
+
+/// <summary>
+/// Restricts who may bind an environment layer into a run: empty grants keep the layer open;
+/// non-empty grants admit only the listed subjects — enforced at dispatch, like connector access.
+/// </summary>
+public sealed record SetEnvironmentLayerGrants(IReadOnlyList<AccessGrant> Grants);
 
 /// <summary>
 /// Creates or updates an environment (and its provider-catalog entry).

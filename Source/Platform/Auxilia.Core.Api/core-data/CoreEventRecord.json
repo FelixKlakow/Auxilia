@@ -1,0 +1,29 @@
+[
+  {
+    "Id": "43fc1caa-7045-4497-ae46-aa11c25976df",
+    "EventType": "review-ready",
+    "WorkflowType": "code-review-workflow",
+    "WorkItemId": "WI-4711",
+    "SourceRunId": "68ab8471-06f2-4440-a1c5-8c5248c00b38",
+    "PayloadJson": "{\u0022verdict\u0022:\u0022approve\u0022,\u0022score\u0022:9}",
+    "CreatedUtc": "2026-08-08T06:26:30.0135642+00:00"
+  },
+  {
+    "Id": "66e95461-3f53-4d82-adb9-ef316c987171",
+    "EventType": "plan-done",
+    "WorkflowType": "code-review-workflow",
+    "WorkItemId": "WI-4711",
+    "SourceRunId": "68ab8471-06f2-4440-a1c5-8c5248c00b38",
+    "PayloadJson": null,
+    "CreatedUtc": "2026-08-08T06:26:30.0861501+00:00"
+  },
+  {
+    "Id": "0c4c16a4-37b5-5b8e-f392-07489a58ee42",
+    "EventType": "run.succeeded",
+    "WorkflowType": "code-review-workflow",
+    "WorkItemId": "",
+    "SourceRunId": "38fe361d-d59c-449b-b862-e8e2ba0f8d32",
+    "PayloadJson": "{\u0022state\u0022:\u0022Success\u0022,\u0022errorMessage\u0022:null}",
+    "CreatedUtc": "2026-08-08T06:26:30.1301058+00:00"
+  }
+]

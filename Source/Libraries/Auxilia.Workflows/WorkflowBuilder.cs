@@ -23,6 +23,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     private readonly List<Workspace.RepositoryDeclaration> _repositories = new();
     private readonly List<SignalDescriptor> _signals = new();
     private readonly List<Views.ViewDescriptor> _views = new();
+    private readonly List<Events.EventDescriptor> _events = new();
     private readonly List<TriggerDeclaration> _triggers = new();
     private readonly List<WorkflowInputDescriptor> _inputs = new();
     private readonly List<string> _consumedArtifacts = new();
@@ -183,6 +184,27 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
         var schema = JsonSchemaExporter.GetJsonSchemaAsNode(JsonSerializerOptions.Default, typeof(TItem));
         _views.Add(new Views.ViewDescriptor(name, schema.ToJsonString(), rendering, lifecycle, rendererKey,
             declaredData is null ? null : JsonSerializer.Serialize(declaredData, declaredData.GetType())));
+        return this;
+    }
+
+    public IWorkflowBuilder DeclaresEvent(string eventType, string? description = null)
+        => DeclaresEvent(eventType, payloadSchemaJson: null, description);
+
+    public IWorkflowBuilder DeclaresEvent<TPayload>(string eventType, string? description = null)
+        => DeclaresEvent(eventType,
+            JsonSchemaExporter.GetJsonSchemaAsNode(JsonSerializerOptions.Default, typeof(TPayload)).ToJsonString(),
+            description);
+
+    private IWorkflowBuilder DeclaresEvent(string eventType, string? payloadSchemaJson, string? description)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(eventType);
+        if (eventType.StartsWith(WorkflowEventMessage.ReservedPlatformPrefix, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"Event type '{eventType}' uses the reserved platform prefix " +
+                $"'{WorkflowEventMessage.ReservedPlatformPrefix}'.");
+        if (_events.Any(e => e.EventType == eventType))
+            throw new InvalidOperationException($"Event '{eventType}' has already been declared.");
+        _events.Add(new Events.EventDescriptor(eventType, payloadSchemaJson, description));
         return this;
     }
 
@@ -351,6 +373,9 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                     services.AddSingleton(new Views.DeclaredViews(_views.AsReadOnly()));
                     services.AddSingleton<Views.IViewPublisher>(
                         new Views.DefaultViewPublisher(context.MessageBus, instanceId, _views.AsReadOnly()));
+                    services.AddSingleton<Events.IEventPublisher>(
+                        new Events.DefaultEventPublisher(
+                            context.MessageBus, instanceId, _workflowName, _events.AsReadOnly()));
                     if (activeResolver is not null)
                     {
                         // Empty Slots on a successful response means just-in-time delivery:
@@ -446,6 +471,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             NetworkEndpoints = _networkEndpoints.AsReadOnly(),
             Repositories = _repositories.AsReadOnly(),
             Triggers = _triggers.AsReadOnly(),
+            Events = _events.AsReadOnly(),
             Inputs = _inputs.AsReadOnly(),
             ConsumedArtifacts = _consumedArtifacts.AsReadOnly(),
             InteractiveTerminalPort = _interactiveTerminalPort,
@@ -462,6 +488,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             NetworkEndpoints = _networkEndpoints.AsReadOnly(),
             Repositories = _repositories.AsReadOnly(),
             Triggers = _triggers.AsReadOnly(),
+            Events = _events.AsReadOnly(),
             Inputs = _inputs.AsReadOnly(),
             ConsumedArtifacts = _consumedArtifacts.AsReadOnly(),
             InteractiveTerminalPort = _interactiveTerminalPort,

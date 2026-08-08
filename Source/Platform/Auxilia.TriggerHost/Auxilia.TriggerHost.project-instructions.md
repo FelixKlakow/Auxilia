@@ -7,7 +7,8 @@ host only provides the always-on process, its storage, and `/health`.
 
 ## Invariants
 - **Pure Core client**: drives the Core exclusively through `ICoreClient` (REST + SSE).
-  No message-bus dependency — artifact chaining rides the Core's filtered artifact stream.
+  No message-bus dependency — artifact chaining rides the Core's filtered artifact stream and
+  event triggers ride the Core's filtered event stream.
 - **Own storage, host-owned credentials.** Mailbox credentials live in THIS host's protected
   records (`SlotInstanceRecord`), not in Core connectors — connector secrets never leave the
   Core by design, so client-side intake credentials are host configuration.

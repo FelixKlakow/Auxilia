@@ -174,6 +174,63 @@ public class MessageBusTopicRoutingSystemTests
         }
     }
 
+    [Test]
+    public async Task EventExchange_SelectiveTypeBindings_DeliverOnlyBoundTypes_AndWildcardsNeverWiden()
+    {
+        // The workflow.events contract on a real broker: one binding per event type
+        // (EventStreamPublisher's selective ingest), '#' for the tracking mirror, and
+        // RoutingKeyFor's wildcard neutralization — a type NAMED "evil.#" must bind/route as a
+        // literal key, never as a pattern that would widen the subscription.
+        var exchange = $"workflow-events-{Guid.NewGuid():N}"; // fixture-local twin of workflow.events
+        await _client.DeclareTopicExchangeAsync(exchange);
+
+        var gate = new object();
+        var reviewReady = new List<Auxilia.Workflows.Messaging.Messages.WorkflowEventMessage>();
+        var wildcardNamed = new List<Auxilia.Workflows.Messaging.Messages.WorkflowEventMessage>();
+        var mirror = new List<Auxilia.Workflows.Messaging.Messages.WorkflowEventMessage>();
+
+        await using var reviewSub = await _client
+            .SubscribeToTopicExchangeAsync<Auxilia.Workflows.Messaging.Messages.WorkflowEventMessage>(
+                exchange,
+                [Auxilia.Workflows.Messaging.Messages.WorkflowEventMessage.RoutingKeyFor("review-ready")],
+                (m, _) => { lock (gate) { reviewReady.Add(m); } return Task.CompletedTask; });
+        await using var wildcardSub = await _client
+            .SubscribeToTopicExchangeAsync<Auxilia.Workflows.Messaging.Messages.WorkflowEventMessage>(
+                exchange,
+                [Auxilia.Workflows.Messaging.Messages.WorkflowEventMessage.RoutingKeyFor("evil.#")],
+                (m, _) => { lock (gate) { wildcardNamed.Add(m); } return Task.CompletedTask; });
+        await using var mirrorSub = await _client
+            .SubscribeToTopicExchangeAsync<Auxilia.Workflows.Messaging.Messages.WorkflowEventMessage>(
+                exchange, ["#"],
+                (m, _) => { lock (gate) { mirror.Add(m); } return Task.CompletedTask; });
+
+        async Task PublishAsync(string eventType)
+            => await _client.PublishToTopicExchangeAsync(exchange,
+                Auxilia.Workflows.Messaging.Messages.WorkflowEventMessage.RoutingKeyFor(eventType),
+                new Auxilia.Workflows.Messaging.Messages.WorkflowEventMessage(
+                    Guid.NewGuid(), eventType, Guid.NewGuid(), "wf", "WI-1", null, DateTimeOffset.UtcNow));
+
+        await PublishAsync("review-ready");
+        await PublishAsync("plan-done");   // bound by nobody but the mirror
+        await PublishAsync("evil.#");      // routes under the NEUTRALIZED literal key
+        await PublishAsync("evil.a");      // would match a binding "evil.#" — must NOT arrive
+
+        await WaitUntilAsync(() => { lock (gate) { return mirror.Count == 4; } }, TimeSpan.FromSeconds(10));
+        await Task.Delay(500);
+
+        lock (gate)
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(reviewReady.Select(m => m.EventType), Is.EqualTo(new[] { "review-ready" }),
+                    "a per-type binding delivers exactly that event type");
+                Assert.That(wildcardNamed.Select(m => m.EventType), Is.EqualTo(new[] { "evil.#" }),
+                    "a wildcard-charactered TYPE binds literally — 'evil.a' arriving would mean the binding widened");
+                Assert.That(mirror, Has.Count.EqualTo(4), "the '#' tracking mirror sees the full feed");
+            });
+        }
+    }
+
     private static async Task WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
