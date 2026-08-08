@@ -1,5 +1,6 @@
 using Auxilia.AdminConsole.Components.Pages;
 using Auxilia.AdminConsole.Rendering;
+using Auxilia.AdminConsole.Support;
 using Auxilia.Core.Client;
 using Auxilia.Core.Contracts;
 using Bunit;
@@ -20,6 +21,8 @@ public sealed class DashboardPageTests
         var ctx = new BunitContext();
         ctx.Services.AddSingleton<ICoreClient>(core);
         ctx.Services.AddSingleton(new ViewRendererRegistry([]));
+        ctx.Services.AddSingleton(new StepUpFlow(core));
+        ctx.Services.AddSingleton(new SharingDirectory(core));
         return ctx;
     }
 

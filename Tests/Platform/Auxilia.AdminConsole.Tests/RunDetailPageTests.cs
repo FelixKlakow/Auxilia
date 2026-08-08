@@ -106,6 +106,74 @@ public sealed class RunDetailPageTests
     }
 
     [Test]
+    public void RunDetail_ShowsTheRunsPlatformEvents()
+    {
+        var runId = Guid.NewGuid();
+        var core = new FakeCoreClient();
+        core.Runs.Add(new RunStatus(runId, "impl", "Success", null, DateTimeOffset.UtcNow, null, null));
+        core.StoredEvents.Add(new EventDto(
+            Guid.NewGuid(), PlatformEventTypes.RunSucceeded, "impl", "", runId,
+            """{"state":"Success"}""", DateTimeOffset.UtcNow));
+        core.StoredEvents.Add(new EventDto(
+            Guid.NewGuid(), "review-ready", "impl", "WI-1", Guid.NewGuid(), null, DateTimeOffset.UtcNow));
+        using var ctx = NewContext(core);
+
+        var cut = ctx.Render<RunDetail>(p => p.Add(c => c.Id, runId));
+
+        cut.WaitForAssertion(() => Assert.Multiple(() =>
+        {
+            Assert.That(cut.Markup, Does.Contain("run.succeeded"),
+                "the run's own lifecycle event renders in the events strip");
+            Assert.That(cut.Markup, Does.Not.Contain("review-ready"),
+                "another run's event stays out — the strip filters by SourceRunId");
+            Assert.That(cut.Markup, Does.Contain($"events?sourceRun={runId}"),
+                "the log links through to the full, pre-filtered Events page");
+        }));
+    }
+
+    /// <summary>
+    /// The section is rendered as soon as the lookup finishes, empty or not: it used to appear only
+    /// when events existed, so the terminal run.* event arriving seconds later shoved the views down.
+    /// </summary>
+    [Test]
+    public void RunDetail_EventLog_RendersEvenWhenTheRunPublishedNothing()
+    {
+        var runId = Guid.NewGuid();
+        var core = new FakeCoreClient();
+        core.Runs.Add(new RunStatus(runId, "impl", "Success", null, DateTimeOffset.UtcNow, null, null));
+        using var ctx = NewContext(core);
+
+        var cut = ctx.Render<RunDetail>(p => p.Add(c => c.Id, runId));
+
+        cut.WaitForAssertion(() => Assert.Multiple(() =>
+        {
+            Assert.That(cut.Markup, Does.Contain("Event log"), "the section keeps its place in the layout");
+            Assert.That(cut.Markup, Does.Contain("published no events"));
+        }));
+    }
+
+    [Test]
+    public void RunDetail_EventLog_SummarisesPayloadFields_UnderRealHeaders()
+    {
+        var runId = Guid.NewGuid();
+        var core = new FakeCoreClient();
+        core.Runs.Add(new RunStatus(runId, "impl", "Success", null, DateTimeOffset.UtcNow, null, null));
+        core.StoredEvents.Add(new EventDto(
+            Guid.NewGuid(), "review-ready", "impl", "WI-7", runId,
+            """{"pullRequest":128}""", DateTimeOffset.UtcNow));
+        using var ctx = NewContext(core);
+
+        var cut = ctx.Render<RunDetail>(p => p.Add(c => c.Id, runId));
+
+        cut.WaitForAssertion(() => Assert.Multiple(() =>
+        {
+            Assert.That(cut.Markup, Does.Contain("Event type"), "the table has column headers now");
+            Assert.That(cut.Markup, Does.Contain("pullRequest"), "payloads read as fields, not truncated JSON");
+            Assert.That(cut.Markup, Does.Contain("128"));
+        }));
+    }
+
+    [Test]
     public void RunDetail_TerminalHostingRun_OpensTheTicketedProxyInANewTab()
     {
         var runId = Guid.NewGuid();

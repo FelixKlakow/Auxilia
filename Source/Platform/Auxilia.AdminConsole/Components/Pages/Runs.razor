@@ -2,11 +2,13 @@
 @attribute [Authorize]
 @implements IDisposable
 @inject ICoreClient Core
+@inject NavigationManager Navigation
 @inject ILogger<Runs> Logger
 
 <PageTitle>Runs — Auxilia</PageTitle>
 
-<PageHeader Title="Runs" Subtitle="Every workflow execution on this platform, newest first."/>
+<PageHeader Title="Runs" Subtitle="Every workflow execution on this platform, newest first."
+            Freshness="_poller?.LastSuccessUtc"/>
 
 <ConnectionBanner Connected="@(_poller?.IsHealthy ?? true)"
                   Detail="@_poller?.LastError"
@@ -14,7 +16,7 @@
 
 @if (!_loaded)
 {
-    <p class="muted">Loading…</p>
+    <LoadingState Rows="8"/>
 }
 else if (_denied)
 {
@@ -26,79 +28,107 @@ else
     {
         <div class="panel denied">@_error</div>
     }
-    @if (_notice is not null)
-    {
-        <div class="panel success">@_notice</div>
-    }
+    <NoticePanel Message="@_notice" OnDismiss="() => _notice = null"/>
 
     <div class="chip-bar" role="group" aria-label="Filter runs by state">
-        @foreach (var state in StateOptions)
+        @foreach (var state in StateOptions())
         {
             <button class="chip @(_stateFilter == state ? "active" : null)"
+                    aria-pressed="@(_stateFilter == state ? "true" : "false")"
                     @onclick="() => ApplyStateAsync(state)">
                 @state
+                @if (CountOf(state) is { } count)
+                {
+                    <span class="chip-count">@count</span>
+                }
             </button>
         }
-        <input class="chip-search" placeholder="Workflow type (exact) …"
+        <input class="chip-search" placeholder="Workflow type (exact) …" aria-label="Filter by workflow type"
                @bind="_workflowType" @bind:after="ApplyAsync"/>
+        @if (HasFilters)
+        {
+            <button class="btn btn-secondary btn-sm" @onclick="ClearFiltersAsync">Clear filters</button>
+        }
         <button class="btn btn-secondary btn-sm" @onclick="RefreshAsync">Refresh</button>
     </div>
 
-    @if (_liveCount > 0)
+    @* Auto-refresh resets to page 1, which would silently throw away everything the reader paged
+       in. Past the first page the poll pauses and offers the refresh explicitly instead. *@
+    @if (_paused)
     {
-        <p class="muted">@_liveCount run(s) active right now.</p>
+        <div class="panel info">
+            <span class="panel-head">
+                Auto-refresh paused while you browse older runs.
+                <button class="btn btn-secondary btn-sm panel-dismiss" @onclick="ResumeAsync">Resume &amp; refresh</button>
+            </span>
+        </div>
     }
 
     @if (_runs.Count == 0)
     {
-        <EmptyState Title="No workflow runs"
-                    Description="Runs appear here as soon as a task source, schedule, or trigger dispatches a workflow."/>
+        @if (HasFilters)
+        {
+            <EmptyState Title="No runs match these filters"
+                        Description="No workflow execution matches the selected state or workflow type.">
+                <div class="empty-actions">
+                    <button class="btn btn-secondary" @onclick="ClearFiltersAsync">Clear filters</button>
+                </div>
+            </EmptyState>
+        }
+        else
+        {
+            <EmptyState Title="No workflow runs"
+                        Description="Runs appear here as soon as a task source, schedule, or trigger dispatches a workflow."/>
+        }
     }
     else
     {
         <div class="card">
-            <table class="data-table">
-                <thead>
-                <tr>
-                    <th>State</th>
-                    <th>Workflow</th>
-                    <th>Configuration</th>
-                    <th>Started</th>
-                    <th>Error</th>
-                    <th>Actions</th>
-                </tr>
-                </thead>
-                <tbody>
-                @foreach (var run in _runs)
-                {
+            <div class="table-scroll">
+                <table class="data-table">
+                    <thead>
                     <tr>
-                        <td><span class="badge badge-state badge-@run.State.ToLowerInvariant()">@run.State</span></td>
-                        <td>
-                            <span class="cell-strong">@run.WorkflowType</span>
-                            <span class="muted mono"> @ShortId(run.RunId)</span>
-                        </td>
-                        <td>@ConfigurationLabel(run)</td>
-                        <td>
-                            @TimeText.Relative(run.CreatedUtc)
-                            <span class="cell-sub">@run.CreatedUtc.ToString("yyyy-MM-dd HH:mm:ss") UTC</span>
-                        </td>
-                        <td class="error-cell">@run.Error</td>
-                        <td>
-                            @if (LiveNow.IsActive(run.State))
-                            {
-                                <button class="btn btn-danger btn-sm" disabled="@_busy"
-                                        @onclick="() => CancelAsync(run.RunId)">Cancel</button>
-                            }
-                        </td>
+                        <th>State</th>
+                        <th>Workflow</th>
+                        <th>Configuration</th>
+                        <th>Started</th>
+                        <th>Error</th>
+                        <th>Actions</th>
                     </tr>
-                }
-                </tbody>
-            </table>
-            @if (_skip + _runs.Count < _total)
+                    </thead>
+                    <tbody>
+                    @foreach (var run in _runs)
+                    {
+                        <tr>
+                            <td><span class="badge badge-state @StateBadge.ClassFor(run.State)">@run.State</span></td>
+                            <td>
+                                <a href="runs/@run.RunId" class="cell-strong">@run.WorkflowType</a>
+                                <span class="cell-sub mono">@ShortId(run.RunId)</span>
+                            </td>
+                            <td>@ConfigurationLabel(run)</td>
+                            <td>
+                                @TimeText.Relative(run.CreatedUtc)
+                                <span class="cell-sub">@run.CreatedUtc.ToString("yyyy-MM-dd HH:mm:ss") UTC</span>
+                            </td>
+                            <td class="error-cell">@run.Error</td>
+                            <td>
+                                @if (LiveNow.IsActive(run.State))
+                                {
+                                    <ConfirmButton Label="Cancel" Question="Cancel this run?" ConfirmLabel="Cancel run"
+                                                   CancelLabel="Keep running" Busy="_busy"
+                                                   OnConfirm="() => CancelAsync(run.RunId)"/>
+                                }
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+            @if (_runs.Count < _total)
             {
                 <div class="card-body table-more">
-                    <button class="btn btn-secondary" @onclick="ShowMoreAsync">
-                        Show more (@(_skip + _runs.Count) of @_total)
+                    <button class="btn btn-secondary" disabled="@_loadingMore" @onclick="ShowMoreAsync">
+                        @(_loadingMore ? "Loading…" : $"Show more ({_runs.Count} of {_total})")
                     </button>
                 </div>
             }
@@ -108,30 +138,49 @@ else
 
 @code {
 
-    private static readonly string[] StateOptions =
-        ["All", "Running", "Queued", "Success", "Failed", "Cancelled", "PreFlightFailed"];
+    // Seed vocabulary; the live chip list is the union of these and whatever states the Core
+    // actually reports (run states are runtime-extensible — never a compiled enum).
+    private static readonly string[] SeedStates =
+        ["Running", "Queued", "Success", "Failed", "Cancelled"];
+
+    private const string AllStates = "All";
 
     private const int PageSize = 50;
 
     private bool _loaded;
     private bool _denied;
     private bool _busy;
+    private bool _loadingMore;
     private string? _error;
     private string? _notice;
 
-    private string _stateFilter = "All";
+    private string _stateFilter = AllStates;
     private string _workflowType = "";
 
-    private int _skip;
     private int _total;
-    private int _liveCount;
+    private RunStats? _stats;
     private List<RunStatus> _runs = [];
     private readonly Dictionary<Guid, string> _configurationNames = new();
+
+    /// <summary>True once the reader pages past the first page — see the poller guard below.</summary>
+    private bool _paused;
 
     private readonly CancellationTokenSource _cts = new();
     private PagePoller? _poller;
 
+    private bool HasFilters => _stateFilter != AllStates || _workflowType.Length > 0;
+
     private static string ShortId(Guid id) => id.ToString("N")[..8];
+
+    /// <summary>Chip vocabulary: the Core's own state histogram, unioned with the common seeds.</summary>
+    private IEnumerable<string> StateOptions()
+        => new[] { AllStates }
+            .Concat(SeedStates.Concat(_stats?.ByState.Keys ?? []).Distinct(StringComparer.Ordinal).OrderBy(s => s, StringComparer.Ordinal))
+            .Append(_stateFilter)
+            .Distinct(StringComparer.Ordinal);
+
+    private int? CountOf(string state)
+        => state == AllStates ? _stats?.Total : _stats?.ByState.GetValueOrDefault(state);
 
     private string ConfigurationLabel(RunStatus run)
     {
@@ -144,6 +193,8 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        _stateFilter = PageFilters.Read(Navigation, "state") is { Length: > 0 } state ? state : AllStates;
+        _workflowType = PageFilters.Read(Navigation, "workflowType");
         try
         {
             await LoadAsync(reset: true);
@@ -162,28 +213,77 @@ else
             return;
         // A PagePoller instead of a raw timer loop: a transport exception (Core restart) must
         // never kill the polling permanently — it flips the banner and keeps retrying.
-        _poller = new PagePoller(TimeSpan.FromSeconds(5), _ => LoadAsync(reset: true), Logger);
+        _poller = new PagePoller(TimeSpan.FromSeconds(5), PollAsync, Logger);
         _poller.StateChanged += () => _ = InvokeAsync(StateHasChanged);
         _poller.Start();
+    }
+
+    /// <summary>
+    /// The poll tick. A reset-refresh would discard every page the reader loaded with "Show more",
+    /// so while paged in it does nothing but keep the transport health current.
+    /// </summary>
+    private async Task PollAsync(CancellationToken ct)
+    {
+        if (_paused)
+        {
+            await Core.GetRunStatsAsync(ct);
+            return;
+        }
+        await LoadAsync(reset: true);
     }
 
     private Task ApplyStateAsync(string state)
     {
         _stateFilter = state;
+        return ApplyAsync();
+    }
+
+    private Task ApplyAsync()
+    {
+        PageFilters.Apply(Navigation, new Dictionary<string, string?>
+        {
+            ["state"] = _stateFilter == AllStates ? null : _stateFilter,
+            ["workflowType"] = _workflowType
+        });
+        _paused = false;
         return LoadAsync(reset: true);
     }
 
-    private Task ApplyAsync() => LoadAsync(reset: true);
+    private Task ClearFiltersAsync()
+    {
+        _stateFilter = AllStates;
+        _workflowType = "";
+        return ApplyAsync();
+    }
 
-    private Task RefreshAsync() => LoadAsync(reset: true);
+    private Task RefreshAsync()
+    {
+        _paused = false;
+        return LoadAsync(reset: true);
+    }
 
-    private Task ShowMoreAsync() => LoadAsync(reset: false);
+    private Task ResumeAsync() => RefreshAsync();
+
+    private async Task ShowMoreAsync()
+    {
+        _loadingMore = true;
+        try
+        {
+            // Paging and a 5-second reset-poll cannot coexist: pause until the reader says otherwise.
+            _paused = true;
+            await LoadAsync(reset: false);
+        }
+        finally
+        {
+            _loadingMore = false;
+        }
+    }
 
     private async Task LoadAsync(bool reset)
     {
-        var skip = reset ? 0 : _skip;
+        var skip = reset ? 0 : _runs.Count;
         var query = new RunQuery(
-            State: _stateFilter == "All" ? null : _stateFilter,
+            State: _stateFilter == AllStates ? null : _stateFilter,
             WorkflowType: string.IsNullOrWhiteSpace(_workflowType) ? null : _workflowType.Trim(),
             Skip: skip,
             Take: PageSize);
@@ -200,8 +300,7 @@ else
                 _runs = page.Items.ToList();
             else
                 _runs.AddRange(page.Items);
-            _skip = skip + page.Items.Count;
-            _liveCount = LiveNow.ActiveOf(_runs).Count;
+            _stats = await Core.GetRunStatsAsync(_cts.Token);
             await ResolveConfigurationNamesAsync();
         }
         catch (CoreApiException ex)

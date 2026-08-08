@@ -1,0 +1,20 @@
+@* Placeholder that keeps roughly the geometry of the content it stands in for, so the page does
+   not collapse and re-expand on first load. Announced to assistive tech via role="status". *@
+
+<div class="loading-state" role="status" aria-live="polite" aria-busy="true">
+    <span class="visually-hidden">@Label</span>
+    @for (var i = 0; i < Rows; i++)
+    {
+        <div class="skeleton-row"></div>
+    }
+</div>
+
+@code {
+
+    [Parameter]
+    public int Rows { get; set; } = 5;
+
+    [Parameter]
+    public string Label { get; set; } = "Loading…";
+
+}

@@ -1,15 +1,17 @@
 @page "/admin/workflow-types"
 @attribute [Authorize]
 @inject ICoreClient Core
+@inject StepUpFlow StepUp
+@inject NavigationManager Navigation
 
-<PageTitle>Workflow types — Auxilia</PageTitle>
+<PageTitle>Workflow registry — Auxilia</PageTitle>
 
-<PageHeader Title="Workflow types"
+<PageHeader Title="Workflow registry"
             Subtitle="The registry — the platform's deploy-time trust gate. Only registered, signed-and-approved types can run; disabling a type stops every configured workflow of it."/>
 
 @if (!_loaded)
 {
-    <p class="muted">Loading…</p>
+    <LoadingState Rows="6"/>
 }
 else if (_denied)
 {
@@ -21,12 +23,12 @@ else
     {
         <div class="panel denied">@_error</div>
     }
-    @if (_notice is not null)
-    {
-        <div class="panel success">@_notice</div>
-    }
+    <NoticePanel Message="@_notice" OnDismiss="() => _notice = null"/>
 
-    <div class="toolbar">
+    <StepUpPrompt Flow="StepUp" Busy="_busy" OnConfirm="ConfirmStepUpAsync"
+                  Reason="Changing the registry's trust decisions is privileged — re-enter YOUR credential (password or API key)."/>
+
+    <form class="toolbar" @onsubmit="ApplyAsync" @onsubmit:preventDefault>
         <label>
             Status
             <select @bind="_statusFilter">
@@ -37,8 +39,14 @@ else
                 <option value="@WorkflowTypeStatus.Disabled">Disabled</option>
             </select>
         </label>
-        <button class="btn btn-secondary" @onclick="ApplyAsync">Apply</button>
-    </div>
+        <div class="toolbar-actions">
+            <button type="submit" class="btn btn-primary">Apply</button>
+            @if (_statusFilter.Length > 0)
+            {
+                <button type="button" class="btn btn-secondary" @onclick="ClearFiltersAsync">Clear filters</button>
+            }
+        </div>
+    </form>
 
     <section class="card">
         <div class="card-header">
@@ -54,6 +62,7 @@ else
         }
         else
         {
+            <div class="table-scroll">
             <table class="data-table">
                 <thead>
                 <tr>
@@ -89,9 +98,10 @@ else
                         </td>
                         <td>
                             <div class="cell-actions">
-                                @if (_canManage)
+                                @if (_canManage || _canAdministerPolicy)
                                 {
                                     <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                            aria-expanded="@(_detailType == type.WorkflowType ? "true" : "false")"
                                             @onclick="() => ToggleDetailAsync(type.WorkflowType)">
                                         @(_detailType == type.WorkflowType ? "Hide details" : "Details")
                                     </button>
@@ -128,18 +138,9 @@ else
                                         <button class="btn btn-secondary btn-sm" disabled="@_busy"
                                                 @onclick="() => SetEnabledAsync(type.WorkflowType, true)">Enable</button>
                                     }
-                                    @if (_confirmUnregisterType == type.WorkflowType)
-                                    {
-                                        <button class="btn btn-danger btn-sm" disabled="@_busy"
-                                                @onclick="() => UnregisterAsync(type.WorkflowType)">Really unregister?</button>
-                                        <button class="btn btn-secondary btn-sm" disabled="@_busy"
-                                                @onclick="() => _confirmUnregisterType = null">Keep</button>
-                                    }
-                                    else
-                                    {
-                                        <button class="btn btn-danger btn-sm" disabled="@_busy"
-                                                @onclick="() => _confirmUnregisterType = type.WorkflowType">Unregister</button>
-                                    }
+                                    <ConfirmButton Label="Unregister" Question="Unregister this type?"
+                                                   ConfirmLabel="Yes, unregister" Busy="_busy"
+                                                   OnConfirm="() => UnregisterAsync(type.WorkflowType)"/>
                                 }
                             </div>
                         </td>
@@ -150,7 +151,7 @@ else
                             <td colspan="6">
                                 @if (_detail is null)
                                 {
-                                    <p class="muted">No registration record found for this type.</p>
+                                    <p class="muted">No registration record is readable for this type.</p>
                                 }
                                 else
                                 {
@@ -183,12 +184,20 @@ else
                                         <div><dt>Updated</dt><dd>@TimeText.Relative(_detail.UpdatedUtc)</dd></div>
                                     </dl>
                                 }
+                                @* Who may act on this type — a policy concern, so only shown to
+                                   principals who administer policy. *@
+                                @if (_canAdministerPolicy)
+                                {
+                                    <h3 class="table-caption access-caption">Access list</h3>
+                                    <WorkflowTypeAccessEditor WorkflowType="@type.WorkflowType"/>
+                                }
                             </td>
                         </tr>
                     }
                 }
                 </tbody>
             </table>
+            </div>
             @if (_skip + _types.Count < _total)
             {
                 <div class="card-body table-more">
@@ -245,6 +254,7 @@ else
     // enable-disable need workflow-type.manage, approve/deny the workflow-type.sign authority.
     private bool _canManage;
     private bool _canSign;
+    private bool _canAdministerPolicy;
 
     private bool _loaded;
     private bool _denied;
@@ -263,7 +273,6 @@ else
 
     private string? _denyType;
     private string _denyReason = "";
-    private string? _confirmUnregisterType;
 
     private string _registerType = "";
     private string _registerPackageUri = "";
@@ -282,16 +291,28 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        _statusFilter = PageFilters.Read(Navigation, "status");
         if (AuthState is not null)
         {
             var user = (await AuthState).User;
             _canManage = ConsoleAuthenticationStateProvider.Can(user, PermissionActions.WorkflowTypeManage);
             _canSign = ConsoleAuthenticationStateProvider.Can(user, PermissionActions.WorkflowTypeSign);
+            _canAdministerPolicy = ConsoleAuthenticationStateProvider.Can(user, PermissionActions.PolicyAdminister);
         }
         await LoadAsync(reset: true);
     }
 
-    private Task ApplyAsync() => LoadAsync(reset: true);
+    private Task ApplyAsync()
+    {
+        PageFilters.Apply(Navigation, new Dictionary<string, string?> { ["status"] = _statusFilter });
+        return LoadAsync(reset: true);
+    }
+
+    private Task ClearFiltersAsync()
+    {
+        _statusFilter = "";
+        return ApplyAsync();
+    }
 
     private Task ShowMoreAsync() => LoadAsync(reset: false);
 
@@ -335,14 +356,16 @@ else
             return;
         }
 
+        // The row opens even when the registration record is unreadable: a policy administrator
+        // without workflow-type.manage still needs the access list underneath it.
+        _detailType = workflowType;
         try
         {
             _detail = await Core.GetWorkflowTypeRegistrationAsync(workflowType);
-            _detailType = workflowType;
         }
-        catch (CoreApiException ex)
+        catch (CoreApiException)
         {
-            _error = ex.ErrorDetail ?? ex.Message;
+            _detail = null;
         }
     }
 
@@ -387,7 +410,6 @@ else
         {
             await Core.UnregisterWorkflowTypeAsync(workflowType);
             _notice = $"\"{workflowType}\" unregistered — it can no longer be run.";
-            _confirmUnregisterType = null;
         });
 
     private Task RegisterAsync()
@@ -412,16 +434,31 @@ else
         });
     }
 
+    /// <summary>Re-runs the mutation the Core rejected, once the operator has re-authenticated.</summary>
+    private async Task ConfirmStepUpAsync()
+    {
+        _busy = true;
+        try
+        {
+            if (await StepUp.ConfirmAsync())
+                await ReloadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
     private async Task MutateAsync(Func<Task> action)
     {
         _error = _notice = null;
         _busy = true;
         try
         {
-            await action();
-            if (_detailType is { } open)
-                _detail = await Core.GetWorkflowTypeRegistrationAsync(open);
-            await LoadAsync(reset: true);
+            // Registry decisions are privileged: an 'elevation-required' rejection raises the
+            // shared step-up prompt instead of surfacing the raw error string.
+            if (await StepUp.RunAsync(action))
+                await ReloadAsync();
         }
         catch (CoreApiException ex)
         {
@@ -431,6 +468,13 @@ else
         {
             _busy = false;
         }
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (_detailType is { } open)
+            _detail = await Core.GetWorkflowTypeRegistrationAsync(open);
+        await LoadAsync(reset: true);
     }
 
 }

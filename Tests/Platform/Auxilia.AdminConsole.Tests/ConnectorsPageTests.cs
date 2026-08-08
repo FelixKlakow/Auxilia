@@ -1,5 +1,6 @@
 using Auxilia.AdminConsole.Components.Pages;
 using Auxilia.AdminConsole.Rendering;
+using Auxilia.AdminConsole.Support;
 using Auxilia.Core.Client;
 using Auxilia.Core.Contracts;
 using Bunit;
@@ -10,7 +11,8 @@ namespace Auxilia.AdminConsole.Tests;
 /// <summary>
 /// The connectors page lists connectors from <c>QueryConnectorsAsync</c>, creates one via
 /// <c>CreateConnectorAsync</c> with the entered settings (secret included, from a catalog-driven form),
-/// and edits personal-connector access via <c>SetConnectorGrantsAsync</c>. Hermetic — no network.
+/// and edits personal-connector sharing via <c>SetConnectorGrantsAsync</c> from a side drawer.
+/// Hermetic — no network.
 /// </summary>
 [TestFixture]
 [Category("Component")]
@@ -21,6 +23,8 @@ public sealed class ConnectorsPageTests
         var ctx = new BunitContext();
         ctx.Services.AddSingleton<ICoreClient>(core);
         ctx.Services.AddSingleton(new ViewRendererRegistry([]));
+        ctx.Services.AddSingleton(new StepUpFlow(core));
+        ctx.Services.AddSingleton(new SharingDirectory(core));
         return ctx;
     }
 
@@ -80,10 +84,10 @@ public sealed class ConnectorsPageTests
         using var ctx = NewContext(core);
         var cut = ctx.Render<Connectors>();
 
-        cut.FindAll("button").First(b => b.TextContent.Trim() == "Grants").Click();
-        cut.FindAll("button").First(b => b.TextContent.Trim() == "Add grant").Click();
-        cut.Find(".card-row input").Change("principal-123");
-        cut.FindAll("button").First(b => b.TextContent.Trim() == "Save grants").Click();
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Sharing").Click();
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Add subject").Click();
+        cut.Find(".drawer .grant-row input").Change("principal-123");
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Save sharing").Click();
 
         Assert.Multiple(() =>
         {

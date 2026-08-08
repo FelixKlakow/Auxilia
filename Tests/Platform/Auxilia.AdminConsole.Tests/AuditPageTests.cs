@@ -1,6 +1,7 @@
 using System.Net;
 using Auxilia.AdminConsole.Components.Pages;
 using Auxilia.AdminConsole.Rendering;
+using Auxilia.AdminConsole.Support;
 using Auxilia.Core.Client;
 using Auxilia.Core.Contracts;
 using Bunit;
@@ -22,6 +23,8 @@ public sealed class AuditPageTests
         var ctx = new BunitContext();
         ctx.Services.AddSingleton<ICoreClient>(core);
         ctx.Services.AddSingleton(new ViewRendererRegistry([]));
+        ctx.Services.AddSingleton(new StepUpFlow(core));
+        ctx.Services.AddSingleton(new SharingDirectory(core));
         return ctx;
     }
 
@@ -56,7 +59,7 @@ public sealed class AuditPageTests
         using var ctx = NewContext(core);
         var cut = ctx.Render<Audit>();
 
-        cut.Find("input[placeholder='e.g. policy.allowed']").Change("workflow.rerun");
+        cut.Find("input[placeholder='e.g. policy.allowed']").Input("workflow.rerun");
         cut.Find(".audit-toolbar button").Click();
 
         Assert.Multiple(() =>

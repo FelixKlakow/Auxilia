@@ -1,6 +1,7 @@
 using System.Net;
 using Auxilia.AdminConsole.Components.Pages;
 using Auxilia.AdminConsole.Rendering;
+using Auxilia.AdminConsole.Support;
 using Auxilia.Core.Client;
 using Auxilia.Core.Contracts;
 using Bunit;
@@ -21,6 +22,8 @@ public sealed class AdminPageTests
         var ctx = new BunitContext();
         ctx.Services.AddSingleton<ICoreClient>(core);
         ctx.Services.AddSingleton(new ViewRendererRegistry([]));
+        ctx.Services.AddSingleton(new StepUpFlow(core));
+        ctx.Services.AddSingleton(new SharingDirectory(core));
         return ctx;
     }
 
@@ -76,7 +79,9 @@ public sealed class AdminPageTests
         var cut = ctx.Render<Admin>();
 
         // Disabling is elevation-gated: the raw error must NOT surface — the prompt appears.
+        // It is also destructive, so it arms before it commits.
         cut.FindAll("button").First(b => b.TextContent.Trim() == "Disable").Click();
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Yes, disable").Click();
         Assert.Multiple(() =>
         {
             Assert.That(cut.Markup, Does.Contain("Re-authentication required"));

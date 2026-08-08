@@ -3,6 +3,7 @@ using System.Security.Claims;
 using Auxilia.AdminConsole.Auth;
 using Auxilia.AdminConsole.Components.Pages;
 using Auxilia.AdminConsole.Rendering;
+using Auxilia.AdminConsole.Support;
 using Auxilia.Core.Client;
 using Auxilia.Core.Contracts;
 using Bunit;
@@ -25,6 +26,8 @@ public sealed class AdminWorkflowTypesPageTests
         var ctx = new BunitContext();
         ctx.Services.AddSingleton<ICoreClient>(core);
         ctx.Services.AddSingleton(new ViewRendererRegistry([]));
+        ctx.Services.AddSingleton(new StepUpFlow(core));
+        ctx.Services.AddSingleton(new SharingDirectory(core));
         return ctx;
     }
 
@@ -126,7 +129,7 @@ public sealed class AdminWorkflowTypesPageTests
         // Unregister asks for confirmation before calling the Core.
         cut.FindAll("button").First(b => b.TextContent.Trim() == "Unregister").Click();
         Assert.That(core.UnregisteredWorkflowTypes, Is.Empty, "first click only arms the confirm");
-        cut.FindAll("button").First(b => b.TextContent.Trim() == "Really unregister?").Click();
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Yes, unregister").Click();
         Assert.Multiple(() =>
         {
             Assert.That(core.UnregisteredWorkflowTypes, Is.EqualTo(new[] { "code-review" }));

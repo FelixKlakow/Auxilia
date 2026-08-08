@@ -1,0 +1,54 @@
+@* Two-step destructive action: the first click arms the button, the second commits. Arming is
+   local to the instance, so a table of these never has two rows armed at once by accident.
+   Use for anything irreversible — cancelling a run, disabling a principal, unregistering a type. *@
+
+@if (_armed)
+{
+    <span class="confirm-inline" role="group" aria-label="@Question">
+        <span class="confirm-question">@Question</span>
+        <button class="btn btn-danger-solid btn-sm" disabled="@Busy" @onclick="CommitAsync">@ConfirmLabel</button>
+        <button class="btn btn-secondary btn-sm" disabled="@Busy" @onclick="() => _armed = false">@CancelLabel</button>
+    </span>
+}
+else
+{
+    <button class="btn @ButtonClass btn-sm" disabled="@Busy" title="@Title"
+            @onclick="() => _armed = true">@Label</button>
+}
+
+@code {
+
+    private bool _armed;
+
+    [Parameter, EditorRequired]
+    public required string Label { get; set; }
+
+    /// <summary>The armed-state question, e.g. "Cancel this run?".</summary>
+    [Parameter, EditorRequired]
+    public required string Question { get; set; }
+
+    [Parameter]
+    public string ConfirmLabel { get; set; } = "Yes";
+
+    [Parameter]
+    public string CancelLabel { get; set; } = "Keep";
+
+    [Parameter]
+    public string ButtonClass { get; set; } = "btn-danger";
+
+    [Parameter]
+    public string? Title { get; set; }
+
+    [Parameter]
+    public bool Busy { get; set; }
+
+    [Parameter]
+    public EventCallback OnConfirm { get; set; }
+
+    private async Task CommitAsync()
+    {
+        _armed = false;
+        await OnConfirm.InvokeAsync();
+    }
+
+}

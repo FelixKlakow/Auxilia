@@ -1,6 +1,7 @@
 using System.Net;
 using Auxilia.AdminConsole.Components.Pages;
 using Auxilia.AdminConsole.Rendering;
+using Auxilia.AdminConsole.Support;
 using Auxilia.Core.Client;
 using Auxilia.Core.Contracts;
 using Bunit;
@@ -21,6 +22,8 @@ public sealed class RunsPageTests
         var ctx = new BunitContext();
         ctx.Services.AddSingleton<ICoreClient>(core);
         ctx.Services.AddSingleton(new ViewRendererRegistry([]));
+        ctx.Services.AddSingleton(new StepUpFlow(core));
+        ctx.Services.AddSingleton(new SharingDirectory(core));
         return ctx;
     }
 
@@ -56,9 +59,13 @@ public sealed class RunsPageTests
         using var ctx = NewContext(core);
         var cut = ctx.Render<Runs>();
 
+        // Cancelling a live run is destructive: it arms first, then commits.
         cut.FindAll("button").First(b => b.TextContent.Trim() == "Cancel").Click();
+        Assert.That(core.CancelledRuns, Is.Empty, "arming the confirmation must not cancel anything yet");
 
-        Assert.That(core.CancelledRuns, Does.Contain(run.RunId), "cancel calls CancelRunAsync with the run id");
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Cancel run").Click();
+
+        Assert.That(core.CancelledRuns, Does.Contain(run.RunId), "confirming calls CancelRunAsync with the run id");
     }
 
     [Test]
@@ -69,7 +76,7 @@ public sealed class RunsPageTests
         using var ctx = NewContext(core);
         var cut = ctx.Render<Runs>();
 
-        cut.FindAll(".chip-bar .chip").First(c => c.TextContent.Trim() == "Failed").Click();
+        cut.FindAll(".chip-bar .chip").First(c => c.TextContent.Contains("Failed")).Click();
 
         Assert.That(core.LastRunQuery!.State, Is.EqualTo("Failed"), "the state chip maps to RunQuery.State");
     }

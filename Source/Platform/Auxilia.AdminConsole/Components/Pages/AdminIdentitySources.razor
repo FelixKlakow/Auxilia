@@ -1,6 +1,7 @@
 @page "/admin/identity-sources"
 @attribute [Authorize]
 @inject ICoreClient Core
+@inject StepUpFlow StepUp
 
 <PageTitle>Identity sources — Auxilia</PageTitle>
 
@@ -9,7 +10,7 @@
 
 @if (!_loaded)
 {
-    <p class="muted">Loading…</p>
+    <LoadingState Rows="5"/>
 }
 else if (_denied)
 {
@@ -21,10 +22,10 @@ else
     {
         <div class="panel denied">@_error</div>
     }
-    @if (_notice is not null)
-    {
-        <div class="panel success">@_notice</div>
-    }
+    <NoticePanel Message="@_notice" OnDismiss="() => _notice = null"/>
+
+    <StepUpPrompt Flow="StepUp" Busy="_busy" OnConfirm="ConfirmStepUpAsync"
+                  Reason="Changing how users are imported is privileged — re-enter YOUR credential (password or API key)."/>
 
     <section class="card">
         <div class="card-header">
@@ -40,6 +41,7 @@ else
         }
         else
         {
+            <div class="table-scroll">
             <table class="data-table">
                 <thead>
                 <tr>
@@ -77,24 +79,16 @@ else
                                         @onclick="() => ImportNowAsync(source)">Import now</button>
                                 <button class="btn btn-secondary btn-sm" disabled="@_busy"
                                         @onclick="() => BeginEditAsync(source)">Edit</button>
-                                @if (_confirmDeleteId == source.Id)
-                                {
-                                    <button class="btn btn-danger btn-sm" disabled="@_busy"
-                                            @onclick="() => DeleteAsync(source)">Really delete?</button>
-                                    <button class="btn btn-secondary btn-sm" disabled="@_busy"
-                                            @onclick="() => _confirmDeleteId = null">Keep</button>
-                                }
-                                else
-                                {
-                                    <button class="btn btn-danger btn-sm" disabled="@_busy"
-                                            @onclick="() => _confirmDeleteId = source.Id">Delete</button>
-                                }
+                                <ConfirmButton Label="Delete" Question="Delete this source?"
+                                               ConfirmLabel="Yes, delete" Busy="_busy"
+                                               OnConfirm="() => DeleteAsync(source)"/>
                             </div>
                         </td>
                     </tr>
                 }
                 </tbody>
             </table>
+            </div>
         }
     </section>
 
@@ -235,7 +229,6 @@ else
     private bool _busy;
     private string? _error;
     private string? _notice;
-    private Guid? _confirmDeleteId;
 
     private IReadOnlyList<IdentityConnectorDescriptorDto> _connectors = [];
     private IReadOnlyList<IdentitySourceDto> _sources = [];
@@ -331,7 +324,6 @@ else
         _draft = new Draft();
         _storedSecretKeys = new HashSet<string>(StringComparer.Ordinal);
         _mappingRows.Clear();
-        _confirmDeleteId = null;
     }
 
     private void AddMappingRow() => _mappingRows.Add(new MappingRow());
@@ -380,8 +372,22 @@ else
         {
             await Core.DeleteIdentitySourceAsync(source.Id);
             _notice = $"Identity source \"{source.Name}\" deleted. Previously imported users stay untouched.";
-            _confirmDeleteId = null;
         });
+
+    /// <summary>Re-runs the mutation the Core rejected, once the operator has re-authenticated.</summary>
+    private async Task ConfirmStepUpAsync()
+    {
+        _busy = true;
+        try
+        {
+            if (await StepUp.ConfirmAsync())
+                await LoadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 
     private async Task MutateAsync(Func<Task> action)
     {
@@ -389,8 +395,8 @@ else
         _busy = true;
         try
         {
-            await action();
-            await LoadAsync();
+            if (await StepUp.RunAsync(action))
+                await LoadAsync();
         }
         catch (CoreApiException ex)
         {

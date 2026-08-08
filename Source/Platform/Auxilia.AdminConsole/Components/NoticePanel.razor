@@ -1,0 +1,45 @@
+@* A dismissible outcome notice. Notices used to linger until the next action overwrote them,
+   with no way to clear one you had read. *@
+
+@if (Visible)
+{
+    <div class="panel @Kind" role="status">
+        <span class="panel-head">
+            <span>
+                @if (ChildContent is not null)
+                {
+                    @ChildContent
+                }
+                else
+                {
+                    @Message
+                }
+            </span>
+            @if (OnDismiss.HasDelegate)
+            {
+                <button type="button" class="btn btn-secondary btn-sm panel-dismiss"
+                        aria-label="Dismiss this message" @onclick="OnDismiss">Dismiss</button>
+            }
+        </span>
+    </div>
+}
+
+@code {
+
+    /// <summary>Renders only when there is something to say — callers pass their nullable field.</summary>
+    [Parameter]
+    public string? Message { get; set; }
+
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Panel modifier: success, denied, warn, or info.</summary>
+    [Parameter]
+    public string Kind { get; set; } = "success";
+
+    [Parameter]
+    public EventCallback OnDismiss { get; set; }
+
+    private bool Visible => ChildContent is not null || !string.IsNullOrEmpty(Message);
+
+}

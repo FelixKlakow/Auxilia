@@ -1,0 +1,492 @@
+@page "/events"
+@attribute [Authorize]
+@implements IDisposable
+@inject ICoreClient Core
+@inject NavigationManager Navigation
+@inject ILogger<Events> Logger
+
+<PageTitle>Events — Auxilia</PageTitle>
+
+<PageHeader Title="Platform events"
+            Subtitle="Named facts published by workflows and the platform's own run lifecycle, newest first."/>
+
+<ConnectionBanner Connected="_connected" Detail="@_connectionDetail" LastUpdatedUtc="_lastFrameUtc"/>
+
+@if (!_loaded)
+{
+    <LoadingState Rows="8"/>
+}
+else if (_denied)
+{
+    <div class="panel denied">Access denied: @_error</div>
+}
+else
+{
+    @* A real form so Enter in any field applies the filter — the first thing anyone tries. *@
+    <form class="toolbar events-toolbar" @onsubmit="ApplyAsync" @onsubmit:preventDefault>
+        <label>
+            Event type
+            <input @bind="_eventType" @bind:event="oninput" list="event-type-suggestions" placeholder="e.g. review-ready"/>
+            <datalist id="event-type-suggestions">
+                @foreach (var type in TypeSuggestions())
+                {
+                    <option value="@type"></option>
+                }
+            </datalist>
+        </label>
+        <label>
+            Work item
+            <input @bind="_workItemId" @bind:event="oninput" placeholder="work item id"/>
+        </label>
+        <label>
+            Source run
+            <input @bind="_sourceRun" @bind:event="oninput" placeholder="run id"/>
+        </label>
+        <label>
+            Before
+            <input type="date" @bind="_before"/>
+            <span class="field-hint">Browse history from a point in time; ordering stays newest-first.</span>
+        </label>
+        <div class="toolbar-actions">
+            <button type="submit" class="btn btn-primary">Apply</button>
+            @if (HasFilters)
+            {
+                <button type="button" class="btn btn-secondary" @onclick="ClearFiltersAsync">Clear filters</button>
+            }
+            <button type="button" class="btn @(_live ? "btn-primary" : "btn-secondary") live-toggle"
+                    aria-pressed="@(_live ? "true" : "false")" disabled="@(_before is not null)"
+                    title="@(_before is not null ? "Clear the 'Before' bound to follow live" : null)"
+                    @onclick="ToggleLiveAsync">
+                @if (_live)
+                {
+                    <span class="live-dot"></span>
+                    <span>Following live</span>
+                }
+                else
+                {
+                    <span>Follow live</span>
+                }
+            </button>
+        </div>
+    </form>
+
+    @if (_error is { Length: > 0 })
+    {
+        <div class="panel denied">@_error</div>
+    }
+
+    @if (_pending.Count > 0)
+    {
+        @* Live arrivals are buffered, not injected under the reader's eyes. *@
+        <div class="table-more live-pending">
+            <button class="btn btn-primary btn-sm" @onclick="FlushPendingAsync">
+                ↑ @_pending.Count new event@(_pending.Count == 1 ? "" : "s")
+            </button>
+        </div>
+    }
+
+    @if (_events.Count == 0)
+    {
+        @if (HasFilters)
+        {
+            <EmptyState Title="No events match these filters"
+                        Description="Nothing on this platform matches the current event type, work item, or source run.">
+                <div class="empty-actions">
+                    <button class="btn btn-secondary" @onclick="ClearFiltersAsync">Clear filters</button>
+                </div>
+            </EmptyState>
+        }
+        else
+        {
+            <EmptyState Title="No events yet"
+                        Description="Workflows publish the events they declare; finished runs publish run.* lifecycle events."/>
+        }
+    }
+    else
+    {
+        <div class="card">
+            <div class="table-scroll">
+                <table class="data-table">
+                    <thead>
+                    <tr>
+                        <th><span class="visually-hidden">Expand</span></th>
+                        <th>When</th>
+                        <th>Event type</th>
+                        <th>Source</th>
+                        <th>Work item</th>
+                        <th>Payload</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var evt in _events)
+                    {
+                        var expanded = _expanded.Contains(evt.Id);
+                        <tr class="row-expandable @(_fresh.Contains(evt.Id) ? "row-fresh" : null)"
+                            @onclick="() => ToggleExpanded(evt.Id)">
+                            <td class="cell-toggle">
+                                <button class="row-toggle" aria-expanded="@(expanded ? "true" : "false")"
+                                        aria-label="@(expanded ? "Collapse" : "Expand") event @evt.EventType"
+                                        @onclick="() => ToggleExpanded(evt.Id)" @onclick:stopPropagation="true">›</button>
+                            </td>
+                            <td>
+                                @TimeText.Relative(evt.CreatedUtc)
+                                <span class="cell-sub">@evt.CreatedUtc.ToString("yyyy-MM-dd HH:mm:ss") UTC</span>
+                            </td>
+                            <td>
+                                <span class="cell-strong">@evt.EventType</span>
+                                @if (IsPlatformEvent(evt))
+                                {
+                                    <span class="type-chip" title="Published by the platform's run lifecycle">platform</span>
+                                }
+                            </td>
+                            <td>
+                                <span>@evt.WorkflowType</span>
+                                @if (evt.SourceRunId is { } run)
+                                {
+                                    <a class="cell-sub cell-mono" href="runs/@run"
+                                       @onclick:stopPropagation="true">run @run.ToString("N")[..8]</a>
+                                }
+                            </td>
+                            <td class="cell-mono">@(evt.WorkItemId is { Length: > 0 } wi ? wi : "—")</td>
+                            <td>
+                                @{
+                                    var summary = PayloadSummary.Fields(evt.PayloadJson);
+                                }
+                                @if (summary.Count == 0)
+                                {
+                                    <span class="muted">—</span>
+                                }
+                                else
+                                {
+                                    <span class="field-summary">
+                                        @foreach (var field in summary)
+                                        {
+                                            <span class="log-field">
+                                                @if (field.Key.Length > 0)
+                                                {
+                                                    <span class="log-label">@field.Key</span>
+                                                }
+                                                <span class="log-value">@field.Value</span>
+                                            </span>
+                                        }
+                                    </span>
+                                }
+                            </td>
+                        </tr>
+                        @if (expanded)
+                        {
+                            <tr class="row-detail">
+                                <td colspan="6">
+                                    <dl class="meta-grid">
+                                        <div>
+                                            <dt>Event id</dt>
+                                            <dd class="cell-mono">@evt.Id</dd>
+                                        </div>
+                                    </dl>
+                                    <div class="button-row detail-actions">
+                                        <button class="btn btn-secondary btn-sm"
+                                                @onclick="() => FilterToTypeAsync(evt.EventType)">
+                                            Filter to "@evt.EventType"
+                                        </button>
+                                        @if (evt.SourceRunId is { } detailRun)
+                                        {
+                                            <a class="btn btn-secondary btn-sm" href="runs/@detailRun">View run →</a>
+                                        }
+                                    </div>
+                                    @if (evt.PayloadJson is { Length: > 0 } payload)
+                                    {
+                                        <pre class="cell-mono payload-pre">@PayloadSummary.Pretty(payload)</pre>
+                                    }
+                                    else
+                                    {
+                                        <p class="muted">This event carries no payload.</p>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    }
+                    </tbody>
+                </table>
+            </div>
+            @if (_skip < _total)
+            {
+                <div class="card-body table-more">
+                    <button class="btn btn-secondary" disabled="@_loadingMore" @onclick="ShowMoreAsync">
+                        @(_loadingMore ? "Loading…" : $"Show more ({_skip} of {_total})")
+                        @if (_liveAdded > 0)
+                        {
+                            <span class="muted"> · +@_liveAdded live</span>
+                        }
+                    </button>
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+
+    private const int PageSize = 100;
+
+    private readonly CancellationTokenSource _cts = new();
+
+    private bool _loaded;
+    private bool _denied;
+    private bool _loadingMore;
+    private string? _error;
+
+    private string _eventType = "";
+    private string _workItemId = "";
+    private string _sourceRun = "";
+    // Only an upper bound: CreatedAfterUtc flips the Core to its oldest-first catch-up shape,
+    // which is a replay contract, not a browse filter.
+    private DateTime? _before;
+
+    // _skip counts rows fetched from the server; live arrivals are counted separately so the
+    // pager's "N of Total" stays comparable with the server's own total.
+    private int _skip;
+    private int _total;
+    private int _liveAdded;
+    private List<EventDto> _events = [];
+    private readonly HashSet<Guid> _expanded = [];
+    private readonly HashSet<Guid> _seen = [];
+    private readonly HashSet<Guid> _fresh = [];
+
+    private bool _live;
+    private CancellationTokenSource? _liveCts;
+    private readonly List<EventDto> _pending = [];
+    private bool _connected = true;
+    private string? _connectionDetail;
+    private DateTimeOffset? _lastFrameUtc;
+
+    private bool HasFilters
+        => _eventType.Length > 0 || _workItemId.Length > 0 || _sourceRun.Length > 0 || _before is not null;
+
+    protected override Task OnInitializedAsync()
+    {
+        // Filters come from the URL so /events?sourceRun=… (the run detail's "View all") lands
+        // pre-filtered, and any filtered view is a shareable link.
+        _eventType = PageFilters.Read(Navigation, "eventType");
+        _workItemId = PageFilters.Read(Navigation, "workItem");
+        _sourceRun = PageFilters.Read(Navigation, "sourceRun");
+        _before = PageFilters.ReadDate(Navigation, "before");
+        return LoadAsync(reset: true);
+    }
+
+    private async Task ApplyAsync()
+    {
+        PushFiltersToUrl();
+        // A historical window and a live tail contradict each other — the bound wins.
+        if (_before is not null && _live)
+            StopLive();
+        // A filter change invalidates the live subscription's server-side filter — restart it.
+        var wasLive = _live;
+        StopLive();
+        await LoadAsync(reset: true);
+        if (wasLive)
+            StartLive();
+    }
+
+    private Task ClearFiltersAsync()
+    {
+        _eventType = _workItemId = _sourceRun = "";
+        _before = null;
+        return ApplyAsync();
+    }
+
+    private Task FilterToTypeAsync(string eventType)
+    {
+        _eventType = eventType;
+        return ApplyAsync();
+    }
+
+    private void PushFiltersToUrl() => PageFilters.Apply(Navigation, new Dictionary<string, string?>
+    {
+        ["eventType"] = _eventType,
+        ["workItem"] = _workItemId,
+        ["sourceRun"] = _sourceRun,
+        ["before"] = _before?.ToString("yyyy-MM-dd")
+    });
+
+    private async Task ShowMoreAsync()
+    {
+        _loadingMore = true;
+        try
+        {
+            await LoadAsync(reset: false);
+        }
+        finally
+        {
+            _loadingMore = false;
+        }
+    }
+
+    private async Task LoadAsync(bool reset)
+    {
+        if (reset)
+        {
+            _skip = 0;
+            _liveAdded = 0;
+            _events = [];
+            _seen.Clear();
+            _fresh.Clear();
+            _pending.Clear();
+        }
+
+        var query = new EventQuery(
+            EventType: Empty(_eventType),
+            WorkItemId: Empty(_workItemId),
+            SourceRunId: Guid.TryParse(_sourceRun.Trim(), out var run) ? run : null,
+            CreatedAfterUtc: null,
+            CreatedBeforeUtc: _before is { } before
+                ? new DateTimeOffset(before.Date.AddDays(1), TimeSpan.Zero)
+                : null,
+            Skip: _skip,
+            Take: PageSize);
+
+        try
+        {
+            var page = await Core.QueryEventsAsync(query, _cts.Token);
+            _denied = false;
+            _error = null;
+            _total = page.Total;
+            foreach (var evt in page.Items.Where(e => _seen.Add(e.Id)))
+                _events.Add(evt);
+            _skip += page.Items.Count;
+        }
+        catch (CoreApiException ex)
+        {
+            _denied = ex.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+
+        _loaded = true;
+    }
+
+    private Task ToggleLiveAsync()
+    {
+        if (_live)
+            StopLive();
+        else
+            StartLive();
+        return Task.CompletedTask;
+    }
+
+    private void StartLive()
+    {
+        _live = true;
+        _connected = true;
+        _connectionDetail = null;
+        _liveCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+        _ = ConsumeLiveAsync(_liveCts.Token);
+    }
+
+    private void StopLive()
+    {
+        _live = false;
+        _liveCts?.Cancel();
+        _liveCts = null;
+        // A paused stream is not a broken connection — clear the banner with the subscription.
+        _connected = true;
+        _connectionDetail = null;
+        _pending.Clear();
+    }
+
+    /// <summary>
+    /// Follows the Core's SERVER-SIDE-FILTERED event stream under the current type/work-item
+    /// filters, buffering fresh events (deduped by id) until the reader asks for them. Connection
+    /// frames drive the banner — a silently reconnecting stream must never look like a live one.
+    /// </summary>
+    private async Task ConsumeLiveAsync(CancellationToken ct)
+    {
+        try
+        {
+            await foreach (var frame in Core.StreamEventsAsync(
+                Empty(_eventType), Empty(_workItemId), ct))
+            {
+                switch (frame)
+                {
+                    case StreamEventFrame<EventStreamEvent> evt:
+                        Buffer(evt.Event.Event);
+                        _lastFrameUtc = DateTimeOffset.UtcNow;
+                        break;
+
+                    case StreamConnectionFrame<EventStreamEvent> { State: StreamConnectionState.Reconnecting } down:
+                        _connected = false;
+                        _connectionDetail = down.Cause?.Message;
+                        break;
+
+                    case StreamConnectionFrame<EventStreamEvent> { State: StreamConnectionState.Connected }:
+                        _connected = true;
+                        _connectionDetail = null;
+                        break;
+                }
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Live mode toggled off or the circuit ended.
+        }
+        catch (CoreApiException ex)
+        {
+            _error = ex.ErrorDetail ?? ex.Message;
+            StopLive();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "The live event stream failed.");
+            _error = ex.Message;
+            StopLive();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void Buffer(EventDto dto)
+    {
+        if (Guid.TryParse(_sourceRun.Trim(), out var run) && dto.SourceRunId != run)
+            return;
+        if (_seen.Contains(dto.Id) || _pending.Any(p => p.Id == dto.Id))
+            return;
+        _pending.Insert(0, dto);
+    }
+
+    private Task FlushPendingAsync()
+    {
+        _fresh.Clear();
+        foreach (var evt in _pending.Where(e => _seen.Add(e.Id)))
+        {
+            _events.Insert(0, evt);
+            _fresh.Add(evt.Id);
+            _liveAdded++;
+        }
+        _pending.Clear();
+        return Task.CompletedTask;
+    }
+
+    private void ToggleExpanded(Guid id)
+    {
+        if (!_expanded.Remove(id))
+            _expanded.Add(id);
+    }
+
+    private static bool IsPlatformEvent(EventDto evt)
+        => evt.EventType.StartsWith(PlatformEventTypes.ReservedPrefix, StringComparison.Ordinal);
+
+    /// <summary>The reserved platform vocabulary plus every type visible in the loaded results.</summary>
+    private IEnumerable<string> TypeSuggestions()
+        => new[] { PlatformEventTypes.RunSucceeded, PlatformEventTypes.RunFailed, PlatformEventTypes.RunCancelled }
+            .Concat(_events.Select(e => e.EventType))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(t => t, StringComparer.Ordinal);
+
+    private static string? Empty(string value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+
+}

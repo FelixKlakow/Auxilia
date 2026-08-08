@@ -1,0 +1,531 @@
+@page "/admin/environments"
+@attribute [Authorize]
+@implements IDisposable
+@inject ICoreClient Core
+@inject StepUpFlow StepUp
+
+<PageTitle>Environments — Auxilia</PageTitle>
+
+<PageHeader Title="Environments"
+            Subtitle="The capability catalog a run's container is composed from: a base environment plus the layers a workflow asks for. Layers build on the fly from their setup script and are cached by content."/>
+
+@if (!_loaded)
+{
+    <LoadingState Rows="6"/>
+}
+else if (_denied)
+{
+    <div class="panel denied">Access denied: @_error</div>
+}
+else
+{
+    @if (_error is { Length: > 0 })
+    {
+        <div class="panel denied">@_error</div>
+    }
+    <NoticePanel Message="@_notice" OnDismiss="() => _notice = null"/>
+
+    <StepUpPrompt Flow="StepUp" Busy="_busy" OnConfirm="ConfirmStepUpAsync"
+                  Reason="Changing what runs can be built from is privileged — re-enter YOUR credential (password or API key)."/>
+
+    <section class="card">
+        <div class="card-header">
+            <h2>Environment layers <span class="count-chip">@_layers.Count</span></h2>
+            <p class="card-subtitle">
+                A layer is offered to workflow editors only while it is available, and — when it carries
+                sharing subjects — only to those subjects.
+            </p>
+            <div class="card-actions">
+                <button class="btn btn-primary" @onclick="StartCreateLayer">New layer</button>
+            </div>
+        </div>
+        @if (_layers.Count == 0)
+        {
+            <div class="card-body">
+                <EmptyState Title="No environment layers"
+                            Description="A layer names a capability a workflow can request — “dotnet-10”, “blender” — and the script that installs it.">
+                    <div class="empty-actions">
+                        <button class="btn btn-primary" @onclick="StartCreateLayer">Create your first layer</button>
+                    </div>
+                </EmptyState>
+            </div>
+        }
+        else
+        {
+            <div class="table-scroll">
+                <table class="data-table">
+                    <thead>
+                    <tr>
+                        <th>Capability</th>
+                        <th>Base</th>
+                        <th>Version</th>
+                        <th>Availability</th>
+                        <th>Access</th>
+                        <th>Updated</th>
+                        <th>Actions</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var layer in _layers)
+                    {
+                        <tr>
+                            <td>
+                                <span class="cell-strong">@layer.ProviderType</span>
+                                @if (layer.Description is { Length: > 0 } description)
+                                {
+                                    <span class="cell-sub">@description</span>
+                                }
+                            </td>
+                            <td>
+                                <span class="type-chip">@layer.BaseEnvironment</span>
+                                @if (layer.BaseVersion is { Length: > 0 } baseVersion)
+                                {
+                                    <span class="cell-sub">pinned to @baseVersion</span>
+                                }
+                                else
+                                {
+                                    <span class="cell-sub">any version</span>
+                                }
+                            </td>
+                            <td>@(layer.Version is { Length: > 0 } version ? version : "—")</td>
+                            <td>
+                                @if (IsAvailable(layer.ProviderType))
+                                {
+                                    <span class="badge badge-valid">available</span>
+                                }
+                                else
+                                {
+                                    <span class="badge">hidden</span>
+                                }
+                            </td>
+                            <td>
+                                @if (layer.Grants.Count > 0)
+                                {
+                                    <span class="badge badge-role" title="@SubjectSummary(layer.Grants)">
+                                        @layer.Grants.Count subject@(layer.Grants.Count == 1 ? "" : "s")
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="muted">everyone</span>
+                                }
+                            </td>
+                            <td>@TimeText.Relative(layer.UpdatedUtc)</td>
+                            <td>
+                                <div class="cell-actions">
+                                    <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                            @onclick="() => StartEditLayer(layer)">Edit</button>
+                                    <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                            @onclick="() => StartLayerSharing(layer)">Sharing</button>
+                                    <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                            @onclick="() => ToggleAvailabilityAsync(layer)">
+                                        @(IsAvailable(layer.ProviderType) ? "Make unavailable" : "Make available")
+                                    </button>
+                                    <ConfirmButton Label="Delete" Question="Delete this layer?"
+                                                   ConfirmLabel="Yes, delete" Busy="_busy"
+                                                   OnConfirm="() => DeleteLayerAsync(layer)"/>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    <section class="card">
+        <div class="card-header">
+            <h2>Environment bases <span class="count-chip">@_bases.Count</span></h2>
+            <p class="card-subtitle">
+                The (name, version) pairs layers may pin to — e.g. linux / ubuntu-24.04. A layer with no
+                pin composes with any version of its base.
+            </p>
+        </div>
+        @if (_bases.Count == 0)
+        {
+            <div class="card-body"><p class="muted view-empty">No base versions registered — layers compose with any version of their base.</p></div>
+        }
+        else
+        {
+            <div class="table-scroll">
+                <table class="data-table">
+                    <thead>
+                    <tr>
+                        <th>Base</th>
+                        <th>Version</th>
+                        <th>Description</th>
+                        <th>Used by</th>
+                        <th>Updated</th>
+                        <th>Actions</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var environmentBase in _bases)
+                    {
+                        var pinned = _layers.Count(l => l.BaseVersion == environmentBase.Version
+                                                        && l.BaseEnvironment == environmentBase.Name);
+                        <tr>
+                            <td><span class="type-chip">@environmentBase.Name</span></td>
+                            <td class="cell-strong">@environmentBase.Version</td>
+                            <td>@(environmentBase.Description is { Length: > 0 } d ? d : "—")</td>
+                            <td>
+                                @if (pinned == 0)
+                                {
+                                    <span class="muted">no layers pinned</span>
+                                }
+                                else
+                                {
+                                    <span>@pinned layer@(pinned == 1 ? "" : "s")</span>
+                                }
+                            </td>
+                            <td>@TimeText.Relative(environmentBase.UpdatedUtc)</td>
+                            <td>
+                                <ConfirmButton Label="Delete" Question="Delete this base version?"
+                                               ConfirmLabel="Yes, delete" Busy="_busy"
+                                               Title="@(pinned > 0 ? $"{pinned} layer(s) pin this version" : null)"
+                                               OnConfirm="() => DeleteBaseAsync(environmentBase)"/>
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+        <div class="card-body">
+            <h3 class="table-caption base-caption">Add a base version</h3>
+            <form class="toolbar" @onsubmit="AddBaseAsync" @onsubmit:preventDefault>
+                <label>
+                    Base name
+                    <input class="input-inline" list="environment-base-names" @bind="_baseName" placeholder="e.g. linux"/>
+                    <datalist id="environment-base-names">
+                        @foreach (var name in BaseNameSuggestions())
+                        {
+                            <option value="@name"></option>
+                        }
+                    </datalist>
+                </label>
+                <label>
+                    Version
+                    <input class="input-inline" @bind="_baseVersion" placeholder="e.g. ubuntu-24.04"/>
+                </label>
+                <label>
+                    Description
+                    <input @bind="_baseDescription" placeholder="optional"/>
+                </label>
+                <div class="toolbar-actions">
+                    <button type="submit" class="btn btn-primary"
+                            disabled="@(_busy || _baseName.Length == 0 || _baseVersion.Length == 0)">Add base version</button>
+                </div>
+            </form>
+        </div>
+    </section>
+
+    <Drawer Open="_layerDraft is not null"
+            Title="@(_layerDraft?.IsNew == true ? "New environment layer" : $"Edit {_layerDraft?.ProviderType}")"
+            Subtitle="The setup script runs when the layer is built; the runner caches the result by content."
+            OnClose="() => _layerDraft = null">
+        <ChildContent>
+            @if (_layerDraft is { } draft)
+            {
+                <div class="form-grid drawer-form">
+                    <label>
+                        Capability name
+                        <input @bind="draft.ProviderType" disabled="@(!draft.IsNew)" placeholder="e.g. dotnet-10"/>
+                        <span class="field-hint">
+                            What a workflow asks for by name. Immutable once created — create a new layer to rename.
+                        </span>
+                    </label>
+                    <label>
+                        Description
+                        <input @bind="draft.Description" placeholder="What this layer adds to the image"/>
+                    </label>
+                    <label>
+                        Base environment
+                        <select @bind="draft.BaseEnvironment">
+                            @foreach (var name in BaseNameSuggestions())
+                            {
+                                <option value="@name">@name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>
+                        Pinned base version
+                        <select @bind="draft.BaseVersion">
+                            <option value="">Any version of @draft.BaseEnvironment</option>
+                            @foreach (var candidate in _bases.Where(b => b.Name == draft.BaseEnvironment))
+                            {
+                                <option value="@candidate.Version">@candidate.Version</option>
+                            }
+                        </select>
+                        <span class="field-hint">A pin must name a version registered in the base catalog above.</span>
+                    </label>
+                    <label>
+                        Software version
+                        <input @bind="draft.Version" placeholder="optional, e.g. 10.0.100"/>
+                        <span class="field-hint">Records what the script installs; free-form.</span>
+                    </label>
+                    <label>
+                        Setup script
+                        <textarea rows="12" class="script-input" spellcheck="false"
+                                  @bind="draft.SetupScript"
+                                  placeholder="#!/bin/sh&#10;apt-get update &amp;&amp; apt-get install -y …"></textarea>
+                        <span class="field-hint">Runs during the layer build. Keep it idempotent — it is cached by content.</span>
+                    </label>
+                </div>
+            }
+        </ChildContent>
+        <Footer>
+            <button class="btn btn-primary" disabled="@(_busy || !CanSaveLayer)" @onclick="SaveLayerAsync">
+                @(_layerDraft?.IsNew == true ? "Create layer" : "Save layer")
+            </button>
+            <button class="btn btn-secondary" disabled="@_busy" @onclick="() => _layerDraft = null">Cancel</button>
+        </Footer>
+    </Drawer>
+
+    <Drawer Open="_sharingLayer is not null" Title="@($"Sharing — {_sharingLayer}")"
+            Subtitle="Who may bind this environment layer into a run."
+            OnClose="() => _sharingLayer = null">
+        <ChildContent>
+            <SharingEditor Rows="_sharingRows"
+                           Hint="Leave empty to offer this layer to everyone. Adding a subject restricts it — only those principals or groups can dispatch a run that uses it."
+                           OpenLabel="Open to everyone — any workflow may bind this layer."/>
+        </ChildContent>
+        <Footer>
+            <button class="btn btn-primary" disabled="@_busy" @onclick="SaveLayerSharingAsync">Save sharing</button>
+            <button class="btn btn-secondary" disabled="@_busy" @onclick="() => _sharingLayer = null">Cancel</button>
+        </Footer>
+    </Drawer>
+}
+
+@code {
+
+    private bool _loaded;
+    private bool _denied;
+    private bool _busy;
+    private string? _error;
+    private string? _notice;
+
+    private List<EnvironmentLayerDto> _layers = [];
+    private List<EnvironmentBaseDto> _bases = [];
+    // Availability lives on the catalog entry, not the layer record — the two are joined by name.
+    private Dictionary<string, bool> _availability = new(StringComparer.Ordinal);
+
+    private string _baseName = EnvironmentBases.Linux;
+    private string _baseVersion = "";
+    private string _baseDescription = "";
+
+    private LayerDraft? _layerDraft;
+    private string? _sharingLayer;
+    private List<GrantRow> _sharingRows = [];
+
+    private readonly CancellationTokenSource _cts = new();
+
+    private sealed class LayerDraft
+    {
+        public bool IsNew;
+        public string ProviderType = "";
+        public string Description = "";
+        public string BaseEnvironment = EnvironmentBases.Linux;
+        public string BaseVersion = "";
+        public string Version = "";
+        public string SetupScript = "";
+    }
+
+    private bool CanSaveLayer
+        => _layerDraft is { } draft && draft.ProviderType.Trim().Length > 0;
+
+    private bool IsAvailable(string providerType)
+        => _availability.GetValueOrDefault(providerType, true);
+
+    private string SubjectSummary(IReadOnlyList<AccessGrant> grants)
+        => string.Join(", ", grants.Select(g => $"{SharingDirectory.KindLabel(g.Kind)}: {g.Id}"));
+
+    /// <summary>Base names the platform knows plus every name already in use — an open vocabulary.</summary>
+    private IEnumerable<string> BaseNameSuggestions()
+        => new[] { EnvironmentBases.Linux, EnvironmentBases.Windows }
+            .Concat(_bases.Select(b => b.Name))
+            .Concat(_layers.Select(l => l.BaseEnvironment))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(n => n, StringComparer.Ordinal);
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _layers = (await Core.ListEnvironmentLayersAsync(ct: _cts.Token))
+                .OrderBy(l => l.ProviderType, StringComparer.Ordinal).ToList();
+            _bases = (await Core.ListEnvironmentBasesAsync(ct: _cts.Token))
+                .OrderBy(b => b.Name, StringComparer.Ordinal)
+                .ThenBy(b => b.Version, StringComparer.Ordinal).ToList();
+            await LoadAvailabilityAsync();
+            _denied = false;
+            _error = null;
+        }
+        catch (CoreApiException ex)
+        {
+            _denied = ex.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+
+        _loaded = true;
+    }
+
+    /// <summary>Best-effort: a layer whose catalog entry is unreadable simply shows as available.</summary>
+    private async Task LoadAvailabilityAsync()
+    {
+        try
+        {
+            var page = await Core.QueryProviderCatalogAsync(new ProviderCatalogQuery(Take: 200), _cts.Token);
+            _availability = page.Items
+                .Where(e => e.ComposesEnvironment)
+                .ToDictionary(e => e.ProviderType, e => e.Available, StringComparer.Ordinal);
+        }
+        catch (CoreApiException)
+        {
+            _availability = new Dictionary<string, bool>(StringComparer.Ordinal);
+        }
+    }
+
+    private void StartCreateLayer()
+    {
+        _error = _notice = null;
+        _sharingLayer = null;
+        _layerDraft = new LayerDraft { IsNew = true };
+    }
+
+    private void StartEditLayer(EnvironmentLayerDto layer)
+    {
+        _error = _notice = null;
+        _sharingLayer = null;
+        _layerDraft = new LayerDraft
+        {
+            IsNew = false,
+            ProviderType = layer.ProviderType,
+            Description = layer.Description ?? "",
+            BaseEnvironment = layer.BaseEnvironment,
+            BaseVersion = layer.BaseVersion ?? "",
+            Version = layer.Version ?? "",
+            SetupScript = layer.SetupScript
+        };
+    }
+
+    private Task SaveLayerAsync()
+    {
+        if (_layerDraft is not { } draft)
+            return Task.CompletedTask;
+        return MutateAsync(async () =>
+        {
+            await Core.UpsertEnvironmentLayerAsync(new UpsertEnvironmentLayer(
+                ProviderType: draft.ProviderType.Trim(),
+                Description: Empty(draft.Description),
+                SetupScript: draft.SetupScript,
+                BaseEnvironment: draft.BaseEnvironment,
+                Version: Empty(draft.Version),
+                BaseVersion: Empty(draft.BaseVersion)), _cts.Token);
+            _notice = $"Environment layer \"{draft.ProviderType.Trim()}\" saved.";
+            _layerDraft = null;
+        });
+    }
+
+    private Task DeleteLayerAsync(EnvironmentLayerDto layer)
+        => MutateAsync(async () =>
+        {
+            await Core.DeleteEnvironmentLayerAsync(layer.ProviderType, _cts.Token);
+            _notice = $"Environment layer \"{layer.ProviderType}\" deleted.";
+        });
+
+    private Task ToggleAvailabilityAsync(EnvironmentLayerDto layer)
+        => MutateAsync(async () =>
+        {
+            var available = !IsAvailable(layer.ProviderType);
+            await Core.SetProviderAvailabilityAsync(layer.ProviderType, available, _cts.Token);
+            _notice = available
+                ? $"\"{layer.ProviderType}\" is now offered in workflow editors."
+                : $"\"{layer.ProviderType}\" is hidden — existing configurations keep it, editors no longer offer it.";
+        });
+
+    private void StartLayerSharing(EnvironmentLayerDto layer)
+    {
+        _error = _notice = null;
+        _layerDraft = null;
+        _sharingLayer = layer.ProviderType;
+        _sharingRows = GrantRows.From(layer.Grants);
+    }
+
+    private Task SaveLayerSharingAsync()
+    {
+        if (_sharingLayer is not { } providerType)
+            return Task.CompletedTask;
+        return MutateAsync(async () =>
+        {
+            var grants = GrantRows.ToGrants(_sharingRows);
+            await Core.SetEnvironmentLayerGrantsAsync(
+                providerType, new SetEnvironmentLayerGrants(grants), _cts.Token);
+            _notice = grants.Count == 0
+                ? $"\"{providerType}\" is open to everyone again."
+                : $"\"{providerType}\" is now restricted to {grants.Count} subject(s).";
+            _sharingLayer = null;
+        });
+    }
+
+    private Task AddBaseAsync()
+        => MutateAsync(async () =>
+        {
+            await Core.UpsertEnvironmentBaseAsync(new UpsertEnvironmentBase(
+                _baseName.Trim(), _baseVersion.Trim(), Empty(_baseDescription)), _cts.Token);
+            _notice = $"Base version \"{_baseName.Trim()} / {_baseVersion.Trim()}\" registered.";
+            _baseVersion = _baseDescription = "";
+        });
+
+    private Task DeleteBaseAsync(EnvironmentBaseDto environmentBase)
+        => MutateAsync(async () =>
+        {
+            await Core.DeleteEnvironmentBaseAsync(environmentBase.Name, environmentBase.Version, _cts.Token);
+            _notice = $"Base version \"{environmentBase.Name} / {environmentBase.Version}\" deleted.";
+        });
+
+    private async Task ConfirmStepUpAsync()
+    {
+        _busy = true;
+        try
+        {
+            if (await StepUp.ConfirmAsync())
+                await LoadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task MutateAsync(Func<Task> action)
+    {
+        _error = _notice = null;
+        _busy = true;
+        try
+        {
+            if (await StepUp.RunAsync(action))
+                await LoadAsync();
+        }
+        catch (CoreApiException ex)
+        {
+            _error = (ex.ErrorDetail ?? ex.Message).Replace('\n', ' ');
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string? Empty(string value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+
+}

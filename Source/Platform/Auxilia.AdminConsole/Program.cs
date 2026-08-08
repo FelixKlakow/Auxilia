@@ -1,6 +1,7 @@
 using Auxilia.AdminConsole.Auth;
 using Auxilia.AdminConsole.Components;
 using Auxilia.AdminConsole.Rendering;
+using Auxilia.AdminConsole.Support;
 using Auxilia.Core.Client;
 using Auxilia.Workflows.Views;
 using BlazorAgentView.Services;
@@ -78,6 +79,10 @@ builder.Services.AddCascadingAuthenticationState();
 
 // --- Blazor UI (interactive server) + the workflow view renderers (moved from BackendService) ---
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
+// Ambient shell state (sidebar live-run count + Core health): one poll loop per circuit.
+builder.Services.AddScoped<LiveRunMonitor>();
+builder.Services.AddScoped<StepUpFlow>();
+builder.Services.AddScoped<SharingDirectory>();
 builder.Services.AddSingleton<ViewRendererRegistry>();
 builder.Services.AddBlazorAgentView();
 builder.Services.AddViewRenderer<AgentChatRenderer>(AgentChatEntry.RendererKey);

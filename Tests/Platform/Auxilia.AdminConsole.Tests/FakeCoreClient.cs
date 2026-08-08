@@ -133,9 +133,14 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task<UserBearerToken> LoginAsync(PasswordLoginRequest request, CancellationToken ct = default)
         => Task.FromResult(new UserBearerToken("auxu_fake", DateTimeOffset.UtcNow.AddHours(8)));
 
+    /// <summary>When set, every step-up attempt fails with this error detail (wrong-secret path).</summary>
+    public string? StepUpError { get; set; }
+
     public Task<ElevationTicket> StepUpAsync(StepUpRequest request, CancellationToken ct = default)
     {
         LastStepUpSecret = request.Secret;
+        if (StepUpError is { } detail)
+            throw new CoreApiException(HttpStatusCode.Forbidden, detail, "step-up failed");
         _elevated = true;
         return Task.FromResult(new ElevationTicket("fake-elevation", DateTimeOffset.UtcNow.AddMinutes(5)));
     }
@@ -288,9 +293,14 @@ internal sealed class FakeCoreClient : ICoreClient
         return Task.FromResult(created);
     }
 
+    public UpdateRunConfiguration? LastUpdatedConfiguration { get; private set; }
+    public Guid? LastUpdatedConfigurationId { get; private set; }
+
     public Task<RunConfiguration> UpdateConfigurationAsync(
         Guid id, UpdateRunConfiguration request, CancellationToken ct = default)
     {
+        LastUpdatedConfiguration = request;
+        LastUpdatedConfigurationId = id;
         var existing = Configurations.First(c => c.Id == id);
         var updated = existing with
         {
@@ -429,6 +439,42 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task<ArtifactDto?> GetArtifactAsync(Guid id, CancellationToken ct = default) => Nope<Task<ArtifactDto?>>();
     public Task<Stream?> OpenArtifactContentAsync(Guid id, CancellationToken ct = default) => Nope<Task<Stream?>>();
     public IAsyncEnumerable<ClientStreamFrame<ArtifactStreamEvent>> StreamArtifactEventsAsync(string? artifactType = null, string? workItemId = null, CancellationToken ct = default) => Nope<IAsyncEnumerable<ClientStreamFrame<ArtifactStreamEvent>>>();
+    // --- Events (Events page + RunDetail strip) ---
+    public List<EventDto> StoredEvents { get; } = [];
+    public EventQuery? LastEventQuery { get; private set; }
+    public CoreApiException? EventsError { get; set; }
+
+    public Task<PagedResult<EventDto>> QueryEventsAsync(EventQuery query, CancellationToken ct = default)
+    {
+        LastEventQuery = query;
+        if (EventsError is { } error)
+            throw error;
+        var filtered = StoredEvents
+            .Where(e => query.EventType is null || e.EventType == query.EventType)
+            .Where(e => query.WorkItemId is null || e.WorkItemId == query.WorkItemId)
+            .Where(e => query.SourceRunId is not { } run || e.SourceRunId == run)
+            .OrderByDescending(e => e.CreatedUtc)
+            .ToList();
+        var page = filtered.Skip(query.Skip).Take(query.Take).ToList();
+        return Task.FromResult(new PagedResult<EventDto>(page, filtered.Count, query.Skip, query.Take));
+    }
+    /// <summary>Scripted frames yielded by <see cref="StreamEventsAsync"/> — connection frames included.</summary>
+    public List<ClientStreamFrame<EventStreamEvent>> EventStreamFrames { get; } = [];
+
+    public (string? EventType, string? WorkItemId)? LastEventStreamFilter { get; private set; }
+
+    public async IAsyncEnumerable<ClientStreamFrame<EventStreamEvent>> StreamEventsAsync(
+        string? eventType = null, string? workItemId = null,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        LastEventStreamFilter = (eventType, workItemId);
+        foreach (var frame in EventStreamFrames.ToList())
+        {
+            ct.ThrowIfCancellationRequested();
+            await Task.CompletedTask;
+            yield return frame;
+        }
+    }
     public Task<GroupDto> CreateGroupAsync(CreateGroupRequest request, CancellationToken ct = default) => Nope<Task<GroupDto>>();
     public Task<IReadOnlyList<GroupDto>> ListGroupsAsync(CancellationToken ct = default) => Nope<Task<IReadOnlyList<GroupDto>>>();
     public Task AddGroupMemberAsync(Guid groupId, AddGroupMemberRequest request, CancellationToken ct = default) => Nope<Task>();
@@ -503,14 +549,95 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task DeleteConfigurationAsync(Guid id, CancellationToken ct = default) => Task.CompletedTask;
     public Task DeleteProviderAsync(string providerType, CancellationToken ct = default) => Task.CompletedTask;
 
+    // --- Environments (layers + bases), the Environments admin tab ---
+    public List<EnvironmentLayerDto> EnvironmentLayers { get; } = [];
+    public List<UpsertEnvironmentLayer> UpsertedLayers { get; } = [];
+    public List<string> DeletedLayers { get; } = [];
+    public List<(string ProviderType, IReadOnlyList<AccessGrant> Grants)> LayerGrantCalls { get; } = [];
+    public CoreApiException? EnvironmentsError { get; set; }
+
     public Task<IReadOnlyList<EnvironmentLayerDto>> ListEnvironmentLayersAsync(string? search = null, CancellationToken ct = default)
-        => Nope<Task<IReadOnlyList<EnvironmentLayerDto>>>();
+    {
+        if (EnvironmentsError is { } error)
+            throw error;
+        var matching = EnvironmentLayers
+            .Where(l => search is null || l.ProviderType.Contains(search, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        return Task.FromResult<IReadOnlyList<EnvironmentLayerDto>>(matching);
+    }
+
     public Task<EnvironmentLayerDto?> GetEnvironmentLayerAsync(string providerType, CancellationToken ct = default)
-        => Nope<Task<EnvironmentLayerDto?>>();
+        => Task.FromResult(EnvironmentLayers.FirstOrDefault(l => l.ProviderType == providerType));
+
     public Task<EnvironmentLayerDto> UpsertEnvironmentLayerAsync(UpsertEnvironmentLayer request, CancellationToken ct = default)
-        => Nope<Task<EnvironmentLayerDto>>();
+    {
+        UpsertedLayers.Add(request);
+        var index = EnvironmentLayers.FindIndex(l => l.ProviderType == request.ProviderType);
+        var grants = index >= 0 ? EnvironmentLayers[index].Grants : [];
+        var saved = new EnvironmentLayerDto(
+            request.ProviderType, request.Description, request.BaseEnvironment, request.SetupScript,
+            request.Version, DateTimeOffset.UtcNow, request.BaseVersion) { Grants = grants };
+        if (index >= 0)
+            EnvironmentLayers[index] = saved;
+        else
+            EnvironmentLayers.Add(saved);
+        return Task.FromResult(saved);
+    }
+
     public Task DeleteEnvironmentLayerAsync(string providerType, CancellationToken ct = default)
-        => Nope<Task>();
+    {
+        DeletedLayers.Add(providerType);
+        EnvironmentLayers.RemoveAll(l => l.ProviderType == providerType);
+        return Task.CompletedTask;
+    }
+
+    public Task<EnvironmentLayerDto> SetEnvironmentLayerGrantsAsync(string providerType, SetEnvironmentLayerGrants request, CancellationToken ct = default)
+    {
+        DemandElevationIfRequired();
+        LayerGrantCalls.Add((providerType, request.Grants));
+        var index = EnvironmentLayers.FindIndex(l => l.ProviderType == providerType);
+        var updated = EnvironmentLayers[index] with { Grants = request.Grants };
+        EnvironmentLayers[index] = updated;
+        return Task.FromResult(updated);
+    }
+
+    public List<(string ProviderType, IReadOnlyList<AccessGrant> Grants)> ProviderGrantCalls { get; } = [];
+
+    public Task<ProviderCatalogEntry> SetProviderGrantsAsync(string providerType, SetProviderGrants request, CancellationToken ct = default)
+    {
+        DemandElevationIfRequired();
+        ProviderGrantCalls.Add((providerType, request.Grants));
+        var index = ProviderCatalog.FindIndex(e => e.ProviderType == providerType);
+        var updated = ProviderCatalog[index] with { Grants = request.Grants };
+        ProviderCatalog[index] = updated;
+        return Task.FromResult(updated);
+    }
+
+    // --- Workflow-type access list ---
+    public List<WorkflowTypeAccessEntryDto> WorkflowTypeAccess { get; } = [];
+    public List<(string Type, WorkflowTypeAccessChange Change)> AccessGrantCalls { get; } = [];
+    public List<(string Type, WorkflowTypeAccessChange Change)> AccessRevokeCalls { get; } = [];
+
+    public Task<IReadOnlyList<WorkflowTypeAccessEntryDto>> ListWorkflowTypeAccessAsync(string workflowType, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<WorkflowTypeAccessEntryDto>>(WorkflowTypeAccess.ToList());
+
+    public Task GrantWorkflowTypeAccessAsync(string workflowType, WorkflowTypeAccessChange request, CancellationToken ct = default)
+    {
+        AccessGrantCalls.Add((workflowType, request));
+        WorkflowTypeAccess.Add(new WorkflowTypeAccessEntryDto(
+            request.Action, request.RoleName, request.PrincipalId, request.GroupId));
+        return Task.CompletedTask;
+    }
+
+    public Task RevokeWorkflowTypeAccessAsync(string workflowType, WorkflowTypeAccessChange request, CancellationToken ct = default)
+    {
+        AccessRevokeCalls.Add((workflowType, request));
+        WorkflowTypeAccess.RemoveAll(e => e.Action == request.Action
+                                          && e.RoleName == request.RoleName
+                                          && e.PrincipalId == request.PrincipalId
+                                          && e.GroupId == request.GroupId);
+        return Task.CompletedTask;
+    }
     public Task<IReadOnlyList<WorkspaceResource>> ListWorkspacesAsync(CancellationToken ct = default)
         => Nope<Task<IReadOnlyList<WorkspaceResource>>>();
     public Task<WorkspaceResource?> GetWorkspaceAsync(Guid id, CancellationToken ct = default)
@@ -526,12 +653,28 @@ internal sealed class FakeCoreClient : ICoreClient
         => Nope<Task<IReadOnlyList<PlatformSettingDto>>>();
     public Task<PlatformSettingDto> SetPlatformSettingAsync(string key, SetPlatformSetting request, CancellationToken ct = default)
         => Nope<Task<PlatformSettingDto>>();
+    public List<EnvironmentBaseDto> EnvironmentBases { get; } = [];
+    public List<UpsertEnvironmentBase> UpsertedBases { get; } = [];
+    public List<(string Name, string Version)> DeletedBases { get; } = [];
+
     public Task<IReadOnlyList<EnvironmentBaseDto>> ListEnvironmentBasesAsync(string? search = null, CancellationToken ct = default)
-        => Nope<Task<IReadOnlyList<EnvironmentBaseDto>>>();
+        => Task.FromResult<IReadOnlyList<EnvironmentBaseDto>>(EnvironmentBases.ToList());
+
     public Task<EnvironmentBaseDto> UpsertEnvironmentBaseAsync(UpsertEnvironmentBase request, CancellationToken ct = default)
-        => Nope<Task<EnvironmentBaseDto>>();
+    {
+        UpsertedBases.Add(request);
+        var saved = new EnvironmentBaseDto(request.Name, request.Version, request.Description, DateTimeOffset.UtcNow);
+        EnvironmentBases.RemoveAll(b => b.Name == request.Name && b.Version == request.Version);
+        EnvironmentBases.Add(saved);
+        return Task.FromResult(saved);
+    }
+
     public Task DeleteEnvironmentBaseAsync(string name, string version, CancellationToken ct = default)
-        => Nope<Task>();
+    {
+        DeletedBases.Add((name, version));
+        EnvironmentBases.RemoveAll(b => b.Name == name && b.Version == version);
+        return Task.CompletedTask;
+    }
     public Task DeleteConnectorAsync(Guid id, CancellationToken ct = default) => Task.CompletedTask;
     public Task<ConnectorBrowseResult> BrowseConnectorAsync(Guid id, BrowseConnector request, CancellationToken ct = default)
         => Task.FromResult(new ConnectorBrowseResult([]));
@@ -578,6 +721,7 @@ internal sealed class FakeCoreClient : ICoreClient
 
     public Task UnregisterWorkflowTypeAsync(string workflowType, CancellationToken ct = default)
     {
+        DemandElevationIfRequired();
         UnregisteredWorkflowTypes.Add(workflowType);
         WorkflowTypes.RemoveAll(t => t.WorkflowType == workflowType);
         WorkflowTypeRegistrations.Remove(workflowType);

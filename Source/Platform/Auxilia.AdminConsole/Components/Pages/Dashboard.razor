@@ -1,3 +1,5 @@
+@* The console's landing page: "/" as well as "/dashboard", which stays a valid deep link. *@
+@page "/"
 @page "/dashboard"
 @attribute [Authorize]
 @implements IDisposable
@@ -6,7 +8,8 @@
 
 <PageTitle>Dashboard — Auxilia</PageTitle>
 
-<PageHeader Title="Dashboard" Subtitle="What is running now, and what ran recently."/>
+<PageHeader Title="Dashboard" Subtitle="What is running now, and what ran recently."
+            Freshness="_poller?.LastSuccessUtc"/>
 
 <ConnectionBanner Connected="@(_poller?.IsHealthy ?? true)"
                   Detail="@_poller?.LastError"
@@ -14,7 +17,7 @@
 
 @if (!_loaded)
 {
-    <p class="muted">Loading…</p>
+    <LoadingState Rows="6"/>
 }
 else if (_denied)
 {
@@ -87,25 +90,27 @@ else
         else
         {
             <div class="card">
-                <table class="data-table">
-                    <thead>
-                    <tr>
-                        <th>State</th>
-                        <th>Workflow</th>
-                        <th>Started</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    @foreach (var run in _active)
-                    {
+                <div class="table-scroll">
+                    <table class="data-table">
+                        <thead>
                         <tr>
-                            <td><span class="badge badge-state badge-@run.State.ToLowerInvariant()">@run.State</span></td>
-                            <td><a href="runs/@run.RunId" class="cell-strong">@run.WorkflowType</a></td>
-                            <td>@TimeText.Relative(run.CreatedUtc)</td>
+                            <th>State</th>
+                            <th>Workflow</th>
+                            <th>Started</th>
                         </tr>
-                    }
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                        @foreach (var run in _active)
+                        {
+                            <tr>
+                                <td><span class="badge badge-state @StateBadge.ClassFor(run.State)">@run.State</span></td>
+                                <td><a href="runs/@run.RunId" class="cell-strong">@run.WorkflowType</a></td>
+                                <td>@TimeText.Relative(run.CreatedUtc)</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
             </div>
         }
     </section>
@@ -120,27 +125,29 @@ else
         else
         {
             <div class="card">
-                <table class="data-table">
-                    <thead>
-                    <tr>
-                        <th>State</th>
-                        <th>Workflow</th>
-                        <th>Started</th>
-                        <th>Error</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    @foreach (var run in _recent)
-                    {
+                <div class="table-scroll">
+                    <table class="data-table">
+                        <thead>
                         <tr>
-                            <td><span class="badge badge-state badge-@run.State.ToLowerInvariant()">@run.State</span></td>
-                            <td><a href="runs/@run.RunId" class="cell-strong">@run.WorkflowType</a></td>
-                            <td>@TimeText.Relative(run.CreatedUtc)</td>
-                            <td class="error-cell">@run.Error</td>
+                            <th>State</th>
+                            <th>Workflow</th>
+                            <th>Started</th>
+                            <th>Error</th>
                         </tr>
-                    }
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                        @foreach (var run in _recent)
+                        {
+                            <tr>
+                                <td><span class="badge badge-state @StateBadge.ClassFor(run.State)">@run.State</span></td>
+                                <td><a href="runs/@run.RunId" class="cell-strong">@run.WorkflowType</a></td>
+                                <td>@TimeText.Relative(run.CreatedUtc)</td>
+                                <td class="error-cell">@run.Error</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
             </div>
         }
     </section>

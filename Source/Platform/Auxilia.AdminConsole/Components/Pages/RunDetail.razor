@@ -15,17 +15,17 @@
 
 @if (!_loaded)
 {
-    <h1>Run</h1>
-    <p class="muted">Loading…</p>
+    <PageHeader Title="Run"/>
+    <LoadingState Rows="5"/>
 }
 else if (_denied)
 {
-    <h1>Run</h1>
+    <PageHeader Title="Run"/>
     <div class="panel denied">Access denied: @_error</div>
 }
 else if (_run is null)
 {
-    <h1>Run</h1>
+    <PageHeader Title="Run"/>
     <div class="panel denied">Run not found.</div>
 }
 else
@@ -52,7 +52,8 @@ else
                     Open terminal
                 </button>
             }
-            <button class="btn btn-danger" disabled="@_busy" @onclick="CancelAsync">Cancel this run</button>
+            <ConfirmButton Label="Cancel this run" Question="Cancel this run?" ConfirmLabel="Cancel run"
+                           CancelLabel="Keep running" Busy="_busy" OnConfirm="CancelAsync"/>
         </div>
     }
 
@@ -69,7 +70,7 @@ else
         <dl class="card-body meta-grid">
             <div>
                 <dt>State</dt>
-                <dd><span class="badge badge-state badge-@_state.ToLowerInvariant()">@_state</span></dd>
+                <dd><span class="badge badge-state @StateBadge.ClassFor(_state)">@_state</span></dd>
             </div>
             <div>
                 <dt>Started</dt>
@@ -111,6 +112,76 @@ else
             </div>
         </section>
     }
+
+    @* The event log is the run's narrative, not its output — it sits BELOW the views and is
+       collapsed by default, and the section is rendered as soon as the lookup finishes (even when
+       empty) so the late-arriving terminal run.* event cannot shove the views around. *@
+    @if (_eventsLoaded)
+    {
+        <section class="card">
+            <div class="card-header">
+                <h2 class="view-title">
+                    Event log <span class="count-chip">@_events.Count</span>
+                </h2>
+                <div class="card-actions">
+                    <a class="btn btn-secondary btn-sm" href="events?sourceRun=@Id">View all →</a>
+                </div>
+            </div>
+            @if (_events.Count == 0)
+            {
+                <div class="card-body"><p class="muted view-empty">This run has published no events.</p></div>
+            }
+            else
+            {
+                <div class="table-scroll">
+                    <table class="data-table">
+                        <thead>
+                        <tr>
+                            <th>When (UTC)</th>
+                            <th>Event type</th>
+                            <th>Work item</th>
+                            <th>Payload</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var evt in _events)
+                        {
+                            <tr>
+                                <td class="cell-mono">@evt.CreatedUtc.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                                <td class="cell-strong">@evt.EventType</td>
+                                <td class="cell-mono">@(evt.WorkItemId is { Length: > 0 } wi ? wi : "—")</td>
+                                <td>
+                                    @{
+                                        var summary = PayloadSummary.Fields(evt.PayloadJson);
+                                    }
+                                    @if (summary.Count == 0)
+                                    {
+                                        <span class="muted">—</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="field-summary">
+                                            @foreach (var field in summary)
+                                            {
+                                                <span class="log-field">
+                                                    @if (field.Key.Length > 0)
+                                                    {
+                                                        <span class="log-label">@field.Key</span>
+                                                    }
+                                                    <span class="log-value">@field.Value</span>
+                                                </span>
+                                            }
+                                        </span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+    }
 }
 
 @code {
@@ -133,6 +204,9 @@ else
     private string? _cancelNotice;
     private RunStatus? _run;
     private string _state = "";
+    private List<EventDto> _events = [];
+    // Distinguishes "no events" from "not looked up yet" — and from "not permitted to look".
+    private bool _eventsLoaded;
 
     private string ShortId => Id.ToString("N")[..8];
 
@@ -164,6 +238,32 @@ else
         _streamStarted = true;
         _ = ConsumeStreamAsync();
         _ = LoadPersistedViewsAsync();
+        _ = LoadEventsAsync();
+    }
+
+    /// <summary>
+    /// Events this run published (and its terminal run.* lifecycle event). Loaded best-effort:
+    /// a principal without event.consume simply sees no events section.
+    /// </summary>
+    private async Task LoadEventsAsync()
+    {
+        try
+        {
+            var page = await Core.QueryEventsAsync(new EventQuery(SourceRunId: Id, Take: 100), _cts.Token);
+            _events = page.Items.ToList();
+            _eventsLoaded = true;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException)
+        {
+            // Circuit disposed.
+        }
+        catch (Exception ex)
+        {
+            // A principal without event.consume simply gets no section — an empty log would be a
+            // claim we cannot make.
+            Logger.LogDebug(ex, "Event lookup skipped for run {RunId}.", Id);
+        }
     }
 
     /// <summary>
@@ -298,6 +398,8 @@ else
                     _state = status.State;
                     if (status.ErrorMessage is { Length: > 0 } message)
                         _error = message;
+                    if (IsTerminal)
+                        _ = RefreshEventsAfterTerminalAsync();
                 }
                 break;
 
@@ -317,6 +419,20 @@ else
                 }
                 break;
         }
+    }
+
+    /// <summary>The run.* lifecycle event lands moments after the terminal status — refetch once.</summary>
+    private async Task RefreshEventsAfterTerminalAsync()
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2), _cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        await LoadEventsAsync();
     }
 
     private ViewItemBuffer BufferOf(string viewName)

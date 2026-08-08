@@ -2,20 +2,17 @@
 @attribute [Authorize]
 @implements IDisposable
 @inject ICoreClient Core
+@inject NavigationManager Navigation
+@inject StepUpFlow StepUp
 
 <PageTitle>Connectors — Auxilia</PageTitle>
 
 <PageHeader Title="Connectors"
             Subtitle="Credential-bearing provider accounts Auxilia can act as. Secrets are encrypted at rest in the Core and never shown back."/>
 
-<div class="panel">
-    Guided OAuth sign-in flows are a follow-up. For now, paste or enter the token/secret directly —
-    it is written once, encrypted, and only its setting keys are ever read back.
-</div>
-
 @if (!_loaded)
 {
-    <p class="muted">Loading…</p>
+    <LoadingState Rows="5"/>
 }
 else if (_denied)
 {
@@ -27,80 +24,98 @@ else
     {
         <div class="panel denied">@_error</div>
     }
-    @if (_notice is not null)
-    {
-        <div class="panel success">@_notice</div>
-    }
+    <NoticePanel Message="@_notice" OnDismiss="() => _notice = null"/>
 
-    <div class="toolbar">
+    <StepUpPrompt Flow="StepUp" Busy="_busy" OnConfirm="ConfirmStepUpAsync"
+                  Reason="Changing a stored credential is privileged — re-enter YOUR credential (password or API key)."/>
+
+    <form class="toolbar" @onsubmit="ApplyAsync" @onsubmit:preventDefault>
         <label>
             Provider type
-            <input @bind="_providerFilter" placeholder="e.g. azure-devops" @bind:after="ApplyAsync"/>
+            <input @bind="_providerFilter" @bind:event="oninput" placeholder="e.g. azure-devops"/>
         </label>
-        <button class="btn btn-secondary" @onclick="RefreshAsync">Refresh</button>
-        <button class="btn btn-primary" @onclick="StartCreate">New connector</button>
-    </div>
+        <div class="toolbar-actions">
+            <button type="submit" class="btn btn-secondary">Apply</button>
+            @if (_providerFilter.Length > 0)
+            {
+                <button type="button" class="btn btn-secondary" @onclick="ClearFiltersAsync">Clear filters</button>
+            }
+            <button type="button" class="btn btn-secondary" @onclick="RefreshAsync">Refresh</button>
+            <button type="button" class="btn btn-primary" @onclick="StartCreate">New connector</button>
+        </div>
+    </form>
 
     @if (_connectors.Count == 0)
     {
-        <EmptyState Title="No connectors"
-                    Description="Create a connector to give a workflow a provider credential to act as."/>
+        @if (_providerFilter.Length > 0)
+        {
+            <EmptyState Title="No connectors match this provider"
+                        Description="No connector on this platform uses that provider type.">
+                <div class="empty-actions">
+                    <button class="btn btn-secondary" @onclick="ClearFiltersAsync">Clear filters</button>
+                </div>
+            </EmptyState>
+        }
+        else
+        {
+            <EmptyState Title="No connectors"
+                        Description="Create a connector to give a workflow a provider credential to act as.">
+                <div class="empty-actions">
+                    <button class="btn btn-primary" @onclick="StartCreate">Create your first connector</button>
+                </div>
+            </EmptyState>
+        }
     }
     else
     {
-        <div class="card">
-            <table class="data-table">
-                <thead>
-                <tr>
-                    <th>Name</th>
-                    <th>Provider</th>
-                    <th>Scope</th>
-                    <th>Stored settings</th>
-                    <th>Updated</th>
-                    <th>Actions</th>
-                </tr>
-                </thead>
-                <tbody>
-                @foreach (var connector in _connectors)
-                {
-                    <tr>
-                        <td class="cell-strong">@connector.Name</td>
-                        <td>@connector.ProviderType</td>
-                        <td><span class="badge badge-state">@connector.Scope</span></td>
-                        <td class="cell-mono">@(connector.SettingKeys.Count == 0 ? "—" : string.Join(", ", connector.SettingKeys))</td>
-                        <td>@TimeText.Relative(connector.UpdatedUtc)</td>
-                        <td>
-                            <button class="btn btn-secondary btn-sm" @onclick="() => ShowDetailAsync(connector.Id)">Details</button>
+        <div class="connector-grid">
+            @foreach (var connector in _connectors)
+            {
+                <article class="connector-card">
+                    <span class="connector-icon">
+                        <ConnectorIcon ProviderType="@connector.ProviderType"/>
+                    </span>
+                    <div class="connector-main">
+                        <span class="connector-name">@connector.Name</span>
+                        <span class="connector-provider">@connector.ProviderType</span>
+                        <span class="connector-badges">
+                            <span class="badge badge-scope">@connector.Scope</span>
+                            <span class="muted">updated @TimeText.Relative(connector.UpdatedUtc)</span>
+                        </span>
+                        <span class="connector-settings">
+                            @(connector.SettingKeys.Count == 0
+                                ? "no stored settings"
+                                : string.Join(", ", connector.SettingKeys))
+                        </span>
+                        <div class="connector-actions">
+                            <button class="btn btn-secondary btn-sm"
+                                    @onclick="() => ShowDetailAsync(connector.Id)">Details</button>
                             @if (connector.Scope == ResourceScope.Personal)
                             {
-                                <button class="btn btn-secondary btn-sm" @onclick="() => StartGrants(connector)">Grants</button>
+                                <button class="btn btn-secondary btn-sm"
+                                        @onclick="() => StartSharing(connector)">Sharing</button>
                             }
-                        </td>
-                    </tr>
-                }
-                </tbody>
-            </table>
-            @if (_skip + _connectors.Count < _total)
-            {
-                <div class="card-body table-more">
-                    <button class="btn btn-secondary" @onclick="ShowMoreAsync">
-                        Show more (@(_skip + _connectors.Count) of @_total)
-                    </button>
-                </div>
+                        </div>
+                    </div>
+                </article>
             }
         </div>
+        @if (_connectors.Count < _total)
+        {
+            <div class="table-more">
+                <button class="btn btn-secondary" disabled="@_loadingMore" @onclick="ShowMoreAsync">
+                    @(_loadingMore ? "Loading…" : $"Show more ({_connectors.Count} of {_total})")
+                </button>
+            </div>
+        }
     }
 
-    @if (_detail is { } detail)
-    {
-        <section class="card">
-            <div class="card-header">
-                <h2>@detail.Name</h2>
-                <div class="card-actions">
-                    <button class="btn btn-secondary btn-sm" @onclick="() => _detail = null">Close</button>
-                </div>
-            </div>
-            <dl class="card-body meta-grid">
+    <Drawer Open="_detail is not null" Title="@(_detail?.Name ?? "Connector")"
+            Subtitle="What the Core stores for this connector. Secret values are never returned."
+            OnClose="() => _detail = null">
+        @if (_detail is { } detail)
+        {
+            <dl class="meta-grid">
                 <div><dt>Provider</dt><dd>@detail.ProviderType</dd></div>
                 <div><dt>Scope</dt><dd>@detail.Scope</dd></div>
                 <div>
@@ -110,135 +125,100 @@ else
                 @if (detail.Grants is { Count: > 0 } grants)
                 {
                     <div>
-                        <dt>Grants</dt>
+                        <dt>Shared with</dt>
                         <dd>@string.Join(", ", grants.Select(g => $"{g.Kind}:{g.Id}"))</dd>
                     </div>
                 }
             </dl>
-        </section>
-    }
+        }
+    </Drawer>
 
-    @if (_draft is { } draft)
-    {
-        <section class="card">
-            <div class="card-header">
-                <h2>New connector</h2>
-                <p class="card-subtitle">The credential is encrypted at rest and never returned by any read.</p>
-            </div>
-            <div class="card-body">
-                <div class="form-grid">
-                    <label>
-                        Name
-                        <input @bind="draft.Name" placeholder="e.g. Team Azure DevOps"/>
-                    </label>
-                    <label>
-                        Provider type
-                        <input @bind="draft.ProviderType" list="provider-types" placeholder="e.g. azure-devops"
-                               @bind:after="SeedFromCatalog"/>
-                        <datalist id="provider-types">
-                            @foreach (var provider in _catalog)
-                            {
-                                <option value="@provider.ProviderType"></option>
-                            }
-                        </datalist>
-                    </label>
-                    <label>
-                        Scope
-                        <select @bind="draft.Scope">
-                            <option value="@ResourceScope.Personal">Personal — you and granted principals</option>
-                            @if (_canShareCompanyWide)
-                            {
-                                <option value="@ResourceScope.Company">Company — any authenticated principal</option>
-                            }
-                        </select>
-                    </label>
-                </div>
-
-                <div class="setting-grid form-grid">
-                    @foreach (var field in draft.Fields)
-                    {
-                        <label>
-                            @(field.Label is { Length: > 0 } ? field.Label : field.Key)
-                            @if (field.Secret)
-                            {
-                                <span class="badge badge-secret">secret</span>
-                            }
-                            @if (field.Secret)
-                            {
-                                <input type="password" @bind="field.Value" placeholder="@(field.Required ? "required" : "")"/>
-                            }
-                            else
-                            {
-                                <input @bind="field.Value" placeholder="@(field.Required ? "required" : "")"/>
-                            }
-                            @if (field.Help is { Length: > 0 })
-                            {
-                                <span class="field-hint">@field.Help</span>
-                            }
-                        </label>
-                    }
-                </div>
-
-                <div class="button-row editor-actions">
-                    <button class="btn btn-secondary btn-sm" @onclick="AddField">Add setting</button>
-                    <button class="btn btn-primary" disabled="@_busy" @onclick="CreateAsync">Create connector</button>
-                    <button class="btn btn-secondary" disabled="@_busy" @onclick="() => _draft = null">Cancel</button>
-                </div>
-            </div>
-        </section>
-    }
-
-    @if (_grants is { } panel)
-    {
-        <section class="card">
-            <div class="card-header">
-                <h2>Grants — @panel.ConnectorName</h2>
-                <p class="card-subtitle">Admit principals or directory groups to this personal connector.</p>
-            </div>
-            <div class="card-body">
-                @foreach (var grant in panel.Grants)
-                {
-                    <div class="card-row">
-                        <select @bind="grant.Kind">
-                            <option value="@AccessGrantKind.Principal">Principal</option>
-                            <option value="@AccessGrantKind.Group">Group</option>
-                            <option value="@AccessGrantKind.DirectoryGroup">Directory group</option>
-                        </select>
-                        @if (grant.Kind == AccessGrantKind.Principal && _subjects is { Principals.Count: > 0 } sp)
+    <Drawer Open="_draft is not null" Title="New connector"
+            Subtitle="The credential is encrypted at rest and never returned by any read."
+            OnClose="() => _draft = null">
+        <ChildContent>
+        <p class="field-hint">
+            Guided OAuth sign-in flows are a follow-up: for now paste or enter the token/secret
+            directly — it is written once, encrypted, and only its setting keys are ever read back.
+        </p>
+        @if (_draft is { } draft)
+        {
+            <div class="form-grid">
+                <label>
+                    Name
+                    <input @bind="draft.Name" placeholder="e.g. Team Azure DevOps"/>
+                </label>
+                <label>
+                    Provider type
+                    <input @bind="draft.ProviderType" list="provider-types" placeholder="e.g. azure-devops"
+                           @bind:after="SeedFromCatalog"/>
+                    <datalist id="provider-types">
+                        @foreach (var provider in _catalog)
                         {
-                            <select @bind="grant.Id">
-                                <option value="">Pick a principal…</option>
-                                @foreach (var principal in sp.Principals)
-                                {
-                                    <option value="@principal.Id">@principal.DisplayName (@principal.Kind)</option>
-                                }
-                            </select>
+                            <option value="@provider.ProviderType"></option>
                         }
-                        else if (grant.Kind == AccessGrantKind.Group && _subjects is { Groups.Count: > 0 } sg)
+                    </datalist>
+                </label>
+                <label>
+                    Scope
+                    <select @bind="draft.Scope">
+                        <option value="@ResourceScope.Personal">Personal — you and principals you share with</option>
+                        @if (_canShareCompanyWide)
                         {
-                            <select @bind="grant.Id">
-                                <option value="">Pick a group…</option>
-                                @foreach (var group in sg.Groups)
-                                {
-                                    <option value="@group.Id">@group.Name</option>
-                                }
-                            </select>
+                            <option value="@ResourceScope.Company">Company — any authenticated principal</option>
+                        }
+                    </select>
+                </label>
+            </div>
+
+            <div class="setting-grid form-grid">
+                @foreach (var field in draft.Fields)
+                {
+                    <label>
+                        @(field.Label is { Length: > 0 } ? field.Label : field.Key)
+                        @if (field.Secret)
+                        {
+                            <span class="badge badge-secret">secret</span>
+                            <input type="password" @bind="field.Value" placeholder="@(field.Required ? "required" : "")"/>
                         }
                         else
                         {
-                            <input @bind="grant.Id" placeholder="subject id (AD group object id / GUID)"/>
+                            <input @bind="field.Value" placeholder="@(field.Required ? "required" : "")"/>
                         }
-                        <button class="btn btn-danger btn-sm" @onclick="() => panel.Grants.Remove(grant)">Remove</button>
-                    </div>
+                        @if (field.Help is { Length: > 0 })
+                        {
+                            <span class="field-hint">@field.Help</span>
+                        }
+                    </label>
                 }
-                <div class="button-row editor-actions">
-                    <button class="btn btn-secondary btn-sm" @onclick="() => panel.Grants.Add(new GrantRow())">Add grant</button>
-                    <button class="btn btn-primary" disabled="@_busy" @onclick="SaveGrantsAsync">Save grants</button>
-                    <button class="btn btn-secondary" disabled="@_busy" @onclick="() => _grants = null">Cancel</button>
-                </div>
             </div>
-        </section>
-    }
+            <div class="button-row detail-actions">
+                <button class="btn btn-secondary btn-sm" @onclick="AddField">Add setting</button>
+            </div>
+        }
+        </ChildContent>
+        <Footer>
+            <button class="btn btn-primary" disabled="@_busy" @onclick="CreateAsync">Create connector</button>
+            <button class="btn btn-secondary" disabled="@_busy" @onclick="() => _draft = null">Cancel</button>
+        </Footer>
+    </Drawer>
+
+    <Drawer Open="_sharing is not null" Title="@($"Sharing — {_sharing?.ConnectorName}")"
+            Subtitle="Who besides the owner may see and use this personal connector."
+            OnClose="() => _sharing = null">
+        <ChildContent>
+            @if (_sharing is { } panel)
+            {
+                <SharingEditor Rows="panel.Grants"
+                               Hint="A personal connector is yours alone until you share it. Adding a subject lets that principal or group bind this credential in their own workflows."
+                               OpenLabel="Not shared — only you can use this connector."/>
+            }
+        </ChildContent>
+        <Footer>
+            <button class="btn btn-primary" disabled="@_busy" @onclick="SaveSharingAsync">Save sharing</button>
+            <button class="btn btn-secondary" disabled="@_busy" @onclick="() => _sharing = null">Cancel</button>
+        </Footer>
+    </Drawer>
 }
 
 @code {
@@ -251,19 +231,19 @@ else
     private bool _loaded;
     private bool _denied;
     private bool _busy;
+    private bool _loadingMore;
     private string? _error;
     private string? _notice;
 
     private string _providerFilter = "";
 
-    private int _skip;
     private int _total;
     private List<Connector> _connectors = [];
     private List<ProviderCatalogEntry> _catalog = [];
 
     private Connector? _detail;
     private ConnectorDraft? _draft;
-    private GrantsDraft? _grants;
+    private SharingDraft? _sharing;
 
     private readonly CancellationTokenSource _cts = new();
 
@@ -285,21 +265,16 @@ else
         public string Value = "";
     }
 
-    private sealed class GrantsDraft
+    private sealed class SharingDraft
     {
         public Guid ConnectorId;
         public string ConnectorName = "";
         public List<GrantRow> Grants = [];
     }
 
-    private sealed class GrantRow
-    {
-        public string Kind { get; set; } = AccessGrantKind.Principal;
-        public string Id { get; set; } = "";
-    }
-
     protected override async Task OnInitializedAsync()
     {
+        _providerFilter = PageFilters.Read(Navigation, "provider");
         if (AuthState is not null)
             _canShareCompanyWide = ConsoleAuthenticationStateProvider.Can(
                 (await AuthState).User, PermissionActions.SlotConfigWrite);
@@ -307,21 +282,41 @@ else
         await LoadAsync(reset: true);
     }
 
-    private Task ApplyAsync() => LoadAsync(reset: true);
+    private Task ApplyAsync()
+    {
+        PageFilters.Apply(Navigation, new Dictionary<string, string?> { ["provider"] = _providerFilter });
+        return LoadAsync(reset: true);
+    }
+
+    private Task ClearFiltersAsync()
+    {
+        _providerFilter = "";
+        return ApplyAsync();
+    }
+
     private Task RefreshAsync() => LoadAsync(reset: true);
-    private Task ShowMoreAsync() => LoadAsync(reset: false);
+
+    private async Task ShowMoreAsync()
+    {
+        _loadingMore = true;
+        try
+        {
+            await LoadAsync(reset: false);
+        }
+        finally
+        {
+            _loadingMore = false;
+        }
+    }
 
     private async Task LoadAsync(bool reset)
     {
         if (reset)
-        {
-            _skip = 0;
             _connectors = [];
-        }
 
         var query = new ConnectorQuery(
             ProviderType: string.IsNullOrWhiteSpace(_providerFilter) ? null : _providerFilter.Trim(),
-            Skip: _skip,
+            Skip: _connectors.Count,
             Take: PageSize);
 
         try
@@ -331,7 +326,6 @@ else
             _error = null;
             _total = page.Total;
             _connectors.AddRange(page.Items);
-            _skip += page.Items.Count;
         }
         catch (CoreApiException ex)
         {
@@ -359,6 +353,8 @@ else
     private async Task ShowDetailAsync(Guid id)
     {
         _error = null;
+        _draft = null;
+        _sharing = null;
         try
         {
             _detail = await Core.GetConnectorAsync(id, _cts.Token);
@@ -373,7 +369,7 @@ else
     {
         _error = _notice = null;
         _detail = null;
-        _grants = null;
+        _sharing = null;
         _draft = new ConnectorDraft();
     }
 
@@ -404,17 +400,17 @@ else
 
     private async Task CreateAsync()
     {
-        if (_draft is null)
+        if (_draft is not { } draft)
             return;
         _error = _notice = null;
         _busy = true;
         try
         {
-            var settings = _draft.Fields
+            var settings = draft.Fields
                 .Where(f => f.Key.Length > 0)
                 .ToDictionary(f => f.Key, f => f.Value, StringComparer.Ordinal);
             var created = await Core.CreateConnectorAsync(
-                new CreateConnector(_draft.Name, _draft.ProviderType, settings, _draft.Scope), _cts.Token);
+                new CreateConnector(draft.Name, draft.ProviderType, settings, draft.Scope), _cts.Token);
             _notice = $"Connector \"{created.Name}\" created.";
             _draft = null;
             await LoadAsync(reset: true);
@@ -429,59 +425,57 @@ else
         }
     }
 
-    private SharingSubjects? _subjects;
-
-    private async Task EnsureSubjectsAsync()
+    private void StartSharing(Connector connector)
     {
-        if (_subjects is not null)
-            return;
-        try
-        {
-            _subjects = await Core.GetSharingSubjectsAsync(_cts.Token);
-        }
-        catch (CoreApiException)
-        {
-            // Picker degrades to the raw-id input; the save path still works.
-        }
-        await InvokeAsync(StateHasChanged);
-    }
-
-    private void StartGrants(Connector connector)
-    {
-        _ = EnsureSubjectsAsync();
         _error = _notice = null;
         _detail = null;
         _draft = null;
-        _grants = new GrantsDraft
+        _sharing = new SharingDraft
         {
             ConnectorId = connector.Id,
             ConnectorName = connector.Name,
-            Grants = (connector.Grants ?? [])
-                .Select(g => new GrantRow { Kind = g.Kind, Id = g.Id })
-                .ToList()
+            Grants = GrantRows.From(connector.Grants)
         };
     }
 
-    private async Task SaveGrantsAsync()
+    private async Task SaveSharingAsync()
     {
-        if (_grants is null)
+        if (_sharing is not { } panel)
             return;
         _error = _notice = null;
         _busy = true;
         try
         {
-            var grants = _grants.Grants
-                .Where(g => g.Id.Length > 0)
-                .Select(g => new AccessGrant(g.Kind, g.Id))
-                .ToList();
-            await Core.SetConnectorGrantsAsync(_grants.ConnectorId, new SetConnectorGrants(grants), _cts.Token);
-            _notice = $"Grants for \"{_grants.ConnectorName}\" saved.";
-            _grants = null;
-            await LoadAsync(reset: true);
+            var grants = GrantRows.ToGrants(panel.Grants);
+            if (await StepUp.RunAsync(() =>
+                    Core.SetConnectorGrantsAsync(panel.ConnectorId, new SetConnectorGrants(grants), _cts.Token)))
+            {
+                _notice = $"Sharing for \"{panel.ConnectorName}\" saved.";
+                _sharing = null;
+                await LoadAsync(reset: true);
+            }
         }
         catch (CoreApiException ex)
         {
             _error = ex.ErrorDetail ?? ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>Retries the mutation the Core rejected, once the operator has re-authenticated.</summary>
+    private async Task ConfirmStepUpAsync()
+    {
+        _busy = true;
+        try
+        {
+            if (await StepUp.ConfirmAsync())
+            {
+                _sharing = null;
+                await LoadAsync(reset: true);
+            }
         }
         finally
         {

@@ -1,0 +1,41 @@
+@using Auxilia.AdminConsole.Support
+
+@* The step-up re-authentication prompt. Renders nothing until the Core demands elevation for a
+   mutation the page attempted; confirming retries that exact mutation. *@
+
+@if (Flow.IsPending)
+{
+    <div class="panel warn step-up" role="alert">
+        <strong>Re-authentication required.</strong>
+        @(Reason ?? "This change is privileged — re-enter YOUR credential (password or API key); the elevation then holds for a few minutes of work.")
+        <div class="step-up-form">
+            <input type="password" autocomplete="current-password" placeholder="your password / API key"
+                   aria-label="Your password or API key"
+                   @bind="Flow.Secret" @bind:event="oninput"/>
+            <button class="btn btn-primary btn-sm" @onclick="OnConfirm"
+                    disabled="@(Busy || string.IsNullOrEmpty(Flow.Secret))">Re-authenticate</button>
+            <button class="btn btn-secondary btn-sm" @onclick="Flow.Cancel" disabled="@Busy">Cancel</button>
+        </div>
+        @if (Flow.Error is { Length: > 0 } error)
+        {
+            <p class="field-hint denied-hint">@error</p>
+        }
+    </div>
+}
+
+@code {
+
+    [Parameter, EditorRequired]
+    public required StepUpFlow Flow { get; set; }
+
+    [Parameter]
+    public EventCallback OnConfirm { get; set; }
+
+    [Parameter]
+    public bool Busy { get; set; }
+
+    /// <summary>Page-specific explanation replacing the generic one.</summary>
+    [Parameter]
+    public string? Reason { get; set; }
+
+}

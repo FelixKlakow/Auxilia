@@ -1,6 +1,8 @@
 @page "/admin/provider-catalog"
 @attribute [Authorize]
+@implements IDisposable
 @inject ICoreClient Core
+@inject StepUpFlow StepUp
 
 <PageTitle>Provider catalog — Auxilia</PageTitle>
 
@@ -9,7 +11,7 @@
 
 @if (!_loaded)
 {
-    <p class="muted">Loading…</p>
+    <LoadingState Rows="6"/>
 }
 else if (_denied)
 {
@@ -21,31 +23,27 @@ else
     {
         <div class="panel denied">@_error</div>
     }
+    <NoticePanel Message="@_notice" OnDismiss="() => _notice = null"/>
 
-    <section class="card">
-        <div class="card-header">
-            <h2>Registered workflows</h2>
-            <p class="card-subtitle">Which workflows may run is managed in Workflow Studio.</p>
-        </div>
-        <div class="card-body">
-            <p class="muted view-empty">
-                Enabling and disabling registered workflows is a Workflow Studio concern — the Core exposes
-                no endpoint for it here. Manage workflow availability in Workflow Studio.
-            </p>
-        </div>
-    </section>
+    <StepUpPrompt Flow="StepUp" Busy="_busy" OnConfirm="ConfirmStepUpAsync"
+                  Reason="Changing what workflows may be built from is privileged — re-enter YOUR credential (password or API key)."/>
 
     <section class="card">
         <div class="card-header">
             <h2>Registered providers</h2>
-            <p class="card-subtitle">A provider is offered in the editors only after it is made available here.</p>
+            <p class="card-subtitle">
+                A provider is offered in the editors only after it is made available here.
+                Workflow availability lives under <a href="admin/workflow-types">Workflow registry</a>,
+                and environment layers have their own tab under <a href="admin/environments">Environments</a>@(_environmentCount > 0 ? $" ({_environmentCount} registered)" : "").
+            </p>
         </div>
-        @if (_entries.Count == 0)
+        @if (_providers.Count == 0)
         {
             <div class="card-body"><p class="muted view-empty">No slot-handler plugins registered.</p></div>
         }
         else
         {
+            <div class="table-scroll">
             <table class="data-table">
                 <thead>
                 <tr>
@@ -53,11 +51,12 @@ else
                     <th>Category</th>
                     <th>Contracts</th>
                     <th>Availability</th>
+                    <th>Access</th>
                     <th>Actions</th>
                 </tr>
                 </thead>
                 <tbody>
-                @foreach (var entry in _entries)
+                @foreach (var entry in _providers)
                 {
                     <tr>
                         <td>
@@ -90,11 +89,23 @@ else
                         <td>
                             @if (entry.Available)
                             {
-                                <span class="badge badge-state badge-valid">available</span>
+                                <span class="badge badge-valid">available</span>
                             }
                             else
                             {
-                                <span class="badge badge-state">hidden</span>
+                                <span class="badge">hidden</span>
+                            }
+                        </td>
+                        <td>
+                            @if (entry.Grants is { Count: > 0 } grants)
+                            {
+                                <span class="badge badge-role" title="@SubjectSummary(grants)">
+                                    @grants.Count subject@(grants.Count == 1 ? "" : "s")
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="muted">everyone</span>
                             }
                         </td>
                         <td>
@@ -103,9 +114,12 @@ else
                                         @onclick="() => ToggleAvailabilityAsync(entry)">
                                     @(entry.Available ? "Make unavailable" : "Make available")
                                 </button>
+                                <button class="btn btn-secondary btn-sm" disabled="@_busy"
+                                        @onclick="() => StartSharing(entry)">Sharing</button>
                                 @if (entry.Descriptors.Count > 0)
                                 {
                                     <button class="btn btn-secondary btn-sm"
+                                            aria-expanded="@(_curatedProvider == entry.ProviderType ? "true" : "false")"
                                             @onclick="() => _curatedProvider = _curatedProvider == entry.ProviderType ? null : entry.ProviderType">
                                         @(_curatedProvider == entry.ProviderType ? "Close settings" : "Curate settings")
                                     </button>
@@ -116,7 +130,7 @@ else
                     @if (_curatedProvider == entry.ProviderType)
                     {
                         <tr>
-                            <td colspan="5">
+                            <td colspan="6">
                                 <p class="field-hint">
                                     A disabled setting disappears from every editor and is no longer required —
                                     e.g. disable an external API key to only allow preassigned credentials.
@@ -144,8 +158,23 @@ else
                 }
                 </tbody>
             </table>
+            </div>
         }
     </section>
+
+    <Drawer Open="_sharingProvider is not null" Title="@($"Sharing — {_sharingProvider}")"
+            Subtitle="Who may bind this provider into a run."
+            OnClose="() => _sharingProvider = null">
+        <ChildContent>
+            <SharingEditor Rows="_sharingRows"
+                           Hint="Leave empty to offer this provider to everyone. Adding a subject restricts it — only those principals or groups can dispatch a run that binds it."
+                           OpenLabel="Open to everyone — any workflow may bind this provider."/>
+        </ChildContent>
+        <Footer>
+            <button class="btn btn-primary" disabled="@_busy" @onclick="SaveSharingAsync">Save sharing</button>
+            <button class="btn btn-secondary" disabled="@_busy" @onclick="() => _sharingProvider = null">Cancel</button>
+        </Footer>
+    </Drawer>
 }
 
 @code {
@@ -156,8 +185,18 @@ else
     private bool _denied;
     private bool _busy;
     private string? _error;
+    private string? _notice;
     private string? _curatedProvider;
-    private List<ProviderCatalogEntry> _entries = [];
+    private List<ProviderCatalogEntry> _providers = [];
+    private int _environmentCount;
+
+    private string? _sharingProvider;
+    private List<GrantRow> _sharingRows = [];
+
+    private readonly CancellationTokenSource _cts = new();
+
+    private static string SubjectSummary(IReadOnlyList<AccessGrant> grants)
+        => string.Join(", ", grants.Select(g => $"{SharingDirectory.KindLabel(g.Kind)}: {g.Id}"));
 
     protected override Task OnInitializedAsync() => LoadAsync();
 
@@ -165,8 +204,12 @@ else
     {
         try
         {
-            var page = await Core.QueryProviderCatalogAsync(new ProviderCatalogQuery(Skip: 0, Take: PageSize));
-            _entries = page.Items.OrderBy(e => e.ProviderType, StringComparer.Ordinal).ToList();
+            var page = await Core.QueryProviderCatalogAsync(new ProviderCatalogQuery(Skip: 0, Take: PageSize), _cts.Token);
+            var ordered = page.Items.OrderBy(e => e.ProviderType, StringComparer.Ordinal).ToList();
+            // Environment layers are catalog records too, but they are a different concept with
+            // their own admin tab — this page is slot providers only.
+            _providers = ordered.Where(e => !e.ComposesEnvironment).ToList();
+            _environmentCount = ordered.Count - _providers.Count;
             _denied = false;
             _error = null;
         }
@@ -180,19 +223,56 @@ else
     }
 
     private Task ToggleAvailabilityAsync(ProviderCatalogEntry entry)
-        => MutateAsync(() => Core.SetProviderAvailabilityAsync(entry.ProviderType, !entry.Available));
+        => MutateAsync(() => Core.SetProviderAvailabilityAsync(entry.ProviderType, !entry.Available, _cts.Token));
 
     private Task ToggleSettingAsync(ProviderCatalogEntry entry, string key, bool disabled)
-        => MutateAsync(() => Core.SetProviderSettingDisabledAsync(entry.ProviderType, key, disabled));
+        => MutateAsync(() => Core.SetProviderSettingDisabledAsync(entry.ProviderType, key, disabled, _cts.Token));
 
-    private async Task MutateAsync(Func<Task> action)
+    private void StartSharing(ProviderCatalogEntry entry)
     {
-        _error = null;
+        _error = _notice = null;
+        _curatedProvider = null;
+        _sharingProvider = entry.ProviderType;
+        _sharingRows = GrantRows.From(entry.Grants);
+    }
+
+    private Task SaveSharingAsync()
+    {
+        if (_sharingProvider is not { } providerType)
+            return Task.CompletedTask;
+        return MutateAsync(async () =>
+        {
+            var grants = GrantRows.ToGrants(_sharingRows);
+            await Core.SetProviderGrantsAsync(providerType, new SetProviderGrants(grants), _cts.Token);
+            _notice = grants.Count == 0
+                ? $"\"{providerType}\" is open to everyone again."
+                : $"\"{providerType}\" is now restricted to {grants.Count} subject(s).";
+            _sharingProvider = null;
+        });
+    }
+
+    private async Task ConfirmStepUpAsync()
+    {
         _busy = true;
         try
         {
-            await action();
-            await LoadAsync();
+            if (await StepUp.ConfirmAsync())
+                await LoadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task MutateAsync(Func<Task> action)
+    {
+        _error = _notice = null;
+        _busy = true;
+        try
+        {
+            if (await StepUp.RunAsync(action))
+                await LoadAsync();
         }
         catch (CoreApiException ex)
         {
@@ -202,6 +282,12 @@ else
         {
             _busy = false;
         }
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
     }
 
 }

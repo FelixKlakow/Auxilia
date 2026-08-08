@@ -1,9 +1,19 @@
+@using Auxilia.AdminConsole.Support
+
 <header class="page-header">
-    <h1>@Title</h1>
+    <h1>
+        @Title
+        @* Polled pages carry their own freshness so a quiet page is visibly quiet, not stale. *@
+        @if (Freshness is { } updated)
+        {
+            <span class="page-freshness">Updated @TimeText.Relative(updated)</span>
+        }
+    </h1>
     @if (!string.IsNullOrEmpty(Subtitle))
     {
         <p class="page-subtitle">@Subtitle</p>
     }
+    @ChildContent
 </header>
 
 @code {
@@ -13,5 +23,12 @@
 
     [Parameter]
     public string? Subtitle { get; set; }
+
+    /// <summary>Last successful data refresh; renders the "Updated …" cue when set.</summary>
+    [Parameter]
+    public DateTimeOffset? Freshness { get; set; }
+
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
 
 }

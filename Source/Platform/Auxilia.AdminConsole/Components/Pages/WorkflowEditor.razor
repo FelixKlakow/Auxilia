@@ -10,11 +10,13 @@
 <div class="page-back"><a href="workflows">← All workflows</a></div>
 
 <PageHeader Title="@(IsEdit ? "Edit workflow configuration" : "New workflow configuration")"
-            Subtitle="Pick a workflow type, bind its capability slots, fill any inputs, then save."/>
+            Subtitle="@(IsEdit
+                          ? "Change the bindings and inputs of this configuration. Saving updates it in place."
+                          : "Pick a workflow type, bind its capability slots, fill any inputs, then save.")"/>
 
 @if (!_loaded)
 {
-    <p class="muted">Loading…</p>
+    <LoadingState Rows="6"/>
 }
 else if (_denied)
 {
@@ -44,7 +46,7 @@ else
             </label>
             <label>
                 Workflow type
-                <select @bind="SelectedType">
+                <select @bind="SelectedType" disabled="@IsEdit">
                     <option value="">Pick a workflow type…</option>
                     @foreach (var type in _types)
                     {
@@ -53,14 +55,18 @@ else
                         </option>
                     }
                 </select>
-                @if (_types.Count == 0)
+                @if (IsEdit)
+                {
+                    <span class="field-hint">A configuration's workflow type is fixed — create a new configuration to run a different type.</span>
+                }
+                else if (_types.Count == 0)
                 {
                     <span class="field-hint">No workflow types are registered on this platform yet.</span>
                 }
             </label>
             <label>
                 Scope
-                <select @bind="_scope">
+                <select @bind="_scope" disabled="@_scopeLocked">
                     <option value="@ResourceScope.Personal">Personal — you and principals/groups you grant</option>
                     @if (_canShareCompanyWide)
                     {
@@ -131,27 +137,40 @@ else
                         </div>
                         @if (IsEnvironmentMultiSlot(slot, providers))
                         {
-                            @* Environment capabilities: any number of layers, but ONE base per run. *@
-                            @foreach (var provider in providers)
-                            {
-                                var conflict = HasBaseConflict(edit, provider);
-                                <label class="check-label">
-                                    <input type="checkbox"
-                                           checked="@edit.MultiProviders.Contains(provider.ProviderType)"
-                                           disabled="@conflict"
-                                           @onchange="e => ToggleLayer(edit, provider.ProviderType, e.Value is true)"/>
-                                    @provider.ProviderType
-                                    <span class="type-chip">@BaseOf(provider)</span>
-                                    @if (provider.Description is { Length: > 0 })
+                            @* A run composes layers onto exactly ONE base, so the base is a choice
+                               and the layers follow from it — never a flat list of checkboxes where
+                               half are disabled and the user has to read why. *@
+                            var bases = BasesOf(providers);
+                            var chosenBase = SelectedBase() ?? bases.FirstOrDefault();
+                            <div class="environment-slot">
+                                <span class="label-micro">Base environment</span>
+                                <div class="environment-bases provider-grid">
+                                    @foreach (var baseName in bases)
                                     {
-                                        <span class="field-hint">@provider.Description</span>
+                                        <label class="provider-card @(chosenBase == baseName ? "selected" : null)">
+                                            <input type="radio" name="@($"env-base-{slot.SlotName}")"
+                                                   checked="@(chosenBase == baseName)"
+                                                   @onchange="() => SelectBase(edit, baseName)"/>
+                                            <span class="provider-name">@baseName</span>
+                                            <span class="provider-category">
+                                                @providers.Count(p => BaseOf(p) == baseName) capabilit@(providers.Count(p => BaseOf(p) == baseName) == 1 ? "y" : "ies")
+                                            </span>
+                                        </label>
                                     }
-                                    @if (conflict)
+                                </div>
+                                <span class="label-micro">Capabilities</span>
+                                <div class="environment-layers">
+                                    @foreach (var provider in providers.Where(p => BaseOf(p) == chosenBase))
                                     {
-                                        <span class="field-hint">unavailable — a run composes layers of one base only</span>
+                                        <label class="check-label" title="@provider.Description">
+                                            <input type="checkbox"
+                                                   checked="@edit.MultiProviders.Contains(provider.ProviderType)"
+                                                   @onchange="e => ToggleLayer(edit, provider.ProviderType, e.Value is true)"/>
+                                            @provider.ProviderType
+                                        </label>
                                     }
-                                </label>
-                            }
+                                </div>
+                            </div>
                         }
                         else if (providers.Count > 0)
                         {
@@ -249,7 +268,7 @@ else
         {
             <section class="card">
                 <div class="card-header">
-                    <h2>Inputs</h2>
+                    <h2><span class="step-number">3</span> Inputs</h2>
                     <p class="card-subtitle">Values passed into every run of this configuration.</p>
                 </div>
                 <div class="card-body form-grid">
@@ -302,7 +321,7 @@ else
         @* ---- Plan: what a run of this configuration dispatches ---- *@
         <section class="card">
             <div class="card-header">
-                <h2>Plan</h2>
+                <h2><span class="step-number">4</span> Plan</h2>
                 <p class="card-subtitle">What a run of this configuration will dispatch.</p>
             </div>
             <div class="card-body">
@@ -333,15 +352,14 @@ else
 
     <div class="button-row editor-actions">
         <button class="btn btn-primary" disabled="@(_busy || !CanSave)" @onclick="SaveAsync">
-            @(IsEdit ? "Save as new configuration" : "Create configuration")
+            @(IsEdit ? "Save changes" : "Create configuration")
         </button>
         <a class="btn btn-secondary" href="workflows">Cancel</a>
     </div>
-    @if (IsEdit)
+    @if (IsEdit && _scopeLocked)
     {
         <p class="field-hint">
-            The Core client surface exposes only <span class="cell-mono">CreateConfigurationAsync</span> —
-            there is no update endpoint, so saving an edit creates a new configuration.
+            Scope is fixed after creation — share this configuration from the Workflows list instead.
         </p>
     }
 }
@@ -386,6 +404,9 @@ else
     private readonly CancellationTokenSource _cts = new();
 
     private bool IsEdit => ConfigurationId is not null;
+
+    /// <summary>The update contract carries no scope, so an existing configuration keeps its own.</summary>
+    private bool _scopeLocked;
 
     private bool CanSave
         => !string.IsNullOrWhiteSpace(_name)
@@ -435,6 +456,7 @@ else
         _selectedType = configuration.WorkflowType;
         _enabled = configuration.Enabled;
         _scope = configuration.Scope;
+        _scopeLocked = true;
         foreach (var (key, value) in configuration.Context)
             _inputs[key] = value;
         await LoadSchemaAsync(configuration.WorkflowType);
@@ -556,6 +578,23 @@ else
     private static string BaseOf(ProviderCatalogEntry provider)
         => provider.EnvironmentBase is { Length: > 0 } environmentBase ? environmentBase : EnvironmentBases.Linux;
 
+    private static List<string> BasesOf(IEnumerable<ProviderCatalogEntry> providers)
+        => providers.Select(BaseOf).Distinct(StringComparer.Ordinal).OrderBy(b => b, StringComparer.Ordinal).ToList();
+
+    /// <summary>Switching base drops the layers of the previous one — they cannot compose together.</summary>
+    private void SelectBase(SlotEdit edit, string environmentBase)
+    {
+        foreach (var providerType in edit.MultiProviders.ToList())
+        {
+            if (ProviderOf(providerType) is { } provider && BaseOf(provider) != environmentBase)
+                edit.MultiProviders.Remove(providerType);
+        }
+        _pinnedBase = environmentBase;
+    }
+
+    /// <summary>The base the operator picked, remembered while no layer is selected yet.</summary>
+    private string? _pinnedBase;
+
     /// <summary>The single base every selected environment layer shares, once any layer is picked.</summary>
     private string? SelectedBase()
     {
@@ -567,13 +606,8 @@ else
                     return BaseOf(provider);
             }
         }
-        return null;
+        return _pinnedBase;
     }
-
-    private bool HasBaseConflict(SlotEdit edit, ProviderCatalogEntry provider)
-        => !edit.MultiProviders.Contains(provider.ProviderType)
-           && SelectedBase() is { } selectedBase
-           && BaseOf(provider) != selectedBase;
 
     private void ToggleLayer(SlotEdit edit, string providerType, bool selected)
     {
@@ -633,15 +667,26 @@ else
                 .Where(i => !string.IsNullOrWhiteSpace(i.Value))
                 .ToDictionary(i => i.Key, i => i.Value, StringComparer.Ordinal);
 
-            var request = new CreateRunConfiguration(
-                Name: _name.Trim(),
-                WorkflowType: _selectedType.Trim(),
-                Context: context.Count == 0 ? null : context,
-                SlotBindings: slotBindings.Count == 0 ? null : slotBindings,
-                Enabled: _enabled,
-                Scope: _scope);
-
-            await Core.CreateConfigurationAsync(request, _cts.Token);
+            // Editing UPDATES the configuration in place — every run, trigger, and shared link that
+            // points at this id keeps pointing at it. Only the "new" route creates.
+            if (ConfigurationId is { } id)
+            {
+                await Core.UpdateConfigurationAsync(id, new UpdateRunConfiguration(
+                    Name: _name.Trim(),
+                    Context: context,
+                    SlotBindings: slotBindings,
+                    Enabled: _enabled), _cts.Token);
+            }
+            else
+            {
+                await Core.CreateConfigurationAsync(new CreateRunConfiguration(
+                    Name: _name.Trim(),
+                    WorkflowType: _selectedType.Trim(),
+                    Context: context.Count == 0 ? null : context,
+                    SlotBindings: slotBindings.Count == 0 ? null : slotBindings,
+                    Enabled: _enabled,
+                    Scope: _scope), _cts.Token);
+            }
             Navigation.NavigateTo("workflows");
         }
         catch (CoreApiException ex)

@@ -1,8 +1,9 @@
-@* Presentational glyph for a connector's account type. Flow keys are runtime-registered
-   (one DI registration adds a flow), so unknown ones fall back to a generic plug. *@
+@* Presentational glyph for a connector's provider. All vendor knowledge in the console is
+   confined to this one component: callers pass a provider type and get a glyph, and anything
+   unrecognised falls back to a generic plug. *@
 
 <svg class="connector-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    @switch (FlowKey)
+    @switch (GlyphKey)
     {
         case "anthropic-claude":
             <path d="M12 3l1.8 4.7 4.7 1.8-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/>
@@ -32,7 +33,27 @@
 
 @code {
 
-    [Parameter, EditorRequired]
-    public string FlowKey { get; set; } = "";
+    /// <summary>Explicit glyph key; when unset it is derived from <see cref="ProviderType"/>.</summary>
+    [Parameter]
+    public string? FlowKey { get; set; }
+
+    [Parameter]
+    public string? ProviderType { get; set; }
+
+    private string GlyphKey => FlowKey is { Length: > 0 } key ? key : KeyFor(ProviderType);
+
+    private static string KeyFor(string? providerType)
+    {
+        if (providerType is not { Length: > 0 })
+            return "";
+        var name = providerType.ToLowerInvariant();
+        if (name.Contains("claude") || name.Contains("anthropic"))
+            return "anthropic-claude";
+        if (name.Contains("github"))
+            return "github";
+        if (name.Contains("microsoft") || name.Contains("entra") || name.Contains("azure"))
+            return "microsoft";
+        return "";
+    }
 
 }

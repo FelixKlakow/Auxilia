@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @implements IDisposable
 @inject ICoreClient Core
+@inject NavigationManager Navigation
 
 <PageTitle>Workflows — Auxilia</PageTitle>
 
@@ -10,7 +11,7 @@
 
 @if (!_loaded)
 {
-    <p class="muted">Loading…</p>
+    <LoadingState Rows="6"/>
 }
 else if (_denied)
 {
@@ -22,30 +23,56 @@ else
     {
         <div class="panel denied">@_error</div>
     }
-    @if (_notice is not null)
+    @if (_lastRun is { } started)
     {
-        <div class="panel success">@_notice</div>
+        <NoticePanel OnDismiss="() => _lastRun = null">
+            Run of "@started.Name" dispatched —
+            <a href="runs/@started.RunId">open it</a> or see it under <a href="runs">Runs</a>.
+        </NoticePanel>
     }
+    <NoticePanel Message="@_notice" OnDismiss="() => _notice = null"/>
 
-    <div class="toolbar">
+    <form class="toolbar" @onsubmit="ApplyAsync" @onsubmit:preventDefault>
         <label>
             Workflow type
-            <input @bind="_workflowType" placeholder="e.g. code-review" @bind:after="ApplyAsync"/>
+            <input @bind="_workflowType" @bind:event="oninput" placeholder="e.g. code-review"/>
         </label>
-        <button class="btn btn-secondary" @onclick="RefreshAsync">Refresh</button>
-        <a class="btn btn-primary" href="workflows/new">New configuration</a>
-    </div>
+        <div class="toolbar-actions">
+            <button type="submit" class="btn btn-secondary">Apply</button>
+            @if (_workflowType.Length > 0)
+            {
+                <button type="button" class="btn btn-secondary" @onclick="ClearFiltersAsync">Clear filters</button>
+            }
+            <button type="button" class="btn btn-secondary" @onclick="RefreshAsync">Refresh</button>
+            <a class="btn btn-primary" href="workflows/new">New configuration</a>
+        </div>
+    </form>
 
     @if (_configurations.Count == 0)
     {
-        <EmptyState Title="No workflow configurations"
-                    Description="A configuration binds a workflow type's capability slots to connectors so it can be run.">
-            <a class="btn btn-primary" href="workflows/new">Configure your first workflow</a>
-        </EmptyState>
+        @if (_workflowType.Length > 0)
+        {
+            <EmptyState Title="No configurations match this type"
+                        Description="No stored configuration runs that workflow type.">
+                <div class="empty-actions">
+                    <button class="btn btn-secondary" @onclick="ClearFiltersAsync">Clear filters</button>
+                </div>
+            </EmptyState>
+        }
+        else
+        {
+            <EmptyState Title="No workflow configurations"
+                        Description="A configuration binds a workflow type's capability slots to connectors so it can be run.">
+                <div class="empty-actions">
+                    <a class="btn btn-primary" href="workflows/new">Configure your first workflow</a>
+                </div>
+            </EmptyState>
+        }
     }
     else
     {
         <div class="card">
+            <div class="table-scroll">
             <table class="data-table">
                 <thead>
                 <tr>
@@ -65,9 +92,9 @@ else
                         <td class="cell-strong">@configuration.Name</td>
                         <td>@configuration.WorkflowType</td>
                         <td>@configuration.SlotBindings.Count</td>
-                        <td><span class="badge badge-state">@configuration.Scope</span></td>
+                        <td><span class="badge badge-scope">@configuration.Scope</span></td>
                         <td>
-                            <span class="badge badge-state @(configuration.Enabled ? "badge-success" : "badge-cancelled")">
+                            <span class="badge @(configuration.Enabled ? "badge-success" : "badge-cancelled")">
                                 @(configuration.Enabled ? "Enabled" : "Disabled")
                             </span>
                         </td>
@@ -86,6 +113,7 @@ else
                 }
                 </tbody>
             </table>
+            </div>
             @if (_skip + _configurations.Count < _total)
             {
                 <div class="card-body table-more">
@@ -97,57 +125,22 @@ else
         </div>
     }
 
-    @if (_grants is { } panel)
-    {
-        <section class="card">
-            <div class="card-header">
-                <h2>Sharing — @panel.ConfigurationName</h2>
-                <p class="card-subtitle">Who besides the owner may see and run this personal configuration.</p>
-            </div>
-            <div class="card-body">
-                @foreach (var grant in panel.Grants)
-                {
-                    <div class="form-grid grant-row">
-                        <select @bind="grant.Kind">
-                            <option value="@AccessGrantKind.Principal">Principal</option>
-                            <option value="@AccessGrantKind.Group">Group</option>
-                            <option value="@AccessGrantKind.DirectoryGroup">Directory group</option>
-                        </select>
-                        @if (grant.Kind == AccessGrantKind.Principal && _subjects is { Principals.Count: > 0 } sp)
-                        {
-                            <select @bind="grant.Id">
-                                <option value="">Pick a principal…</option>
-                                @foreach (var principal in sp.Principals)
-                                {
-                                    <option value="@principal.Id">@principal.DisplayName (@principal.Kind)</option>
-                                }
-                            </select>
-                        }
-                        else if (grant.Kind == AccessGrantKind.Group && _subjects is { Groups.Count: > 0 } sg)
-                        {
-                            <select @bind="grant.Id">
-                                <option value="">Pick a group…</option>
-                                @foreach (var group in sg.Groups)
-                                {
-                                    <option value="@group.Id">@group.Name</option>
-                                }
-                            </select>
-                        }
-                        else
-                        {
-                            <input @bind="grant.Id" placeholder="subject id (AD group object id / GUID)"/>
-                        }
-                        <button class="btn btn-danger btn-sm" @onclick="() => panel.Grants.Remove(grant)">Remove</button>
-                    </div>
-                }
-                <div class="button-row editor-actions">
-                    <button class="btn btn-secondary btn-sm" @onclick="() => panel.Grants.Add(new GrantRow())">Add grant</button>
-                    <button class="btn btn-primary" disabled="@_busy" @onclick="SaveGrantsAsync">Save sharing</button>
-                    <button class="btn btn-secondary" disabled="@_busy" @onclick="() => _grants = null">Cancel</button>
-                </div>
-            </div>
-        </section>
-    }
+    <Drawer Open="_grants is not null" Title="@($"Sharing — {_grants?.ConfigurationName}")"
+            Subtitle="Who besides the owner may see and run this personal configuration."
+            OnClose="() => _grants = null">
+        <ChildContent>
+            @if (_grants is { } panel)
+            {
+                <SharingEditor Rows="panel.Grants"
+                               Hint="A personal configuration is yours alone until you share it. Adding a subject lets that principal or group see it and run it."
+                               OpenLabel="Not shared — only you can see and run this configuration."/>
+            }
+        </ChildContent>
+        <Footer>
+            <button class="btn btn-primary" disabled="@_busy" @onclick="SaveGrantsAsync">Save sharing</button>
+            <button class="btn btn-secondary" disabled="@_busy" @onclick="() => _grants = null">Cancel</button>
+        </Footer>
+    </Drawer>
 }
 
 @code {
@@ -159,6 +152,7 @@ else
     private bool _busy;
     private string? _error;
     private string? _notice;
+    private (string Name, Guid RunId)? _lastRun;
 
     private string _workflowType = "";
 
@@ -168,9 +162,24 @@ else
 
     private readonly CancellationTokenSource _cts = new();
 
-    protected override Task OnInitializedAsync() => LoadAsync(reset: true);
+    protected override Task OnInitializedAsync()
+    {
+        _workflowType = PageFilters.Read(Navigation, "type");
+        return LoadAsync(reset: true);
+    }
 
-    private Task ApplyAsync() => LoadAsync(reset: true);
+    private Task ApplyAsync()
+    {
+        PageFilters.Apply(Navigation, new Dictionary<string, string?> { ["type"] = _workflowType });
+        return LoadAsync(reset: true);
+    }
+
+    private Task ClearFiltersAsync()
+    {
+        _workflowType = "";
+        return ApplyAsync();
+    }
+
     private Task RefreshAsync() => LoadAsync(reset: true);
     private Task ShowMoreAsync() => LoadAsync(reset: false);
 
@@ -209,11 +218,13 @@ else
     private async Task RunAsync(RunConfiguration configuration)
     {
         _error = _notice = null;
+        _lastRun = null;
         _busy = true;
         try
         {
             var accepted = await Core.RunConfigurationAsync(configuration.Id, ct: _cts.Token);
-            _notice = $"Run of \"{configuration.Name}\" dispatched ({accepted.RunId.ToString("N")[..8]}) — see it under Runs.";
+            // A dispatched run is only useful if you can get to it — the notice links straight there.
+            _lastRun = (configuration.Name, accepted.RunId);
         }
         catch (CoreApiException ex)
         {
@@ -234,40 +245,14 @@ else
         public List<GrantRow> Grants = [];
     }
 
-    private sealed class GrantRow
-    {
-        public string Kind { get; set; } = AccessGrantKind.Principal;
-        public string Id { get; set; } = "";
-    }
-
-    private SharingSubjects? _subjects;
-
-    private async Task EnsureSubjectsAsync()
-    {
-        if (_subjects is not null)
-            return;
-        try
-        {
-            _subjects = await Core.GetSharingSubjectsAsync(_cts.Token);
-        }
-        catch (CoreApiException)
-        {
-            // Picker degrades to the raw-id input; the save path still works.
-        }
-        await InvokeAsync(StateHasChanged);
-    }
-
     private void StartGrants(RunConfiguration configuration)
     {
-        _ = EnsureSubjectsAsync();
         _error = _notice = null;
         _grants = new GrantsDraft
         {
             ConfigurationId = configuration.Id,
             ConfigurationName = configuration.Name,
-            Grants = (configuration.Grants ?? [])
-                .Select(g => new GrantRow { Kind = g.Kind, Id = g.Id })
-                .ToList()
+            Grants = GrantRows.From(configuration.Grants)
         };
     }
 
@@ -278,10 +263,7 @@ else
         _busy = true;
         try
         {
-            var grants = _grants.Grants
-                .Where(g => !string.IsNullOrWhiteSpace(g.Id))
-                .Select(g => new AccessGrant(g.Kind, g.Id.Trim()))
-                .ToList();
+            var grants = GrantRows.ToGrants(_grants.Grants);
             var updated = await Core.SetConfigurationGrantsAsync(
                 _grants.ConfigurationId, new SetConfigurationGrants(grants), _cts.Token);
             var index = _configurations.FindIndex(c => c.Id == updated.Id);

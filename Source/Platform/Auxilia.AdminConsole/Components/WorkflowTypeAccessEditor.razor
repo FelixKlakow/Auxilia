@@ -1,0 +1,258 @@
+@using Auxilia.AdminConsole.Support
+@inject ICoreClient Core
+@inject SharingDirectory Directory
+
+@* Per-workflow-type access list. Distinct from AccessGrant sharing: entries are per ACTION and a
+   role is a valid subject, and the list flips to exclusive as soon as it has one entry for an
+   action. Surfaced only to principals holding policy.administer. *@
+
+<div class="access-editor">
+    <p class="field-hint">
+        Empty for an action means the role-derived permission decides who may do it. The
+        <strong>first</strong> entry for an action makes this list the only grant source for that
+        action on this type — everyone not listed is denied, however their roles are set.
+    </p>
+
+    @if (_error is { Length: > 0 })
+    {
+        <p class="field-hint denied-hint">@_error</p>
+    }
+
+    @if (_entries.Count == 0)
+    {
+        <p class="muted view-empty">No access entries — role permissions decide.</p>
+    }
+    else
+    {
+        <div class="table-scroll">
+            <table class="data-table">
+                <thead>
+                <tr>
+                    <th>Action</th>
+                    <th>Subject</th>
+                    <th>Kind</th>
+                    <th>Actions</th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var entry in _entries)
+                {
+                    <tr>
+                        <td class="cell-mono">@entry.Action</td>
+                        <td class="cell-strong">@SubjectNameOf(entry)</td>
+                        <td><span class="type-chip">@SubjectKindOf(entry)</span></td>
+                        <td>
+                            <ConfirmButton Label="Revoke" Question="Revoke this entry?"
+                                           ConfirmLabel="Yes, revoke" Busy="_busy"
+                                           OnConfirm="() => RevokeAsync(entry)"/>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <form class="toolbar access-add" @onsubmit="GrantAsync" @onsubmit:preventDefault>
+        <label>
+            Action
+            <input class="input-inline" list="@($"wt-actions-{WorkflowType}")" @bind="_action"
+                   placeholder="@PermissionActions.WorkflowTrigger"/>
+            <datalist id="@($"wt-actions-{WorkflowType}")">
+                @foreach (var action in ActionSuggestions())
+                {
+                    <option value="@action"></option>
+                }
+            </datalist>
+        </label>
+        <label>
+            Subject kind
+            <select class="select-inline" aria-label="Subject kind" @bind="_subjectKind">
+                <option value="@SubjectRole">Role</option>
+                <option value="@SubjectPrincipal">Principal</option>
+                <option value="@SubjectGroup">Group</option>
+            </select>
+        </label>
+        <label>
+            Subject
+            @if (_subjectKind == SubjectRole)
+            {
+                <select class="select-inline" aria-label="Role" @bind="_subjectId">
+                    <option value="">Pick a role…</option>
+                    @foreach (var role in _roles)
+                    {
+                        <option value="@role">@role</option>
+                    }
+                </select>
+            }
+            else if (_subjectKind == SubjectPrincipal && Directory.Subjects.Principals.Count > 0)
+            {
+                <select @bind="_subjectId">
+                    <option value="">Pick a principal…</option>
+                    @foreach (var principal in Directory.Subjects.Principals)
+                    {
+                        <option value="@principal.Id">@principal.DisplayName (@principal.Kind)</option>
+                    }
+                </select>
+            }
+            else if (_subjectKind == SubjectGroup && Directory.Subjects.Groups.Count > 0)
+            {
+                <select @bind="_subjectId">
+                    <option value="">Pick a group…</option>
+                    @foreach (var group in Directory.Subjects.Groups)
+                    {
+                        <option value="@group.Id">@group.Name</option>
+                    }
+                </select>
+            }
+            else
+            {
+                <input @bind="_subjectId" placeholder="subject id (GUID)"/>
+            }
+        </label>
+        <div class="toolbar-actions">
+            <button type="submit" class="btn btn-secondary" disabled="@(_busy || !CanGrant)">Add entry</button>
+        </div>
+    </form>
+</div>
+
+@code {
+
+    private const string SubjectRole = "Role";
+    private const string SubjectPrincipal = "Principal";
+    private const string SubjectGroup = "Group";
+
+    [Parameter, EditorRequired]
+    public required string WorkflowType { get; set; }
+
+    private bool _busy;
+    private string? _error;
+    private string _loadedFor = "";
+
+    private IReadOnlyList<WorkflowTypeAccessEntryDto> _entries = [];
+    private string[] _roles = [];
+
+    private string _action = PermissionActions.WorkflowTrigger;
+    private string _subjectKind = SubjectRole;
+    private string _subjectId = "";
+
+    private bool CanGrant
+        => _action.Trim().Length > 0
+           && (_subjectKind == SubjectRole ? _subjectId.Length > 0 : Guid.TryParse(_subjectId.Trim(), out _));
+
+    /// <summary>Actions worth offering: the run-facing verbs, plus anything already in the list.</summary>
+    private IEnumerable<string> ActionSuggestions()
+        => new[]
+            {
+                PermissionActions.WorkflowTrigger, PermissionActions.WorkflowCancel,
+                PermissionActions.RunObserve, PermissionActions.WorkflowApprove
+            }
+            .Concat(_entries.Select(e => e.Action))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(a => a, StringComparer.Ordinal);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == WorkflowType)
+            return;
+        _loadedFor = WorkflowType;
+        await Directory.LoadAsync();
+        try
+        {
+            _roles = (await Core.ListRolesAsync()).Select(r => r.Name).ToArray();
+        }
+        catch (CoreApiException)
+        {
+            _roles = [];
+        }
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _entries = (await Core.ListWorkflowTypeAccessAsync(WorkflowType))
+                .OrderBy(e => e.Action, StringComparer.Ordinal)
+                .ThenBy(SubjectNameOf, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            _error = null;
+        }
+        catch (CoreApiException ex)
+        {
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+    }
+
+    private string SubjectNameOf(WorkflowTypeAccessEntryDto entry)
+    {
+        if (entry.RoleName is { Length: > 0 } role)
+            return role;
+        if (entry.PrincipalId is { } principalId)
+            return Directory.NameOf(AccessGrantKind.Principal, principalId.ToString());
+        if (entry.GroupId is { } groupId)
+            return Directory.NameOf(AccessGrantKind.Group, groupId.ToString());
+        return "—";
+    }
+
+    private static string SubjectKindOf(WorkflowTypeAccessEntryDto entry) => entry switch
+    {
+        { RoleName: { Length: > 0 } } => "role",
+        { PrincipalId: not null } => "principal",
+        { GroupId: not null } => "group",
+        _ => "unknown"
+    };
+
+    private WorkflowTypeAccessChange? DraftChange()
+    {
+        var action = _action.Trim();
+        if (_subjectKind == SubjectRole)
+            return new WorkflowTypeAccessChange(action, RoleName: _subjectId);
+        if (!Guid.TryParse(_subjectId.Trim(), out var id))
+            return null;
+        return _subjectKind == SubjectPrincipal
+            ? new WorkflowTypeAccessChange(action, PrincipalId: id)
+            : new WorkflowTypeAccessChange(action, GroupId: id);
+    }
+
+    private async Task GrantAsync()
+    {
+        if (DraftChange() is not { } change)
+            return;
+        _busy = true;
+        try
+        {
+            await Core.GrantWorkflowTypeAccessAsync(WorkflowType, change);
+            _subjectId = "";
+            await LoadAsync();
+        }
+        catch (CoreApiException ex)
+        {
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RevokeAsync(WorkflowTypeAccessEntryDto entry)
+    {
+        _busy = true;
+        try
+        {
+            await Core.RevokeWorkflowTypeAccessAsync(WorkflowType, new WorkflowTypeAccessChange(
+                entry.Action, entry.RoleName, entry.PrincipalId, entry.GroupId));
+            await LoadAsync();
+        }
+        catch (CoreApiException ex)
+        {
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+}

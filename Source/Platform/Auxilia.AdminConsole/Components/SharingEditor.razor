@@ -1,0 +1,78 @@
+@using Auxilia.AdminConsole.Support
+@inject SharingDirectory Directory
+
+@* The one sharing UI in the console: connectors, workflow configurations, providers, and
+   environment layers all restrict access with the same AccessGrant list, so they all edit it
+   the same way. Empty list = open to everyone. *@
+
+<p class="field-hint sharing-hint">@(Hint ?? DefaultHint)</p>
+
+@if (Rows.Count == 0)
+{
+    <p class="muted view-empty">@OpenLabel</p>
+}
+else
+{
+    @foreach (var row in Rows)
+    {
+        <div class="grant-row">
+            <select @bind="row.Kind" aria-label="Subject kind">
+                <option value="@AccessGrantKind.Principal">Principal</option>
+                <option value="@AccessGrantKind.Group">Group</option>
+                <option value="@AccessGrantKind.DirectoryGroup">Directory group</option>
+            </select>
+            @if (row.Kind == AccessGrantKind.Principal && Directory.Subjects.Principals.Count > 0)
+            {
+                <select @bind="row.Id" aria-label="Principal">
+                    <option value="">Pick a principal…</option>
+                    @foreach (var principal in Directory.Subjects.Principals)
+                    {
+                        <option value="@principal.Id">@principal.DisplayName (@principal.Kind)</option>
+                    }
+                </select>
+            }
+            else if (row.Kind == AccessGrantKind.Group && Directory.Subjects.Groups.Count > 0)
+            {
+                <select @bind="row.Id" aria-label="Group">
+                    <option value="">Pick a group…</option>
+                    @foreach (var group in Directory.Subjects.Groups)
+                    {
+                        <option value="@group.Id">@group.Name</option>
+                    }
+                </select>
+            }
+            else
+            {
+                @* No directory (or a directory group, which the Core cannot enumerate): raw id. *@
+                <input @bind="row.Id" aria-label="Subject id"
+                       placeholder="subject id (AD group object id / GUID)"/>
+            }
+            <button type="button" class="btn btn-danger btn-sm"
+                    aria-label="Remove this subject" @onclick="() => Rows.Remove(row)">Remove</button>
+        </div>
+    }
+}
+
+<div class="button-row detail-actions">
+    <button type="button" class="btn btn-secondary btn-sm" @onclick="() => Rows.Add(new GrantRow())">Add subject</button>
+</div>
+
+@code {
+
+    [Parameter, EditorRequired]
+    public required List<GrantRow> Rows { get; set; }
+
+    /// <summary>What restricting this resource means, in the caller's own words.</summary>
+    [Parameter]
+    public string? Hint { get; set; }
+
+    /// <summary>What "no grants" means for this resource.</summary>
+    [Parameter]
+    public string OpenLabel { get; set; } = "Open to everyone — add a subject to restrict it.";
+
+    private const string DefaultHint =
+        "Leave empty to keep this open to every authenticated principal. Adding a subject restricts it to the listed subjects only.";
+
+    protected override Task OnInitializedAsync() => Directory.LoadAsync();
+
+}

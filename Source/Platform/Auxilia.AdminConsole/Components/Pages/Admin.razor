@@ -1,6 +1,8 @@
 @page "/admin"
 @attribute [Authorize]
 @inject ICoreClient Core
+@inject StepUpFlow StepUp
+@inject NavigationManager Navigation
 
 <PageTitle>Principals — Auxilia</PageTitle>
 
@@ -9,7 +11,7 @@
 
 @if (!_loaded)
 {
-    <p class="muted">Loading…</p>
+    <LoadingState Rows="8"/>
 }
 else if (_denied)
 {
@@ -21,25 +23,8 @@ else
     {
         <div class="panel denied">@_error</div>
     }
-    @if (_stepUpPending is not null)
-    {
-        <div class="panel">
-            <strong>Re-authentication required.</strong>
-            This change affects administrator rights or disables a principal — re-enter YOUR
-            credential (password or API key); the elevation then holds for a few minutes of work.
-            <div class="button-row" style="margin-top:.5rem">
-                <input type="password" placeholder="your password / API key" @bind="_stepUpSecret"
-                       @bind:event="oninput"/>
-                <button class="btn btn-primary btn-sm" @onclick="ConfirmStepUpAsync"
-                        disabled="@(_busy || string.IsNullOrEmpty(_stepUpSecret))">Re-authenticate</button>
-                <button class="btn btn-secondary btn-sm" @onclick="CancelStepUp" disabled="@_busy">Cancel</button>
-            </div>
-            @if (_stepUpError is { Length: > 0 })
-            {
-                <div class="muted" style="color:var(--bs-danger,#c0392b)">@_stepUpError</div>
-            }
-        </div>
-    }
+    <StepUpPrompt Flow="StepUp" Busy="_busy" OnConfirm="ConfirmStepUpAsync"
+                  Reason="This change affects administrator rights or disables a principal — re-enter YOUR credential (password or API key); the elevation then holds for a few minutes of work."/>
     @if (_createdApiKey is not null)
     {
         <div class="panel success">
@@ -48,7 +33,7 @@ else
         </div>
     }
 
-    <div class="toolbar">
+    <form class="toolbar" @onsubmit="ApplyAsync" @onsubmit:preventDefault>
         <label>
             Kind
             <select @bind="_kind">
@@ -68,10 +53,16 @@ else
         </label>
         <label>
             Search
-            <input @bind="_search" placeholder="name / subject"/>
+            <input @bind="_search" @bind:event="oninput" placeholder="name / subject"/>
         </label>
-        <button class="btn btn-secondary" @onclick="ApplyAsync">Apply</button>
-    </div>
+        <div class="toolbar-actions">
+            <button type="submit" class="btn btn-primary">Apply</button>
+            @if (HasFilters)
+            {
+                <button type="button" class="btn btn-secondary" @onclick="ClearFiltersAsync">Clear filters</button>
+            }
+        </div>
+    </form>
 
     <section class="card">
         <div class="card-header">
@@ -79,10 +70,19 @@ else
         </div>
         @if (_principals.Count == 0)
         {
-            <div class="card-body"><p class="muted view-empty">No principals match the current filter.</p></div>
+            <div class="card-body">
+                <p class="muted view-empty">No principals match the current filter.</p>
+                @if (HasFilters)
+                {
+                    <div class="button-row detail-actions">
+                        <button class="btn btn-secondary btn-sm" @onclick="ClearFiltersAsync">Clear filters</button>
+                    </div>
+                }
+            </div>
         }
         else
         {
+            <div class="table-scroll">
             <table class="data-table">
                 <thead>
                 <tr>
@@ -121,8 +121,16 @@ else
                                     @role.RoleName
                                     @if (role.Source == "Direct")
                                     {
-                                        <button class="chip-x" title="Revoke role"
-                                                @onclick="() => RevokeRoleAsync(principal.Id, role.RoleName)">✕</button>
+                                        @if (_confirmRevoke == (principal.Id, role.RoleName))
+                                        {
+                                            <button class="chip-x" title="Confirm revoking this role"
+                                                    @onclick="() => RevokeRoleAsync(principal.Id, role.RoleName)">revoke?</button>
+                                        }
+                                        else
+                                        {
+                                            <button class="chip-x" title="Revoke role"
+                                                    @onclick="() => Arm(principal.Id, role.RoleName)">✕</button>
+                                        }
                                     }
                                 </span>
                             }
@@ -161,7 +169,9 @@ else
                                 }
                                 @if (IsActive(principal))
                                 {
-                                    <button class="btn btn-danger btn-sm" @onclick="() => SetEnabledAsync(principal.Id, false)" disabled="@_busy">Disable</button>
+                                    <ConfirmButton Label="Disable" Question="Disable this principal?"
+                                                   ConfirmLabel="Yes, disable" Busy="_busy"
+                                                   OnConfirm="() => SetEnabledAsync(principal.Id, false)"/>
                                 }
                                 else
                                 {
@@ -173,6 +183,7 @@ else
                 }
                 </tbody>
             </table>
+            </div>
             @if (_skip + _principals.Count < _total)
             {
                 <div class="card-body table-more">
@@ -246,12 +257,21 @@ else
     private string _humanUsername = "";
     private string _humanPassword = "";
     private string _aiDisplayName = "";
-    private string _aiKind = "AiAgent";
 
     private static bool IsActive(PrincipalDto p) => p.Status == "Active";
 
+    private bool HasFilters => _kind.Length > 0 || _enabled.Length > 0 || _search.Length > 0;
+
+    /// <summary>Armed role revocation — a role chip's ✕ asks once before it takes the role away.</summary>
+    private (Guid Principal, string Role)? _confirmRevoke;
+
+    private void Arm(Guid principalId, string role) => _confirmRevoke = (principalId, role);
+
     protected override async Task OnInitializedAsync()
     {
+        _kind = PageFilters.Read(Navigation, "kind");
+        _enabled = PageFilters.Read(Navigation, "status");
+        _search = PageFilters.Read(Navigation, "q");
         try
         {
             BuiltInRoles = (await Core.ListRolesAsync()).Select(r => r.Name).ToArray();
@@ -263,7 +283,22 @@ else
         await LoadAsync(reset: true);
     }
 
-    private Task ApplyAsync() => LoadAsync(reset: true);
+    private Task ApplyAsync()
+    {
+        PageFilters.Apply(Navigation, new Dictionary<string, string?>
+        {
+            ["kind"] = _kind,
+            ["status"] = _enabled,
+            ["q"] = _search
+        });
+        return LoadAsync(reset: true);
+    }
+
+    private Task ClearFiltersAsync()
+    {
+        _kind = _enabled = _search = "";
+        return ApplyAsync();
+    }
 
     private Task ShowMoreAsync() => LoadAsync(reset: false);
 
@@ -386,55 +421,32 @@ else
         => MutateAsync(() => Core.SetPrincipalTagsAsync(principal.Id,
             new SetPrincipalTagsRequest(principal.Tags.Where(t => t != tag).ToList())));
 
-    // --- Step-up re-authentication: the Core rejects admin-role grant/revoke and principal
-    // disable with 'elevation-required' until the operator re-proves their OWN credential.
-    // StepUpAsync holds the X-Auxilia-Elevation header on this circuit's client, so the
-    // retried action (and further sensitive work for a few minutes) passes without re-asking.
-    private Func<Task>? _stepUpPending;
-    private string _stepUpSecret = "";
-    private string? _stepUpError;
-
-    private void CancelStepUp()
-    {
-        _stepUpPending = null;
-        _stepUpSecret = "";
-        _stepUpError = null;
-    }
-
+    // Step-up re-authentication lives in the shared StepUpFlow: the Core rejects admin-role
+    // grant/revoke and principal disable with 'elevation-required' until the operator re-proves
+    // their OWN credential, and the flow retries the exact rejected action once elevated.
     private async Task ConfirmStepUpAsync()
     {
         _busy = true;
         try
         {
-            await Core.StepUpAsync(new StepUpRequest(_stepUpSecret));
+            if (await StepUp.ConfirmAsync())
+                await LoadAsync(reset: true);
         }
-        catch (CoreApiException ex)
+        finally
         {
-            _stepUpError = ex.ErrorDetail ?? ex.Message;
             _busy = false;
-            return;
         }
-        var pending = _stepUpPending;
-        CancelStepUp();
-        _busy = false;
-        if (pending is not null)
-            await MutateAsync(pending);
     }
 
     private async Task MutateAsync(Func<Task> action)
     {
         _error = null;
         _busy = true;
+        _confirmRevoke = null;
         try
         {
-            await action();
-            await LoadAsync(reset: true);
-        }
-        catch (CoreApiException ex) when (ex.ErrorDetail == "elevation-required")
-        {
-            _stepUpPending = action;
-            _stepUpSecret = "";
-            _stepUpError = null;
+            if (await StepUp.RunAsync(action))
+                await LoadAsync(reset: true);
         }
         catch (CoreApiException ex)
         {

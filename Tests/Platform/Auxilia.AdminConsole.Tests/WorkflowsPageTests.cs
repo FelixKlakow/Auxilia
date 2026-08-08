@@ -1,6 +1,7 @@
 using System.Net;
 using Auxilia.AdminConsole.Components.Pages;
 using Auxilia.AdminConsole.Rendering;
+using Auxilia.AdminConsole.Support;
 using Auxilia.Core.Client;
 using Auxilia.Core.Contracts;
 using Bunit;
@@ -25,6 +26,8 @@ public sealed class WorkflowsPageTests
         var ctx = new BunitContext();
         ctx.Services.AddSingleton<ICoreClient>(core);
         ctx.Services.AddSingleton(new ViewRendererRegistry([]));
+        ctx.Services.AddSingleton(new StepUpFlow(core));
+        ctx.Services.AddSingleton(new SharingDirectory(core));
         return ctx;
     }
 
@@ -138,6 +141,61 @@ public sealed class WorkflowsPageTests
         });
     }
 
+    /// <summary>
+    /// Editing UPDATES in place. It used to create a duplicate configuration, orphaning every
+    /// trigger and shared link that pointed at the original id.
+    /// </summary>
+    [Test]
+    public void Editor_EditRoute_UpdatesInPlace_InsteadOfCreatingADuplicate()
+    {
+        var configurationId = Guid.NewGuid();
+        var core = new FakeCoreClient();
+        core.WorkflowTypes.Add(new WorkflowTypeDto("code-review", "1.0.0", "Ephemeral", null, []));
+        core.WorkflowSchemas["code-review"] = Schema("code-review",
+            new WorkflowSlotDto("source", "ISourceControlAccess", null, true, null));
+        core.Configurations.Add(new RunConfiguration(
+            configurationId, "Nightly review", "code-review",
+            new Dictionary<string, string>(), [], true, DateTimeOffset.UtcNow));
+        using var ctx = NewContext(core);
+
+        var cut = ctx.Render<WorkflowEditor>(p => p.Add(c => c.ConfigurationId, configurationId));
+
+        cut.Find("input[placeholder='e.g. Nightly code review']").Change("Nightly review v2");
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Save changes").Click();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(core.LastCreatedConfiguration, Is.Null, "editing must not create a second configuration");
+            Assert.That(core.LastUpdatedConfigurationId, Is.EqualTo(configurationId));
+            Assert.That(core.LastUpdatedConfiguration!.Name, Is.EqualTo("Nightly review v2"));
+            Assert.That(core.Configurations, Has.Count.EqualTo(1), "the id the world points at survives");
+        });
+    }
+
+    [Test]
+    public void Editor_EditRoute_LocksTheTypeAndScope()
+    {
+        var configurationId = Guid.NewGuid();
+        var core = new FakeCoreClient();
+        core.WorkflowTypes.Add(new WorkflowTypeDto("code-review", "1.0.0", "Ephemeral", null, []));
+        core.Configurations.Add(new RunConfiguration(
+            configurationId, "Nightly review", "code-review",
+            new Dictionary<string, string>(), [], true, DateTimeOffset.UtcNow));
+        using var ctx = NewContext(core);
+
+        var cut = ctx.Render<WorkflowEditor>(p => p.Add(c => c.ConfigurationId, configurationId));
+
+        var selects = cut.FindAll("select");
+        Assert.Multiple(() =>
+        {
+            Assert.That(selects[0].HasAttribute("disabled"), Is.True,
+                "the update contract carries no workflow type — changing it here would be a lie");
+            Assert.That(selects[1].HasAttribute("disabled"), Is.True, "and no scope either");
+            Assert.That(cut.Markup, Does.Not.Contain("CreateConfigurationAsync"),
+                "the page no longer explains a client-library limitation to the operator");
+        });
+    }
+
     [Test]
     public void Editor_GenericBinding_NarrowsProvidersByContract_AndSavesProviderTypeWithSettings()
     {
@@ -190,15 +248,14 @@ public sealed class WorkflowsPageTests
         cut.Find("input[placeholder='e.g. Nightly code review']").Change("Session");
         cut.FindAll("select")[0].Change("session");
 
-        // Environment slots render as checkboxes (one per layer), not a connector select.
+        // Environment slots render as a base choice plus that base's capabilities — never a flat
+        // list where the other base's layers sit there disabled.
         cut.FindAll("input[type=checkbox]").First(c => c.Parent!.TextContent.Contains("dotnet-10")).Change(true);
 
-        cut.WaitForAssertion(() =>
-        {
-            var windowsBox = cut.FindAll("input[type=checkbox]").First(c => c.Parent!.TextContent.Contains("windows-vs"));
-            Assert.That(windowsBox.HasAttribute("disabled"), Is.True,
-                "picking a linux layer disables layers of any other base");
-        });
+        cut.WaitForAssertion(() => Assert.That(
+            cut.FindAll(".environment-layers input[type=checkbox]")
+                .Any(c => c.Parent!.TextContent.Contains("windows-vs")), Is.False,
+            "layers of another base are not offered at all once a base is in play"));
         cut.FindAll("input[type=checkbox]").First(c => c.Parent!.TextContent.Contains("node-22")).Change(true);
         cut.FindAll("button").First(b => b.TextContent.Trim() == "Create configuration").Click();
 

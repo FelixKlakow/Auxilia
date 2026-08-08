@@ -1,0 +1,77 @@
+@* Side panel for create/edit forms. Replaces the old "append a card at the bottom of the page"
+   pattern, where opening a form below a 50-row table looked like nothing had happened. *@
+
+@if (Open)
+{
+    <div class="drawer-scrim" @onclick="OnClose"></div>
+    <aside class="drawer" role="dialog" aria-modal="true" aria-label="@Title" tabindex="-1"
+           @ref="_panel" @onkeydown="OnKeyDown">
+        <header class="drawer-header">
+            <div>
+                <h2>@Title</h2>
+                @if (!string.IsNullOrEmpty(Subtitle))
+                {
+                    <p class="card-subtitle">@Subtitle</p>
+                }
+            </div>
+            <button type="button" class="drawer-close" aria-label="Close" @onclick="OnClose">×</button>
+        </header>
+        <div class="drawer-body">
+            @ChildContent
+        </div>
+        @if (Footer is not null)
+        {
+            <footer class="drawer-footer">
+                @Footer
+            </footer>
+        }
+    </aside>
+}
+
+@code {
+
+    private ElementReference _panel;
+    private bool _focused;
+
+    [Parameter]
+    public bool Open { get; set; }
+
+    [Parameter, EditorRequired]
+    public required string Title { get; set; }
+
+    [Parameter]
+    public string? Subtitle { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Pinned action row — Save/Cancel stay reachable however long the form is.</summary>
+    [Parameter]
+    public RenderFragment? Footer { get; set; }
+
+    /// <summary>Escape closes the panel — the reflex for anything that overlays the page.</summary>
+    private async Task OnKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape")
+            await OnClose.InvokeAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Move focus into the panel when it opens, so keyboard and screen-reader users land on the
+        // form they just asked for instead of staying behind it on the page.
+        if (Open && !_focused)
+        {
+            _focused = true;
+            await _panel.FocusAsync();
+        }
+        else if (!Open)
+        {
+            _focused = false;
+        }
+    }
+
+}
