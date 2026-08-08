@@ -66,6 +66,17 @@ public abstract class CoreApiComponentTestBase
     protected HttpClient CreateAnonymousClient() => Factory.CreateClient();
 
     /// <summary>
+    /// Opens the platform's default resource access (ungranted resources usable by every
+    /// role-permitted principal — the pre-hardening posture). For fixtures exercising
+    /// role-permission or sharing mechanics rather than the restricted default itself.
+    /// </summary>
+    protected Task OpenDefaultResourceAccessAsync()
+        => Factory.Services.GetRequiredService<Auxilia.Core.Api.Services.PlatformSettingsService>()
+            .SetAsync(null,
+                Auxilia.Core.Contracts.PlatformSettingKeys.DefaultResourceAccess,
+                Auxilia.Core.Contracts.DefaultResourceAccessModes.Open, CancellationToken.None);
+
+    /// <summary>
     /// Registers <paramref name="workflowType"/> as an Active registry entry (register + approve —
     /// a docker package has no signature, so approval is the trust act). Runs dispatch by type only,
     /// so most run-path tests need this before acting.

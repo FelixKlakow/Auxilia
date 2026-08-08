@@ -141,8 +141,29 @@ public class PolicyEngineTests
     }
 
     [Test]
-    public async Task WorkflowTypeWithoutAccessList_FallsBackToRolePermissions()
+    public async Task WorkflowTypeWithoutAccessList_UnderRestrictedDefault_IsAdministratorsOnly()
     {
+        var user = await _ctx.NewPrincipalWithRoleAsync(BuiltInRoles.User);
+        var admin = await _ctx.NewPrincipalWithRoleAsync(BuiltInRoles.Administrator);
+
+        var userDecision = await _ctx.PolicyEngine.EvaluateAsync(
+            new PolicyContext(user, PermissionActions.WorkflowTrigger, "run") { WorkflowType = "ungranted-wf" });
+        var adminDecision = await _ctx.PolicyEngine.EvaluateAsync(
+            new PolicyContext(admin, PermissionActions.WorkflowTrigger, "run") { WorkflowType = "ungranted-wf" });
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(userDecision.Allowed, Is.False,
+                "an ungranted type is not triggerable by non-admins under the restricted default");
+            Assert.That(userDecision.Reason, Is.EqualTo("workflow-type-default-restricted"));
+            Assert.That(adminDecision.Allowed, Is.True);
+        });
+    }
+
+    [Test]
+    public async Task WorkflowTypeWithoutAccessList_UnderOpenDefault_FallsBackToRolePermissions()
+    {
+        _ctx.DefaultAccess.Restricted = false;
         var user = await _ctx.NewPrincipalWithRoleAsync(BuiltInRoles.User);
 
         var decision = await _ctx.PolicyEngine.EvaluateAsync(
@@ -150,6 +171,34 @@ public class PolicyEngineTests
 
         Assert.That(decision.Allowed, Is.True);
         Assert.That(decision.Reason, Is.EqualTo("role-permission"));
+    }
+
+    [Test]
+    public async Task WorkflowTypeWithoutAccessList_RestrictedDefault_LeavesOtherActionsRoleGoverned()
+    {
+        // Only TRIGGERING an ungranted type is restricted — cancel/observe stay role-governed,
+        // otherwise granting trigger would force enumerating every action per type.
+        var operatorId = await _ctx.NewPrincipalWithRoleAsync(BuiltInRoles.Operator);
+
+        var cancel = await _ctx.PolicyEngine.EvaluateAsync(
+            new PolicyContext(operatorId, PermissionActions.WorkflowCancel, "run") { WorkflowType = "ungranted-wf" });
+
+        Assert.That(cancel.Allowed, Is.True);
+        Assert.That(cancel.Reason, Is.EqualTo("role-permission"));
+    }
+
+    [Test]
+    public async Task WorkflowTypeAccessList_NeverLocksOutAdministrators()
+    {
+        var admin = await _ctx.NewPrincipalWithRoleAsync(BuiltInRoles.Administrator);
+        await _ctx.AccessStore.GrantPrincipalAsync(
+            "secure-wf", PermissionActions.WorkflowTrigger, Guid.NewGuid());
+
+        var decision = await _ctx.PolicyEngine.EvaluateAsync(
+            new PolicyContext(admin, PermissionActions.WorkflowTrigger, "run") { WorkflowType = "secure-wf" });
+
+        Assert.That(decision.Allowed, Is.True);
+        Assert.That(decision.Reason, Is.EqualTo("administrator"));
     }
 
     [Test]

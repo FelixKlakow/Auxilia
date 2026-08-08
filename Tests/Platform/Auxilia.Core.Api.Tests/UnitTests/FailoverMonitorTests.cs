@@ -103,6 +103,8 @@ public sealed class FailoverMonitorTests
             new AccessGrantEvaluator(
                 new InMemoryDataAccess<Auxilia.PlatformData.Entities.PrincipalRecord>(),
                 new InMemoryDataAccess<Auxilia.PlatformData.Entities.GroupMembershipRecord>()),
+            TestResourceAccess.EmptyPrincipalDirectory(),
+            TestResourceAccess.Open,
             new RunnerLivenessTracker(), _runs,
             new WorkflowStatusPublisher(_bus, _time), _time,
             Options.Create(_settings), NullLogger<RunService>.Instance);

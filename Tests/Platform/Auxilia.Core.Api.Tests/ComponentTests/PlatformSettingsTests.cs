@@ -83,6 +83,44 @@ public sealed class PlatformSettingsTests : CoreApiComponentTestBase
     }
 
     [Test]
+    public async Task DefaultResourceAccess_AcceptsOnlyTheTwoModes_AndGovernsDispatch()
+    {
+        var admin = await ElevatedAdminAsync();
+
+        Assert.That(
+            (await admin.PutAsJsonAsync(
+                $"/api/platform-settings/{PlatformSettingKeys.DefaultResourceAccess}",
+                new SetPlatformSetting("everyone"))).StatusCode,
+            Is.EqualTo(HttpStatusCode.BadRequest), "only restricted|open are admissible");
+
+        // Flip to open, and a User-role principal may trigger an ungranted type again.
+        var set = await admin.PutAsJsonAsync(
+            $"/api/platform-settings/{PlatformSettingKeys.DefaultResourceAccess}",
+            new SetPlatformSetting(DefaultResourceAccessModes.Open));
+        Assert.That(set.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        await RegisterActiveTypeAsync(CreateClient(), "settings-open-wt", "docker://img");
+        var directory = Factory.Services.GetRequiredService<PrincipalDirectory>();
+        var (principal, apiKey) = await directory.CreateApiKeyPrincipalAsync($"svc-{Guid.NewGuid():N}");
+        await directory.AssignRoleAsync(principal.Id, BuiltInRoles.User);
+        var user = Factory.CreateClient();
+        user.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+
+        Assert.That(
+            (await user.PostAsJsonAsync("/api/runs", new { workflowType = "settings-open-wt" })).StatusCode,
+            Is.EqualTo(HttpStatusCode.OK), "the open posture restores role-governed dispatch");
+
+        // Back to restricted: the same principal is refused again — no restart involved.
+        await admin.PutAsJsonAsync(
+            $"/api/platform-settings/{PlatformSettingKeys.DefaultResourceAccess}",
+            new SetPlatformSetting(DefaultResourceAccessModes.Restricted));
+        Assert.That(
+            (await user.PostAsJsonAsync("/api/runs", new { workflowType = "settings-open-wt" })).StatusCode,
+            Is.EqualTo(HttpStatusCode.Forbidden));
+    }
+
+    [Test]
     public async Task Reads_WithoutPolicyAdminister_AreForbidden()
     {
         var directory = Factory.Services.GetRequiredService<PrincipalDirectory>();

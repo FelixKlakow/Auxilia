@@ -56,7 +56,8 @@ public sealed class AccessSurfaceTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(cut.Markup, Does.Contain("everyone"), "an unrestricted provider reads as open");
+            Assert.That(cut.Markup, Does.Contain("platform default"),
+                "an ungranted provider defers to the platform default");
             Assert.That(cut.Markup, Does.Contain("1 subject"), "a restricted one shows how many admit it");
         });
     }
@@ -207,14 +208,15 @@ public sealed class AccessSurfaceTests
     }
 
     [Test]
-    public void Registry_AccessEditor_EmptyList_SaysRolesDecide()
+    public void Registry_AccessEditor_EmptyList_SaysThePlatformDefaultDecides()
     {
         using var ctx = NewContext(RegistryWithType());
 
         var cut = RenderRegistry(ctx, PermissionActions.PolicyAdminister);
         cut.FindAll("button").First(b => b.TextContent.Trim() == "Details").Click();
 
-        cut.WaitForAssertion(() => Assert.That(cut.Markup, Does.Contain("role permissions decide"),
-            "an empty access list is not the same as a locked-down one"));
+        cut.WaitForAssertion(() => Assert.That(cut.Markup,
+            Does.Contain("the platform default decides who may trigger"),
+            "an empty access list defers to the platform default, not to roles alone"));
     }
 }

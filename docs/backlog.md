@@ -98,11 +98,30 @@ Open:
   would first need a TriggerHost REST surface (undecided).
 
 ## Governance + signing follow-ups (2026-08-08 console review)
+- ~~MCP parity for the newer admin surfaces~~ — DONE 2026-08-08: `set_provider_grants`
+  (slot providers AND environment layers — one catalog mechanism), `list_platform_settings`,
+  `set_platform_setting` (elevation-gated via the EXISTING MCP `step_up` flow, matching the
+  REST posture — no read-only compromise was needed), `list_environment_bases` /
+  `upsert_environment_base` / `delete_environment_base`, and `list_runners`. All ride the
+  same service layer as REST (the component-tested seam), each policy-checked.
+- ~~Default-deny resource access~~ — DONE 2026-08-08 (ARCHITECTURE "Default-deny resource
+  access"): empty grants now follow the runtime setting `security.default-resource-access`
+  (`restricted` = administrators only, the default incl. unset; `open` = the old role-governed
+  behavior), enforced at the catalog dispatch gate (`RunService`) and the Policy Engine's
+  workflow-trigger fall-through. Administrators always pass (empty AND non-empty lists);
+  system dispatches without a principal are exempt; only trigger/bind is posture-gated —
+  cancel/observe/approve stay role-governed. The runner's pre-flight re-check deliberately
+  evaluates the OPEN posture (the Core owns the setting and already gated the dispatch).
+  AdminConsole: `/admin/settings` page (posture + login lifetime, step-up-gated), ungranted
+  layers/providers show "admin-only (default)" instead of "everyone". Covered by
+  PolicyEngineTests, ResourceGrantsTests (incl. the new restricted-default roundtrip),
+  PlatformSettingsTests, and bUnit console tests.
 - ~~Environment rights~~ — DONE 2026-08-08: `EnvironmentLayerRecord.GrantsJson` +
   `PUT /api/environment-layers/{type}/grants` (gated `provider-catalog.manage`,
   `ICoreClient.SetEnvironmentLayerGrantsAsync`); empty grants = open, non-empty enforced at
   dispatch when the layer is bound (403 via `RunAccessDeniedException`); upserts preserve
-  grants. Component-tested (`ResourceGrantsTests`). AdminConsole grant-editing UI still open.
+  grants. Component-tested (`ResourceGrantsTests`). ~~AdminConsole grant-editing UI~~ —
+  exists (the Sharing drawer on `/admin/environments`), posture-aware since 2026-08-08.
 - ~~Workflow-type rights~~ — RESOLVED 2026-08-08: the mechanism ALREADY existed — the Policy
   Engine's per-(type, action) EXCLUSIVE access list (`WorkflowTypeAccessStore`, governance-rbac
   design), enforced at every dispatch — it was just administrable via MCP only. Now exposed
@@ -110,7 +129,8 @@ Open:
   `policy.administer`) and `ICoreClient`
   (`ListWorkflowTypeAccessAsync`/`Grant…`/`RevokeWorkflowTypeAccessAsync`), component-tested
   incl. exclusive dispatch enforcement (`ResourceGrantsTests`). No second grant mechanism was
-  added. AdminConsole access-editing UI still open.
+  added. ~~AdminConsole access-editing UI~~ — exists (`WorkflowTypeAccessEditor` in the
+  registry detail row), default-posture-aware since 2026-08-08.
 - **Signed-package roundtrip SYSTEM test**: DONE —
   `CoreClientSurface/SigningRoundtripSystemTests` drives the loop over the real Dockerized
   Core: trusted-key upload → auto-Active → dispatch (runner token-downloads the `core://`
@@ -273,6 +293,26 @@ access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing di
   Remaining idea (unbuilt): bases carrying a concrete image reference the composition could
   `FROM` — today composition always builds FROM the workflow image, so an image ref on the
   base only becomes meaningful with pre-built environment containers.
+- ~~Base-catalog prefill~~ — DONE 2026-08-08 (ARCHITECTURE "Fleet platform advertisement +
+  base seeding"): NO online registry lookup by design (registry neutrality, air-gapped
+  deployments). Delivered instead: (a) the console's curated seed list on an empty base
+  catalog (one-click add, admin stays the curator), and (b) runners probe their Docker
+  daemon (OS type + arch, cached; the daemon's answer, not the process OS) and advertise it
+  on every `RunnerHeartbeat` — tracked per runner, served over `GET /api/runners` +
+  `ICoreClient.ListRunnersAsync` (gated `provider-catalog.manage`), and used to filter the
+  seed suggestions to what the fleet can host. Checking "which docker bases are there" only
+  becomes meaningful when bases carry a concrete image ref (idea above) — then the RUNNER
+  validates by pull at composition, never the Core.
+- **Automated base-image download (open, 2026-08-08 — depends on bases carrying an image
+  ref).** Runner-side reconcile, never Core-side: each runner compares the registered bases
+  for its platform against its local Docker images and background-pulls what's missing
+  (triggered by a catalog-change bus message plus a periodic sweep as catch-up), pinned by
+  digest at registration so a repointed tag can't swap the code. Pull auth, if a private
+  registry needs it, is runner-local configuration (the Core stores no registry credential
+  and makes no registry calls). The heartbeat reports per-base readiness so the console can
+  show "ready on N/M runners" and surface pull failures; air-gapped deployments load images
+  by hand and the reconcile simply finds them present. Until then, nothing to download:
+  composition builds FROM the workflow image, which the runner already pulls on demand.
 - **Build-time hardening (context, 2026-08-02).** Environment composition runs `docker build`
   on a generated one-file Dockerfile (context = that file only; nothing from the host leaks
   in). The RUN steps execute in ordinary build containers: root inside, NO egress policy

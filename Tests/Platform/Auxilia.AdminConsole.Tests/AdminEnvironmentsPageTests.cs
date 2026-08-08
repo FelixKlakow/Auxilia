@@ -52,8 +52,60 @@ public sealed class AdminEnvironmentsPageTests
             Assert.That(cut.Markup, Does.Contain("10.0.100"));
             Assert.That(cut.Markup, Does.Contain("any version"), "an unpinned layer says so");
             Assert.That(cut.Markup, Does.Contain("1 subject"), "a restricted layer shows its access chip");
-            Assert.That(cut.Markup, Does.Contain("everyone"), "an open layer reads as open");
+            Assert.That(cut.Markup, Does.Contain("admin-only (default)"),
+                "an ungranted layer shows the restricted platform default");
         });
+    }
+
+    [Test]
+    public void Environments_EmptyBaseCatalog_OffersCuratedSeeds_OneClickRegisters()
+    {
+        var core = new FakeCoreClient();
+        using var ctx = NewContext(core);
+        var cut = ctx.Render<AdminEnvironments>();
+
+        Assert.That(cut.Markup, Does.Contain("ubuntu-24.04").And.Contain("server-2022"),
+            "the curated seed list is offered while the catalog is empty");
+
+        cut.FindAll("button").First(b => b.TextContent.Contains("linux / ubuntu-24.04")).Click();
+
+        cut.WaitForAssertion(() => Assert.That(
+            core.EnvironmentBases.Any(b => b.Name == "linux" && b.Version == "ubuntu-24.04"),
+            Is.True, "one click registers the suggested base — the admin stays the curator"));
+    }
+
+    [Test]
+    public void Environments_SeedSuggestions_AreFilteredByTheFleetPlatform()
+    {
+        var core = new FakeCoreClient();
+        core.Runners.Add(new RunnerDto(
+            Guid.NewGuid(), "Auxilia.Core.Runner", DateTimeOffset.UtcNow, Alive: true,
+            HostPlatform: "linux", HostArchitecture: "x86_64"));
+        using var ctx = NewContext(core);
+
+        var cut = ctx.Render<AdminEnvironments>();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(cut.Markup, Does.Contain("linux / ubuntu-24.04"));
+            Assert.That(cut.Markup, Does.Not.Contain("server-2022"),
+                "a linux-only fleet hides windows seed suggestions");
+        });
+    }
+
+    [Test]
+    public void Environments_UngrantedLayer_ReadsAsOpen_WhenThePlatformDefaultIsOpen()
+    {
+        var core = new FakeCoreClient();
+        core.EnvironmentLayers.Add(Layer("dotnet-10"));
+        core.PlatformSettings.Add(new PlatformSettingDto(
+            PlatformSettingKeys.DefaultResourceAccess, DefaultResourceAccessModes.Open, DateTimeOffset.UtcNow));
+        using var ctx = NewContext(core);
+
+        var cut = ctx.Render<AdminEnvironments>();
+
+        Assert.That(cut.Markup, Does.Contain("everyone (default open)"),
+            "the open posture is reflected on ungranted layers");
     }
 
     [Test]
@@ -175,7 +227,7 @@ public sealed class AdminEnvironmentsPageTests
         Assert.Multiple(() =>
         {
             Assert.That(core.LayerGrantCalls[0].Grants, Is.Empty);
-            Assert.That(cut.Markup, Does.Contain("open to everyone again"));
+            Assert.That(cut.Markup, Does.Contain("follows the platform default access again"));
         });
     }
 

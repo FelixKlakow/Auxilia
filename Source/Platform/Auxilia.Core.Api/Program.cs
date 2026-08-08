@@ -130,6 +130,10 @@ builder.Services.AddSingleton<AccessGrantEvaluator>();
 builder.Services.AddSingleton<ConnectorAccessPolicy>();
 builder.Services.AddSingleton<WorkspaceResourceService>();
 builder.Services.AddSingleton<PlatformSettingsService>();
+// Binds the governance default-access posture (used by PolicyEngine and the dispatch gates)
+// to the runtime security.default-resource-access setting.
+builder.Services.AddSingleton<Auxilia.Governance.Policy.IDefaultResourceAccessPolicy,
+    PlatformDefaultResourceAccessPolicy>();
 builder.Services.AddSingleton<DelegatedTokenStore>();
 builder.Services.AddSingleton<RunConfigurationService>();
 builder.Services.AddSingleton<RunQuotaService>();
@@ -1338,6 +1342,22 @@ app.MapDelete("/api/environment-bases/{name}/{version}", async (
     return await svc.DeleteAsync(CoreClaims.PrincipalIdOf(http.User), name, version, ct)
         ? Results.NoContent()
         : Results.NotFound();
+}).RequireAuthorization();
+
+// --- Runner fleet (what the Core knows from bus heartbeats; feeds environment editors) ---
+app.MapGet("/api/runners", async (
+        HttpContext http, IPolicyEngine policy, Auxilia.Core.Api.Services.RunnerLivenessTracker liveness,
+        IOptions<CoreApiSettings> apiSettings, TimeProvider clock, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ProviderCatalogManage, ct) is { } fail)
+        return fail;
+    var cutoff = clock.GetUtcNow()
+                 - TimeSpan.FromSeconds(apiSettings.Value.HeartbeatTimeoutSeconds);
+    return Results.Ok(liveness.Snapshot()
+        .Select(r => new RunnerDto(
+            r.ServiceId, r.ServiceName, r.LastSeen, r.LastSeen >= cutoff,
+            r.HostPlatform, r.HostArchitecture))
+        .ToList());
 }).RequireAuthorization();
 
 // Fragment download for the RUNNER, authorized by the run's resolution token (same trust as the

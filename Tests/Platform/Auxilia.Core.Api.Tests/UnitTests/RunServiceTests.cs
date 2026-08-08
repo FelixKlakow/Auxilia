@@ -78,6 +78,8 @@ public sealed class RunServiceTests
             providerCatalog, resolver, accessPolicy, connectors, repositories,
             new AccessGrantEvaluator(
                 new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>()),
+            TestResourceAccess.EmptyPrincipalDirectory(),
+            TestResourceAccess.Open,
             liveness,
             _runs = new InMemoryDataAccess<CoreRunRecord>(),
             new Auxilia.Workflows.Messaging.WorkflowStatusPublisher(bus, TimeProvider.System),

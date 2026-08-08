@@ -105,7 +105,10 @@ else
                             }
                             else
                             {
-                                <span class="muted">everyone</span>
+                                <span class="badge"
+                                      title="No grants — under the restricted platform default only administrators may bind this provider. Add sharing subjects to open it up.">
+                                    platform default
+                                </span>
                             }
                         </td>
                         <td>
@@ -167,8 +170,8 @@ else
             OnClose="() => _sharingProvider = null">
         <ChildContent>
             <SharingEditor Rows="_sharingRows"
-                           Hint="Leave empty to offer this provider to everyone. Adding a subject restricts it — only those principals or groups can dispatch a run that binds it."
-                           OpenLabel="Open to everyone — any workflow may bind this provider."/>
+                           Hint="Leave empty to fall back to the platform default (restricted: administrators only; open: everyone). Adding a subject grants exactly those principals or groups — administrators always pass."
+                           OpenLabel="No grants — the platform default access applies."/>
         </ChildContent>
         <Footer>
             <button class="btn btn-primary" disabled="@_busy" @onclick="SaveSharingAsync">Save sharing</button>
@@ -245,7 +248,7 @@ else
             var grants = GrantRows.ToGrants(_sharingRows);
             await Core.SetProviderGrantsAsync(providerType, new SetProviderGrants(grants), _cts.Token);
             _notice = grants.Count == 0
-                ? $"\"{providerType}\" is open to everyone again."
+                ? $"\"{providerType}\" follows the platform default access again."
                 : $"\"{providerType}\" is now restricted to {grants.Count} subject(s).";
             _sharingProvider = null;
         });

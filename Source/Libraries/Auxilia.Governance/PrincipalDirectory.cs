@@ -187,7 +187,8 @@ public sealed class PrincipalDirectory(
         return assignmentsQuery.Any(a => a.RoleName == BuiltInRoles.Administrator);
     }
 
-    private async Task<bool> IsAdministratorAsync(Guid principalId, CancellationToken ct)
+    /// <summary>True when the principal holds Administrator, directly or via a group role.</summary>
+    public async Task<bool> IsAdministratorAsync(Guid principalId, CancellationToken ct)
     {
         var assignments = await roleAssignments.ReadAsync(ct);
         return assignments.Any(a => a.PrincipalId == principalId && a.RoleName == BuiltInRoles.Administrator)

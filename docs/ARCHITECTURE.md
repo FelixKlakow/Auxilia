@@ -586,6 +586,16 @@ both the dispatch (`RunService`) and the authoring mirror (`WorkflowAuthoring`) 
 mixed base versions exactly as they do on mixed base names — one run composes one image on
 one base version.
 
+**Fleet platform advertisement + base seeding (2026-08-08).** Each runner probes its Docker
+daemon once (OS type + architecture — the daemon's answer, not the process OS: the socket may
+be remote) and advertises the result on every `RunnerHeartbeat`. The Core's liveness tracker
+keeps it per runner and serves the fleet over `GET /api/runners` (gated
+`provider-catalog.manage`), so environment editors can tell which base NAMES the connected
+fleet actually hosts. The AdminConsole offers a small CURATED seed list when the base catalog
+is empty (one-click add, filtered by the fleet's advertised platforms; the admin stays the
+curator) — deliberately no registry lookup: bases are an abstract compatibility vocabulary,
+and a Core-side registry call would break registry neutrality and air-gapped deployments.
+
 **Warm cache behaviour:**
 - Cache entries are populated on first fetch and kept current by background `git fetch` / equivalent per source system
 - A cache entry may only be used to create a snapshot if the requesting identity independently passes an access check for that repository
@@ -971,7 +981,7 @@ An authorization check is the triple **(principal, action, resource)** evaluated
 
 - **Actions** are fine-grained verbs per resource type: `workflow.trigger`, `workflow.cancel`, `run.observe`, `run.provide-input`, `view.subscribe`, `artifact.consume`, `slot-config.write`, `bundle.manage`, `policy.administer`, `audit.read`, …
 - **Resources** carry a scope chain: `tenant → workflow-type → run/view/artifact`. A grant at an outer scope implies the inner ones unless explicitly narrowed
-- **Workflow-type access lists** are the primary day-to-day instrument: per workflow type, entries grant an action to a role, an individual principal, or every member of a first-class group; when entries exist for a (type, action) they are the exclusive grant source (administered via MCP, gated `policy.administer`)
+- **Workflow-type access lists** are the primary day-to-day instrument: per workflow type, entries grant an action to a role, an individual principal, or every member of a first-class group; when entries exist for a (type, action) they are the exclusive grant source (administered via MCP and REST, gated `policy.administer`). With no entries, the `security.default-resource-access` posture decides who may trigger (restricted = administrators only; see "Resource ownership and sharing")
 - v1 is **single-tenant**, but every resource and grant carries a `TenantId` (default tenant) so multi-tenancy is a data migration, not a schema break
 
 ### Policy Engine evaluation
@@ -997,7 +1007,8 @@ Connectors and run configurations share one ownership model (`ResourceScope` + `
 - **Company** — shared platform-wide; creating one is the deliberate opt-in gated by the resource's management permission (`slot-config.write` for connectors, `workflow-configuration.manage` for configurations).
 - Editing, deleting, and re-sharing a personal resource is **owner-or-manager**; company resources are manager-only.
 - Clients gate what they display on `CurrentPrincipal.Permissions` (the role-derived effective action set from `GET /auth/me`); grant editors pick subjects from `GET /api/directory/subjects`, which exposes ids and display names only — sharing needs a people picker, not principal administration.
-- **Platform resources restrict rather than own.** Workflow TYPES are governed by the Policy Engine's per-(type, action) access list (`WorkflowTypeAccessStore`): no entries = the role-derived permission decides; the FIRST entry makes the list the EXCLUSIVE grant source for that (type, action) — enforced at every dispatch. Administered via `policy.administer` over MCP and REST (`/api/workflow-types/{type}/access`). Catalog-curated bindables — slot PROVIDERS and environment LAYERS alike — share ONE optional `AccessGrant` list stored on the provider-catalog curation record (`PUT /api/provider-catalog/{type}/grants`, with `PUT /api/environment-layers/{type}/grants` as the layer-flavored twin): empty = every binder, non-empty admits only the listed subjects, enforced by a single dispatch gate; upserts never widen grants.
+- **Platform resources restrict rather than own.** Workflow TYPES are governed by the Policy Engine's per-(type, action) access list (`WorkflowTypeAccessStore`): the FIRST entry makes the list the EXCLUSIVE grant source for that (type, action) — enforced at every dispatch. Administered via `policy.administer` over MCP and REST (`/api/workflow-types/{type}/access`). Catalog-curated bindables — slot PROVIDERS and environment LAYERS alike — share ONE optional `AccessGrant` list stored on the provider-catalog curation record (`PUT /api/provider-catalog/{type}/grants`, with `PUT /api/environment-layers/{type}/grants` as the layer-flavored twin): non-empty admits only the listed subjects, enforced by a single dispatch gate; upserts never widen grants.
+- **Default-deny resource access (2026-08-08).** A grantable platform resource with NO explicit grants follows the platform posture `security.default-resource-access` (a runtime platform setting): **restricted** — the default, including when unset — means an ungranted workflow type may be TRIGGERED only by administrators and an ungranted provider/layer may be BOUND only by administrators; **open** restores role-governed access (the pre-hardening behavior). Only trigger/bind — resource USE — is posture-gated: other type-scoped actions (cancel, observe, approve) stay role-governed, so granting trigger never forces enumerating every action. **Administrators always pass** both empty and non-empty grant lists — they administer the lists, so excluding them is bootstrap pain, not protection. System dispatches without a principal (failover redispatch, the approval pipeline) are exempt: the Core itself is the actor. The runner's pre-flight re-check stays a role-permission defense and never re-applies the restricted default (the Core owns the posture and already gated the dispatch).
 
 ### Groups and group mapping
 
@@ -1028,11 +1039,15 @@ already-authenticated cookie session, never from a password.
 Security knobs an administrator changes WITHOUT a redeployment live in the platform-settings
 store (`GET/PUT /api/platform-settings`, gated `policy.administer`; writes additionally demand
 a step-up elevation — they shape the security posture). Known keys only (a typo fails loudly);
-an unset key falls back to the deployment configuration. First key:
+an unset key falls back to the deployment configuration. Keys:
 `auth.login-token-lifetime-minutes` — the desktop sign-in session lifetime (deployment default
-one week), applied to every NEW sign-in immediately. Deliberately NO config-side ceiling: the
+one week), applied to every NEW sign-in immediately; and `security.default-resource-access`
+(`restricted` | `open`, unset = `restricted`) — whether an ungranted grantable resource is
+administrators-only or role-governed (see "Resource ownership and sharing"), applied to every
+subsequent dispatch immediately. Deliberately NO config-side ceiling: the
 deployment default is a reasonable security default, not a babysitter — the admin surface
-(audited, elevation-gated) is trusted to override it in either direction.
+(audited, elevation-gated) is trusted to override it in either direction. The AdminConsole
+surfaces both on `/admin/settings` (gated `policy.administer`).
 
 ### Safeguards for principal administration
 

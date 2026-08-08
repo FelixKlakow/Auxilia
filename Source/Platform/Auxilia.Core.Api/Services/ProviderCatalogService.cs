@@ -160,7 +160,8 @@ public sealed class ProviderCatalogService(
 
     /// <summary>
     /// Replaces who may bind the entry into a run (slot providers and environment layers
-    /// alike). Empty grants = everyone; non-empty grants are enforced at dispatch. Audited.
+    /// alike). Empty grants follow the platform default (restricted = administrators only,
+    /// open = everyone); non-empty grants are enforced at dispatch. Audited.
     /// </summary>
     public async Task<ProviderCatalogEntry> SetGrantsAsync(
         string actor, string providerType, IReadOnlyList<AccessGrant> grants, CancellationToken ct)
@@ -169,7 +170,7 @@ public sealed class ProviderCatalogService(
         var updated = curation with { GrantsJson = JsonSerializer.Serialize(grants) };
         await catalog.SaveAsync(updated, ct);
         await auditLog.AppendAsync(actor, "provider-catalog.grants-changed",
-            providerType, grants.Count == 0 ? "open" : $"{grants.Count} grant(s)", ct: ct);
+            providerType, grants.Count == 0 ? "platform-default" : $"{grants.Count} grant(s)", ct: ct);
         return ToEntry(provider, updated);
     }
 

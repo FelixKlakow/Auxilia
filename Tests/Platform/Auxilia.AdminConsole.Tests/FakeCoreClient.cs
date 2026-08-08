@@ -649,16 +649,29 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task DeleteWorkspaceAsync(Guid id, CancellationToken ct = default) => Nope<Task>();
     public Task SetWorkspaceGrantsAsync(Guid id, SetWorkspaceGrants request, CancellationToken ct = default)
         => Nope<Task>();
+    public List<PlatformSettingDto> PlatformSettings { get; } = [];
+
     public Task<IReadOnlyList<PlatformSettingDto>> ListPlatformSettingsAsync(CancellationToken ct = default)
-        => Nope<Task<IReadOnlyList<PlatformSettingDto>>>();
+        => Task.FromResult<IReadOnlyList<PlatformSettingDto>>(PlatformSettings.ToList());
+
     public Task<PlatformSettingDto> SetPlatformSettingAsync(string key, SetPlatformSetting request, CancellationToken ct = default)
-        => Nope<Task<PlatformSettingDto>>();
+    {
+        var dto = new PlatformSettingDto(key, request.Value, DateTimeOffset.UtcNow);
+        PlatformSettings.RemoveAll(s => s.Key == key);
+        PlatformSettings.Add(dto);
+        return Task.FromResult(dto);
+    }
     public List<EnvironmentBaseDto> EnvironmentBases { get; } = [];
     public List<UpsertEnvironmentBase> UpsertedBases { get; } = [];
     public List<(string Name, string Version)> DeletedBases { get; } = [];
 
     public Task<IReadOnlyList<EnvironmentBaseDto>> ListEnvironmentBasesAsync(string? search = null, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<EnvironmentBaseDto>>(EnvironmentBases.ToList());
+
+    public List<RunnerDto> Runners { get; } = [];
+
+    public Task<IReadOnlyList<RunnerDto>> ListRunnersAsync(CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<RunnerDto>>(Runners.ToList());
 
     public Task<EnvironmentBaseDto> UpsertEnvironmentBaseAsync(UpsertEnvironmentBase request, CancellationToken ct = default)
     {

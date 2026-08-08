@@ -36,6 +36,40 @@ public sealed class RunnerLivenessTrackerTests
     }
 
     [Test]
+    public void Record_KeepsTheLastNonNullAdvertisement_AcrossBeats()
+    {
+        var tracker = new RunnerLivenessTracker();
+        var id = Guid.NewGuid();
+        // First beats arrive before the runner has probed its daemon — no platform yet.
+        tracker.Record(id, T0, "Auxilia.Core.Runner");
+        tracker.Record(id, T0 + TimeSpan.FromSeconds(5), "Auxilia.Core.Runner", "linux", "x86_64");
+        // A later beat without a platform (fresh probe cache after restart) must not erase it.
+        tracker.Record(id, T0 + TimeSpan.FromSeconds(10), "Auxilia.Core.Runner");
+
+        var runner = tracker.Snapshot().Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(runner.ServiceName, Is.EqualTo("Auxilia.Core.Runner"));
+            Assert.That(runner.LastSeen, Is.EqualTo(T0 + TimeSpan.FromSeconds(10)));
+            Assert.That(runner.HostPlatform, Is.EqualTo("linux"));
+            Assert.That(runner.HostArchitecture, Is.EqualTo("x86_64"));
+        });
+    }
+
+    [Test]
+    public void Snapshot_ListsEveryTrackedRunner_NewestBeatFirst()
+    {
+        var tracker = new RunnerLivenessTracker();
+        var older = Guid.NewGuid();
+        var newer = Guid.NewGuid();
+        tracker.Record(older, T0);
+        tracker.Record(newer, T0 + TimeSpan.FromSeconds(20));
+
+        Assert.That(tracker.Snapshot().Select(r => r.ServiceId),
+            Is.EqualTo(new[] { newer, older }).AsCollection);
+    }
+
+    [Test]
     public void Forget_DropsTheRunner_SoItsDeathTriggersFailoverAtMostOnce()
     {
         var tracker = new RunnerLivenessTracker();

@@ -41,9 +41,15 @@ public sealed class ResourceGrantsTests : CoreApiComponentTestBase
         var (granted, grantedId) = await UserClientAsync();
         var (stranger, _) = await UserClientAsync();
 
-        // No entries: the role-derived workflow.trigger permission decides.
+        // No entries + restricted platform default: administrators only.
         Assert.That((await stranger.PostAsJsonAsync("/api/runs", new { workflowType = type })).StatusCode,
-            Is.EqualTo(HttpStatusCode.OK), "a type without access entries stays role-governed");
+            Is.EqualTo(HttpStatusCode.Forbidden),
+            "an ungranted type is admin-only under the restricted default");
+
+        // Opened, the role-derived workflow.trigger permission decides.
+        await OpenDefaultResourceAccessAsync();
+        Assert.That((await stranger.PostAsJsonAsync("/api/runs", new { workflowType = type })).StatusCode,
+            Is.EqualTo(HttpStatusCode.OK), "a type without access entries is role-governed once opened");
 
         // The FIRST entry makes the list the EXCLUSIVE grant source for (type, workflow.trigger).
         var grant = await admin.PostAsJsonAsync($"/api/workflow-types/{type}/access/grant",
@@ -99,6 +105,8 @@ public sealed class ResourceGrantsTests : CoreApiComponentTestBase
     public async Task EnvironmentLayerGrants_GateTheBinding_AtDispatch()
     {
         var admin = CreateClient();
+        // This fixture exercises the GRANT mechanics; the restricted default has its own test below.
+        await OpenDefaultResourceAccessAsync();
         var type = await RegisterTypeAsync($"env-wt-{Guid.NewGuid():N}");
         var layer = $"layer-{Guid.NewGuid():N}";
         await admin.PostAsJsonAsync("/api/environment-layers",
@@ -136,6 +144,7 @@ public sealed class ResourceGrantsTests : CoreApiComponentTestBase
     public async Task ProviderGrants_GateThePluginBinding_AtDispatch()
     {
         var admin = CreateClient();
+        await OpenDefaultResourceAccessAsync();
         var type = await RegisterTypeAsync($"prov-wt-{Guid.NewGuid():N}");
         var provider = $"provider-{Guid.NewGuid():N}";
         await admin.PostAsJsonAsync("/api/provider-catalog", new
@@ -169,6 +178,51 @@ public sealed class ResourceGrantsTests : CoreApiComponentTestBase
             Assert.That((await stranger.PostAsJsonAsync("/api/runs", RunWithProvider())).StatusCode,
                 Is.EqualTo(HttpStatusCode.Forbidden), "an ungranted principal is refused at dispatch");
         });
+    }
+
+    [Test]
+    public async Task RestrictedDefault_MakesUngrantedResourcesAdminOnly_AndGrantsOpenThem()
+    {
+        var admin = CreateClient();
+        var type = await RegisterTypeAsync($"restricted-wt-{Guid.NewGuid():N}");
+        var layer = $"restricted-layer-{Guid.NewGuid():N}";
+        await admin.PostAsJsonAsync("/api/environment-layers",
+            new { providerType = layer, description = "restricted layer", setupScript = "echo hi" });
+        var (user, userId) = await UserClientAsync();
+
+        object RunWithLayer() => new
+        {
+            workflowType = type,
+            slotBindings = new[] { new { slotName = "environment", providerType = layer } }
+        };
+
+        Assert.Multiple(async () =>
+        {
+            Assert.That((await user.PostAsJsonAsync("/api/runs", new { workflowType = type })).StatusCode,
+                Is.EqualTo(HttpStatusCode.Forbidden),
+                "an ungranted TYPE is admin-only under the restricted default");
+            Assert.That((await admin.PostAsJsonAsync("/api/runs", RunWithLayer())).StatusCode,
+                Is.EqualTo(HttpStatusCode.OK),
+                "the administrator dispatches an ungranted type + layer regardless");
+        });
+
+        // An access-list entry admits the user to the TYPE…
+        await admin.PostAsJsonAsync($"/api/workflow-types/{type}/access/grant",
+            new { action = PermissionActions.WorkflowTrigger, principalId = userId });
+        Assert.Multiple(async () =>
+        {
+            Assert.That((await user.PostAsJsonAsync("/api/runs", new { workflowType = type })).StatusCode,
+                Is.EqualTo(HttpStatusCode.OK), "the access-list entry admits the user to the type");
+            Assert.That((await user.PostAsJsonAsync("/api/runs", RunWithLayer())).StatusCode,
+                Is.EqualTo(HttpStatusCode.Forbidden),
+                "…but the ungranted LAYER stays admin-only under the restricted default");
+        });
+
+        // …and a layer grant opens the layer for the user too.
+        await admin.PutAsJsonAsync($"/api/environment-layers/{layer}/grants",
+            new { grants = new[] { new { kind = "Principal", id = userId.ToString("D") } } });
+        Assert.That((await user.PostAsJsonAsync("/api/runs", RunWithLayer())).StatusCode,
+            Is.EqualTo(HttpStatusCode.OK), "the layer grant admits the user");
     }
 
     [Test]

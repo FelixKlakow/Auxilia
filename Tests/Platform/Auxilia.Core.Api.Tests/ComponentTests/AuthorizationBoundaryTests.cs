@@ -159,6 +159,8 @@ public sealed class AuthorizationBoundaryTests : CoreApiComponentTestBase
     [Test]
     public async Task PersonalConfiguration_OwnerManagesIt_AStrangerCannot_AGrantAdmits()
     {
+        // Configuration OWNERSHIP mechanics are under test — open the restricted default.
+        await OpenDefaultResourceAccessAsync();
         var owner = await ClientForRolesAsync(BuiltInRoles.User);
         var other = await ClientForRolesAsync(BuiltInRoles.User);
         var otherId = (await other.GetFromJsonAsync<CurrentPrincipal>("/auth/me"))!.PrincipalId;
@@ -227,6 +229,8 @@ public sealed class AuthorizationBoundaryTests : CoreApiComponentTestBase
     [TestCase(BuiltInRoles.Auditor, HttpStatusCode.Forbidden)]
     public async Task TriggerRun_RequiresWorkflowTrigger(string role, HttpStatusCode expected)
     {
+        // The matrix tests the ROLE permission — open the restricted default so it decides.
+        await OpenDefaultResourceAccessAsync();
         var client = await ClientForRolesAsync(role);
         var response = await client.PostAsJsonAsync("/api/runs",
             new { workflowType = "wt", packageUri = "docker://img" });

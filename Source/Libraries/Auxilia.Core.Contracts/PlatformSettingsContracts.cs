@@ -19,4 +19,22 @@ public static class PlatformSettingKeys
     /// <c>CoreSecurity:LoginTokenLifetimeMinutes</c> (default one week).
     /// </summary>
     public const string LoginTokenLifetimeMinutes = "auth.login-token-lifetime-minutes";
+
+    /// <summary>
+    /// Who may use a grantable resource (workflow type, environment layer, slot provider) that
+    /// carries NO explicit grants: <see cref="DefaultResourceAccessModes.Restricted"/> (the
+    /// default — administrators only) or <see cref="DefaultResourceAccessModes.Open"/> (every
+    /// authenticated principal, the pre-hardening behavior). Explicit grants override either
+    /// way; administrators always pass.
+    /// </summary>
+    public const string DefaultResourceAccess = "security.default-resource-access";
+}
+
+/// <summary>The admissible values of <see cref="PlatformSettingKeys.DefaultResourceAccess"/>.</summary>
+public static class DefaultResourceAccessModes
+{
+    /// <summary>An ungranted resource is usable by administrators only (the default).</summary>
+    public const string Restricted = "restricted";
+    /// <summary>An ungranted resource is usable by every authenticated principal.</summary>
+    public const string Open = "open";
 }

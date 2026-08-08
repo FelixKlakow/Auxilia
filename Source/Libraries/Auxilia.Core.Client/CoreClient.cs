@@ -503,6 +503,11 @@ public sealed class CoreClient : ICoreClient
         => PutAsync<SetPlatformSetting, PlatformSettingDto>(
             $"/api/platform-settings/{Uri.EscapeDataString(key)}", request, ct);
 
+    // --- Runner fleet ---
+
+    public Task<IReadOnlyList<RunnerDto>> ListRunnersAsync(CancellationToken ct = default)
+        => GetAsync<IReadOnlyList<RunnerDto>>("/api/runners", ct);
+
     // --- Environment bases ---
 
     public Task<IReadOnlyList<EnvironmentBaseDto>> ListEnvironmentBasesAsync(

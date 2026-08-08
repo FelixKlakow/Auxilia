@@ -23,6 +23,8 @@ public sealed class RunService(
     ConnectorService connectors,
     WorkspaceResourceService workspaceResources,
     AccessGrantEvaluator grantEvaluator,
+    Auxilia.Governance.PrincipalDirectory principalDirectory,
+    Auxilia.Governance.Policy.IDefaultResourceAccessPolicy defaultAccess,
     RunnerLivenessTracker runnerLiveness,
     Auxilia.UniversalDataAccess.IDataAccess<Data.CoreRunRecord> runs,
     Auxilia.Workflows.Messaging.WorkflowStatusPublisher statusPublisher,
@@ -121,14 +123,28 @@ public sealed class RunService(
         return new RunAccepted(commandId, commandId);
     }
 
-    /// <summary>Catalog-entry access gate: an entry with grants admits only the listed subjects.</summary>
+    /// <summary>
+    /// Catalog-entry access gate: an entry with grants admits only the listed subjects; an entry
+    /// WITHOUT grants follows the platform default (restricted = administrators only, open =
+    /// everyone). Administrators always pass, and system dispatches without a principal (failover
+    /// redispatch, the approval pipeline) are exempt — the Core itself is the actor there.
+    /// </summary>
     private async Task EnsureMayUseCatalogEntryAsync(
         ProviderCatalogEntry entry, Guid? triggeredBy, CancellationToken ct)
     {
-        if (entry.Grants.Count == 0)
+        if (triggeredBy is not { } principal)
             return;
-        if (triggeredBy is not { } principal
-            || !await grantEvaluator.IsGrantedAsync(
+        if (await principalDirectory.IsAdministratorAsync(principal, ct))
+            return;
+        if (entry.Grants.Count == 0)
+        {
+            if (!await defaultAccess.IsRestrictedAsync(ct))
+                return;
+            throw new RunAccessDeniedException(
+                $"provider '{entry.ProviderType}' carries no grants and the platform default "
+                + "is restricted — only administrators may bind it until access is granted");
+        }
+        if (!await grantEvaluator.IsGrantedAsync(
                 System.Text.Json.JsonSerializer.Serialize(entry.Grants), principal, ct))
             throw new RunAccessDeniedException(
                 $"not permitted to use provider '{entry.ProviderType}'");

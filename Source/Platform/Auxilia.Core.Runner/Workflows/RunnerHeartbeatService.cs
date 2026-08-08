@@ -16,6 +16,7 @@ public sealed class RunnerHeartbeatService(
     IDataAccess<ServiceHeartbeatRecord> heartbeats,
     IMessageBusClient messageBus,
     CoreRunnerInfo instanceInfo,
+    RunnerHostPlatformProbe hostPlatform,
     TimeProvider timeProvider,
     IOptions<WorkflowDispatcherSettings> settings,
     ILogger<RunnerHeartbeatService> logger) : BackgroundService
@@ -41,8 +42,12 @@ public sealed class RunnerHeartbeatService(
                     ServiceName = ServiceName,
                     LastBeatUtc = now
                 }, stoppingToken);
+                // The platform is probed lazily and cached — until the daemon answers, the
+                // beat advertises none and stays a pure liveness signal.
+                var platform = await hostPlatform.GetAsync(stoppingToken);
                 await messageBus.PublishToExchangeAsync(RunnerHeartbeat.ExchangeName,
-                    new RunnerHeartbeat(instanceInfo.ServiceId, ServiceName, now), stoppingToken);
+                    new RunnerHeartbeat(instanceInfo.ServiceId, ServiceName, now,
+                        platform?.Os, platform?.Architecture), stoppingToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

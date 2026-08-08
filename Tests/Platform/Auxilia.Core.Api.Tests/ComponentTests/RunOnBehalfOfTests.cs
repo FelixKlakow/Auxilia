@@ -23,7 +23,12 @@ public sealed class RunOnBehalfOfTests : CoreApiComponentTestBase
     private const string DummyImage = "docker://auxilia-dummy-workflows:system-test";
 
     [SetUp]
-    public Task RegisterDummyTypeAsync() => RegisterActiveTypeAsync(CreateClient(), DummyType, DummyImage);
+    public async Task RegisterDummyTypeAsync()
+    {
+        await RegisterActiveTypeAsync(CreateClient(), DummyType, DummyImage);
+        // This fixture exercises delegation stamping, not the restricted default posture.
+        await OpenDefaultResourceAccessAsync();
+    }
 
 
     private async Task<(HttpClient Client, Guid PrincipalId)> PrincipalWithRolesAsync(params string[] roles)

@@ -48,7 +48,8 @@ Source/Platform/Auxilia.Core.Runner/
     ├── ArtifactPersister.cs          # Persists declared artifact outputs to the Artifact Store
     ├── SignalDispatcher.cs / ViewDataHandler.cs / WorkflowStateHandler.cs  # Signals; live view data; WorkflowStateMessage
     ├── LongLivingDrainCoordinator.cs # Drain-and-replace for long-living workflows on config change / upgrade
-    ├── SteeringHeartbeatService.cs   # Emits ownership heartbeats for failover detection
+    ├── RunnerHeartbeatService.cs     # Emits ownership heartbeats for failover detection; advertises the
+    │                                 #   Docker daemon's host platform (RunnerHostPlatformProbe, cached probe)
     └── Storage/                      # Durable stores over IDataAccess: schemas, slot-provider (DLL) registry, signal handlers,
                                       #   run instances, packages + in-memory WorkflowInstanceTokenRegistry (one-time tokens)
 ```

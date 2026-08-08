@@ -29,6 +29,9 @@ internal sealed class GovernanceTestContext
     public GroupMappingResolver GroupMappingResolver { get; }
     public GroupMappingDirectory GroupMappingDirectory { get; }
 
+    /// <summary>The platform default-access posture; restricted like production unless a test opens it.</summary>
+    public MutableDefaultResourceAccess DefaultAccess { get; } = new();
+
     public GovernanceTestContext()
     {
         AuditLog = new AuditLog(AuditRecords, TimeProvider.System);
@@ -36,7 +39,8 @@ internal sealed class GovernanceTestContext
         AccessStore = new WorkflowTypeAccessStore(AccessRecords);
         PolicyEngine = new PolicyEngine(
             Principals, RoleAssignments, AccessStore, AuditLog,
-            new GroupRoleResolver(GroupMemberships, GroupRoles));
+            new GroupRoleResolver(GroupMemberships, GroupRoles),
+            defaultAccess: DefaultAccess);
         IdentityProvider = new LocalIdentityProvider(Credentials, Principals, RoleAssignments);
         GroupMappingResolver = new GroupMappingResolver(GroupMappings);
         GroupMappingDirectory = new GroupMappingDirectory(GroupMappings, AuditLog);
@@ -63,4 +67,12 @@ internal sealed class GovernanceTestContext
         var query = await AuditRecords.ReadAsync();
         return query.Count(r => r.Action == action);
     }
+}
+
+/// <summary>A flippable <see cref="IDefaultResourceAccessPolicy"/> for tests.</summary>
+internal sealed class MutableDefaultResourceAccess : IDefaultResourceAccessPolicy
+{
+    public bool Restricted { get; set; } = true;
+
+    public Task<bool> IsRestrictedAsync(CancellationToken ct) => Task.FromResult(Restricted);
 }

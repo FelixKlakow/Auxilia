@@ -8,9 +8,11 @@
 
 <div class="access-editor">
     <p class="field-hint">
-        Empty for an action means the role-derived permission decides who may do it. The
-        <strong>first</strong> entry for an action makes this list the only grant source for that
-        action on this type — everyone not listed is denied, however their roles are set.
+        With no entry for <code>workflow.trigger</code> the platform default decides who may run
+        this type (restricted: administrators only; open: role-governed) — other actions stay
+        role-governed. The <strong>first</strong> entry for an action makes this list the only
+        grant source for that action on this type — everyone not listed is denied, however their
+        roles are set. Administrators always pass.
     </p>
 
     @if (_error is { Length: > 0 })
@@ -20,7 +22,10 @@
 
     @if (_entries.Count == 0)
     {
-        <p class="muted view-empty">No access entries — role permissions decide.</p>
+        <p class="muted view-empty">
+            No access entries — the platform default decides who may trigger (restricted default:
+            administrators only); other actions follow role permissions.
+        </p>
     }
     else
     {

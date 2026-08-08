@@ -121,6 +121,9 @@ public class WorkflowDispatchPipelineComponentTests
                 services.AddSettingsProtection(platformData);
                 services.AddSingleton<AuditLog>();
                 services.AddGovernance(platformData, new Auxilia.Governance.GovernanceSettings());
+                // Mirrors the runner host: the pre-flight is a role-permission defense only.
+                services.AddSingleton<Auxilia.Governance.Policy.IDefaultResourceAccessPolicy,
+                    Auxilia.Governance.Policy.OpenDefaultResourceAccessPolicy>();
 
                 services.AddSingleton(TimeProvider.System);
                 services.AddSingleton<WorkflowStatusPublisher>();

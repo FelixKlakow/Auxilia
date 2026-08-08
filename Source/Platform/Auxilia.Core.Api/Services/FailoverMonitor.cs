@@ -57,7 +57,8 @@ public sealed class FailoverMonitor(
     private Task OnHeartbeatAsync(RunnerHeartbeat heartbeat, CancellationToken ct)
     {
         // Stamp with our own receive time, not the runner's clock — robust to cross-host skew.
-        liveness.Record(heartbeat.ServiceId, clock.GetUtcNow());
+        liveness.Record(heartbeat.ServiceId, clock.GetUtcNow(),
+            heartbeat.ServiceName, heartbeat.HostPlatform, heartbeat.HostArchitecture);
         return Task.CompletedTask;
     }
 

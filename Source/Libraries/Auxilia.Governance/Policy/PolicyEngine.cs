@@ -1,3 +1,4 @@
+using Auxilia.Core.Contracts;
 using Auxilia.PlatformData;
 using Auxilia.PlatformData.Entities;
 using Auxilia.UniversalDataAccess;
@@ -10,7 +11,8 @@ public sealed class PolicyEngine(
     WorkflowTypeAccessStore accessStore,
     AuditLog auditLog,
     GroupRoleResolver? groupRoleResolver = null,
-    Identity.PrincipalRoleCache? cache = null) : IPolicyEngine
+    Identity.PrincipalRoleCache? cache = null,
+    IDefaultResourceAccessPolicy? defaultAccess = null) : IPolicyEngine
 {
     public async Task<PolicyDecision> EvaluateAsync(PolicyContext context, CancellationToken ct = default)
     {
@@ -59,9 +61,13 @@ public sealed class PolicyEngine(
             roles = roles.Concat(groupRoles).Distinct().ToList();
         }
 
+        var isAdministrator = roles.Contains(BuiltInRoles.Administrator);
+
         // Workflow-type access lists take precedence: when entries exist for this
         // (workflow type, action), they are the exclusive grant source. An entry admits a
         // principal directly, via a role it holds, or via a first-class group it belongs to.
+        // Administrators always pass — they administer the lists, so excluding them would
+        // only be bootstrap pain, never protection.
         if (context.WorkflowType is not null)
         {
             var entries = await accessStore.GetEntriesAsync(context.WorkflowType, context.Action, ct);
@@ -76,10 +82,20 @@ public sealed class PolicyEngine(
                     var memberOf = await groupRoleResolver.GroupsForAsync(context.PrincipalId, ct);
                     matched = entries.Any(e => e.GroupId is { } groupId && memberOf.Contains(groupId));
                 }
-                return matched
-                    ? PolicyDecision.Allow("workflow-type-access")
+                if (matched)
+                    return PolicyDecision.Allow("workflow-type-access");
+                return isAdministrator
+                    ? PolicyDecision.Allow("administrator")
                     : PolicyDecision.Deny("workflow-type-access-list-excludes-principal");
             }
+
+            // No access list. Under the restricted platform default only administrators may
+            // TRIGGER an ungranted type; other type-scoped actions (cancel, observe, approve)
+            // stay role-governed so granting trigger never forces enumerating every action.
+            if (context.Action == PermissionActions.WorkflowTrigger
+                && !isAdministrator
+                && (defaultAccess is null || await defaultAccess.IsRestrictedAsync(ct)))
+                return PolicyDecision.Deny("workflow-type-default-restricted");
         }
 
         var permitted = roles

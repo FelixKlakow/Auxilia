@@ -44,13 +44,17 @@ public sealed record ProviderCatalogEntry(
     string? EnvironmentBase = null,
     string? EnvironmentBaseVersion = null)
 {
-    /// <summary>Who may bind this entry into a run; empty = everyone (dispatch-enforced).</summary>
+    /// <summary>
+    /// Who may bind this entry into a run (dispatch-enforced); empty follows the platform's
+    /// <c>security.default-resource-access</c> setting (restricted = administrators only).
+    /// </summary>
     public IReadOnlyList<AccessGrant> Grants { get; init; } = [];
 }
 
 /// <summary>
 /// Restricts who may bind a catalog entry (slot provider or environment layer) into a run:
-/// empty grants keep it open; non-empty grants admit only the listed subjects at dispatch.
+/// empty grants defer to the platform default-access setting; non-empty grants admit only the
+/// listed subjects at dispatch. Administrators always pass.
 /// </summary>
 public sealed record SetProviderGrants(IReadOnlyList<AccessGrant> Grants);
 

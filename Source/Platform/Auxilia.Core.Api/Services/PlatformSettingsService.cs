@@ -55,6 +55,19 @@ public sealed class PlatformSettingsService(
         return TimeSpan.FromMinutes(minutes);
     }
 
+    /// <summary>
+    /// Whether an ungranted resource is restricted to administrators. Unset (and anything
+    /// unparseable) reads as restricted — the maximum-security default; only an explicit
+    /// <see cref="DefaultResourceAccessModes.Open"/> opens the platform up.
+    /// </summary>
+    public async Task<bool> IsDefaultResourceAccessRestrictedAsync(CancellationToken ct)
+    {
+        var stored = await store.ReadAsync(
+            PlatformSettingRecord.IdFor(PlatformSettingKeys.DefaultResourceAccess), ct);
+        return !string.Equals(
+            stored?.Value, DefaultResourceAccessModes.Open, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static void Validate(string key, string value)
     {
         switch (key)
@@ -62,6 +75,13 @@ public sealed class PlatformSettingsService(
             case PlatformSettingKeys.LoginTokenLifetimeMinutes:
                 if (!int.TryParse(value, out var minutes) || minutes < 1)
                     throw new ArgumentException("the login-token lifetime must be a positive number of minutes");
+                return;
+            case PlatformSettingKeys.DefaultResourceAccess:
+                if (!string.Equals(value, DefaultResourceAccessModes.Restricted, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(value, DefaultResourceAccessModes.Open, StringComparison.OrdinalIgnoreCase))
+                    throw new ArgumentException(
+                        $"default-resource-access must be '{DefaultResourceAccessModes.Restricted}' "
+                        + $"or '{DefaultResourceAccessModes.Open}'");
                 return;
             default:
                 throw new ArgumentException($"unknown platform setting '{key}'");

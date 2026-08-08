@@ -105,9 +105,16 @@ else
                                         @layer.Grants.Count subject@(layer.Grants.Count == 1 ? "" : "s")
                                     </span>
                                 }
+                                else if (_restrictedDefault is false)
+                                {
+                                    <span class="muted">everyone (default open)</span>
+                                }
                                 else
                                 {
-                                    <span class="muted">everyone</span>
+                                    <span class="badge"
+                                          title="No grants — under the restricted platform default only administrators may bind this layer. Add sharing subjects to open it up.">
+                                        admin-only (default)
+                                    </span>
                                 }
                             </td>
                             <td>@TimeText.Relative(layer.UpdatedUtc)</td>
@@ -144,7 +151,27 @@ else
         </div>
         @if (_bases.Count == 0)
         {
-            <div class="card-body"><p class="muted view-empty">No base versions registered — layers compose with any version of their base.</p></div>
+            <div class="card-body">
+                <EmptyState Title="No base versions registered"
+                            Description="Layers compose with any version of their base until versions are registered. Start from a suggested base — you stay the curator — or add your own below.">
+                    <div class="empty-actions">
+                        @foreach (var suggestion in SuggestedBases())
+                        {
+                            <button class="btn btn-secondary" disabled="@_busy"
+                                    @onclick="() => AddSuggestedBaseAsync(suggestion)">
+                                + @suggestion.Name / @suggestion.Version
+                            </button>
+                        }
+                    </div>
+                    @if (_runnerPlatforms.Count > 0)
+                    {
+                        <p class="field-hint">
+                            Suggestions are filtered to what the connected runner fleet advertises
+                            (@string.Join(", ", _runnerPlatforms)).
+                        </p>
+                    }
+                </EmptyState>
+            </div>
         }
         else
         {
@@ -288,8 +315,8 @@ else
             OnClose="() => _sharingLayer = null">
         <ChildContent>
             <SharingEditor Rows="_sharingRows"
-                           Hint="Leave empty to offer this layer to everyone. Adding a subject restricts it — only those principals or groups can dispatch a run that uses it."
-                           OpenLabel="Open to everyone — any workflow may bind this layer."/>
+                           Hint="Leave empty to fall back to the platform default (restricted: administrators only; open: everyone). Adding a subject grants exactly those principals or groups — administrators always pass."
+                           OpenLabel="No grants — the platform default access applies."/>
         </ChildContent>
         <Footer>
             <button class="btn btn-primary" disabled="@_busy" @onclick="SaveLayerSharingAsync">Save sharing</button>
@@ -314,6 +341,27 @@ else
     private string _baseName = EnvironmentBases.Linux;
     private string _baseVersion = "";
     private string _baseDescription = "";
+
+    // Best-effort context: null = the posture is unreadable for this operator (shown as the
+    // restricted default, which is what an unset setting means).
+    private bool? _restrictedDefault;
+    private IReadOnlyList<string> _runnerPlatforms = [];
+
+    private sealed record SuggestedBase(string Name, string Version, string Description);
+
+    /// <summary>Curated seed bases offered when the catalog is empty; the admin stays the curator.</summary>
+    private static readonly SuggestedBase[] CuratedBases =
+    [
+        new(EnvironmentBases.Linux, "ubuntu-24.04", "Ubuntu 24.04 LTS"),
+        new(EnvironmentBases.Linux, "ubuntu-22.04", "Ubuntu 22.04 LTS"),
+        new(EnvironmentBases.Linux, "debian-12", "Debian 12 (bookworm)"),
+        new(EnvironmentBases.Windows, "server-2022", "Windows Server 2022"),
+    ];
+
+    private IEnumerable<SuggestedBase> SuggestedBases()
+        => _runnerPlatforms.Count == 0
+            ? CuratedBases
+            : CuratedBases.Where(b => _runnerPlatforms.Contains(b.Name, StringComparer.OrdinalIgnoreCase));
 
     private LayerDraft? _layerDraft;
     private string? _sharingLayer;
@@ -361,6 +409,7 @@ else
                 .OrderBy(b => b.Name, StringComparer.Ordinal)
                 .ThenBy(b => b.Version, StringComparer.Ordinal).ToList();
             await LoadAvailabilityAsync();
+            await LoadFleetAndPostureAsync();
             _denied = false;
             _error = null;
         }
@@ -465,11 +514,52 @@ else
             await Core.SetEnvironmentLayerGrantsAsync(
                 providerType, new SetEnvironmentLayerGrants(grants), _cts.Token);
             _notice = grants.Count == 0
-                ? $"\"{providerType}\" is open to everyone again."
+                ? $"\"{providerType}\" follows the platform default access again."
                 : $"\"{providerType}\" is now restricted to {grants.Count} subject(s).";
             _sharingLayer = null;
         });
     }
+
+    /// <summary>
+    /// Best-effort context: the fleet's advertised platforms (filters base suggestions) and the
+    /// default-access posture (labels ungranted layers). Either read may be forbidden for this
+    /// operator — the page then falls back to showing the restricted default.
+    /// </summary>
+    private async Task LoadFleetAndPostureAsync()
+    {
+        try
+        {
+            _runnerPlatforms = (await Core.ListRunnersAsync(_cts.Token))
+                .Where(r => r.Alive)
+                .Select(r => r.HostPlatform)
+                .OfType<string>()
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch (CoreApiException)
+        {
+            _runnerPlatforms = [];
+        }
+        try
+        {
+            var settings = await Core.ListPlatformSettingsAsync(_cts.Token);
+            _restrictedDefault = !string.Equals(
+                settings.FirstOrDefault(s => s.Key == PlatformSettingKeys.DefaultResourceAccess)?.Value,
+                DefaultResourceAccessModes.Open, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (CoreApiException)
+        {
+            _restrictedDefault = null;
+        }
+    }
+
+    private Task AddSuggestedBaseAsync(SuggestedBase suggestion)
+        => MutateAsync(async () =>
+        {
+            await Core.UpsertEnvironmentBaseAsync(new UpsertEnvironmentBase(
+                suggestion.Name, suggestion.Version, suggestion.Description), _cts.Token);
+            _notice = $"Base version \"{suggestion.Name} / {suggestion.Version}\" registered.";
+        });
 
     private Task AddBaseAsync()
         => MutateAsync(async () =>

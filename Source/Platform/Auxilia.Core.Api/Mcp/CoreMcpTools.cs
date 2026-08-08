@@ -37,6 +37,11 @@ public sealed class CoreMcpTools(
     PrincipalDirectory principals,
     PrincipalAdminService principalAdmin,
     ElevationTicketService elevation,
+    PlatformSettingsService platformSettings,
+    EnvironmentBaseService environmentBases,
+    RunnerLivenessTracker runnerLiveness,
+    Microsoft.Extensions.Options.IOptions<CoreApiSettings> apiSettings,
+    TimeProvider clock,
     Auxilia.UniversalDataAccess.IDataAccess<Data.CoreArtifactRecord> artifacts,
     Auxilia.UniversalDataAccess.IDataAccess<Data.CoreEventRecord> events)
 {
@@ -596,6 +601,156 @@ public sealed class CoreMcpTools(
         {
             return Error(ex.Message);
         }
+    }
+
+    [McpServerTool(Name = "set_provider_grants")]
+    [Description("Replaces who may BIND a catalog entry — a slot provider or an environment layer — into a " +
+                 "run. Grants is a JSON array of {kind,id}, kind = Principal, Group, or DirectoryGroup. An " +
+                 "EMPTY array defers to the platform default access (restricted: administrators only); " +
+                 "non-empty admits only the listed subjects. Administrators always pass.")]
+    public async Task<CallToolResult> SetProviderGrantsAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Provider type name (slot provider or environment layer).")] string providerType,
+        [Description("JSON array, e.g. [{\"kind\":\"Principal\",\"id\":\"<principal-id>\"}]; [] to clear.")] string grantsJson,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (await DenyAsync(principalId, PermissionActions.ProviderCatalogManage, providerType, cancellationToken) is { } denial)
+            return denial;
+        try
+        {
+            var grantList = JsonSerializer.Deserialize<List<AccessGrant>>(grantsJson, JsonOptions) ?? [];
+            return JsonResult(await providerCatalog.SetGrantsAsync(
+                principalId.ToString("D"), providerType, grantList, cancellationToken));
+        }
+        catch (Exception ex) when (ex is JsonException or KeyNotFoundException)
+        {
+            return Error(ex.Message);
+        }
+    }
+
+    [McpServerTool(Name = "list_platform_settings")]
+    [Description("Lists the stored runtime platform settings (security knobs). An unset key falls back to " +
+                 "its deployment default — notably security.default-resource-access, which reads as " +
+                 "\"restricted\" (ungranted resources are administrators-only) when unset.")]
+    public async Task<CallToolResult> ListPlatformSettingsAsync(
+        RequestContext<CallToolRequestParams> context,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (await DenyAsync(principalId, PermissionActions.PolicyAdminister, null, cancellationToken) is { } denial)
+            return denial;
+        return JsonResult(await platformSettings.ListAsync(cancellationToken));
+    }
+
+    [McpServerTool(Name = "set_platform_setting")]
+    [Description("Sets one runtime platform setting — e.g. security.default-resource-access to " +
+                 "\"restricted\" or \"open\", or auth.login-token-lifetime-minutes. Settings shape the " +
+                 "security posture, so a step-up elevation token is REQUIRED (like the REST surface).")]
+    public async Task<CallToolResult> SetPlatformSettingAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Setting key, e.g. \"security.default-resource-access\".")] string key,
+        [Description("The new value, e.g. \"restricted\" or \"open\".")] string value,
+        [Description("Step-up elevation token (from step_up).")] string? elevationToken = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (await DenyAsync(principalId, PermissionActions.PolicyAdminister, key, cancellationToken) is { } denial)
+            return denial;
+        if (DenyWithoutElevation(context.User, elevationToken) is { } unelevated)
+            return unelevated;
+        try
+        {
+            return JsonResult(await platformSettings.SetAsync(principalId, key, value, cancellationToken));
+        }
+        catch (ArgumentException ex)
+        {
+            return Error(ex.Message);
+        }
+    }
+
+    [McpServerTool(Name = "list_environment_bases")]
+    [Description("Lists the environment-base catalog: the (name, version) pairs environment layers may pin " +
+                 "to, e.g. linux / ubuntu-24.04.")]
+    public async Task<CallToolResult> ListEnvironmentBasesAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Optional case-insensitive filter over name, version, and description.")] string? search = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (await DenyAsync(principalId, PermissionActions.ProviderCatalogManage, null, cancellationToken) is { } denial)
+            return denial;
+        return JsonResult(await environmentBases.ListAsync(search, cancellationToken));
+    }
+
+    [McpServerTool(Name = "upsert_environment_base")]
+    [Description("Registers (or updates) one base version of the environment-base catalog, " +
+                 "e.g. name \"linux\", version \"ubuntu-24.04\".")]
+    public async Task<CallToolResult> UpsertEnvironmentBaseAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Base name, e.g. \"linux\" or \"windows\".")] string name,
+        [Description("Base version, e.g. \"ubuntu-24.04\".")] string version,
+        [Description("Optional description.")] string? description = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (await DenyAsync(principalId, PermissionActions.ProviderCatalogManage, null, cancellationToken) is { } denial)
+            return denial;
+        try
+        {
+            return JsonResult(await environmentBases.UpsertAsync(
+                principalId, new UpsertEnvironmentBase(name, version, description), cancellationToken));
+        }
+        catch (ArgumentException ex)
+        {
+            return Error(ex.Message);
+        }
+    }
+
+    [McpServerTool(Name = "delete_environment_base")]
+    [Description("Removes one base version from the environment-base catalog.")]
+    public async Task<CallToolResult> DeleteEnvironmentBaseAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Base name.")] string name,
+        [Description("Base version.")] string version,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (await DenyAsync(principalId, PermissionActions.ProviderCatalogManage, null, cancellationToken) is { } denial)
+            return denial;
+        return await environmentBases.DeleteAsync(principalId, name, version, cancellationToken)
+            ? JsonResult(new { name, version, deleted = true })
+            : Error("base version not found.");
+    }
+
+    [McpServerTool(Name = "list_runners")]
+    [Description("Lists the runner fleet as the Core knows it from bus heartbeats: liveness plus the host " +
+                 "platform each runner's Docker daemon advertises (which base names the fleet can host).")]
+    public Task<CallToolResult> ListRunnersAsync(
+        RequestContext<CallToolRequestParams> context,
+        CancellationToken cancellationToken = default)
+        => ListRunnersCoreAsync(context, cancellationToken);
+
+    private async Task<CallToolResult> ListRunnersCoreAsync(
+        RequestContext<CallToolRequestParams> context, CancellationToken ct)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (await DenyAsync(principalId, PermissionActions.ProviderCatalogManage, null, ct) is { } denial)
+            return denial;
+        var cutoff = clock.GetUtcNow()
+                     - TimeSpan.FromSeconds(apiSettings.Value.HeartbeatTimeoutSeconds);
+        return JsonResult(runnerLiveness.Snapshot()
+            .Select(r => new RunnerDto(
+                r.ServiceId, r.ServiceName, r.LastSeen, r.LastSeen >= cutoff,
+                r.HostPlatform, r.HostArchitecture))
+            .ToList());
     }
 
     [McpServerTool(Name = "list_workflow_types")]

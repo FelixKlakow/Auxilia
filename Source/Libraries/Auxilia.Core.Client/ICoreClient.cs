@@ -158,6 +158,10 @@ public interface ICoreClient
     Task<IReadOnlyList<PlatformSettingDto>> ListPlatformSettingsAsync(CancellationToken ct = default);
     Task<PlatformSettingDto> SetPlatformSettingAsync(string key, SetPlatformSetting request, CancellationToken ct = default);
 
+    // --- Runner fleet (heartbeat-known runners; provider-catalog.manage) ---
+    /// <summary>The runner fleet as the Core knows it from heartbeats, incl. advertised host platforms.</summary>
+    Task<IReadOnlyList<RunnerDto>> ListRunnersAsync(CancellationToken ct = default);
+
     // --- Environment bases (the configurable (name, version) vocabulary layers build on) ---
     /// <summary>Lists base versions; <paramref name="search"/> filters by name, version, or description.</summary>
     Task<IReadOnlyList<EnvironmentBaseDto>> ListEnvironmentBasesAsync(string? search = null, CancellationToken ct = default);

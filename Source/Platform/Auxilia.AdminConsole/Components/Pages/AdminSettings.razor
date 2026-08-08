@@ -1,0 +1,194 @@
+@page "/admin/settings"
+@attribute [Authorize]
+@implements IDisposable
+@inject ICoreClient Core
+@inject StepUpFlow StepUp
+
+<PageTitle>Platform settings — Auxilia</PageTitle>
+
+<PageHeader Title="Platform settings"
+            Subtitle="Runtime security knobs — changes apply immediately, no redeployment. Writes demand a fresh step-up elevation."/>
+
+@if (!_loaded)
+{
+    <LoadingState Rows="3"/>
+}
+else if (_denied)
+{
+    <div class="panel denied">Access denied: @_error</div>
+}
+else
+{
+    @if (_error is { Length: > 0 })
+    {
+        <div class="panel denied">@_error</div>
+    }
+    <NoticePanel Message="@_notice" OnDismiss="() => _notice = null"/>
+
+    <StepUpPrompt Flow="StepUp" Busy="_busy" OnConfirm="ConfirmStepUpAsync"
+                  Reason="Platform settings shape the security posture — re-enter YOUR credential (password or API key)."/>
+
+    <section class="card">
+        <div class="card-header">
+            <h2>Default resource access</h2>
+            <p class="card-subtitle">
+                Who may use a grantable resource — a workflow type, environment layer, or slot
+                provider — that carries no explicit grants. Explicit grants override either way;
+                administrators always pass.
+            </p>
+        </div>
+        <div class="card-body">
+            <div class="form-grid">
+                <label class="radio-row">
+                    <input type="radio" name="default-access" value="@DefaultResourceAccessModes.Restricted"
+                           checked="@(_defaultAccess == DefaultResourceAccessModes.Restricted)"
+                           @onchange="() => _defaultAccess = DefaultResourceAccessModes.Restricted"/>
+                    <span>
+                        <strong>Restricted</strong> (the default) — an ungranted resource is usable by
+                        administrators only until access is granted.
+                    </span>
+                </label>
+                <label class="radio-row">
+                    <input type="radio" name="default-access" value="@DefaultResourceAccessModes.Open"
+                           checked="@(_defaultAccess == DefaultResourceAccessModes.Open)"
+                           @onchange="() => _defaultAccess = DefaultResourceAccessModes.Open"/>
+                    <span>
+                        <strong>Open</strong> — an ungranted resource is usable by every principal whose
+                        roles permit the action.
+                    </span>
+                </label>
+            </div>
+            <div class="button-row">
+                <button class="btn btn-primary" disabled="@_busy" @onclick="SaveDefaultAccessAsync">
+                    Save default access
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">
+            <h2>Sign-in</h2>
+            <p class="card-subtitle">How long a password sign-in's bearer token lives.</p>
+        </div>
+        <div class="card-body">
+            <form class="toolbar" @onsubmit="SaveLoginLifetimeAsync" @onsubmit:preventDefault>
+                <label>
+                    Login token lifetime (minutes)
+                    <input class="input-inline" type="number" min="1" @bind="_loginLifetimeMinutes"
+                           placeholder="e.g. 480"/>
+                </label>
+                <div class="toolbar-actions">
+                    <button type="submit" class="btn btn-primary"
+                            disabled="@(_busy || _loginLifetimeMinutes is null or < 1)">Save lifetime</button>
+                </div>
+            </form>
+            <p class="field-hint">
+                Unset falls back to the deployment configuration. Stored value:
+                @(_storedLoginLifetime is { Length: > 0 } stored ? $"{stored} minutes" : "none (deployment default)").
+            </p>
+        </div>
+    </section>
+}
+
+@code {
+
+    private bool _loaded;
+    private bool _denied;
+    private bool _busy;
+    private string? _error;
+    private string? _notice;
+
+    private string _defaultAccess = DefaultResourceAccessModes.Restricted;
+    private int? _loginLifetimeMinutes;
+    private string? _storedLoginLifetime;
+
+    private readonly CancellationTokenSource _cts = new();
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var settings = await Core.ListPlatformSettingsAsync(_cts.Token);
+            var access = settings.FirstOrDefault(s => s.Key == PlatformSettingKeys.DefaultResourceAccess)?.Value;
+            _defaultAccess = string.Equals(access, DefaultResourceAccessModes.Open, StringComparison.OrdinalIgnoreCase)
+                ? DefaultResourceAccessModes.Open
+                : DefaultResourceAccessModes.Restricted;
+            _storedLoginLifetime = settings.FirstOrDefault(
+                s => s.Key == PlatformSettingKeys.LoginTokenLifetimeMinutes)?.Value;
+            _loginLifetimeMinutes = int.TryParse(_storedLoginLifetime, out var minutes) ? minutes : null;
+            _denied = false;
+            _error = null;
+        }
+        catch (CoreApiException ex)
+        {
+            _denied = ex.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized;
+            _error = ex.ErrorDetail ?? ex.Message;
+        }
+
+        _loaded = true;
+    }
+
+    private Task SaveDefaultAccessAsync()
+        => MutateAsync(async () =>
+        {
+            await Core.SetPlatformSettingAsync(
+                PlatformSettingKeys.DefaultResourceAccess, new SetPlatformSetting(_defaultAccess), _cts.Token);
+            _notice = _defaultAccess == DefaultResourceAccessModes.Restricted
+                ? "Default resource access is RESTRICTED — ungranted resources are administrators-only."
+                : "Default resource access is OPEN — ungranted resources follow role permissions.";
+        });
+
+    private Task SaveLoginLifetimeAsync()
+        => MutateAsync(async () =>
+        {
+            if (_loginLifetimeMinutes is not { } minutes || minutes < 1)
+                return;
+            await Core.SetPlatformSettingAsync(
+                PlatformSettingKeys.LoginTokenLifetimeMinutes,
+                new SetPlatformSetting(minutes.ToString()), _cts.Token);
+            _notice = $"Login token lifetime set to {minutes} minutes.";
+        });
+
+    private async Task ConfirmStepUpAsync()
+    {
+        _busy = true;
+        try
+        {
+            if (await StepUp.ConfirmAsync())
+                await LoadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task MutateAsync(Func<Task> action)
+    {
+        _error = _notice = null;
+        _busy = true;
+        try
+        {
+            if (await StepUp.RunAsync(action))
+                await LoadAsync();
+        }
+        catch (CoreApiException ex)
+        {
+            _error = (ex.ErrorDetail ?? ex.Message).Replace('\n', ' ');
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+
+}

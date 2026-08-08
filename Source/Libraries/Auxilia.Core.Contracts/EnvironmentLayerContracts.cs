@@ -16,13 +16,17 @@ public sealed record EnvironmentLayerDto(
     DateTimeOffset UpdatedUtc,
     string? BaseVersion = null)
 {
-    /// <summary>Who may bind this layer into a run; empty = everyone.</summary>
+    /// <summary>
+    /// Who may bind this layer into a run; empty follows the platform's
+    /// <c>security.default-resource-access</c> setting (restricted = administrators only).
+    /// </summary>
     public IReadOnlyList<AccessGrant> Grants { get; init; } = [];
 }
 
 /// <summary>
-/// Restricts who may bind an environment layer into a run: empty grants keep the layer open;
-/// non-empty grants admit only the listed subjects — enforced at dispatch, like connector access.
+/// Restricts who may bind an environment layer into a run: empty grants defer to the platform
+/// default-access setting; non-empty grants admit only the listed subjects — enforced at
+/// dispatch, like connector access. Administrators always pass.
 /// </summary>
 public sealed record SetEnvironmentLayerGrants(IReadOnlyList<AccessGrant> Grants);
 

@@ -89,6 +89,10 @@ try
     var governanceSettings = new GovernanceSettings();
     builder.Configuration.GetSection("Governance").Bind(governanceSettings);
     builder.Services.AddGovernance(platformDataSettings, governanceSettings);
+    // The restricted-by-default resource posture is a Core-side dispatch gate (the Core owns
+    // the runtime setting); the runner's pre-flight re-check is a role-permission defense only.
+    builder.Services.AddSingleton<Auxilia.Governance.Policy.IDefaultResourceAccessPolicy,
+        Auxilia.Governance.Policy.OpenDefaultResourceAccessPolicy>();
 
     // --- Workflow services ---
     builder.Services.AddSingleton<WorkflowSchemaStore>();
@@ -116,6 +120,7 @@ try
     builder.Services.AddSingleton<WorkflowStateHandler>();
     builder.Services.AddSingleton<Auxilia.Workflows.Messaging.WorkflowStatusPublisher>();
     builder.Services.AddSingleton<LongLivingDrainCoordinator>();
+    builder.Services.AddSingleton<RunnerHostPlatformProbe>();
     builder.Services.AddHostedService<RunnerHeartbeatService>();
     builder.Services.AddSingleton<IWorkflowLauncher, DockerWorkflowLauncher>();
     builder.Services.AddSingleton<IDockerClientFactory, DefaultDockerClientFactory>();
