@@ -1,9 +1,9 @@
 # Auxilia.Workflows.Client
 
 The [Auxilia](https://github.com/FelixKlakow/Auxilia) workflow-domain library on top of
-`Auxilia.Core.Client`: schema-validated authoring, interval triggers, and artifact chaining
-over the Core's filtered artifact event stream. Host it wherever you like — a server
-service or embedded in a desktop app; triggers fire while your host runs.
+`Auxilia.Core.Client`: schema-validated authoring, interval triggers, artifact chaining, and
+platform-event triggers over the Core's filtered event streams. Host it wherever you like —
+a server service or embedded in a desktop app; triggers fire while your host runs.
 
 Auxilia is a self-hosted platform for governed AI agent workflows: signed workflow
 containers, just-in-time scoped credentials, live operator steering, and full REST + MCP
@@ -17,6 +17,10 @@ parity.
 - **Artifact chaining** — trigger a workflow when another run produces a matching
   artifact, driven by the Core's filtered artifact event stream (never the message bus —
   this library is a pure Core client).
+- **Event triggers** — trigger a workflow on a named platform event: events a workflow
+  declares and publishes via the SDK, or the platform's built-in run-lifecycle vocabulary
+  (`run.succeeded` / `run.failed` / `run.cancelled`), driven by the Core's filtered event
+  stream with reconnect catch-up and de-duplication.
 
 The platform ships `Auxilia.TriggerHost` as the bundled always-on reference host; this
 package is the same engine for your own hosting choice.

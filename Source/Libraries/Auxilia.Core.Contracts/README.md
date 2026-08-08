@@ -1,8 +1,9 @@
 # Auxilia.Core.Contracts
 
 Wire contracts (DTOs) of the [Auxilia](https://github.com/FelixKlakow/Auxilia) Core API —
-runs, configurations, connectors, artifacts, workflow types, identity, and audit. The same
-records are compiled into the server and every client, so the contract cannot drift.
+runs, configurations, connectors, artifacts, platform events, workflow types, identity, and
+audit. The same records are compiled into the server and every client, so the contract
+cannot drift.
 
 Auxilia is a self-hosted platform for governed AI agent workflows: signed workflow
 containers, just-in-time scoped credentials, live operator steering, and full REST + MCP
