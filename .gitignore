@@ -436,8 +436,10 @@ FodyWeavers.xsd
 # codegraph MCP runtime (local index/daemon)
 .codegraph/
 
-# Core.Api local runtime state (JSON store, package store)
-Source/Auxilia.Core.Api/core-data/
+# Core.Api dev store: the folder is a deliberately committed dev-stand SEED (principals,
+# roles, catalog, workflow types), but the audit log is runtime output — it grows on every
+# dev-stack run and is never seed data.
+Source/Platform/Auxilia.Core.Api/core-data/AuditRecord.json
 
 # Start-DevStack.ps1 runtime state (service logs, PIDs)
 .devstack/
