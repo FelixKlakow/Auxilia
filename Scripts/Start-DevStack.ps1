@@ -46,6 +46,7 @@ $runnerEnv = @{
     # that kills the whole script before anything starts.
     "WorkflowLauncher__SlotPackages__claude-code-cli"             = "$repo\Source\Slots\Auxilia.Slots.ClaudeCode\bin\Debug\net10.0\Auxilia.Slots.ClaudeCode.slothandler.dll"
     "WorkflowLauncher__SlotPackages__github-copilot-cli"          = "$repo\Source\Slots\Auxilia.Slots.GitHubCopilot\bin\Debug\net10.0\Auxilia.Slots.GitHubCopilot.slothandler.dll"
+    "WorkflowLauncher__SlotPackages__codex-cli"                   = "$repo\Source\Slots\Auxilia.Slots.Codex\bin\Debug\net10.0\Auxilia.Slots.Codex.slothandler.dll"
     "WorkflowLauncher__SlotPackages__tfs-account"                 = "$repo\Source\Slots\Auxilia.Slots.AzureDevOps\bin\Debug\net10.0\Auxilia.Slots.AzureDevOps.slothandler.dll"
     "WorkflowLauncher__SlotPackages__simulated-work-items"        = "$repo\Source\Slots\Auxilia.Slots.SimulatedWorkItems\bin\Debug\net10.0\Auxilia.Slots.SimulatedWorkItems.slothandler.dll"
     "WorkflowLauncher__SlotPackages__coding-session-workspace"    = "$repo\Source\Slots\Auxilia.Slots.CodingSession\bin\Debug\net10.0\Auxilia.Slots.CodingSession.slothandler.dll"

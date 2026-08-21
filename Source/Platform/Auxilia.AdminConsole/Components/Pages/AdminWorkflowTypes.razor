@@ -184,6 +184,70 @@ else
                                         <div><dt>Updated</dt><dd>@TimeText.Relative(_detail.UpdatedUtc)</dd></div>
                                     </dl>
                                 }
+                                @* The spawn summary — what approving this type permits to RUN:
+                                   the pod topology plus any runtime-spawn envelope. Prominent by
+                                   design; the signing decision covers exactly this. *@
+                                @if (_detailSchema is null)
+                                {
+                                    <div class="panel warn">
+                                        <strong>No declared schema.</strong>&nbsp;
+                                        This type's inputs and pod topology are undiscoverable until its
+                                        first run publishes a schema — an approval here is a blind trust
+                                        decision about the package itself.
+                                    </div>
+                                }
+                                @if (_detailSchema is { } schema
+                                     && (schema.Companions.Count > 0 || schema.PodControl is not null))
+                                {
+                                    <div class="panel warn">
+                                        <strong>Spawn summary:</strong>&nbsp;
+                                        each run starts up to @schema.MaxPodContainers pod container(s) —
+                                        @(schema.MaxPodContainers - (schema.PodControl?.MaxContainers ?? 0))
+                                        declared companion(s)@(schema.PodControl is { } pc
+                                            ? $" plus a runtime-spawn envelope of {pc.MaxContainers}"
+                                            : "") — on a private zero-egress pod network.
+                                    </div>
+                                    @if (schema.Companions.Count > 0)
+                                    {
+                                        <h3 class="table-caption">Declared companions</h3>
+                                        <div class="table-scroll">
+                                        <table class="data-table">
+                                            <thead>
+                                            <tr><th>Name</th><th>Image</th><th>Scale</th><th>Starts after</th><th>Resources</th></tr>
+                                            </thead>
+                                            <tbody>
+                                            @foreach (var companion in schema.Companions)
+                                            {
+                                                <tr>
+                                                    <td class="cell-strong">@companion.Name</td>
+                                                    <td class="cell-mono">@Shorten(companion.Image)</td>
+                                                    <td>@ScaleText(companion)</td>
+                                                    <td>@(companion.StartAfter.Count > 0 ? string.Join(", ", companion.StartAfter) : "—")</td>
+                                                    <td>@ResourceText(companion)</td>
+                                                </tr>
+                                            }
+                                            </tbody>
+                                        </table>
+                                        </div>
+                                    }
+                                    @if (schema.PodControl is { } control)
+                                    {
+                                        <p class="muted">
+                                            Runtime spawning: the run may start up to <strong>@control.MaxContainers</strong>
+                                            additional container(s) mid-run, only from admin-curated digest-pinned bases its
+                                            configuration selects (<code>pod-bases</code>) — declared companions never consume
+                                            this envelope.
+                                            @if (control.Description is { Length: > 0 })
+                                            {
+                                                <span> Declared purpose: “@control.Description”.</span>
+                                            }
+                                            @if (control.PodVolumes.Count > 0)
+                                            {
+                                                <span> Shared pod volumes: @string.Join(", ", control.PodVolumes).</span>
+                                            }
+                                        </p>
+                                    }
+                                }
                                 @* Who may act on this type — a policy concern, so only shown to
                                    principals who administer policy. *@
                                 @if (_canAdministerPolicy)
@@ -270,6 +334,7 @@ else
 
     private string? _detailType;
     private WorkflowTypeRegistrationDto? _detail;
+    private WorkflowSchemaDto? _detailSchema;
 
     private string? _denyType;
     private string _denyReason = "";
@@ -288,6 +353,21 @@ else
 
     private static string Shorten(string? keyBase64)
         => keyBase64 is { Length: > 16 } ? keyBase64[..16] + "…" : keyBase64 ?? "—";
+
+    private static string ScaleText(WorkflowCompanionDto companion)
+        => companion.MinInstances == companion.MaxInstances
+            ? companion.MaxInstances.ToString()
+            : $"{companion.MinInstances}–{companion.MaxInstances}"
+              + (companion.CountInput is { Length: > 0 } input ? $" (input \"{input}\")" : "");
+
+    private static string ResourceText(WorkflowCompanionDto companion)
+        => (companion.MemoryMb, Cpu: companion.Cpus?.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)) switch
+        {
+            (null, null) => "—",
+            ({ } mb, null) => $"{mb} MB",
+            (null, { } cpus) => $"{cpus} CPU",
+            ({ } mb, { } cpus) => $"{mb} MB · {cpus} CPU"
+        };
 
     protected override async Task OnInitializedAsync()
     {
@@ -353,6 +433,7 @@ else
         {
             _detailType = null;
             _detail = null;
+            _detailSchema = null;
             return;
         }
 
@@ -366,6 +447,14 @@ else
         catch (CoreApiException)
         {
             _detail = null;
+        }
+        try
+        {
+            _detailSchema = await Core.GetWorkflowSchemaAsync(workflowType);
+        }
+        catch (CoreApiException)
+        {
+            _detailSchema = null;
         }
     }
 
@@ -473,7 +562,10 @@ else
     private async Task ReloadAsync()
     {
         if (_detailType is { } open)
+        {
             _detail = await Core.GetWorkflowTypeRegistrationAsync(open);
+            _detailSchema = await Core.GetWorkflowSchemaAsync(open);
+        }
         await LoadAsync(reset: true);
     }
 

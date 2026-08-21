@@ -21,6 +21,9 @@ public sealed record EnvironmentBaseRecord : IEntity
 
     public string? Description { get; init; }
 
+    /// <summary>Optional digest-pinned image this base resolves to — the runtime-spawnable seam.</summary>
+    public string? ImageReference { get; init; }
+
     public DateTimeOffset UpdatedUtc { get; init; }
 
     public Guid? UpdatedBy { get; init; }

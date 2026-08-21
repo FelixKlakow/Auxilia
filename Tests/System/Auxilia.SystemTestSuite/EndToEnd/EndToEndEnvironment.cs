@@ -252,6 +252,13 @@ public class EndToEndEnvironment
 
         // Seed Core identity + the mail-review configuration over the REST API (bootstrap admin).
         RunAsPrincipalId = await CreateCorePrincipalAsync("E2E Mail Trigger", "User");
+        // Under the restricted platform default an ungranted type is administrators-only, so the
+        // mail trigger's run-as principal needs an explicit trigger grant — the same governed
+        // access-list path a real deployment uses to authorize a trigger target.
+        (await CoreApiClient.PostAsJsonAsync(
+            $"/api/workflow-types/{WorkflowType}/access/grant",
+            new WorkflowTypeAccessChange(PermissionActions.WorkflowTrigger, PrincipalId: RunAsPrincipalId)))
+            .EnsureSuccessStatusCode();
         var triggerHostApiKey = await CreateCoreServiceKeyAsync("E2E Trigger Host", "Operator");
         var adminConsoleApiKey = await CreateCoreServiceKeyAsync("E2E Admin Console", "Administrator");
         MailReviewConfigurationId = await CreateMailReviewConfigurationAsync();

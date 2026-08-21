@@ -45,6 +45,11 @@ public sealed class EnvironmentBaseService(
             throw new ArgumentException("name is required (e.g. linux, windows)");
         if (version.Length == 0)
             throw new ArgumentException("version is required (e.g. ubuntu-24.04)");
+        var imageReference = request.ImageReference?.Trim();
+        // An image-carrying base is the runtime-spawnable vocabulary of pod control — the same
+        // repointing discipline as companion images: only a digest can enter the catalog.
+        if (imageReference is { Length: > 0 } && !imageReference.Contains("@sha256:", StringComparison.Ordinal))
+            throw new ArgumentException("imageReference must be digest-pinned (…@sha256:…)");
 
         var record = new EnvironmentBaseRecord
         {
@@ -52,6 +57,7 @@ public sealed class EnvironmentBaseService(
             Name = name,
             Version = version,
             Description = request.Description,
+            ImageReference = string.IsNullOrEmpty(imageReference) ? null : imageReference,
             UpdatedUtc = clock.GetUtcNow(),
             UpdatedBy = actor,
         };
@@ -76,5 +82,26 @@ public sealed class EnvironmentBaseService(
     private static string ActorName(Guid? actor) => actor?.ToString("D") ?? "core-api";
 
     private static EnvironmentBaseDto ToDto(EnvironmentBaseRecord record)
-        => new(record.Name, record.Version, record.Description, record.UpdatedUtc);
+        => new(record.Name, record.Version, record.Description, record.UpdatedUtc,
+            record.ImageReference);
+
+    /// <summary>
+    /// The runtime-spawnable base map of a dispatch — <c>name</c> and <c>name/version</c> keys to
+    /// digest-pinned images, for every base carrying an image reference. A name key exists only
+    /// while it is unambiguous (one image-carrying version); ambiguous names require the
+    /// versioned key at spawn time.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<string, string>> SpawnableImagesAsync(CancellationToken ct)
+    {
+        var withImages = (await bases.ReadAsync(ct))
+            .Where(b => !string.IsNullOrEmpty(b.ImageReference))
+            .ToList();
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var record in withImages)
+            map[$"{record.Name}/{record.Version}"] = record.ImageReference!;
+        foreach (var group in withImages.GroupBy(b => b.Name))
+            if (group.Count() == 1)
+                map[group.Key] = group.First().ImageReference!;
+        return map;
+    }
 }

@@ -61,7 +61,7 @@ public sealed class ProviderCatalogPageTests
         core.ProviderCatalog.Add(new ProviderCatalogEntry(
             "dotnet-10", Available: true, Category: "Environment",
             Descriptors: [], Contracts: [], Description: ".NET 10 SDK layer",
-            ComposesEnvironment: true, EnvironmentBase: "linux", EnvironmentBaseVersion: "24.04"));
+            ComposesEnvironment: true, EnvironmentBases: [new EnvironmentBaseRef("linux", "24.04")]));
         using var ctx = NewContext(core);
 
         var cut = ctx.Render<AdminProviderCatalog>();

@@ -95,6 +95,15 @@ public sealed class WorkflowSchemaReadService(IDataAccess<CoreWorkflowTypeRecord
             status)
         {
             Events = schema.Events.Select(e => new WorkflowEventDto(
-                e.EventType, e.PayloadSchemaJson, e.Description)).ToList()
+                e.EventType, e.PayloadSchemaJson, e.Description)).ToList(),
+            Companions = schema.Companions.Select(c => new WorkflowCompanionDto(
+                c.Name, c.Image, c.MinInstances, c.MaxInstances, c.CountInput, c.StartAfter,
+                c.MemoryMb, c.Cpus)).ToList(),
+            PodControl = schema.PodControl is { } podControl
+                ? new WorkflowPodControlDto(
+                    podControl.MaxContainers, podControl.Description, podControl.PodVolumes)
+                : null,
+            MaxPodContainers = Auxilia.Workflows.Companions.CompanionTopologyValidator
+                .MaxContainers(schema.Companions, schema.PodControl)
         };
 }

@@ -1,0 +1,35 @@
+[
+  {
+    "Id": "5de1fb6c-e2e6-4f00-ad5b-d1daef752843",
+    "ArtifactType": "greeting-matrix",
+    "WorkflowType": "example-parametrised",
+    "WorkItemId": "",
+    "RunInstanceId": "2879f526-091f-4619-9ce8-4638d3ebfd71",
+    "Version": 1,
+    "ContentHash": "38AF608A2705D2C7469BBC0816B266154C8B82607D361C2C59E77DF754C6EB50",
+    "SizeBytes": 82,
+    "CreatedUtc": "2026-08-16T15:29:33.6410561+00:00"
+  },
+  {
+    "Id": "05d8ff27-a12c-457e-bab9-600ddc987165",
+    "ArtifactType": "greeting-matrix",
+    "WorkflowType": "example-parametrised",
+    "WorkItemId": "",
+    "RunInstanceId": "dad1ddec-e2c2-4f1f-9d6f-ee1b32cd2fc5",
+    "Version": 2,
+    "ContentHash": "D1D5AB3E950E26253601396ABE8B39F818EBD88D571BD7557731EC6C758F5B02",
+    "SizeBytes": 114,
+    "CreatedUtc": "2026-08-16T15:29:57.6896024+00:00"
+  },
+  {
+    "Id": "461a518b-783b-4da4-a38a-b39a14443e5e",
+    "ArtifactType": "greeting-matrix",
+    "WorkflowType": "example-parametrised",
+    "WorkItemId": "",
+    "RunInstanceId": "b08bae8a-446e-4700-b977-0f0d74c4c4cc",
+    "Version": 3,
+    "ContentHash": "DFC45FFC8D8C74272B3CE370BEF7F50B2A21FD9C8F92E426A25259514555E019",
+    "SizeBytes": 88,
+    "CreatedUtc": "2026-08-16T16:31:46.2505484+00:00"
+  }
+]

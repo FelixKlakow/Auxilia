@@ -200,6 +200,8 @@ public sealed class WorkflowRegistrationHandler(
             Inputs = manifest.Inputs,
             ConsumedArtifacts = manifest.ConsumedArtifacts,
             InteractiveTerminalPort = manifest.InteractiveTerminalPort,
-            InteractiveTerminalGate = manifest.InteractiveTerminalGate
+            InteractiveTerminalGate = manifest.InteractiveTerminalGate,
+            Companions = manifest.Companions,
+            PodControl = manifest.PodControl
         };
 }

@@ -48,6 +48,18 @@ public sealed record WorkflowSchema(
     /// runs whose effective input value matches. Null = every run gets the terminal.
     /// </summary>
     public InteractiveTerminalGate? InteractiveTerminalGate { get; init; }
+
+    /// <summary>
+    /// Companion containers of the run's pod (see <see cref="Companions.CompanionDeclaration"/>);
+    /// empty means the workflow spawns nothing beside itself.
+    /// </summary>
+    public IReadOnlyList<Companions.CompanionDeclaration> Companions { get; init; } = [];
+
+    /// <summary>
+    /// The runtime pod-control envelope, when declared (see
+    /// <see cref="Companions.PodControlDeclaration"/>); null = no runtime spawning.
+    /// </summary>
+    public Companions.PodControlDeclaration? PodControl { get; init; }
 }
 
 /// <summary>
@@ -90,10 +102,10 @@ public sealed record WorkflowInputDescriptor(
     string? Description = null)
 {
     /// <summary>
-    /// Rendering kind ("Text", "Multiline", "Boolean", "Choice", "Number") — editors render inputs
-    /// BY KIND and fall back to plain text on kinds they do not know.
+    /// Rendering kind (see <see cref="WorkflowInputKinds"/>) — editors render inputs BY KIND
+    /// and fall back to plain text on kinds they do not know.
     /// </summary>
-    public string Kind { get; init; } = "Text";
+    public string Kind { get; init; } = WorkflowInputKinds.Text;
 
     /// <summary>Pre-filled value editors start from.</summary>
     public string? DefaultValue { get; init; }

@@ -117,10 +117,13 @@ public class WorkflowDispatcherWorkspaceTests
             TestStores.NewArtifactStore(),
             new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
             TestStores.NewWorkspaceManager(_dispatcherSettings),
+            TestStores.NewHostPlatformProbe(),
             _mockRepoAuth.Object,
             new AuditLog(_auditRecords, TimeProvider.System),
             TestStores.NewInstanceInfo(),
             new Auxilia.PlatformData.Protection.NullSettingsProtector(),
+            new FakePodHost(),
+            new Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry(),
             NullLogger<WorkflowDispatcher>.Instance);
 
         await _sut.StartAsync(CancellationToken.None);

@@ -399,7 +399,7 @@ graph TD
 - Every action (human or AI) is written to an immutable audit log
 - TFVC / TFS is explicitly supported as a source control target for enterprises that have not yet migrated
 
-**Environment layers share the workflow trust bar** (delivered 2026-07-27): a session environment is an admin-managed Core record — base environment (`linux`/`windows`) plus an **initialization script** (+ optional pinned version) — managed via `/api/environment-layers` (gated by `provider-catalog.manage`; the upsert also maintains the available provider-catalog entry, category `environment`). Because the script executes at image-build time, the Core generates the build fragment and **signs it with the platform signing key**; the runner fetches it at dispatch (resolution-token authorized, mirroring the package download) and verifies it against `WorkflowDispatcher:TrustedEnvironmentSigningKeys` before composing the content-addressed `auxilia-env:<hash>` image (hash includes the base image digest, so a rebuilt workflow image never reuses a stale composition). An empty trust-key list is the dev-host posture, exactly like disabled package signing; a statically configured local layer of the same name is the host's override. **One run composes one image on one base**: each layer's base (`linux`/`windows`) rides its provider-catalog entry, and a dispatch that mixes bases fails fast at the Core — mixed-base layers can never build into the same container image.
+**Environment layers share the workflow trust bar** (delivered 2026-07-27; multi-base variants 2026-08-15): a session environment is an admin-managed Core record — a capability name carrying **one initialization-script variant per base environment it supports** (`linux`/`windows`, each with an optional base-version pin, + an optional layer-wide software version) — managed via `/api/environment-layers` (gated by `provider-catalog.manage`; the upsert is keyed (providerType, baseEnvironment) and also maintains the available provider-catalog entry, category `environment`; `DELETE …/variants/{base}` removes one variant, the last removal removes the layer). Because the script executes at image-build time, the Core generates the build fragment — a base64-wrapped `sh -e` RUN layer on linux, a base64-wrapped stop-on-error PowerShell RUN layer on windows — and **signs it with the platform signing key**; the runner fetches the variant matching **its own base** at dispatch (`…/content?base=<os>`, resolution-token authorized, the base taken from the same Docker-daemon probe that feeds the heartbeat) and verifies it against `WorkflowDispatcher:TrustedEnvironmentSigningKeys` before composing the content-addressed `auxilia-env:<hash>` image (hash includes the base image digest, so a rebuilt workflow image never reuses a stale composition). An empty trust-key list is the dev-host posture, exactly like disabled package signing; a statically configured local layer of the same name is the host's override. **One run composes one image on one base**: each layer's supported base set rides its provider-catalog entry (`EnvironmentBases`), and a dispatch whose selected layers share no base (or whose version pins disagree on every shared base) fails fast at the Core — a layer with both a linux and a windows variant composes with either side.
 
 ---
 
@@ -576,15 +576,17 @@ layers the fragments onto the workflow image, content-addressed (`auxilia-env:<h
 distinct combination builds once and later runs cache-hit. An unknown capability fails
 pre-flight. A "template" is simply a capability whose fragment installs a whole stack.
 
-**Versioned bases (2026-08-03).** A layer's base is a NAME ("linux", "windows") plus an
-optional pinned VERSION from the admin-managed **environment-base catalog**
+**Versioned bases (2026-08-03) and multi-base variants (2026-08-15).** A layer names a
+capability; per supported base ("linux", "windows") it carries its own setup-script VARIANT
+with an optional pinned VERSION from the admin-managed **environment-base catalog**
 (`/api/environment-bases`: (name, version) pairs like ("linux", "ubuntu-24.04") — an open,
 configurable vocabulary, provider-catalog-gated like layers). A pinned version must be
-registered (a typo'd pin would silently never compose); an unpinned layer composes with any
-version of its base. The pin rides the layer's catalog entry (`EnvironmentBaseVersion`), and
-both the dispatch (`RunService`) and the authoring mirror (`WorkflowAuthoring`) fail fast on
-mixed base versions exactly as they do on mixed base names — one run composes one image on
-one base version.
+registered (a typo'd pin would silently never compose); an unpinned variant composes with any
+version of its base. The supported base set (with pins) rides the layer's catalog entry
+(`EnvironmentBases`), and both the dispatch (`RunService`) and the authoring mirror
+(`WorkflowAuthoring`) fail fast when the selected layers share no base whose version pins
+agree — one run composes one image on one base, but a multi-variant layer composes on any of
+its bases.
 
 **Fleet platform advertisement + base seeding (2026-08-08).** Each runner probes its Docker
 daemon once (OS type + architecture — the daemon's answer, not the process OS: the socket may
@@ -678,6 +680,35 @@ network:
 - All traffic is still fully logged — the difference from `default-deny` is that nothing is blocked, not that nothing is observed
 - Platform policy is the hard ceiling: administrators can prohibit `allow-all` entirely, regardless of what any run configuration requests
 - The effective mode and the identity that requested it are always recorded in the run audit log
+
+### Run pods (companion containers)
+
+A workflow may declare **companion containers** (`RequiresCompanion` — digest-pinned inert
+services like a database, broker, or simulated machine; full design in
+`docs/test-fabric-and-swarm-design.md`). The runner materializes them on a **private per-run
+`--internal` network** before the workflow starts: start order is a declared DAG gated on
+readiness, instance counts come from run inputs clamped to the signed bounds, per-run
+secrets are minted, and the resolved topology is announced via `Workflow__Companion__*`.
+Companions have **zero egress**; the workflow container joins the pod network additionally
+(alias `workflow`) and remains the pod's only governed path outside (this section's policy
+applies to it unchanged). Declared pod volumes are shared run-scoped scratch space
+(`/workspace/pod/<name>` in the workflow container). The pod dies with the run on every
+terminal path — state message, container crash, re-adoption, orphan sweep — and each
+companion's log tail is persisted as a `companion-log-<name>` artifact. The topology is part
+of the signed schema; the registry refuses structurally invalid ones (unpinned images,
+cycles) and serves the aggregate spawn summary on the schema DTO for the approval review.
+
+Beyond declared templates, a workflow may declare a **runtime pod-control envelope**
+(`RequiresPodControl(max)`): the test itself then spawns/stops companions mid-run via
+`IPodController` — runner-mediated over an authenticated queue (never a Docker socket),
+audited per operation, clamped to the signed cap on the live **runtime-spawned** count
+(declared templates are separately signed topology and never consume the envelope — total
+= templates + envelope, exactly what the spawn summary advertises), and restricted to
+**configuration-pinned base images**: environment bases may carry a digest-pinned
+`ImageReference`, the run's configuration selects its subset (context key `pod-bases`), and
+the Core snapshots exactly that map into the dispatch command — default-deny without a
+selection, immune to catalog edits mid-run. Software for spawned machines rides the pod
+volumes from the workflow's own signed image; there is no exec channel into companions.
 
 ---
 

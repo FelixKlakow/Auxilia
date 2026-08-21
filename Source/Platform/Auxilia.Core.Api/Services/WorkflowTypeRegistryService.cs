@@ -37,6 +37,37 @@ public sealed class WorkflowTypeRegistryService(
     private const string DockerScheme = "docker://";
     private const string CoreScheme = "core://";
 
+    private static readonly JsonSerializerOptions SchemaReadOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    /// <summary>
+    /// Refuses registrations whose schema declares a structurally invalid companion topology
+    /// (unpinned images, cycles, bad bounds) — the registry is the spawn-grant gate, so an
+    /// invalid pod must never become registrable. A schema that does not parse is tolerated
+    /// here (schema-less and legacy registrations exist); it simply carries no companions.
+    /// </summary>
+    private static string? ValidateCompanionTopology(string? schemaJson)
+    {
+        if (schemaJson is not { Length: > 0 })
+            return null;
+        Auxilia.Workflows.WorkflowSchema? schema;
+        try
+        {
+            schema = JsonSerializer.Deserialize<Auxilia.Workflows.WorkflowSchema>(schemaJson, SchemaReadOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        if (schema is null || (schema.Companions.Count == 0 && schema.PodControl is null))
+            return null;
+        var errors = Auxilia.Workflows.Companions.CompanionTopologyValidator
+            .Validate(schema.Companions, schema.PodControl);
+        return errors.Count == 0 ? null : "invalid companion topology: " + string.Join(" ", errors);
+    }
+
     public async Task<RegistryOutcome> RegisterAsync(
         RegisterWorkflowTypeRequest request, Guid? registeredBy, CancellationToken ct)
     {
@@ -82,6 +113,7 @@ public sealed class WorkflowTypeRegistryService(
         string statusReason;
         string? publisherKey = null;
         string? schemaJson = request.SchemaJson;
+        var existing = await store.ReadAsync(CoreWorkflowTypeRecord.IdFor(type), ct);
 
         if (packageBytes is not null)
         {
@@ -112,7 +144,17 @@ public sealed class WorkflowTypeRegistryService(
             // explicit act of the signing authority (or the operator's static host configuration).
             status = WorkflowTypeStatus.Pending;
             statusReason = "a docker package has no verifiable signature — awaiting the signing authority";
+            // The Core never inspects images, so without a declared schema the type's whole
+            // input/pod surface is INVISIBLE until its first run publishes one — say so where
+            // the approver reads, instead of leaving a silent blind spot.
+            if (schemaJson is null && existing?.SchemaJson is null)
+                statusReason += "; no declared schema — inputs and pod topology stay undiscoverable "
+                                + "until the first run publishes one (emit it with --emit-schema and "
+                                + "pass schemaJson to declare it up front)";
         }
+
+        if (ValidateCompanionTopology(schemaJson) is { } companionError)
+            return RegistryOutcome.Fail(companionError);
 
         if (hasUpload)
         {
@@ -121,7 +163,6 @@ public sealed class WorkflowTypeRegistryService(
         }
 
         var now = clock.GetUtcNow();
-        var existing = await store.ReadAsync(CoreWorkflowTypeRecord.IdFor(type), ct);
         var record = new CoreWorkflowTypeRecord
         {
             Id = CoreWorkflowTypeRecord.IdFor(type),

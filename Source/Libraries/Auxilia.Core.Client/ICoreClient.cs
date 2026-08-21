@@ -136,8 +136,11 @@ public interface ICoreClient
     /// <summary>Lists layers; <paramref name="search"/> filters by type, base, version, or description.</summary>
     Task<IReadOnlyList<EnvironmentLayerDto>> ListEnvironmentLayersAsync(string? search = null, CancellationToken ct = default);
     Task<EnvironmentLayerDto?> GetEnvironmentLayerAsync(string providerType, CancellationToken ct = default);
-    /// <summary>Creates or updates a layer AND its (available) catalog entry.</summary>
+    /// <summary>Creates or updates ONE base variant of a layer AND its (available) catalog entry.</summary>
     Task<EnvironmentLayerDto> UpsertEnvironmentLayerAsync(UpsertEnvironmentLayer request, CancellationToken ct = default);
+    /// <summary>Removes one base variant; removing the last variant removes the layer itself.</summary>
+    Task<EnvironmentLayerDto?> DeleteEnvironmentLayerVariantAsync(
+        string providerType, string baseEnvironment, CancellationToken ct = default);
     /// <summary>Replaces who may bind the layer into a run; empty grants = everyone (dispatch-enforced).</summary>
     Task<EnvironmentLayerDto> SetEnvironmentLayerGrantsAsync(
         string providerType, SetEnvironmentLayerGrants request, CancellationToken ct = default);

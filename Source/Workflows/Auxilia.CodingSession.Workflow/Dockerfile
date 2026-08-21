@@ -5,14 +5,19 @@ RUN dotnet publish Source/Workflows/Auxilia.CodingSession.Workflow/Auxilia.Codin
     -c Release -o /app/publish --no-self-contained
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
-# Session tooling: the real Claude Code CLI, tmux (the session survives browser
-# disconnects), ttyd (the web terminal the dashboard proxies to), and git.
+# Session tooling: ALL THREE coding-agent CLIs (the bound slot provider decides which one the
+# session launches — Claude Code, GitHub Copilot, or Codex), tmux (the session survives
+# browser disconnects), ttyd (the web terminal the dashboard proxies to), and git.
 # This layer never changes with source edits, so Docker caches it across rebuilds.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates git tmux \
  && rm -rf /var/lib/apt/lists/* \
  && curl -fsSL https://claude.ai/install.sh | bash \
  && ln -s /root/.local/bin/claude /usr/local/bin/claude \
+ && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+ && apt-get install -y --no-install-recommends nodejs \
+ && rm -rf /var/lib/apt/lists/* \
+ && npm install -g @github/copilot @openai/codex \
  && curl -fsSL -o /usr/local/bin/ttyd \
       https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 \
  && chmod +x /usr/local/bin/ttyd

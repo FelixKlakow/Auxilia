@@ -31,8 +31,9 @@ public sealed class AdminEnvironmentsPageTests
     private static EnvironmentLayerDto Layer(
         string name, string environmentBase = "linux", string? baseVersion = null,
         string? version = null, IReadOnlyList<AccessGrant>? grants = null)
-        => new(name, $"{name} description", environmentBase, "apt-get install -y thing",
-            version, DateTimeOffset.UtcNow, baseVersion) { Grants = grants ?? [] };
+        => new(name, $"{name} description",
+            [new EnvironmentLayerVariant(environmentBase, "apt-get install -y thing", baseVersion)],
+            version, DateTimeOffset.UtcNow) { Grants = grants ?? [] };
 
     [Test]
     public void Environments_ListsLayers_WithBasePinAndAccess()
@@ -150,8 +151,58 @@ public sealed class AdminEnvironmentsPageTests
             Assert.That(cut.Find("textarea").GetAttribute("value"), Does.Contain("apt-get"));
         });
 
-        cut.FindAll("button").First(b => b.TextContent.Trim() == "Save layer").Click();
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Save variant").Click();
         Assert.That(core.UpsertedLayers[0].ProviderType, Is.EqualTo("dotnet-10"));
+    }
+
+    [Test]
+    public void Environments_EditLayer_SwitchingTheBase_EditsThatVariantInPlace()
+    {
+        var core = new FakeCoreClient();
+        core.EnvironmentLayers.Add(new EnvironmentLayerDto("dotnet-10", null,
+            [
+                new EnvironmentLayerVariant("linux", "apt-get install -y dotnet"),
+                new EnvironmentLayerVariant("windows", "choco install -y dotnet"),
+            ],
+            "10.0", DateTimeOffset.UtcNow));
+        using var ctx = NewContext(core);
+        var cut = ctx.Render<AdminEnvironments>();
+
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Edit").Click();
+        Assert.That(cut.Find("textarea").GetAttribute("value"), Does.Contain("apt-get"));
+
+        cut.FindAll("select").First(s => s.TextContent.Contains("windows")).Change("windows");
+        Assert.That(cut.Find("textarea").GetAttribute("value"), Does.Contain("choco"),
+            "each base carries its own setup script — switching the base swaps the variant being edited");
+
+        cut.Find("textarea").Change("winget install dotnet");
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Save variant").Click();
+        Assert.Multiple(() =>
+        {
+            Assert.That(core.UpsertedLayers.Single().BaseEnvironment, Is.EqualTo("windows"));
+            Assert.That(core.UpsertedLayers.Single().SetupScript, Is.EqualTo("winget install dotnet"));
+        });
+    }
+
+    [Test]
+    public void Environments_RemoveVariant_GoesThroughTheVariantEndpoint_AfterConfirm()
+    {
+        var core = new FakeCoreClient();
+        core.EnvironmentLayers.Add(new EnvironmentLayerDto("dotnet-10", null,
+            [
+                new EnvironmentLayerVariant("linux", "apt-get install -y dotnet"),
+                new EnvironmentLayerVariant("windows", "choco install -y dotnet"),
+            ],
+            "10.0", DateTimeOffset.UtcNow));
+        using var ctx = NewContext(core);
+        var cut = ctx.Render<AdminEnvironments>();
+
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Edit").Click();
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Remove variant").Click();
+        Assert.That(core.DeletedLayerVariants, Is.Empty, "arming must not remove");
+
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Yes, remove").Click();
+        Assert.That(core.DeletedLayerVariants, Is.EqualTo(new[] { ("dotnet-10", "linux") }));
     }
 
     [Test]

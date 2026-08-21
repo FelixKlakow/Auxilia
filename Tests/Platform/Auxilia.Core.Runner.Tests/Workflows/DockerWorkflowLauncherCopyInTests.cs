@@ -58,6 +58,7 @@ public class DockerWorkflowLauncherCopyInTests
         _sut = new DockerWorkflowLauncher(
             Options.Create(DefaultSettings),
             _mockFactory.Object,
+            new FakePodHost(),
             NullLogger<DockerWorkflowLauncher>.Instance);
     }
 

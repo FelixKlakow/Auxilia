@@ -77,14 +77,19 @@ else
                                 }
                             </td>
                             <td>
-                                <span class="type-chip">@layer.BaseEnvironment</span>
-                                @if (layer.BaseVersion is { Length: > 0 } baseVersion)
+                                @foreach (var variant in layer.Variants)
                                 {
-                                    <span class="cell-sub">pinned to @baseVersion</span>
-                                }
-                                else
-                                {
-                                    <span class="cell-sub">any version</span>
+                                    <div class="variant-row">
+                                        <span class="type-chip">@variant.BaseEnvironment</span>
+                                        @if (variant.BaseVersion is { Length: > 0 } baseVersion)
+                                        {
+                                            <span class="cell-sub">pinned to @baseVersion</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="cell-sub">any version</span>
+                                        }
+                                    </div>
                                 }
                             </td>
                             <td>@(layer.Version is { Length: > 0 } version ? version : "—")</td>
@@ -190,8 +195,8 @@ else
                     <tbody>
                     @foreach (var environmentBase in _bases)
                     {
-                        var pinned = _layers.Count(l => l.BaseVersion == environmentBase.Version
-                                                        && l.BaseEnvironment == environmentBase.Name);
+                        var pinned = _layers.Count(l => l.Variants.Any(v =>
+                            v.BaseVersion == environmentBase.Version && v.BaseEnvironment == environmentBase.Name));
                         <tr>
                             <td><span class="type-chip">@environmentBase.Name</span></td>
                             <td class="cell-strong">@environmentBase.Version</td>
@@ -269,12 +274,17 @@ else
                     </label>
                     <label>
                         Base environment
-                        <select @bind="draft.BaseEnvironment">
+                        <select value="@draft.BaseEnvironment"
+                                @onchange="e => SwitchDraftBase(e.Value?.ToString() ?? string.Empty)">
                             @foreach (var name in BaseNameSuggestions())
                             {
                                 <option value="@name">@name</option>
                             }
                         </select>
+                        <span class="field-hint">
+                            Each base carries its OWN setup script — switching the base edits (or starts)
+                            that base's variant; the other variants stay untouched.
+                        </span>
                     </label>
                     <label>
                         Pinned base version
@@ -304,8 +314,15 @@ else
         </ChildContent>
         <Footer>
             <button class="btn btn-primary" disabled="@(_busy || !CanSaveLayer)" @onclick="SaveLayerAsync">
-                @(_layerDraft?.IsNew == true ? "Create layer" : "Save layer")
+                @(_layerDraft?.IsNew == true ? "Create layer" : "Save variant")
             </button>
+            @if (_layerDraft is { IsNew: false } editDraft && DraftVariantExists(editDraft))
+            {
+                <ConfirmButton Label="Remove variant"
+                               Question="@($"Remove the {editDraft.BaseEnvironment} variant? Removing the last variant deletes the layer.")"
+                               ConfirmLabel="Yes, remove" Busy="_busy"
+                               OnConfirm="RemoveDraftVariantAsync"/>
+            }
             <button class="btn btn-secondary" disabled="@_busy" @onclick="() => _layerDraft = null">Cancel</button>
         </Footer>
     </Drawer>
@@ -355,6 +372,7 @@ else
         new(EnvironmentBases.Linux, "ubuntu-24.04", "Ubuntu 24.04 LTS"),
         new(EnvironmentBases.Linux, "ubuntu-22.04", "Ubuntu 22.04 LTS"),
         new(EnvironmentBases.Linux, "debian-12", "Debian 12 (bookworm)"),
+        new(EnvironmentBases.Windows, "server-2025", "Windows Server 2025"),
         new(EnvironmentBases.Windows, "server-2022", "Windows Server 2022"),
     ];
 
@@ -378,6 +396,37 @@ else
         public string BaseVersion = "";
         public string Version = "";
         public string SetupScript = "";
+        // The layer being edited — the drawer swaps script and pin when the base changes so
+        // each base variant is edited in place, without touching its siblings.
+        public EnvironmentLayerDto? Source;
+    }
+
+    private bool DraftVariantExists(LayerDraft draft)
+        => draft.Source?.Variants.Any(v =>
+            string.Equals(v.BaseEnvironment, draft.BaseEnvironment, StringComparison.OrdinalIgnoreCase)) == true;
+
+    private void SwitchDraftBase(string baseEnvironment)
+    {
+        if (_layerDraft is not { } draft || baseEnvironment.Length == 0)
+            return;
+        draft.BaseEnvironment = baseEnvironment;
+        var variant = draft.Source?.Variants.FirstOrDefault(v =>
+            string.Equals(v.BaseEnvironment, baseEnvironment, StringComparison.OrdinalIgnoreCase));
+        draft.SetupScript = variant?.SetupScript ?? "";
+        draft.BaseVersion = variant?.BaseVersion ?? "";
+    }
+
+    private Task RemoveDraftVariantAsync()
+    {
+        if (_layerDraft is not { } draft)
+            return Task.CompletedTask;
+        return MutateAsync(async () =>
+        {
+            await Core.DeleteEnvironmentLayerVariantAsync(
+                draft.ProviderType, draft.BaseEnvironment, _cts.Token);
+            _notice = $"Variant \"{draft.BaseEnvironment}\" of \"{draft.ProviderType}\" removed.";
+            _layerDraft = null;
+        });
     }
 
     private bool CanSaveLayer
@@ -393,7 +442,7 @@ else
     private IEnumerable<string> BaseNameSuggestions()
         => new[] { EnvironmentBases.Linux, EnvironmentBases.Windows }
             .Concat(_bases.Select(b => b.Name))
-            .Concat(_layers.Select(l => l.BaseEnvironment))
+            .Concat(_layers.SelectMany(l => l.Variants).Select(v => v.BaseEnvironment))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(n => n, StringComparer.Ordinal);
 
@@ -449,15 +498,17 @@ else
     {
         _error = _notice = null;
         _sharingLayer = null;
+        var first = layer.Variants.FirstOrDefault();
         _layerDraft = new LayerDraft
         {
             IsNew = false,
             ProviderType = layer.ProviderType,
             Description = layer.Description ?? "",
-            BaseEnvironment = layer.BaseEnvironment,
-            BaseVersion = layer.BaseVersion ?? "",
+            BaseEnvironment = first?.BaseEnvironment ?? EnvironmentBases.Linux,
+            BaseVersion = first?.BaseVersion ?? "",
             Version = layer.Version ?? "",
-            SetupScript = layer.SetupScript
+            SetupScript = first?.SetupScript ?? "",
+            Source = layer
         };
     }
 

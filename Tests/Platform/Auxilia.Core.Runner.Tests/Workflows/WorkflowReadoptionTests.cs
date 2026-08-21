@@ -165,6 +165,8 @@ public sealed class WorkflowReadoptionTests
     private FakeContainerHost _host = null!;
     private List<WorkflowStatusEvent> _published = null!;
     private CoreRunnerInfo _instanceInfo = null!;
+    private WorkflowSchemaStore _schemaStore = null!;
+    private Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry _podControlRegistry = null!;
     private WorkflowReadoptionService _sut = null!;
 
     [SetUp]
@@ -206,16 +208,23 @@ public sealed class WorkflowReadoptionTests
             TestStores.NewArtifactStore(),
             new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
             TestStores.NewWorkspaceManager(),
+            TestStores.NewHostPlatformProbe(),
             Mock.Of<IRepositoryAuthResolver>(),
             TestStores.NewAuditLog(),
             _instanceInfo,
             new NullSettingsProtector(),
+            new FakePodHost(),
+            new Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry(),
             NullLogger<WorkflowDispatcher>.Instance);
 
+        _schemaStore = TestStores.NewWorkflowSchemaStore();
+        _podControlRegistry = new Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry();
         _sut = new WorkflowReadoptionService(
-            _host, _registry, _tokens, dispatcher, statusPublisher,
+            _host, _registry, _tokens, _schemaStore, _podControlRegistry,
+            dispatcher, statusPublisher,
             TestStores.NewWorkspaceManager(), new NullSettingsProtector(),
             Options.Create(dispatcherSettings), _instanceInfo, TestStores.NewAuditLog(),
+            new FakePodHost(),
             NullLogger<WorkflowReadoptionService>.Instance);
     }
 
@@ -223,7 +232,7 @@ public sealed class WorkflowReadoptionTests
     public void TearDown() => (_records as IDisposable)?.Dispose();
 
     private async Task<WorkflowInstanceRecord> SeedAsync(
-        string state, string? containerId, string? token = "tok-1")
+        string state, string? containerId, string? token = "tok-1", string? podBaseImagesJson = null)
     {
         var commandId = Guid.NewGuid();
         var record = new WorkflowInstanceRecord
@@ -237,7 +246,8 @@ public sealed class WorkflowReadoptionTests
             ProtectedInstanceToken = token,
             DispatchCommandJson = JsonSerializer.Serialize(new RunWorkflowCommand(
                 commandId, "wf-type", "docker://wf:test",
-                new Dictionary<string, string>(), ResolutionToken: "rt"))
+                new Dictionary<string, string>(), ResolutionToken: "rt",
+                PodBaseImagesJson: podBaseImagesJson))
         };
         await _records.SaveAsync(record);
         return record;
@@ -267,6 +277,50 @@ public sealed class WorkflowReadoptionTests
                 "the exit watcher must be re-attached");
             Assert.That(_host.Removed, Is.Empty);
         });
+    }
+
+    [Test]
+    public async Task AdoptedPodControlledRun_GetsItsPodControlStateRebuilt()
+    {
+        const string pinned =
+            "sim@sha256:3333333333333333333333333333333333333333333333333333333333333333";
+        await _schemaStore.SetSchemaAsync("wf-type", new Auxilia.Workflows.WorkflowSchema("wf-type", [], [])
+        {
+            PodControl = new Auxilia.Workflows.Companions.PodControlDeclaration(3, "fleet")
+            {
+                PodVolumes = ["logs"]
+            }
+        });
+        var record = await SeedAsync("Running", "c-pod",
+            podBaseImagesJson: JsonSerializer.Serialize(
+                new Dictionary<string, string> { ["sim-base"] = pinned }));
+        _host.Containers.Add(new WorkflowContainerInfo("c-pod", record.Id, IsRunning: true));
+
+        await _sut.RunAsync();
+
+        var state = _podControlRegistry.Get(record.Id);
+        Assert.Multiple(() =>
+        {
+            Assert.That(state, Is.Not.Null,
+                "an adopted run must keep its runtime spawn capability across the restart");
+            Assert.That(state!.MaxContainers, Is.EqualTo(3));
+            Assert.That(state.BaseImages["sim-base"], Is.EqualTo(pinned),
+                "the configuration-pinned base map survives via the persisted dispatch command");
+            Assert.That(state.NetworkName, Is.EqualTo($"auxilia-pod-{record.Id:N}"),
+                "the network name re-derives deterministically");
+            Assert.That(state.VolumeNames["logs"], Is.EqualTo($"auxilia-pod-{record.Id:N}-logs"));
+        });
+    }
+
+    [Test]
+    public async Task AdoptedRunWithoutAPodEnvelope_RegistersNoPodControlState()
+    {
+        var record = await SeedAsync("Running", "c-plain");
+        _host.Containers.Add(new WorkflowContainerInfo("c-plain", record.Id, IsRunning: true));
+
+        await _sut.RunAsync();
+
+        Assert.That(_podControlRegistry.Get(record.Id), Is.Null);
     }
 
     [Test]

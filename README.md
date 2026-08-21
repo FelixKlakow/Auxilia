@@ -107,6 +107,14 @@ dotnet test  Auxilia.slnx        # full test suite (system tests need Docker)
 
 ./Scripts/Start-DevStack.ps1 -Build      # local Core stack: Core.Api on :5280 + Core.Runner,
                                  # simulation-seeded; -Stop tears it down
+
+./Scripts/Setup-Platform.ps1 -BuildImages    # seed a running Core (local eval OR a real
+                                 # deployment via -CoreUrl/-ApiKey) with the standard catalog:
+                                 # base boxes, environment layers (dotnet/node/python/java/…),
+                                 # the coding-agent CLIs (Claude Code, Copilot, Codex), the
+                                 # TFS/Azure DevOps/GitHub providers, and the default
+                                 # workflow types; idempotent, -IncludeWindows adds windows
+                                 # variants of the environment layers
 ```
 
 ## License

@@ -26,6 +26,7 @@ public sealed class RunService(
     Auxilia.Governance.PrincipalDirectory principalDirectory,
     Auxilia.Governance.Policy.IDefaultResourceAccessPolicy defaultAccess,
     RunnerLivenessTracker runnerLiveness,
+    EnvironmentBaseService environmentBases,
     Auxilia.UniversalDataAccess.IDataAccess<Data.CoreRunRecord> runs,
     Auxilia.Workflows.Messaging.WorkflowStatusPublisher statusPublisher,
     TimeProvider clock,
@@ -186,8 +187,8 @@ public sealed class RunService(
         // mount settings themselves are non-secret and ride the command.
         var mounts = new List<WorkspaceMountDispatch>();
         var environmentCapabilities = new List<string>();
-        var environmentBases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var environmentBaseVersions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var environmentBases =
+            new Dictionary<string, IReadOnlyList<EnvironmentBaseRef>>(StringComparer.OrdinalIgnoreCase);
         var pluginBindings = new List<SlotBinding>();
         var stashedBindings = new List<SlotBinding>();
         foreach (var boundSlot in slotBindings)
@@ -226,10 +227,8 @@ public sealed class RunService(
             {
                 if (!environmentCapabilities.Contains(entry.ProviderType))
                     environmentCapabilities.Add(entry.ProviderType);
-                if (entry.EnvironmentBase is { Length: > 0 } envBase)
-                    environmentBases[entry.ProviderType] = envBase;
-                if (entry.EnvironmentBaseVersion is { Length: > 0 } envBaseVersion)
-                    environmentBaseVersions[entry.ProviderType] = envBaseVersion;
+                if (entry.EnvironmentBases is { Count: > 0 } envBases)
+                    environmentBases[entry.ProviderType] = envBases;
                 continue;
             }
             if (entry is not { MountsIntoWorkspace: true })
@@ -253,22 +252,33 @@ public sealed class RunService(
             mounts.Add(new WorkspaceMountDispatch(mountId, entry.ProviderType, settingsByRole, authSlot));
         }
 
-        // One run composes ONE container image on ONE base — environment layers of different
-        // bases (linux vs windows) can never build into the same image, so a mixed selection
-        // must fail the dispatch, not the build. Layers without a declared base (runner-static
-        // overrides) cannot be checked here and are left to the runner's composition.
-        if (environmentBases.Values.Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
-            throw new InvalidOperationException(
-                "environment capabilities mix incompatible bases — "
-                + string.Join(", ", environmentBases.Select(b => $"'{b.Key}' ({b.Value})"))
-                + ". One run composes one image on one base; pick layers of a single base.");
-        // The same holds along the VERSION axis: layers pinning different versions of the base
-        // can never build into one image. Unpinned layers compose with any version.
-        if (environmentBaseVersions.Values.Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
-            throw new InvalidOperationException(
-                "environment capabilities mix incompatible base versions — "
-                + string.Join(", ", environmentBaseVersions.Select(b => $"'{b.Key}' ({b.Value})"))
-                + ". One run composes one image on one base version; pick compatible layers.");
+        // One run composes ONE container image on ONE base — but a layer may carry a variant per
+        // base. The selection is viable only if some base is supported by EVERY base-declaring
+        // layer and, on that base, every version pin agrees. Layers without declared bases
+        // (runner-static overrides) cannot be checked here and are left to the runner's composition.
+        if (environmentBases.Count > 0)
+        {
+            var candidateBases = environmentBases.Values
+                .Select(refs => refs.Select(r => r.Name).ToHashSet(StringComparer.OrdinalIgnoreCase))
+                .Aggregate((intersection, next) =>
+                {
+                    intersection.IntersectWith(next);
+                    return intersection;
+                });
+            bool VersionsAgree(string baseName) => environmentBases.Values
+                .Select(refs => refs.First(r =>
+                    string.Equals(r.Name, baseName, StringComparison.OrdinalIgnoreCase)).Version)
+                .Where(v => v is { Length: > 0 })
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count() <= 1;
+            if (!candidateBases.Any(VersionsAgree))
+                throw new InvalidOperationException(
+                    "environment capabilities have no common base — "
+                    + string.Join(", ", environmentBases.Select(b =>
+                        $"'{b.Key}' ({string.Join("|", b.Value.Select(r => r.Version is { Length: > 0 } ? $"{r.Name}/{r.Version}" : r.Name))})"))
+                    + ". One run composes one image on one base; every selected layer must share "
+                    + "a base whose version pins agree.");
+        }
 
         // Gate identity-linked connectors — including each repo's auth connector: the triggering
         // principal must be allowed to use every connector this run binds. Company connectors pass
@@ -323,7 +333,12 @@ public sealed class RunService(
             // The registry's inspected schema rides along so a FRESH runner decides terminal/
             // network/repository questions from it on the type's very first dispatch — the
             // runner-side store only fills on a run's own registration, which is too late.
-            SchemaJson: (await workflowTypes.GetRecordAsync(workflowType, ct))?.SchemaJson);
+            SchemaJson: (await workflowTypes.GetRecordAsync(workflowType, ct))?.SchemaJson,
+            // The runtime-spawnable base snapshot, PINNED BY CONFIGURATION: only the base refs
+            // the run's context selects (context key "pod-bases", fixable in the stored
+            // configuration like any input) resolve into the map — default-deny when absent —
+            // and a catalog edit never changes what an in-flight run may start.
+            PodBaseImagesJson: await SerializeSpawnableBasesAsync(context, ct));
 
         // Stash the resolution context AND the dispatch command itself (keyed by CommandId), so an
         // orphaned run can be re-dispatched once on failover without the Core reading the runner's DB.
@@ -337,6 +352,26 @@ public sealed class RunService(
             "Dispatched run. CommandId={CommandId} WorkflowType={WorkflowType} WorkspaceMounts={MountCount}",
             commandId, workflowType, mounts.Count);
         return new RunAccepted(commandId, commandId);
+    }
+
+    /// <summary>Context key selecting the run's spawnable bases (comma-separated base refs).</summary>
+    internal const string PodBasesContextKey = "pod-bases";
+
+    private async Task<string?> SerializeSpawnableBasesAsync(
+        IReadOnlyDictionary<string, string> context, CancellationToken ct)
+    {
+        if (!context.TryGetValue(PodBasesContextKey, out var selection)
+            || string.IsNullOrWhiteSpace(selection))
+            return null;
+        var requested = selection
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var images = (await environmentBases.SpawnableImagesAsync(ct))
+            .Where(kv => requested.Contains(kv.Key))
+            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+        return images.Count == 0
+            ? null
+            : System.Text.Json.JsonSerializer.Serialize(images);
     }
 
     /// <summary>

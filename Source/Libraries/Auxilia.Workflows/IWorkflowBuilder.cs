@@ -80,6 +80,25 @@ public interface IWorkflowBuilder
         string id, string cloneUrl, string? branch = null, bool noCache = false,
         string? setupScript = null);
 
+    /// <summary>
+    /// Declares a companion container of the run's pod (design: test-fabric-and-swarm §A):
+    /// an inert, digest-pinned service the runner materializes on the run's private network
+    /// before the workflow starts. Part of the signed manifest and the approval's spawn summary.
+    /// </summary>
+    IWorkflowBuilder RequiresCompanion(
+        string name, string image, Action<Companions.ICompanionBuilder>? configure = null);
+
+    /// <summary>
+    /// Declares the runtime pod-control envelope (design: test-fabric-and-swarm §"pod
+    /// controller"): the signed permission to spawn up to <paramref name="maxContainers"/>
+    /// companions at runtime via <see cref="Companions.IPodController"/>. Images are never
+    /// named here — the run's configuration pins its spawnable bases (context key
+    /// <c>pod-bases</c>), resolved against the Core's digest-pinned base catalog.
+    /// <paramref name="podVolumes"/> names run-scoped shared volumes for software delivery.
+    /// </summary>
+    IWorkflowBuilder RequiresPodControl(
+        int maxContainers, string? description = null, params string[] podVolumes);
+
     IWorkflowBuilder DeclaresSignal<TPayload>(string name, string? description = null);
 
     /// <summary>

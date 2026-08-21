@@ -123,6 +123,12 @@ try
     builder.Services.AddSingleton<RunnerHostPlatformProbe>();
     builder.Services.AddHostedService<RunnerHeartbeatService>();
     builder.Services.AddSingleton<IWorkflowLauncher, DockerWorkflowLauncher>();
+    builder.Services.AddSingleton<Auxilia.Core.Runner.Workflows.Pods.ICompanionReadinessChecker,
+        Auxilia.Core.Runner.Workflows.Pods.InspectCompanionReadinessChecker>();
+    builder.Services.AddSingleton<Auxilia.Core.Runner.Workflows.Pods.IPodHost,
+        Auxilia.Core.Runner.Workflows.Pods.DockerPodHost>();
+    builder.Services.AddSingleton<Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry>();
+    builder.Services.AddSingleton<Auxilia.Core.Runner.Workflows.Pods.PodControlHandler>();
     builder.Services.AddSingleton<IDockerClientFactory, DefaultDockerClientFactory>();
     builder.Services.AddSingleton<IDeveloperModeProvider, EnvironmentDeveloperModeProvider>();
     builder.Services.AddSingleton<IWorkflowPackageVerifier, WorkflowPackageVerifier>();
@@ -208,27 +214,13 @@ try
             sidecar?.Description);
     }
 
-    var handler = app.Services.GetRequiredService<WorkflowRegistrationHandler>();
-    await handler.StartAsync(app.Lifetime.ApplicationStopping);
-
-    var slotActivationHandler = app.Services.GetRequiredService<SlotActivationHandler>();
-    await slotActivationHandler.StartAsync(app.Lifetime.ApplicationStopping);
-
-    var resourceProxyHandler = app.Services.GetRequiredService<ResourceProxyHandler>();
-    await resourceProxyHandler.StartAsync(app.Lifetime.ApplicationStopping);
-
-    var viewDataHandler = app.Services.GetRequiredService<ViewDataHandler>();
-    await viewDataHandler.StartAsync(app.Lifetime.ApplicationStopping);
-
-    var signalDispatcher = app.Services.GetRequiredService<SignalDispatcher>();
-    await signalDispatcher.StartAsync(app.Lifetime.ApplicationStopping);
-
-    var announcementHandler = app.Services.GetRequiredService<WorkflowAnnouncementHandler>();
-    await announcementHandler.StartAsync(app.Lifetime.ApplicationStopping);
-
-    // RE-ADOPT the previous runner process's containers before accepting new work: re-claim
-    // their runs under the fresh ServiceId (racing the Core's failover clock), re-attach exit
-    // watchers, restore instance tokens, collect downtime exits, clean-kill the unmatchable.
+    // RE-ADOPT the previous runner process's containers BEFORE any bus subscriber starts:
+    // re-claim their runs under the fresh ServiceId (racing the Core's failover clock),
+    // re-attach exit watchers, restore instance tokens (incl. pod-control state), collect
+    // downtime exits, clean-kill the unmatchable. Order matters — every handler below
+    // validates instance tokens, so a message from a legitimately-running workflow arriving
+    // before the restore would be rejected as unauthenticated (found by the pod re-adoption
+    // system test).
     if (launcherSettings.ReadoptContainersOnStart
         && app.Services.GetRequiredService<IWorkflowLauncher>() is DockerWorkflowLauncher dockerLauncher)
     {
@@ -254,6 +246,28 @@ try
             Log.Warning(ex, "Composed-image sweep failed — continuing; stale auxilia-env images only cost disk.");
         }
     }
+
+    var handler = app.Services.GetRequiredService<WorkflowRegistrationHandler>();
+    await handler.StartAsync(app.Lifetime.ApplicationStopping);
+
+    var slotActivationHandler = app.Services.GetRequiredService<SlotActivationHandler>();
+    await slotActivationHandler.StartAsync(app.Lifetime.ApplicationStopping);
+
+    var resourceProxyHandler = app.Services.GetRequiredService<ResourceProxyHandler>();
+    await resourceProxyHandler.StartAsync(app.Lifetime.ApplicationStopping);
+
+    var podControlHandler = app.Services
+        .GetRequiredService<Auxilia.Core.Runner.Workflows.Pods.PodControlHandler>();
+    await podControlHandler.StartAsync(app.Lifetime.ApplicationStopping);
+
+    var viewDataHandler = app.Services.GetRequiredService<ViewDataHandler>();
+    await viewDataHandler.StartAsync(app.Lifetime.ApplicationStopping);
+
+    var signalDispatcher = app.Services.GetRequiredService<SignalDispatcher>();
+    await signalDispatcher.StartAsync(app.Lifetime.ApplicationStopping);
+
+    var announcementHandler = app.Services.GetRequiredService<WorkflowAnnouncementHandler>();
+    await announcementHandler.StartAsync(app.Lifetime.ApplicationStopping);
 
     var dispatcher = app.Services.GetRequiredService<WorkflowDispatcher>();
     await dispatcher.StartAsync(app.Lifetime.ApplicationStopping);

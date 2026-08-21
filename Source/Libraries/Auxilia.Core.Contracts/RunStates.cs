@@ -10,8 +10,17 @@ public static class RunStates
     /// <summary>Core-authored initial state: accepted and published, not yet claimed by a runner.</summary>
     public const string Dispatched = "Dispatched";
 
-    private static readonly string[] Terminal = ["Success", "Failed", "Cancelled", "PreFlightFailed"];
-    private static readonly string[] Active = [Dispatched, "Received", "Queued", "Running", "Draining"];
+    public const string Received = "Received";
+    public const string Queued = "Queued";
+    public const string Running = "Running";
+    public const string Draining = "Draining";
+    public const string Success = "Success";
+    public const string Failed = "Failed";
+    public const string Cancelled = "Cancelled";
+    public const string PreFlightFailed = "PreFlightFailed";
+
+    private static readonly string[] Terminal = [Success, Failed, Cancelled, PreFlightFailed];
+    private static readonly string[] Active = [Dispatched, Received, Queued, Running, Draining];
 
     public static bool IsTerminal(string? state)
         => state is not null && Terminal.Contains(state, StringComparer.Ordinal);

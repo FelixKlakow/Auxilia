@@ -22,6 +22,9 @@ parity.
 | `Auxilia.Core.Contracts` | The wire contracts (this package) |
 | `Auxilia.Core.Client` | Typed HTTP client for the full Core API |
 | `Auxilia.Workflows.Client` | Workflow-domain library: authoring, triggers, artifact chaining |
+| `Auxilia.Workflows` | Workflow SDK for the programs themselves |
+| `Auxilia.Messaging` | Message-bus abstraction + RabbitMQ implementation |
+| `Auxilia.AI` | AI session abstraction for agentic workflow steps |
 | `Auxilia.Steering.Codec` | Dependency-free steering wire protocol |
 
 ## License

@@ -4,10 +4,11 @@ using Auxilia.UniversalDataAccess;
 namespace Auxilia.Core.Api.Data;
 
 /// <summary>
-/// One admin-managed session environment: base environment + initialization script (+ optional
-/// pinned software version). The runner builds the container layer on the fly from the fragment
-/// the Core generates out of the script. The matching provider-catalog entry (category
-/// "environment") is maintained alongside by <c>EnvironmentLayerService</c>.
+/// One admin-managed session environment: a capability name plus one initialization-script
+/// variant per base environment it supports (+ optional pinned software version). The runner
+/// builds the container layer on the fly from the fragment the Core generates out of the
+/// variant matching its base. The matching provider-catalog entry (category "environment") is
+/// maintained alongside by <c>EnvironmentLayerService</c>.
 /// </summary>
 public sealed record EnvironmentLayerRecord : IEntity
 {
@@ -17,14 +18,8 @@ public sealed record EnvironmentLayerRecord : IEntity
 
     public string? Description { get; init; }
 
-    /// <summary>The base this environment initializes on (e.g. "linux", "windows").</summary>
-    public required string BaseEnvironment { get; init; }
-
-    /// <summary>Optional pinned base version (from the environment-base catalog); null = any.</summary>
-    public string? BaseVersion { get; init; }
-
-    /// <summary>The initialization script executed while building the environment layer.</summary>
-    public required string SetupScript { get; init; }
+    /// <summary>Serialized <c>EnvironmentLayerVariant</c> list — one setup script per supported base.</summary>
+    public required string VariantsJson { get; init; }
 
     /// <summary>Optional pinned software version — the seam for later pre-built versioned containers.</summary>
     public string? Version { get; init; }

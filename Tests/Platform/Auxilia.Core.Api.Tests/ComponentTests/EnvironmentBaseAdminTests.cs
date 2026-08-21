@@ -148,8 +148,9 @@ public sealed class EnvironmentBaseAdminTests : CoreApiComponentTestBase
         var entry = catalog!.Items.Single(e => e.ProviderType == "dotnet-11");
         Assert.Multiple(() =>
         {
-            Assert.That(entry.EnvironmentBase, Is.EqualTo("linux"));
-            Assert.That(entry.EnvironmentBaseVersion, Is.EqualTo("ubuntu-24.04"),
+            var baseRef = entry.EnvironmentBases!.Single();
+            Assert.That(baseRef.Name, Is.EqualTo("linux"));
+            Assert.That(baseRef.Version, Is.EqualTo("ubuntu-24.04"),
                 "the pin must ride the catalog entry — dispatch checks read it there");
         });
     }

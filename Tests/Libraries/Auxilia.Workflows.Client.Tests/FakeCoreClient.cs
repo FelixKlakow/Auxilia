@@ -264,6 +264,7 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task DeleteConnectorAsync(Guid id, CancellationToken ct = default) => Nope<Task>();
     public Task DeleteProviderAsync(string providerType, CancellationToken ct = default) => Nope<Task>();
     public Task DeleteEnvironmentLayerAsync(string providerType, CancellationToken ct = default) => Nope<Task>();
+    public Task<EnvironmentLayerDto?> DeleteEnvironmentLayerVariantAsync(string providerType, string baseEnvironment, CancellationToken ct = default) => Nope<Task<EnvironmentLayerDto?>>();
     public Task<IReadOnlyList<EnvironmentBaseDto>> ListEnvironmentBasesAsync(string? search = null, CancellationToken ct = default) => Nope<Task<IReadOnlyList<EnvironmentBaseDto>>>();
     public Task<IReadOnlyList<PlatformSettingDto>> ListPlatformSettingsAsync(CancellationToken ct = default) => Nope<Task<IReadOnlyList<PlatformSettingDto>>>();
     public Task<IReadOnlyList<RunnerDto>> ListRunnersAsync(CancellationToken ct = default) => Nope<Task<IReadOnlyList<RunnerDto>>>();

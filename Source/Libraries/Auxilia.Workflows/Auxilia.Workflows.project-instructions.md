@@ -33,6 +33,7 @@ Source/Libraries/Auxilia.Workflows/
 ├── WorkflowSchema.cs / WorkflowManifest.cs    # Schema = stdout export; Manifest = wire format
 ├── SlotHandlerRegistry.cs / ISlotHandler.cs   # Static registry: providerType string → ISlotHandler
 ├── Capabilities/                              # ICapability marker + NoCapabilities sentinel
+├── Companions/                                # Run pods (test-fabric design §A): RequiresCompanion declarations + builder + CompanionTopologyValidator (digest pinning, bounds, cycles — shared with the Core's registry gate) + RequiresPodControl envelope with IPodController/PodControlClient (runtime spawn over the authenticated pod-control queue)
 ├── Crypto/                                    # EphemeralKeyPair (RSA-4096) + SlotConfigurationCrypto (decrypt helper)
 ├── Environment/                               # IEnvironmentRequirement + Tool / Os / Port requirement records
 ├── Events/                                    # DeclaresEvent descriptors + IEventPublisher/DefaultEventPublisher (workflow.events topic exchange; run.* prefix reserved for the platform; payload cap — big data goes to the artifact store)

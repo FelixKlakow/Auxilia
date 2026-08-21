@@ -344,12 +344,31 @@ public sealed class CoreClientSurfaceSystemTests
         const string layerType = "client-surface-probe-env";
         var layer = await Admin.UpsertEnvironmentLayerAsync(
             new UpsertEnvironmentLayer(layerType, "probe env", "echo layer-setup"), ct);
-        Assert.That(layer.SetupScript, Is.EqualTo("echo layer-setup"));
-        Assert.That((await Admin.GetEnvironmentLayerAsync(layerType, ct))!.BaseEnvironment, Is.EqualTo("linux"));
+        Assert.That(layer.Variants.Single().SetupScript, Is.EqualTo("echo layer-setup"));
+        Assert.That((await Admin.GetEnvironmentLayerAsync(layerType, ct))!.Variants.Single().BaseEnvironment,
+            Is.EqualTo("linux"));
         Assert.That((await Admin.ListEnvironmentLayersAsync(ct: ct)).Select(l => l.ProviderType), Does.Contain(layerType));
         Assert.That((await Admin.ListEnvironmentLayersAsync("probe-env", ct)).Select(l => l.ProviderType),
             Does.Contain(layerType));
-        await Admin.DeleteEnvironmentLayerAsync(layerType, ct);
+
+        // Multi-base variants: the same upsert keyed on a second base ADDS a variant, the
+        // catalog entry advertises the base set, and removing variants one by one removes
+        // the layer with the last — the whole flow over the typed client surface.
+        var twoBases = await Admin.UpsertEnvironmentLayerAsync(new UpsertEnvironmentLayer(
+            layerType, "probe env", "Write-Host layer-setup", BaseEnvironment: "windows"), ct);
+        Assert.That(twoBases.Variants.Select(v => v.BaseEnvironment), Is.EquivalentTo(["linux", "windows"]));
+        var catalogEntry = (await Admin.QueryProviderCatalogAsync(new ProviderCatalogQuery(Take: 200), ct))
+            .Items.Single(p => p.ProviderType == layerType);
+        Assert.That(catalogEntry.EnvironmentBases!.Select(b => b.Name), Is.EquivalentTo(["linux", "windows"]),
+            "the catalog entry carries the supported base set — dispatch checks read it there");
+
+        var afterRemove = await Admin.DeleteEnvironmentLayerVariantAsync(layerType, "windows", ct);
+        Assert.That(afterRemove!.Variants.Single().BaseEnvironment, Is.EqualTo("linux"));
+        await Admin.DeleteEnvironmentLayerVariantAsync(layerType, "linux", ct);
+        Assert.That(await Admin.GetEnvironmentLayerAsync(layerType, ct), Is.Null,
+            "removing the last variant removes the layer");
+        Assert.That(await Admin.DeleteEnvironmentLayerVariantAsync(layerType, "linux", ct), Is.Null,
+            "a missing layer yields null, not an error");
     }
 
     [Test]

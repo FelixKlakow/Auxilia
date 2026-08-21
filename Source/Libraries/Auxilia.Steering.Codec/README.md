@@ -24,6 +24,9 @@ without throwing, so older clients keep working against newer workflows.
 | `Auxilia.Core.Contracts` | The wire contracts |
 | `Auxilia.Core.Client` | Typed HTTP client for the full Core API |
 | `Auxilia.Workflows.Client` | Workflow-domain library: authoring, triggers, artifact chaining |
+| `Auxilia.Workflows` | Workflow SDK for the programs themselves |
+| `Auxilia.Messaging` | Message-bus abstraction + RabbitMQ implementation |
+| `Auxilia.AI` | AI session abstraction for agentic workflow steps |
 | `Auxilia.Steering.Codec` | Dependency-free steering wire protocol (this package) |
 
 ## License

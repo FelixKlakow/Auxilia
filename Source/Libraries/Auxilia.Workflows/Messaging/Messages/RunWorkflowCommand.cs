@@ -67,4 +67,12 @@ public sealed record RunWorkflowCommand(
     /// dispatch. The runner's own store — refreshed by every run's registration — still wins
     /// when populated; this is only the cold-start seed. Null when the registry has no schema.
     /// </summary>
-    string? SchemaJson = null);
+    string? SchemaJson = null,
+    /// <summary>
+    /// The runtime-spawnable base-image map of this dispatch (JSON object, base name or
+    /// name/version → digest-pinned image), snapshotted from the Core's environment-base
+    /// catalog. The runner's pod-control handler resolves spawn requests against THIS map
+    /// only — deterministic per run, no mid-run catalog reads. Null when no base carries an
+    /// image reference (runtime spawns then always fail their base resolution).
+    /// </summary>
+    string? PodBaseImagesJson = null);

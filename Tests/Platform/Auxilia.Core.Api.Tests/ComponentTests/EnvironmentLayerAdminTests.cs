@@ -32,8 +32,9 @@ public sealed class EnvironmentLayerAdminTests : CoreApiComponentTestBase
         var layer = await admin.GetFromJsonAsync<EnvironmentLayerDto>("/api/environment-layers/blender-4");
         Assert.Multiple(() =>
         {
-            Assert.That(layer!.SetupScript, Does.Contain("blender"));
-            Assert.That(layer.BaseEnvironment, Is.EqualTo("linux"));
+            var variant = layer!.Variants.Single();
+            Assert.That(variant.SetupScript, Does.Contain("blender"));
+            Assert.That(variant.BaseEnvironment, Is.EqualTo("linux"));
             Assert.That(layer.Version, Is.EqualTo("4.2"));
         });
 
@@ -117,7 +118,62 @@ public sealed class EnvironmentLayerAdminTests : CoreApiComponentTestBase
             $"/api/environment-layers/msbuild-17/content?runId={runId}&token=tok-2");
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound),
-            "windows-base environments wait for windows-container runners — never composed onto a linux image");
+            "a linux composition must never receive a windows-only layer");
+    }
+
+    [Test]
+    public async Task ContentEndpoint_ServesTheVariantMatchingTheRunnersBase()
+    {
+        var admin = CreateClient();
+        await admin.PostAsJsonAsync("/api/environment-layers", Blender());
+        await admin.PostAsJsonAsync("/api/environment-layers", new UpsertEnvironmentLayer(
+            "blender-4", "Blender 4 preinstalled", "choco install -y blender",
+            BaseEnvironment: EnvironmentBases.Windows, Version: "4.2"));
+        var runId = Guid.NewGuid();
+        await Factory.Services.GetRequiredService<IDataAccess<CoreRunResolutionRecord>>()
+            .SaveAsync(new CoreRunResolutionRecord { Id = runId, ResolutionToken = "tok-3" });
+        var anonymous = Factory.CreateClient();
+
+        var linux = await anonymous.GetAsync(
+            $"/api/environment-layers/blender-4/content?runId={runId}&token=tok-3&base=linux");
+        var windows = await anonymous.GetAsync(
+            $"/api/environment-layers/blender-4/content?runId={runId}&token=tok-3&base=windows");
+
+        Assert.Multiple(async () =>
+        {
+            Assert.That(linux.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            Assert.That(await linux.Content.ReadAsStringAsync(), Does.Contain("base64 -d"));
+            Assert.That(windows.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            Assert.That(await windows.Content.ReadAsStringAsync(), Does.Contain("powershell"),
+                "the windows fragment executes the script via PowerShell with stop-on-error semantics");
+        });
+    }
+
+    [Test]
+    public async Task DeleteVariant_KeepsSiblings_AndTheLastRemovesTheLayer()
+    {
+        var admin = CreateClient();
+        await admin.PostAsJsonAsync("/api/environment-layers", Blender());
+        await admin.PostAsJsonAsync("/api/environment-layers", new UpsertEnvironmentLayer(
+            "blender-4", "Blender 4 preinstalled", "choco install -y blender",
+            BaseEnvironment: EnvironmentBases.Windows, Version: "4.2"));
+
+        var afterFirst = await admin.DeleteAsync("/api/environment-layers/blender-4/variants/windows");
+        Assert.That(afterFirst.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var layer = await admin.GetFromJsonAsync<EnvironmentLayerDto>("/api/environment-layers/blender-4");
+        Assert.That(layer!.Variants.Single().BaseEnvironment, Is.EqualTo("linux"));
+
+        var afterLast = await admin.DeleteAsync("/api/environment-layers/blender-4/variants/linux");
+        Assert.Multiple(async () =>
+        {
+            Assert.That(afterLast.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            Assert.That(
+                (await admin.GetAsync("/api/environment-layers/blender-4")).StatusCode,
+                Is.EqualTo(HttpStatusCode.NotFound),
+                "a layer without a single variant composes nowhere and disappears");
+            var catalog = await admin.GetFromJsonAsync<PagedResult<ProviderCatalogEntry>>("/api/provider-catalog");
+            Assert.That(catalog!.Items.Select(e => e.ProviderType), Does.Not.Contain("blender-4"));
+        });
     }
 
     [Test]

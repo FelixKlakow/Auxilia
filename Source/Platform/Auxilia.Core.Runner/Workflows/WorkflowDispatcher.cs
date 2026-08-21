@@ -45,10 +45,13 @@ public sealed class WorkflowDispatcher(
     Auxilia.PlatformData.Artifacts.IArtifactStore artifactStore,
     NetworkPolicyResolver networkPolicyResolver,
     WorkspaceManager workspaceManager,
+    RunnerHostPlatformProbe hostPlatform,
     IRepositoryAuthResolver repositoryAuthResolver,
     AuditLog auditLog,
     CoreRunnerInfo instanceInfo,
     Auxilia.PlatformData.Protection.ISettingsProtector settingsProtector,
+    Pods.IPodHost podHost,
+    Pods.PodControlRegistry podControlRegistry,
     ILogger<WorkflowDispatcher> logger)
 {
     private IAsyncDisposable? _subscription;
@@ -264,9 +267,14 @@ public sealed class WorkflowDispatcher(
             try
             {
                 var http = httpClientFactory.CreateClient("workflow-packages");
+                // Ask for the variant matching the base THIS runner hosts (the Docker daemon's
+                // platform, same source as the heartbeat); an unreachable daemon falls back to
+                // linux — the only base such a runner could compose anyway.
+                var hostBase = (await hostPlatform.GetAsync(token))?.Os ?? "linux";
                 var url = $"{baseAddress.TrimEnd('/')}/api/environment-layers/"
                           + $"{Uri.EscapeDataString(capability)}/content"
-                          + $"?runId={cmd.CommandId}&token={Uri.EscapeDataString(cmd.ResolutionToken ?? "")}";
+                          + $"?runId={cmd.CommandId}&token={Uri.EscapeDataString(cmd.ResolutionToken ?? "")}"
+                          + $"&base={Uri.EscapeDataString(hostBase)}";
                 using var response = await http.GetAsync(url, token);
                 if (!response.IsSuccessStatusCode)
                     return null;
@@ -422,6 +430,53 @@ public sealed class WorkflowDispatcher(
                 instanceId.ToString(), (repositories.Count + emptyWorkspaces.Count).ToString(), ct: ct);
         }
 
+        // The run's pod (design: test-fabric-and-swarm §A): declared companions resolved
+        // against the run's inputs (counts clamped to the signed bounds), their facts
+        // announced to the workflow, the topology re-validated as defense in depth (the
+        // registry gate refused invalid ones long ago — a stale runner store must not
+        // bypass that).
+        Pods.PodPlan? podPlan = null;
+        if (schema is not null && (schema.Companions.Count > 0 || schema.PodControl is not null))
+        {
+            var topologyErrors = Auxilia.Workflows.Companions.CompanionTopologyValidator
+                .Validate(schema.Companions, schema.PodControl);
+            if (topologyErrors.Count > 0)
+            {
+                await FailPreFlightAsync(instanceId, workflowType,
+                    "invalid companion topology: " + string.Join(" ", topologyErrors), ct);
+                return;
+            }
+            podPlan = Pods.PodPlanner.Plan(
+                schema.Companions, schema.PodControl, command.Context, instanceId);
+            if (podPlan is not null)
+            {
+                foreach (var (key, value) in podPlan.WorkflowAnnouncements)
+                    env[key] = value;
+                await auditLog.AppendAsync(
+                    "core-runner", "workflow.pod-planned", instanceId.ToString(),
+                    podPlan.Companions.Count.ToString(),
+                    JsonSerializer.Serialize(new
+                    {
+                        network = podPlan.NetworkName,
+                        companions = podPlan.Companions.Select(c => c.InstanceName)
+                    }), ct);
+            }
+
+            // Runtime pod control: register the run's state (the signed envelope + the
+            // CONFIGURATION-pinned base map snapshotted into the command) and hand the
+            // workflow its pod-control queue.
+            if (schema.PodControl is { } podControl && podPlan is not null)
+            {
+                env[WorkflowEnvironmentVariables.PodControlQueue] =
+                    dispatcherSettings.Value.PodControlQueueName;
+                podControlRegistry.Register(instanceId, new Pods.PodControlState(
+                    podControl.MaxContainers,
+                    ParseBaseImages(command.PodBaseImagesJson),
+                    podPlan.NetworkName,
+                    podPlan.Volumes.ToDictionary(v => v.Name, v => v.DockerVolumeName)));
+            }
+        }
+
         // Workflows declaring an interactive web terminal get its container named so the
         // backend can reach the terminal by name on the shared network. A declared gate makes
         // the terminal per-run — evaluated as data against the run's context.
@@ -456,15 +511,16 @@ public sealed class WorkflowDispatcher(
                         TerminalContainerName = terminalContainerName,
                         OnExited = onContainerExited,
                         InstanceId = instanceId,
-                        OnContainerCreated = onContainerCreated
+                        OnContainerCreated = onContainerCreated,
+                        Pod = podPlan
                     },
                     ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // A launch that never started a container (plugin/image incompatibility, a
-                // failed environment-image build, Docker down) must FAIL the run visibly —
-                // never leave it stranded in Received.
+                // failed environment-image build, a companion that never became ready,
+                // Docker down) must FAIL the run visibly — never leave it stranded.
                 logger.LogError(ex,
                     "Workflow launch failed pre-start. CommandId={CommandId} WorkflowType={WorkflowType}",
                     command.CommandId, workflowType);
@@ -529,7 +585,8 @@ public sealed class WorkflowDispatcher(
                 TerminalContainerName = terminalContainerName,
                 OnExited = onContainerExited,
                 InstanceId = instanceId,
-                OnContainerCreated = onContainerCreated
+                OnContainerCreated = onContainerCreated,
+                Pod = podPlan
             }, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -646,6 +703,10 @@ public sealed class WorkflowDispatcher(
             tokenRegistry.Consume(instanceId);
             await auditLog.AppendAsync(
                 "core-runner", "workflow.container-exit", instanceId.ToString(), "failed", reason);
+            // A crashed workflow never sends the terminal state message that normally tears
+            // its pod down — sweep here (idempotent, no-op for pod-less runs).
+            podControlRegistry.Consume(instanceId);
+            await podHost.TeardownAsync(instanceId);
         }
         catch (Exception ex)
         {
@@ -661,6 +722,23 @@ public sealed class WorkflowDispatcher(
         await instanceRegistry.SetStateAsync(instanceId, "PreFlightFailed", reason, ct);
         await statusPublisher.PublishAsync(instanceId, workflowType, "PreFlightFailed", reason, ct: ct);
         tokenRegistry.Consume(instanceId);
+        podControlRegistry.Consume(instanceId);
+    }
+
+    /// <summary>The command's configuration-pinned spawnable base map; empty on anything malformed.</summary>
+    internal static IReadOnlyDictionary<string, string> ParseBaseImages(string? podBaseImagesJson)
+    {
+        if (string.IsNullOrWhiteSpace(podBaseImagesJson))
+            return new Dictionary<string, string>();
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(podBaseImagesJson)
+                   ?? new Dictionary<string, string>();
+        }
+        catch (JsonException)
+        {
+            return new Dictionary<string, string>();
+        }
     }
 
     private async Task MarkQueuedAsync(

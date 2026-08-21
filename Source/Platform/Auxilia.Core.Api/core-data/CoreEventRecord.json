@@ -25,5 +25,68 @@
     "SourceRunId": "38fe361d-d59c-449b-b862-e8e2ba0f8d32",
     "PayloadJson": "{\u0022state\u0022:\u0022Success\u0022,\u0022errorMessage\u0022:null}",
     "CreatedUtc": "2026-08-08T06:26:30.1301058+00:00"
+  },
+  {
+    "Id": "60882763-121e-f4b2-fa0d-7a8d84a403e3",
+    "EventType": "run.failed",
+    "WorkflowType": "implementation",
+    "WorkItemId": "",
+    "SourceRunId": "87e46bd2-d11a-43c8-bef3-43e45a49c37c",
+    "PayloadJson": "{\u0022state\u0022:\u0022Failed\u0022,\u0022errorMessage\u0022:\u0022The dispatch context carries no work-item-id \\u2014 an implementation run needs its story.\u0022}",
+    "CreatedUtc": "2026-08-09T16:48:15.8085308+00:00"
+  },
+  {
+    "Id": "8bb89348-a90a-aef4-c167-fbb920a267f0",
+    "EventType": "run.failed",
+    "WorkflowType": "implementation",
+    "WorkItemId": "",
+    "SourceRunId": "7fae07c3-f76d-430c-94ef-2722b02e939e",
+    "PayloadJson": "{\u0022state\u0022:\u0022Failed\u0022,\u0022errorMessage\u0022:\u0022The dispatch context carries no work-item-id \\u2014 an implementation run needs its story.\u0022}",
+    "CreatedUtc": "2026-08-09T17:06:20.2035761+00:00"
+  },
+  {
+    "Id": "38f614fd-7b2f-0106-a13d-c85b41085c0c",
+    "EventType": "run.failed",
+    "WorkflowType": "implementation",
+    "WorkItemId": "",
+    "SourceRunId": "fc86ef97-c7af-42a6-8d1a-fe75e6ae028e",
+    "PayloadJson": "{\u0022state\u0022:\u0022Failed\u0022,\u0022errorMessage\u0022:\u0022git push failed: \u0022}",
+    "CreatedUtc": "2026-08-10T18:41:43.6821586+00:00"
+  },
+  {
+    "Id": "ca735c2b-3f83-4dd9-de3d-c4a8f02bc98c",
+    "EventType": "run.failed",
+    "WorkflowType": "implementation",
+    "WorkItemId": "",
+    "SourceRunId": "b60b7c69-99e4-4b7a-8527-275f632ac786",
+    "PayloadJson": "{\u0022state\u0022:\u0022Failed\u0022,\u0022errorMessage\u0022:\u0022runner restarted and the run\\u0027s container no longer exists\u0022}",
+    "CreatedUtc": "2026-08-16T15:21:47.6527097+00:00"
+  },
+  {
+    "Id": "efe9054b-ec9c-b808-ec9f-22e4ea4baa88",
+    "EventType": "run.succeeded",
+    "WorkflowType": "example-parametrised",
+    "WorkItemId": "",
+    "SourceRunId": "2879f526-091f-4619-9ce8-4638d3ebfd71",
+    "PayloadJson": "{\u0022state\u0022:\u0022Success\u0022,\u0022errorMessage\u0022:null}",
+    "CreatedUtc": "2026-08-16T15:29:33.6097433+00:00"
+  },
+  {
+    "Id": "4a41982f-b951-5e88-1ecf-358cae396686",
+    "EventType": "run.succeeded",
+    "WorkflowType": "example-parametrised",
+    "WorkItemId": "",
+    "SourceRunId": "dad1ddec-e2c2-4f1f-9d6f-ee1b32cd2fc5",
+    "PayloadJson": "{\u0022state\u0022:\u0022Success\u0022,\u0022errorMessage\u0022:null}",
+    "CreatedUtc": "2026-08-16T15:29:57.6774971+00:00"
+  },
+  {
+    "Id": "fffbfdfd-7898-d06e-1209-1a7aad32459d",
+    "EventType": "run.succeeded",
+    "WorkflowType": "example-parametrised",
+    "WorkItemId": "",
+    "SourceRunId": "b08bae8a-446e-4700-b977-0f0d74c4c4cc",
+    "PayloadJson": "{\u0022state\u0022:\u0022Success\u0022,\u0022errorMessage\u0022:null}",
+    "CreatedUtc": "2026-08-16T16:31:46.2155559+00:00"
   }
 ]

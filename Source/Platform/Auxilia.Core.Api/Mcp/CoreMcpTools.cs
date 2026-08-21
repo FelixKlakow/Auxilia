@@ -100,7 +100,11 @@ public sealed class CoreMcpTools(
 
     [McpServerTool(Name = "approve_workflow_type")]
     [Description("Signing authority: approves a pending workflow-type registration (a Core-stored package is " +
-                 "re-signed with the platform key when configured). The type becomes Active and runnable.")]
+                 "re-signed with the platform key when configured). The type becomes Active and runnable. " +
+                 "Call get_workflow_schema FIRST and review its spawn summary — companions, runtime " +
+                 "pod-control envelope, maxPodContainers — since approval permits exactly that topology. " +
+                 "A type WITHOUT a readable schema (docker:// registered schemaless) is a blind trust " +
+                 "decision — say so before approving.")]
     public async Task<CallToolResult> ApproveWorkflowTypeAsync(
         RequestContext<CallToolRequestParams> context,
         [Description("Workflow type name.")] string workflowType,
@@ -363,11 +367,13 @@ public sealed class CoreMcpTools(
 
     [McpServerTool(Name = "list_artifacts")]
     [Description("Lists persisted-artifact metadata, newest first. Optional exact-match filters on " +
-                 "artifact type and work item id — chaining decisions read this, payloads come via REST.")]
+                 "artifact type, work item id, and run id (dispatch or instance id — both resolve) — " +
+                 "chaining decisions read this, payloads come via REST.")]
     public async Task<CallToolResult> ListArtifactsAsync(
         RequestContext<CallToolRequestParams> context,
         [Description("Exact artifact type, e.g. \"code-review-result\".")] string? artifactType = null,
         [Description("Exact work item id.")] string? workItemId = null,
+        [Description("Run id (GUID) — the dispatch id from run_workflow works here too.")] string? runId = null,
         [Description("Maximum artifacts to return (default 50, max 500).")] int limit = 50,
         CancellationToken cancellationToken = default)
     {
@@ -380,6 +386,15 @@ public sealed class CoreMcpTools(
             all = all.Where(a => string.Equals(a.ArtifactType, artifactType, StringComparison.Ordinal));
         if (!string.IsNullOrWhiteSpace(workItemId))
             all = all.Where(a => string.Equals(a.WorkItemId, workItemId, StringComparison.Ordinal));
+        if (!string.IsNullOrWhiteSpace(runId))
+        {
+            if (!Guid.TryParse(runId, out var run))
+                return Error("runId must be a GUID.");
+            // Callers hold the dispatch id; artifacts are recorded under the runner's instance
+            // id — resolve through the run record like the REST surface.
+            var effectiveRunId = (await runView.GetRecordAsync(run, cancellationToken))?.Id ?? run;
+            all = all.Where(a => a.RunInstanceId == effectiveRunId);
+        }
         var page = all.OrderByDescending(a => a.CreatedUtc).Take(Math.Clamp(limit, 1, 500))
             .Select(a => new ArtifactDto(
                 a.Id, a.ArtifactType, a.WorkflowType, a.WorkItemId, a.RunInstanceId,
@@ -771,7 +786,10 @@ public sealed class CoreMcpTools(
 
     [McpServerTool(Name = "get_workflow_schema")]
     [Description("Returns a registered workflow type's full schema: declared slots and their capability " +
-                 "requirements, run inputs, views, trigger kinds, and environment requirements.")]
+                 "requirements, run inputs, views, trigger kinds, and environment requirements — plus the " +
+                 "pod spawn summary (declared companions, the runtime pod-control envelope, and " +
+                 "maxPodContainers, the hard per-run container cap). Review that summary before approving " +
+                 "a pending type: it is exactly what the approval permits to run.")]
     public async Task<CallToolResult> GetWorkflowSchemaAsync(
         RequestContext<CallToolRequestParams> context,
         [Description("Workflow type name.")] string workflowType,

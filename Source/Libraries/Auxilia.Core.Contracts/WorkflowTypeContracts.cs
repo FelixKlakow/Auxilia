@@ -123,6 +123,8 @@ public sealed record WorkflowInputDto(
 /// <summary>
 /// Rendering kinds a declared input can carry — editors render inputs BY KIND, never by name.
 /// An unknown kind renders as <see cref="Text"/> so old editors stay usable with newer schemas.
+/// The workflow SDK mirrors this vocabulary as <c>Auxilia.Workflows.WorkflowInputKinds</c> —
+/// the two must stay identical (one wire vocabulary, declared and rendered).
 /// </summary>
 public static class InputKinds
 {
@@ -175,4 +177,40 @@ public sealed record WorkflowSchemaDto(
 {
     /// <summary>Event types the workflow declares it publishes.</summary>
     public IReadOnlyList<WorkflowEventDto> Events { get; init; } = [];
+
+    /// <summary>Companion containers of the run's pod — the approval's spawn summary.</summary>
+    public IReadOnlyList<WorkflowCompanionDto> Companions { get; init; } = [];
+
+    /// <summary>
+    /// The runtime pod-control envelope, when the workflow declares one: it may spawn
+    /// companions at runtime from configuration-pinned catalog bases, up to its cap.
+    /// </summary>
+    public WorkflowPodControlDto? PodControl { get; init; }
+
+    /// <summary>
+    /// Hard cap of the pod topology: every declared companion's upper scale bound plus the
+    /// pod-control envelope.
+    /// </summary>
+    public int MaxPodContainers { get; init; }
 }
+
+/// <summary>The declared runtime-spawn envelope — part of the approval's spawn summary.</summary>
+public sealed record WorkflowPodControlDto(
+    int MaxContainers,
+    string? Description,
+    IReadOnlyList<string> PodVolumes);
+
+/// <summary>
+/// One declared companion container of a workflow's per-run pod: a digest-pinned inert
+/// service the runner materializes on the run's private network. Rendered prominently in
+/// the registry approval UI — approving the type IS the spawn grant.
+/// </summary>
+public sealed record WorkflowCompanionDto(
+    string Name,
+    string Image,
+    int MinInstances,
+    int MaxInstances,
+    string? CountInput,
+    IReadOnlyList<string> StartAfter,
+    int? MemoryMb = null,
+    double? Cpus = null);

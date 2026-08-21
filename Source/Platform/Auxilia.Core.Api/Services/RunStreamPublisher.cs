@@ -166,11 +166,14 @@ public sealed class RunStreamPublisher(
             _aliasWork.Writer.TryWrite((instanceId, true));
         }
 
+        // The terminal endpoint is a Core-internal address ("never leaves the Core") — the
+        // client surface signals terminal PRESENCE via RunStatus.HasTerminal instead.
         PublishAliased(instanceId, runId => new RunStreamEvent(
             RunStreamEvent.StatusKind,
             runId,
             Sequence: 0,
-            PayloadJson: JsonSerializer.Serialize(statusEvent, JsonSerializerOptions.Web),
+            PayloadJson: JsonSerializer.Serialize(
+                statusEvent with { TerminalEndpoint = null }, JsonSerializerOptions.Web),
             TimestampUtc: statusEvent.TimestampUtc));
 
         if (CoreRunStates.IsTerminal(statusEvent.State))
@@ -225,8 +228,7 @@ public sealed class RunStreamPublisher(
                         continue;
                     var final = new WorkflowStatusEvent(
                         record.Id, record.WorkflowType, record.State, record.ErrorMessage,
-                        record.UpdatedUtc, record.OwnerServiceId, record.CommandId,
-                        record.TerminalEndpoint);
+                        record.UpdatedUtc, record.OwnerServiceId, record.CommandId);
                     broker.Publish(new RunStreamEvent(
                         RunStreamEvent.StatusKind, id, Sequence: 0,
                         PayloadJson: JsonSerializer.Serialize(final, JsonSerializerOptions.Web),
@@ -248,8 +250,7 @@ public sealed class RunStreamPublisher(
                     // otherwise keepalives hold the orphaned subscriber open forever.
                     var recovered = new WorkflowStatusEvent(
                         rekeyed.Id, rekeyed.WorkflowType, rekeyed.State, rekeyed.ErrorMessage,
-                        rekeyed.UpdatedUtc, rekeyed.OwnerServiceId, rekeyed.CommandId,
-                        rekeyed.TerminalEndpoint);
+                        rekeyed.UpdatedUtc, rekeyed.OwnerServiceId, rekeyed.CommandId);
                     PublishAliased(rekeyed.Id, runId => new RunStreamEvent(
                         RunStreamEvent.StatusKind, runId, Sequence: 0,
                         PayloadJson: JsonSerializer.Serialize(recovered, JsonSerializerOptions.Web),

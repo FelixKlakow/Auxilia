@@ -6,6 +6,25 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <PropertyGroup Label="Packaging">
+    <PackageId>Auxilia.AI</PackageId>
+    <Version>0.2.0</Version>
+    <Authors>Felix Klakow</Authors>
+    <Description>The Auxilia AI session abstraction workflows build agentic steps on: provider-agnostic sessions, typed tool-call capability sinks (ICapabilityMcpTools) for structured results, and MCP plumbing. Referenced by the workflow SDK.</Description>
+    <RepositoryUrl>https://github.com/FelixKlakow/Auxilia</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/FelixKlakow/Auxilia</PackageProjectUrl>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>auxilia;ai;agents;mcp</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\..\LICENSE" Pack="true" PackagePath="" Visible="false" />
+    <None Include="README.md" Pack="true" PackagePath="" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Agents.AI" Version="1.16.0" />

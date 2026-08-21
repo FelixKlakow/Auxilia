@@ -11,6 +11,9 @@ public static class WorkflowEnvironmentVariables
     public const string AnnouncementQueue = "Workflow__AnnouncementQueue";
     public const string SlotActivationQueue = "Workflow__SlotActivationQueue";
     public const string ResourceProxyQueue = "Workflow__ResourceProxyQueue";
+
+    /// <summary>Queue of the runner's pod-control handler; present only for pod-controlled runs.</summary>
+    public const string PodControlQueue = "Workflow__PodControlQueue";
     public const string InstanceId = "Workflow__InstanceId";
     public const string InstanceToken = "Workflow__InstanceToken";
     /// <summary>Directory where the workflow writes its declared outputs for persistence.</summary>
@@ -29,6 +32,17 @@ public static class WorkflowEnvironmentVariables
     /// SDK executes it in the mount's root, inside the container, before the application.
     /// </summary>
     public const string WorkspaceMountSetupPrefix = "Workflow__WorkspaceMountSetup__";
+
+    /// <summary>
+    /// Prefix of the per-companion announcements (suffixed with the upper-cased companion
+    /// name and a fact suffix): <c>…__COUNT</c> = resolved instance count, <c>…__ENDPOINTS</c> =
+    /// comma-joined <c>host:port</c> list (probe port), <c>…__SECRET__&lt;VAR&gt;</c> = a run-minted
+    /// secret shared with that companion.
+    /// </summary>
+    public const string CompanionPrefix = "Workflow__Companion__";
+
+    /// <summary>Root of the run's shared pod volumes inside the workflow container.</summary>
+    public const string PodVolumeRoot = "/workspace/pod";
 
     /// <summary>
     /// The single workspace mount's effective root (per-mount working directory included), or

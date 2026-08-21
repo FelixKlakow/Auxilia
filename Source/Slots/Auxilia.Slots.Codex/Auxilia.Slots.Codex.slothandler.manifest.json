@@ -1,0 +1,35 @@
+{
+  "ProviderType": "codex-cli",
+  "ContentHashBase64": "",
+  "SignatureBase64": "",
+  "PublicKeyBase64": "",
+  "Contracts": [
+    "Auxilia.Workflows.AiAgent.CodingAgent.ICodingAgent"
+  ],
+  "Category": "coding-agent",
+  "Description": "Runs the OpenAI Codex CLI as the coding agent of a workflow; the API key reaches the agent container just-in-time.",
+  "Settings": [
+    {
+      "Key": "ApiKey",
+      "Label": "OpenAI API key",
+      "Kind": "Secret",
+      "Required": true,
+      "HelpText": "An OpenAI API key with Codex access. Stored encrypted and never displayed back."
+    },
+    {
+      "Key": "Model",
+      "Label": "Model",
+      "Kind": "Text",
+      "Required": false,
+      "HelpText": "Optional model override; the CLI's default model is used when empty."
+    },
+    {
+      "Key": "CliPath",
+      "Label": "CLI path",
+      "Kind": "Text",
+      "Required": false,
+      "HelpText": "Path of the Codex CLI executable inside the workflow image; only changed for testing.",
+      "DefaultValue": "codex"
+    }
+  ]
+}

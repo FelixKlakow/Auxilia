@@ -75,6 +75,8 @@ public class WorkflowStateHandlerTests
             TestStores.NewStatusPublisher(_mockBus.Object),
             TestStores.NewArtifactPersister(_mockBus.Object, _artifactStore, _settings),
             TestStores.NewWorkspaceManager(_settings),
+            new FakePodHost(),
+            new Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry(),
             Options.Create(_settings),
             NullLogger<WorkflowStateHandler>.Instance);
 

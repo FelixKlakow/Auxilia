@@ -29,6 +29,9 @@ public sealed class WorkflowDispatcherSettings
     /// </summary>
     public string ResourceProxyQueueName { get; set; } = "workflow-resource-proxy";
 
+    /// <summary>Queue of the runtime pod-control handler (run-pod design §"pod controller").</summary>
+    public string PodControlQueueName { get; set; } = "workflow-pod-control";
+
     /// <summary>Validity of a delivered slot credential; the SDK re-requests after expiry.</summary>
     public TimeSpan SlotCredentialLifetime { get; set; } = TimeSpan.FromMinutes(30);
 

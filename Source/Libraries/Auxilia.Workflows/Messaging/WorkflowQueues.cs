@@ -22,4 +22,8 @@ public static class WorkflowQueues
     /// </summary>
     public static string InputQueueFor(Guid workflowInstanceId)
         => $"workflow-response-{workflowInstanceId}-inputs";
+
+    /// <summary>Pod-control responses use their own per-instance queue, like resources/inputs.</summary>
+    public static string PodControlResponseQueueFor(Guid workflowInstanceId)
+        => $"workflow-response-{workflowInstanceId}-pod";
 }

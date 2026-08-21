@@ -9,8 +9,7 @@
     "RequiredCredentialContract": null,
     "MountsIntoWorkspace": false,
     "ComposesEnvironment": false,
-    "EnvironmentBase": null,
-    "EnvironmentBaseVersion": null,
+    "EnvironmentBasesJson": null,
     "OAuthRefreshJson": "{\u0022TokenEndpoint\u0022:\u0022https://console.anthropic.com/v1/oauth/token\u0022,\u0022ClientId\u0022:\u00229d1c250a-e61b-44d9-88ed-5944d1962f5e\u0022,\u0022AccessTokenKey\u0022:\u0022OAuthToken\u0022,\u0022RefreshTokenKey\u0022:\u0022OAuthRefreshToken\u0022,\u0022ExpiresAtKey\u0022:\u0022OAuthExpiresAt\u0022}",
     "ModelCatalogJson": "{\u0022Endpoint\u0022:\u0022https://api.anthropic.com/v1/models?limit=100\u0022,\u0022ItemsPath\u0022:\u0022data\u0022,\u0022IdField\u0022:\u0022id\u0022,\u0022LabelField\u0022:\u0022display_name\u0022,\u0022Headers\u0022:{\u0022anthropic-version\u0022:\u00222023-06-01\u0022},\u0022ApiKeyHeader\u0022:\u0022x-api-key\u0022,\u0022ApiKeySettingKey\u0022:\u0022ApiKey\u0022,\u0022BearerSettingKey\u0022:\u0022OAuthToken\u0022,\u0022BearerHeaders\u0022:{\u0022anthropic-beta\u0022:\u0022oauth-2025-04-20\u0022}}",
     "Description": "Runs the Claude Code CLI as the coding agent of a workflow; credentials reach the agent container just-in-time. Interactive runs route permission prompts to the operator."
@@ -25,8 +24,7 @@
     "RequiredCredentialContract": null,
     "MountsIntoWorkspace": false,
     "ComposesEnvironment": false,
-    "EnvironmentBase": null,
-    "EnvironmentBaseVersion": null,
+    "EnvironmentBasesJson": null,
     "OAuthRefreshJson": null,
     "ModelCatalogJson": null,
     "Description": "Your GitHub account. One connection serves ALL its repositories: live repository/branch lists, just-in-time clone auth \u2014 the credential never enters a container."
@@ -41,8 +39,7 @@
     "RequiredCredentialContract": null,
     "MountsIntoWorkspace": false,
     "ComposesEnvironment": false,
-    "EnvironmentBase": null,
-    "EnvironmentBaseVersion": null,
+    "EnvironmentBasesJson": null,
     "OAuthRefreshJson": null,
     "ModelCatalogJson": null,
     "Description": "A TFS / Azure DevOps account (personal access token). One connection serves all repositories the account can reach; resolved just-in-time, never inside a container."
@@ -57,8 +54,7 @@
     "RequiredCredentialContract": "git-credential",
     "MountsIntoWorkspace": true,
     "ComposesEnvironment": false,
-    "EnvironmentBase": null,
-    "EnvironmentBaseVersion": null,
+    "EnvironmentBasesJson": null,
     "OAuthRefreshJson": null,
     "ModelCatalogJson": null,
     "Description": "A git repository the run works on: cloned into the workspace before launch, authenticated by a connected account, picked live from that account."
@@ -73,8 +69,7 @@
     "RequiredCredentialContract": null,
     "MountsIntoWorkspace": false,
     "ComposesEnvironment": false,
-    "EnvironmentBase": null,
-    "EnvironmentBaseVersion": null,
+    "EnvironmentBasesJson": null,
     "OAuthRefreshJson": null,
     "ModelCatalogJson": null,
     "Description": "Runs the GitHub Copilot CLI as the coding agent of a workflow; the token reaches the agent container just-in-time."
@@ -89,8 +84,7 @@
     "RequiredCredentialContract": null,
     "MountsIntoWorkspace": false,
     "ComposesEnvironment": true,
-    "EnvironmentBase": null,
-    "EnvironmentBaseVersion": null,
+    "EnvironmentBasesJson": "[{\"Name\":\"linux\",\"Version\":null}]",
     "OAuthRefreshJson": null,
     "ModelCatalogJson": null,
     "Description": "The .NET 10 SDK preinstalled \u2014 build, test, and run .NET projects inside the session."
@@ -105,8 +99,7 @@
     "RequiredCredentialContract": null,
     "MountsIntoWorkspace": false,
     "ComposesEnvironment": true,
-    "EnvironmentBase": null,
-    "EnvironmentBaseVersion": null,
+    "EnvironmentBasesJson": "[{\"Name\":\"linux\",\"Version\":null}]",
     "OAuthRefreshJson": null,
     "ModelCatalogJson": null,
     "Description": "Node.js 22 with npm preinstalled \u2014 build and run JavaScript/TypeScript projects inside the session."
@@ -121,8 +114,7 @@
     "RequiredCredentialContract": null,
     "MountsIntoWorkspace": false,
     "ComposesEnvironment": false,
-    "EnvironmentBase": null,
-    "EnvironmentBaseVersion": null,
+    "EnvironmentBasesJson": null,
     "OAuthRefreshJson": null,
     "ModelCatalogJson": null,
     "Description": "SIMULATION: scripted TFS stand-in with per-operation delay - live-view testing only."
@@ -137,8 +129,7 @@
     "RequiredCredentialContract": null,
     "MountsIntoWorkspace": false,
     "ComposesEnvironment": false,
-    "EnvironmentBase": null,
-    "EnvironmentBaseVersion": null,
+    "EnvironmentBasesJson": null,
     "OAuthRefreshJson": null,
     "ModelCatalogJson": null,
     "Description": "Backs a session with the mounted workspace directory."
@@ -153,8 +144,7 @@
     "RequiredCredentialContract": null,
     "MountsIntoWorkspace": true,
     "ComposesEnvironment": false,
-    "EnvironmentBase": null,
-    "EnvironmentBaseVersion": null,
+    "EnvironmentBasesJson": null,
     "OAuthRefreshJson": null,
     "ModelCatalogJson": null,
     "Description": "A fresh, empty scratch directory materialized into the run\u0027s workspace - no clone, no credential."

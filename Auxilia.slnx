@@ -48,6 +48,7 @@
   <Folder Name="/Source/Slots/">
     <Project Path="Source\Slots\Auxilia.Slots.AzureDevOps\Auxilia.Slots.AzureDevOps.csproj" />
     <Project Path="Source\Slots\Auxilia.Slots.ClaudeCode\Auxilia.Slots.ClaudeCode.csproj" />
+    <Project Path="Source\Slots\Auxilia.Slots.Codex\Auxilia.Slots.Codex.csproj" />
     <Project Path="Source\Slots\Auxilia.Slots.CodingSession\Auxilia.Slots.CodingSession.csproj" />
     <Project Path="Source\Slots\Auxilia.Slots.CredentialProbe\Auxilia.Slots.CredentialProbe.csproj" />
     <Project Path="Source\Slots\Auxilia.Slots.Email\Auxilia.Slots.Email.csproj" />
@@ -84,6 +85,7 @@
   <Folder Name="/Tests/Slots/">
     <Project Path="Tests\Slots\Auxilia.Slots.AzureDevOps.Tests\Auxilia.Slots.AzureDevOps.Tests.csproj" />
     <Project Path="Tests\Slots\Auxilia.Slots.ClaudeCode.Tests\Auxilia.Slots.ClaudeCode.Tests.csproj" />
+    <Project Path="Tests\Slots\Auxilia.Slots.Codex.Tests\Auxilia.Slots.Codex.Tests.csproj" />
     <Project Path="Tests\Slots\Auxilia.Slots.Email.Tests\Auxilia.Slots.Email.Tests.csproj" />
     <Project Path="Tests\Slots\Auxilia.Slots.GitHub.Tests\Auxilia.Slots.GitHub.Tests.csproj" />
     <Project Path="Tests\Slots\Auxilia.Slots.GitHubCopilot.Tests\Auxilia.Slots.GitHubCopilot.Tests.csproj" />
@@ -100,6 +102,7 @@
     <Project Path="Tests\System\Auxilia.FakeSlots.CodeReview.Happy\Auxilia.FakeSlots.CodeReview.Happy.csproj" />
     <Project Path="Tests\System\Auxilia.FakeSlots.CodeReview.WriteBackFailure\Auxilia.FakeSlots.CodeReview.WriteBackFailure.csproj" />
     <Project Path="Tests\System\Auxilia.FakeSlots.Tests\Auxilia.FakeSlots.Tests.csproj" />
+    <Project Path="Tests\System\Auxilia.SimStack\Auxilia.SimStack.csproj" />
     <Project Path="Tests\System\Auxilia.SystemTestSuite\Auxilia.SystemTestSuite.csproj" />
     <Project Path="Tests\System\Auxilia.Workflows.Testing\Auxilia.Workflows.Testing.csproj" />
     <Project Path="Tests\System\Auxilia.Workflows.Testing.Tests\Auxilia.Workflows.Testing.Tests.csproj" />

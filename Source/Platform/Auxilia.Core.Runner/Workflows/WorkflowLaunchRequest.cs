@@ -70,6 +70,14 @@ public sealed record WorkflowLaunchRequest(
     /// leaves a matched record.
     /// </summary>
     public Func<string, Task>? OnContainerCreated { get; init; }
+
+    /// <summary>
+    /// The run's resolved pod (companion containers on a private per-run network), when the
+    /// schema declares one. Materialized before the workflow container starts; the workflow
+    /// container joins the pod network additionally and binds every pod volume under
+    /// <c>/workspace/pod</c>.
+    /// </summary>
+    public Pods.PodPlan? Pod { get; init; }
 }
 
 /// <summary>How a workflow container ended: the exit code and the last lines it wrote.</summary>

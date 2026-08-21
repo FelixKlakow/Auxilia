@@ -578,9 +578,10 @@ app.MapGet("/api/runs/{id:guid}/stream", async (
         // before dispatch) → no snapshot, the stream just stays open.
         if (record is not null)
         {
+            // TerminalEndpoint stays Core-internal — presence rides RunStatus.HasTerminal.
             var snapshot = new Auxilia.Workflows.Messaging.Messages.WorkflowStatusEvent(
                 record.Id, record.WorkflowType, record.State, record.ErrorMessage,
-                record.UpdatedUtc, record.OwnerServiceId, record.CommandId, record.TerminalEndpoint);
+                record.UpdatedUtc, record.OwnerServiceId, record.CommandId);
             await SseWriter.WriteEventAsync(http.Response, new RunStreamEvent(
                 RunStreamEvent.StatusKind, id, 0,
                 System.Text.Json.JsonSerializer.Serialize(snapshot, System.Text.Json.JsonSerializerOptions.Web),
@@ -777,6 +778,7 @@ app.MapGet("/api/artifacts", async (
         string? artifactType, string? workItemId, Guid? runId, DateTimeOffset? createdAfterUtc,
         HttpContext http, IPolicyEngine policy,
         Auxilia.UniversalDataAccess.IDataAccess<CoreArtifactRecord> artifacts,
+        RunReadService runReads,
         CancellationToken ct, int skip = 0, int take = 50) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ArtifactConsume, ct) is { } fail)
@@ -787,7 +789,12 @@ app.MapGet("/api/artifacts", async (
     if (!string.IsNullOrWhiteSpace(workItemId))
         all = all.Where(a => string.Equals(a.WorkItemId, workItemId, StringComparison.Ordinal));
     if (runId is { } run)
-        all = all.Where(a => a.RunInstanceId == run);
+    {
+        // Callers hold the DISPATCH id (RunAccepted.RunId) while artifacts are recorded under
+        // the runner's instance id — resolve through the run record like every other run read.
+        var effectiveRunId = (await runReads.GetRecordAsync(run, ct))?.Id ?? run;
+        all = all.Where(a => a.RunInstanceId == effectiveRunId);
+    }
     if (createdAfterUtc is { } after)
         all = all.Where(a => a.CreatedUtc > after);
     // The catch-up shape (createdAfterUtc) pages oldest-first so a reconnecting consumer drains
@@ -1308,6 +1315,19 @@ app.MapDelete("/api/environment-layers/{providerType}", async (
         : Results.NotFound();
 }).RequireAuthorization();
 
+// Removes one base variant; removing the last variant removes the layer itself.
+app.MapDelete("/api/environment-layers/{providerType}/variants/{baseEnvironment}", async (
+        string providerType, string baseEnvironment, HttpContext http, IPolicyEngine policy,
+        EnvironmentLayerService svc, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ProviderCatalogManage, ct) is { } fail)
+        return fail;
+    return await svc.RemoveVariantAsync(CoreClaims.PrincipalIdOf(http.User), providerType, baseEnvironment, ct)
+        is { } layer
+        ? Results.Ok(layer)
+        : Results.NotFound();
+}).RequireAuthorization();
+
 // --- Environment bases (the configurable (name, version) vocabulary layers build on) ---
 app.MapGet("/api/environment-bases", async (
         string? search, HttpContext http, IPolicyEngine policy, EnvironmentBaseService svc, CancellationToken ct) =>
@@ -1365,12 +1385,13 @@ app.MapGet("/api/runners", async (
 app.MapGet("/api/environment-layers/{providerType}/content", async (
         string providerType, Guid runId, string token, HttpContext http, EnvironmentLayerService svc,
         Auxilia.UniversalDataAccess.IDataAccess<CoreRunResolutionRecord> resolutions,
-        CancellationToken ct) =>
+        CancellationToken ct, string? @base = null) =>
 {
     var resolution = await resolutions.ReadAsync(runId, ct);
     if (resolution is null || resolution.ResolutionToken != token)
         return Results.Json(new { error = "invalid resolution token" }, statusCode: StatusCodes.Status403Forbidden);
-    var signed = await svc.ReadFragmentAsync(providerType, ct);
+    // The runner states the base it hosts; an omitted base keeps the linux default.
+    var signed = await svc.ReadFragmentAsync(providerType, @base ?? EnvironmentBases.Linux, ct);
     if (signed is null)
         return Results.NotFound();
     if (signed.SignatureBase64 is { Length: > 0 } signature)

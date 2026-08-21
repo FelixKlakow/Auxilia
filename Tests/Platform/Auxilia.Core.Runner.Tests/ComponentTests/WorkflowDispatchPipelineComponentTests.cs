@@ -142,6 +142,9 @@ public class WorkflowDispatchPipelineComponentTests
                 services.AddSingleton<WorkspaceManager>();
                 services.AddSingleton(TestStores.NewArtifactStore());
                 services.AddSingleton(Mock.Of<IRepositoryAuthResolver>());
+                services.AddSingleton(TestStores.NewHostPlatformProbe());
+                services.AddSingleton<Auxilia.Core.Runner.Workflows.Pods.IPodHost>(new Auxilia.Core.Runner.Tests.Workflows.FakePodHost());
+                services.AddSingleton<Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry>();
                 services.AddSingleton<WorkflowDispatcher>();
             })
             .Build();

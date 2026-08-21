@@ -574,14 +574,39 @@ internal sealed class FakeCoreClient : ICoreClient
         UpsertedLayers.Add(request);
         var index = EnvironmentLayers.FindIndex(l => l.ProviderType == request.ProviderType);
         var grants = index >= 0 ? EnvironmentLayers[index].Grants : [];
+        // Variant-keyed like the real service: replace the same-base variant, keep the others.
+        var variants = (index >= 0 ? EnvironmentLayers[index].Variants : [])
+            .Where(v => !string.Equals(v.BaseEnvironment, request.BaseEnvironment, StringComparison.OrdinalIgnoreCase))
+            .Append(new EnvironmentLayerVariant(request.BaseEnvironment, request.SetupScript, request.BaseVersion))
+            .ToList();
         var saved = new EnvironmentLayerDto(
-            request.ProviderType, request.Description, request.BaseEnvironment, request.SetupScript,
-            request.Version, DateTimeOffset.UtcNow, request.BaseVersion) { Grants = grants };
+            request.ProviderType, request.Description, variants,
+            request.Version, DateTimeOffset.UtcNow) { Grants = grants };
         if (index >= 0)
             EnvironmentLayers[index] = saved;
         else
             EnvironmentLayers.Add(saved);
         return Task.FromResult(saved);
+    }
+
+    public List<(string ProviderType, string BaseEnvironment)> DeletedLayerVariants { get; } = [];
+
+    public Task<EnvironmentLayerDto?> DeleteEnvironmentLayerVariantAsync(
+        string providerType, string baseEnvironment, CancellationToken ct = default)
+    {
+        DeletedLayerVariants.Add((providerType, baseEnvironment));
+        var index = EnvironmentLayers.FindIndex(l => l.ProviderType == providerType);
+        if (index < 0)
+            return Task.FromResult<EnvironmentLayerDto?>(null);
+        var remaining = EnvironmentLayers[index].Variants
+            .Where(v => !string.Equals(v.BaseEnvironment, baseEnvironment, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var updated = EnvironmentLayers[index] with { Variants = remaining };
+        if (remaining.Count == 0)
+            EnvironmentLayers.RemoveAt(index);
+        else
+            EnvironmentLayers[index] = updated;
+        return Task.FromResult<EnvironmentLayerDto?>(updated);
     }
 
     public Task DeleteEnvironmentLayerAsync(string providerType, CancellationToken ct = default)

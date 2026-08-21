@@ -153,14 +153,14 @@ else
                                                    @onchange="() => SelectBase(edit, baseName)"/>
                                             <span class="provider-name">@baseName</span>
                                             <span class="provider-category">
-                                                @providers.Count(p => BaseOf(p) == baseName) capabilit@(providers.Count(p => BaseOf(p) == baseName) == 1 ? "y" : "ies")
+                                                @providers.Count(p => SupportsBase(p, baseName)) capabilit@(providers.Count(p => SupportsBase(p, baseName)) == 1 ? "y" : "ies")
                                             </span>
                                         </label>
                                     }
                                 </div>
                                 <span class="label-micro">Capabilities</span>
                                 <div class="environment-layers">
-                                    @foreach (var provider in providers.Where(p => BaseOf(p) == chosenBase))
+                                    @foreach (var provider in providers.Where(p => chosenBase is { } b && SupportsBase(p, b)))
                                     {
                                         <label class="check-label" title="@provider.Description">
                                             <input type="checkbox"
@@ -575,18 +575,24 @@ else
     private static bool IsEnvironmentMultiSlot(WorkflowSlotDto slot, List<ProviderCatalogEntry> providers)
         => slot.AllowMultiple && providers.Count > 0 && providers.All(p => p.ComposesEnvironment);
 
-    private static string BaseOf(ProviderCatalogEntry provider)
-        => provider.EnvironmentBase is { Length: > 0 } environmentBase ? environmentBase : EnvironmentBases.Linux;
+    /// <summary>The bases a layer can compose on; an undeclared set reads as linux-only.</summary>
+    private static IReadOnlyList<string> BasesOf(ProviderCatalogEntry provider)
+        => provider.EnvironmentBases is { Count: > 0 } refs
+            ? refs.Select(r => r.Name).ToList()
+            : [EnvironmentBases.Linux];
+
+    private static bool SupportsBase(ProviderCatalogEntry provider, string baseName)
+        => BasesOf(provider).Contains(baseName, StringComparer.OrdinalIgnoreCase);
 
     private static List<string> BasesOf(IEnumerable<ProviderCatalogEntry> providers)
-        => providers.Select(BaseOf).Distinct(StringComparer.Ordinal).OrderBy(b => b, StringComparer.Ordinal).ToList();
+        => providers.SelectMany(BasesOf).Distinct(StringComparer.Ordinal).OrderBy(b => b, StringComparer.Ordinal).ToList();
 
-    /// <summary>Switching base drops the layers of the previous one — they cannot compose together.</summary>
+    /// <summary>Switching base drops the layers that cannot compose on it; multi-base layers stay.</summary>
     private void SelectBase(SlotEdit edit, string environmentBase)
     {
         foreach (var providerType in edit.MultiProviders.ToList())
         {
-            if (ProviderOf(providerType) is { } provider && BaseOf(provider) != environmentBase)
+            if (ProviderOf(providerType) is { } provider && !SupportsBase(provider, environmentBase))
                 edit.MultiProviders.Remove(providerType);
         }
         _pinnedBase = environmentBase;
@@ -595,18 +601,31 @@ else
     /// <summary>The base the operator picked, remembered while no layer is selected yet.</summary>
     private string? _pinnedBase;
 
-    /// <summary>The single base every selected environment layer shares, once any layer is picked.</summary>
+    /// <summary>
+    /// The base the current selection composes on: the intersection of every selected layer's
+    /// base set — preferring the operator's pick when it is still viable.
+    /// </summary>
     private string? SelectedBase()
     {
+        HashSet<string>? shared = null;
         foreach (var edit in _slotEdits.Values)
         {
             foreach (var providerType in edit.MultiProviders)
             {
-                if (ProviderOf(providerType) is { } provider)
-                    return BaseOf(provider);
+                if (ProviderOf(providerType) is not { } provider)
+                    continue;
+                var bases = BasesOf(provider).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (shared is null)
+                    shared = bases;
+                else
+                    shared.IntersectWith(bases);
             }
         }
-        return _pinnedBase;
+        if (shared is null)
+            return _pinnedBase;
+        if (_pinnedBase is { } pinned && shared.Contains(pinned))
+            return pinned;
+        return shared.OrderBy(b => b, StringComparer.Ordinal).FirstOrDefault() ?? _pinnedBase;
     }
 
     private void ToggleLayer(SlotEdit edit, string providerType, bool selected)

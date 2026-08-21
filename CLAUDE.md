@@ -18,6 +18,7 @@ Every project directory has a `<ProjectName>.project-instructions.md` beside its
 - **`docs/workflow-sdk-design.md`** — the workflow SDK / builder contract.
 - **`docs/implementation-workflow-design.md`** — the full assisted-delivery workflow (story → plan → implement → review → push → story state).
 - **`docs/view-data-design.md`** — live views and status fan-out.
+- **`docs/test-fabric-and-swarm-design.md`** — run pods (multi-container test topologies; P0 + pod controller implemented and system-proven) and swarm primitives (fan-out/join, run groups, peer channel — still design-only).
 
 **Delivered / historical (`docs/delivered/` — context only, not live design):** core-platform-separation-plan, security-consolidation-plan, governance-rbac-design, enterprise-login-design, goal-v1, and workflow-dispatch-test-strategy.
 

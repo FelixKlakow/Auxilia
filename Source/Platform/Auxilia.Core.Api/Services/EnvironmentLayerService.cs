@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text.Json;
 using Auxilia.Core.Api.Data;
 using Auxilia.Core.Contracts;
 using Auxilia.PlatformData;
@@ -12,11 +13,11 @@ public sealed record SignedEnvironmentFragment(
     string Fragment, string? SignatureBase64, string? PublisherKeyBase64);
 
 /// <summary>
-/// Admin-managed session-environment layers: the Core stores each capability's Dockerfile
-/// fragment and maintains the matching provider-catalog entry (category "environment",
+/// Admin-managed session-environment layers: the Core stores each capability's per-base setup
+/// scripts and maintains the matching provider-catalog entry (category "environment",
 /// composes-environment, available) so configured workflows can pick it. Runners fetch the
-/// fragment at dispatch, token-authorized — a statically configured local layer of the same
-/// name stays the host's override. Every mutation is audited.
+/// fragment for THEIR base at dispatch, token-authorized — a statically configured local layer
+/// of the same name stays the host's override. Every mutation is audited.
 /// </summary>
 public sealed class EnvironmentLayerService(
     IDataAccess<EnvironmentLayerRecord> layers,
@@ -50,9 +51,9 @@ public sealed class EnvironmentLayerService(
         => string.IsNullOrWhiteSpace(search)
            || Contains(record.ProviderType, search)
            || Contains(record.Description, search)
-           || Contains(record.BaseEnvironment, search)
-           || Contains(record.BaseVersion, search)
-           || Contains(record.Version, search);
+           || Contains(record.Version, search)
+           || ParseVariants(record).Any(v =>
+               Contains(v.BaseEnvironment, search) || Contains(v.BaseVersion, search));
 
     private static bool Contains(string? value, string search)
         => value?.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase) == true;
@@ -64,19 +65,23 @@ public sealed class EnvironmentLayerService(
 
     /// <summary>
     /// The image-build fragment for the runner's on-the-fly composition, generated from the
-    /// environment's setup script; null when the environment is unmanaged or its base cannot be
-    /// hosted on the requesting runner's platform (only Linux runners exist today).
+    /// variant matching the requesting runner's base environment; null when the environment is
+    /// unmanaged or has no variant for that base.
     /// </summary>
-    public async Task<SignedEnvironmentFragment?> ReadFragmentAsync(string providerType, CancellationToken ct)
+    public async Task<SignedEnvironmentFragment?> ReadFragmentAsync(
+        string providerType, string baseEnvironment, CancellationToken ct)
     {
         var record = await layers.ReadAsync(EnvironmentLayerRecord.IdFor(providerType), ct);
-        if (record is null
-            || !string.Equals(record.BaseEnvironment, EnvironmentBases.Linux, StringComparison.OrdinalIgnoreCase))
+        var variant = record is null ? null : VariantFor(record, baseEnvironment);
+        if (variant is null)
             return null;
 
         // Environments are code the build executes — sign the fragment with the platform key
         // (the same trust anchor as re-signed workflow packages) so runners verify integrity.
-        var fragment = LinuxFragmentFor(record.SetupScript);
+        var fragment = string.Equals(
+            variant.BaseEnvironment, EnvironmentBases.Windows, StringComparison.OrdinalIgnoreCase)
+            ? WindowsFragmentFor(variant.SetupScript)
+            : LinuxFragmentFor(variant.SetupScript);
         var pemFile = settings.Value.SigningKeyPemFile;
         if (string.IsNullOrWhiteSpace(pemFile) || !File.Exists(pemFile))
             return new SignedEnvironmentFragment(fragment, null, null);
@@ -107,8 +112,25 @@ public sealed class EnvironmentLayerService(
     }
 
     /// <summary>
-    /// Creates or updates an environment and its catalog entry. The entry is made AVAILABLE
-    /// immediately — the upsert itself is the administrator's curation act.
+    /// The Windows twin: the script travels base64 into a PowerShell file executed with
+    /// stop-on-error semantics, then removed — same guarantees as the linux fragment.
+    /// </summary>
+    internal static string WindowsFragmentFor(string setupScript)
+    {
+        var encoded = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(
+            setupScript.ReplaceLineEndings("\r\n")));
+        return "RUN powershell -NoProfile -ExecutionPolicy Bypass -Command "
+               + "\"$ErrorActionPreference='Stop'; "
+               + $"[IO.File]::WriteAllBytes('C:\\auxilia-env-setup.ps1', [Convert]::FromBase64String('{encoded}')); "
+               + "& C:\\auxilia-env-setup.ps1; "
+               + "Remove-Item -Force C:\\auxilia-env-setup.ps1\"\n";
+    }
+
+    /// <summary>
+    /// Creates or updates ONE variant of a layer, keyed (providerType, baseEnvironment) — the
+    /// layer itself is created on its first variant. The catalog entry is refreshed with the
+    /// full base set and made AVAILABLE immediately — the upsert itself is the administrator's
+    /// curation act.
     /// </summary>
     public async Task<EnvironmentLayerDto> UpsertAsync(
         Guid? actor, UpsertEnvironmentLayer request, CancellationToken ct)
@@ -130,33 +152,81 @@ public sealed class EnvironmentLayerService(
             throw new ArgumentException(
                 $"base version '{baseName}/{baseVersion}' is not registered in the environment-base catalog");
 
+        var existing = await layers.ReadAsync(EnvironmentLayerRecord.IdFor(type), ct);
+        var variants = existing is null ? [] : ParseVariants(existing).ToList();
+        variants.RemoveAll(v =>
+            string.Equals(v.BaseEnvironment, baseName, StringComparison.OrdinalIgnoreCase));
+        variants.Add(new EnvironmentLayerVariant(baseName, request.SetupScript, baseVersion));
+        variants.Sort((a, b) => string.CompareOrdinal(a.BaseEnvironment, b.BaseEnvironment));
+
         var record = new EnvironmentLayerRecord
         {
             Id = EnvironmentLayerRecord.IdFor(type),
             ProviderType = type,
             Description = request.Description,
-            BaseEnvironment = baseName,
-            BaseVersion = baseVersion,
-            SetupScript = request.SetupScript,
+            VariantsJson = JsonSerializer.Serialize(variants),
             Version = string.IsNullOrWhiteSpace(request.Version) ? null : request.Version.Trim(),
             UpdatedUtc = clock.GetUtcNow(),
             UpdatedBy = actor,
         };
         await layers.SaveAsync(record, ct);
+        await RefreshCatalogEntryAsync(actor, record, variants, ct);
+        await auditLog.AppendAsync(
+            ActorName(actor), "environment-layer.upserted", type, $"upserted variant '{baseName}'", ct: ct);
+        return ToDto(record);
+    }
 
-        var actorName = actor?.ToString("D") ?? "core-api";
-        await catalog.RegisterAsync(actorName, new RegisterSlotProvider(
-            type,
+    /// <summary>
+    /// Removes one base variant; removing the LAST variant removes the layer (and its catalog
+    /// entry) — a layer without a single setup script composes nowhere.
+    /// </summary>
+    public async Task<EnvironmentLayerDto?> RemoveVariantAsync(
+        Guid? actor, string providerType, string baseEnvironment, CancellationToken ct)
+    {
+        var record = await layers.ReadAsync(EnvironmentLayerRecord.IdFor(providerType), ct);
+        if (record is null)
+            return null;
+        var variants = ParseVariants(record).ToList();
+        var removed = variants.RemoveAll(v =>
+            string.Equals(v.BaseEnvironment, baseEnvironment.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (removed == 0)
+            return null;
+
+        if (variants.Count == 0)
+        {
+            await DeleteAsync(actor, record.ProviderType, ct);
+            return ToDto(record) with { Variants = [] };
+        }
+
+        var updated = record with
+        {
+            VariantsJson = JsonSerializer.Serialize(variants),
+            UpdatedUtc = clock.GetUtcNow(),
+            UpdatedBy = actor,
+        };
+        await layers.SaveAsync(updated, ct);
+        await RefreshCatalogEntryAsync(actor, updated, variants, ct);
+        await auditLog.AppendAsync(
+            ActorName(actor), "environment-layer.upserted", record.ProviderType,
+            $"removed variant '{baseEnvironment.Trim().ToLowerInvariant()}'", ct: ct);
+        return ToDto(updated);
+    }
+
+    private async Task RefreshCatalogEntryAsync(
+        Guid? actor, EnvironmentLayerRecord record, List<EnvironmentLayerVariant> variants,
+        CancellationToken ct)
+    {
+        await catalog.RegisterAsync(ActorName(actor), new RegisterSlotProvider(
+            record.ProviderType,
             Category,
-            request.Description,
+            record.Description,
             Contracts: [EnvironmentContract],
             Settings: [],
             ComposesEnvironment: true,
-            EnvironmentBase: record.BaseEnvironment,
-            EnvironmentBaseVersion: record.BaseVersion), ct);
-        await catalog.SetAvailabilityAsync(actorName, type, available: true, ct);
-        await auditLog.AppendAsync(actorName, "environment-layer.upserted", type, "upserted", ct: ct);
-        return ToDto(record);
+            EnvironmentBases: variants
+                .Select(v => new EnvironmentBaseRef(v.BaseEnvironment, v.BaseVersion))
+                .ToList()), ct);
+        await catalog.SetAvailabilityAsync(ActorName(actor), record.ProviderType, available: true, ct);
     }
 
     /// <summary>Removes the layer and its catalog entry; configured workflows binding it will fail pre-flight.</summary>
@@ -165,9 +235,8 @@ public sealed class EnvironmentLayerService(
         var removed = await layers.RemoveAsync(EnvironmentLayerRecord.IdFor(providerType), ct);
         if (!removed)
             return false;
-        var actorName = actor?.ToString("D") ?? "core-api";
-        await catalog.DeleteAsync(actorName, providerType, ct);
-        await auditLog.AppendAsync(actorName, "environment-layer.deleted", providerType, "deleted", ct: ct);
+        await catalog.DeleteAsync(ActorName(actor), providerType, ct);
+        await auditLog.AppendAsync(ActorName(actor), "environment-layer.deleted", providerType, "deleted", ct: ct);
         return true;
     }
 
@@ -181,11 +250,22 @@ public sealed class EnvironmentLayerService(
         var record = await layers.ReadAsync(EnvironmentLayerRecord.IdFor(providerType), ct);
         if (record is null)
             return null;
-        var entry = await catalog.SetGrantsAsync(actor?.ToString("D") ?? "core-api", providerType, grants, ct);
+        var entry = await catalog.SetGrantsAsync(ActorName(actor), providerType, grants, ct);
         return ToDto(record) with { Grants = entry.Grants };
     }
 
+    private static string ActorName(Guid? actor) => actor?.ToString("D") ?? "core-api";
+
+    private static EnvironmentLayerVariant? VariantFor(EnvironmentLayerRecord record, string baseEnvironment)
+        => ParseVariants(record).FirstOrDefault(v =>
+            string.Equals(v.BaseEnvironment, baseEnvironment.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    private static IReadOnlyList<EnvironmentLayerVariant> ParseVariants(EnvironmentLayerRecord record)
+        => string.IsNullOrWhiteSpace(record.VariantsJson)
+            ? []
+            : JsonSerializer.Deserialize<List<EnvironmentLayerVariant>>(record.VariantsJson) ?? [];
+
     private static EnvironmentLayerDto ToDto(EnvironmentLayerRecord record)
-        => new(record.ProviderType, record.Description, record.BaseEnvironment,
-            record.SetupScript, record.Version, record.UpdatedUtc, record.BaseVersion);
+        => new(record.ProviderType, record.Description, ParseVariants(record),
+            record.Version, record.UpdatedUtc);
 }

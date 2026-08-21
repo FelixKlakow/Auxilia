@@ -150,12 +150,20 @@ public sealed class ImplementationWorkflowSystemTests
         await using var provider = EndToEndEnvironment.BuildPlatformDataProvider();
 
         // 4. The declared outputs must be indexed: the plan, the review bundle (written
-        //    unconditionally in the implementation loop), and the session report.
-        var artifacts = (await provider.GetRequiredService<IDataAccess<ArtifactRecord>>()
-                .ReadAsync(cancellationToken))
-            .Where(a => a.RunInstanceId == instanceId)
-            .Select(a => a.ArtifactType)
-            .ToList();
+        //    unconditionally in the implementation loop), and the session report. Indexing
+        //    trails the terminal status event by a moment — poll before asserting.
+        var artifactStore = provider.GetRequiredService<IDataAccess<ArtifactRecord>>();
+        var artifacts = new List<string>();
+        await WaitForAsync(() =>
+        {
+            artifacts = artifactStore.ReadAsync(cancellationToken).GetAwaiter().GetResult()
+                .Where(a => a.RunInstanceId == instanceId)
+                .Select(a => a.ArtifactType)
+                .ToList();
+            return artifacts.Contains("implementation-plan")
+                   && artifacts.Contains("review-bundle")
+                   && artifacts.Contains("session-report");
+        }, TimeSpan.FromSeconds(60), cancellationToken);
         Assert.Multiple(() =>
         {
             Assert.That(artifacts, Does.Contain("implementation-plan"),
@@ -167,13 +175,19 @@ public sealed class ImplementationWorkflowSystemTests
         });
 
         // 5. The pipeline's chat view must be persisted: the story opens the conversation and
-        //    the plan is published as an assistant entry.
-        var chatItems = (await provider.GetRequiredService<IDataAccess<ViewDataRecord>>()
-                .ReadAsync(cancellationToken))
-            .Where(v => v.WorkflowInstanceId == instanceId && v.ViewName == "agent-conversation")
-            .OrderBy(v => v.Sequence)
-            .Select(v => System.Text.Json.JsonSerializer.Deserialize<AgentChatEntry>(v.PayloadJson)!)
-            .ToList();
+        //    the plan is published as an assistant entry. Persistence trails the live stream —
+        //    poll like the artifact index above.
+        var viewStore = provider.GetRequiredService<IDataAccess<ViewDataRecord>>();
+        var chatItems = new List<AgentChatEntry>();
+        await WaitForAsync(() =>
+        {
+            chatItems = viewStore.ReadAsync(cancellationToken).GetAwaiter().GetResult()
+                .Where(v => v.WorkflowInstanceId == instanceId && v.ViewName == "agent-conversation")
+                .OrderBy(v => v.Sequence)
+                .Select(v => System.Text.Json.JsonSerializer.Deserialize<AgentChatEntry>(v.PayloadJson)!)
+                .ToList();
+            return chatItems.Any(e => e.Role == AgentChatRole.Assistant);
+        }, TimeSpan.FromSeconds(60), cancellationToken);
         Assert.Multiple(() =>
         {
             Assert.That(chatItems.FirstOrDefault()?.Role, Is.EqualTo(AgentChatRole.User),

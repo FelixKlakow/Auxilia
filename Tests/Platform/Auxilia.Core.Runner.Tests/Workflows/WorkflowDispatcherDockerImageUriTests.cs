@@ -82,10 +82,13 @@ public class WorkflowDispatcherDockerImageUriTests
             TestStores.NewArtifactStore(),
             new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
             TestStores.NewWorkspaceManager(),
+            TestStores.NewHostPlatformProbe(),
             Mock.Of<IRepositoryAuthResolver>(),
             TestStores.NewAuditLog(),
             TestStores.NewInstanceInfo(),
             new Auxilia.PlatformData.Protection.NullSettingsProtector(),
+            new FakePodHost(),
+            new Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry(),
             NullLogger<WorkflowDispatcher>.Instance);
     }
 

@@ -18,6 +18,17 @@
   `GET /api/environment-bases` accept `?search=` (case-insensitive substring over
   type/name, version(s), base, description), wired through `ICoreClient` and covered by
   component + client-surface system tests.
+- ~~External-consumer gap wave~~ — DONE 2026-08-16 (found by the out-of-repo
+  `Auxilia.Example` exercise): artifact queries (REST + MCP `list_artifacts`, which also
+  gained a `runId` filter) resolve the dispatch↔instance id alias like every other run
+  read; `RunStreamEvent.AsStatus()/AsView()` + `RunStates` constants give clients typed
+  stream decoding (and the stream stops leaking the Core-internal `TerminalEndpoint`);
+  `WorkflowAuthoring` kind-validates input values, refuses per-run inputs in stored
+  configurations, and `ConfigureAndRunAsync` carries a per-run context; a schemaless
+  `docker://` registration says so in its status reason, the registry UI warns the
+  approver, and the SDK ships `IRunInputs` (typed, declared-name-checked input access) +
+  `WorkflowInputKinds`; the SDK trio (`Auxilia.Workflows`/`Messaging`/`AI`) is packable at
+  0.2.0 with family READMEs.
 - **Workflow-type registry administration** — full client surface exists on `ICoreClient`
   (register/approve/deny/unregister), and the steering client ships a registry-administration panel
   (2026-08-02, permission-gated on `workflow-type.manage`/`workflow-type.sign`).
@@ -98,6 +109,14 @@ Open:
   would first need a TriggerHost REST surface (undecided).
 
 ## Governance + signing follow-ups (2026-08-08 console review)
+- **Policy allow-once anomaly (2026-08-15, unexplained)**: the E2E mail-trigger dispatch
+  (on-behalf-of a plain User, ungranted type, restricted default) was correctly denied
+  `workflow-type-default-restricted` in every isolated run — but in one full-suite run the
+  FIRST dispatch went through and completed before later polls were denied. Suspect the
+  principal/role cache serving a wrong entry right after seeding. The E2E now grants the
+  run-as principal trigger access explicitly (the governed path, also the fix for the suite
+  being broken since the default-deny wave), which hides the anomaly — worth a targeted
+  look at `PrincipalRoleCache` freshness right after principal creation.
 - ~~MCP parity for the newer admin surfaces~~ — DONE 2026-08-08: `set_provider_grants`
   (slot providers AND environment layers — one catalog mechanism), `list_platform_settings`,
   `set_platform_setting` (elevation-gated via the EXISTING MCP `step_up` flow, matching the
@@ -321,6 +340,69 @@ access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing di
   the runner before the build) rather than what the build may do. Future levers if needed:
   pin the build's NetworkMode to a network that reaches only the package proxy, and pass
   memory/CPU caps in `ImageBuildParameters`.
+
+## Test fabric & agent swarms — P0 implemented, rest designed
+See `docs/test-fabric-and-swarm-design.md`. **P0 (declared run pods) IMPLEMENTED 2026-08-15**:
+SDK `RequiresCompanion` (+ scale/start-order/pod-volume/placeholder surface), `Companions` in
+the signed schema/manifest, registry-gate structural validation (digest pinning, cycles) +
+spawn summary (`WorkflowSchemaDto.Companions`/`MaxPodContainers`), runner materialization
+(per-run `--internal` pod network, DAG start gated on readiness, counts clamped to signed
+bounds, run-minted secrets, `Workflow__Companion__*` announcements, pod volumes under
+`/workspace/pod`), teardown on every terminal path (state handler, crash-exit, re-adoption,
+orphan sweep) with `companion-log-<name>` artifacts. Unit+component covered. Open:
+- **In-network readiness prober** — readiness today = inspect-based (Running + Docker health
+  if defined); a declared TCP/HTTP probe needs a prober container on the pod network.
+- ~~Docker system tests~~ — DONE 2026-08-15: `PodFabric/PodScenarioSystemTests` runs the
+  design doc's WHOLE worked example on the real daemon: pod of rabbit + fleet-manager +
+  coordinator + input-scaled machines on the per-run `--internal` network, runtime
+  spawn/stop through the pod controller (configuration-pinned base), availability handshake
+  2→4→3 asserted via the coordinator, `logs.zip` (from the shared pod volume) + `report.json`
+  artifacts verified BY CONTENT, every companion's `companion-log-*` artifact present
+  (incl. the runtime-spawned machine; the mid-run-stopped one correctly absent), and pod
+  containers/network gone after the run. Fixture trick: a throwaway `registry:2` with a
+  DAEMON-assigned port mints real digests for in-test-built companion images (push only —
+  the local RepoDigest makes `name@sha256:…` inspectable without any pull). Isolation is
+  asserted too (2026-08-16): mid-run the pod network must be `--internal`, and the
+  coordinator's egress prober dials REAL TCP from inside the pod — a pod peer answers, the
+  platform RabbitMQ and the internet must be CLOSED (unit side: network-create params +
+  companions expose no host ports). Re-adoption across a runner restart is covered too
+  (2026-08-16, `PodReadoptionSystemTests`): a parked pod-controlled run survives a real
+  stop/start and performs its FIRST runtime spawn only afterwards — green.
+- ~~Envelope-clamp semantics~~ — RESOLVED 2026-08-16: the envelope caps **runtime spawns
+  only** (Felix's call). Runtime companions carry `auxilia.companion-runtime`; the clamp
+  and pod-control stop filter on it, so declared templates neither consume the envelope
+  nor can be stopped mid-run — total = templates + envelope, exactly as the spawn summary
+  advertises.
+- ~~Spawn-summary surfaces~~ — DONE 2026-08-16: the registry page's detail row renders a
+  prominent warn-panel spawn summary (per-run container cap, declared-companion table with
+  scale/start-order/resources, the runtime envelope + purpose + pod volumes); MCP's
+  `get_workflow_schema`/`approve_workflow_type` descriptions call the summary out as the
+  thing an approval permits.
+
+**POD CONTROLLER also IMPLEMENTED 2026-08-15** (the runtime-spawn half): environment bases
+optionally carry a digest-pinned `ImageReference` (validated at upsert — closes the old
+"bases carrying a concrete image reference" idea); the run's CONFIGURATION pins its
+spawnable subset via context key `pod-bases`, resolved by `RunService` into
+`RunWorkflowCommand.PodBaseImagesJson` (default-deny without a selection, snapshot survives
+failover redispatch); SDK `RequiresPodControl(max, description, podVolumes)` +
+`IPodController` (`PodControlClient` over the authenticated `workflow-pod-control` queue,
+resource-proxy pattern); runner `PodControlHandler` + `PodControlRegistry` (base map +
+envelope clamp on the live RUNTIME-SPAWNED count, declared-volume-only mounts, per-op audit, refusals
+audited); `DockerPodHost` spawn/stop/count; pod network+volumes materialize at launch even
+without declared companions. Unit/component covered end to end. Open beyond the shared
+items above:
+- ~~Runner-restart residual~~ — CLOSED 2026-08-16: re-adoption REBUILDS pod-control state
+  (envelope from the schema store, base map from the persisted dispatch command,
+  network/volume names re-derived via `PodPlanner`) — no new persistence needed. The system
+  test also exposed a startup ordering bug, fixed: re-adoption now runs BEFORE any bus
+  handler starts, else token-validating handlers reject messages from legitimately-running
+  workflows in the restore gap.
+- **`pod-bases` UX**: the context key works through any dispatch surface today; a dedicated
+  configuration-editor picker (granted bases only) is unbuilt, as are grants ON bases
+  (currently: catalog entry = admin-curated, selection = configuration).
+- **P0.5 remainder (design only)**: layer-composed companions + setup scripts, declared
+  tunnels, pod-profile catalog; then the swarm primitives (run groups, fan-out/join,
+  `workflow.swarm` channel).
 
 ## Generic binding pipeline
 - **Persistent workspaces — reset semantics (design note, 2026-08-03).** Today nothing

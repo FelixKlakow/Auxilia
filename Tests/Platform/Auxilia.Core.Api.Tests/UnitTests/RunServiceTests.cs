@@ -81,6 +81,10 @@ public sealed class RunServiceTests
             TestResourceAccess.EmptyPrincipalDirectory(),
             TestResourceAccess.Open,
             liveness,
+            new EnvironmentBaseService(
+                new InMemoryDataAccess<EnvironmentBaseRecord>(),
+                new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System),
+                TimeProvider.System),
             _runs = new InMemoryDataAccess<CoreRunRecord>(),
             new Auxilia.Workflows.Messaging.WorkflowStatusPublisher(bus, TimeProvider.System),
             TimeProvider.System,
@@ -273,10 +277,10 @@ public sealed class RunServiceTests
         await SeedActiveTypeAsync(registry, "wt", "docker://img");
         await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
             "dotnet-10", "environment", null, ["exec-env"], [],
-            ComposesEnvironment: true, EnvironmentBase: "linux"), CancellationToken.None);
+            ComposesEnvironment: true, EnvironmentBases: [new EnvironmentBaseRef("linux")]), CancellationToken.None);
         await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
             "msbuild-17", "environment", null, ["exec-env"], [],
-            ComposesEnvironment: true, EnvironmentBase: "windows"), CancellationToken.None);
+            ComposesEnvironment: true, EnvironmentBases: [new EnvironmentBaseRef("windows")]), CancellationToken.None);
 
         var ex = Assert.ThrowsAsync<InvalidOperationException>(() => service.RunInlineAsync(
             new RunRequest("wt", SlotBindings:
@@ -286,9 +290,38 @@ public sealed class RunServiceTests
             ]),
             triggeredBy: null, CancellationToken.None));
 
-        Assert.That(ex!.Message, Does.Contain("mix incompatible bases")
+        Assert.That(ex!.Message, Does.Contain("no common base")
             .And.Contain("dotnet-10").And.Contain("msbuild-17"),
             "One run composes one image on one base - a mixed selection fails fast at dispatch.");
+    }
+
+    [Test]
+    public async Task RunInline_MultiBaseLayer_ComposesWithASingleBaseSibling()
+    {
+        var (service, bus, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
+            "dotnet-10", "environment", null, ["exec-env"], [],
+            ComposesEnvironment: true,
+            EnvironmentBases: [new EnvironmentBaseRef("linux"), new EnvironmentBaseRef("windows")]),
+            CancellationToken.None);
+        await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
+            "msbuild-17", "environment", null, ["exec-env"], [],
+            ComposesEnvironment: true, EnvironmentBases: [new EnvironmentBaseRef("windows")]),
+            CancellationToken.None);
+
+        await service.RunInlineAsync(
+            new RunRequest("wt", SlotBindings:
+            [
+                new SlotBinding("environment", ProviderType: "dotnet-10"),
+                new SlotBinding("environment", ProviderType: "msbuild-17"),
+            ]),
+            triggeredBy: null, CancellationToken.None);
+
+        Assert.That(
+            bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>().Count(),
+            Is.EqualTo(1),
+            "a layer carrying variants for several bases composes wherever a shared base remains");
     }
 
     [Test]
@@ -366,11 +399,11 @@ public sealed class RunServiceTests
         await SeedActiveTypeAsync(registry, "wt", "docker://img");
         await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
             "dotnet-10", "environment", null, ["exec-env"], [],
-            ComposesEnvironment: true, EnvironmentBase: "linux", EnvironmentBaseVersion: "ubuntu-22.04"),
+            ComposesEnvironment: true, EnvironmentBases: [new EnvironmentBaseRef("linux", "ubuntu-22.04")]),
             CancellationToken.None);
         await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
             "node-22", "environment", null, ["exec-env"], [],
-            ComposesEnvironment: true, EnvironmentBase: "linux", EnvironmentBaseVersion: "ubuntu-24.04"),
+            ComposesEnvironment: true, EnvironmentBases: [new EnvironmentBaseRef("linux", "ubuntu-24.04")]),
             CancellationToken.None);
 
         var ex = Assert.ThrowsAsync<InvalidOperationException>(() => service.RunInlineAsync(
@@ -381,7 +414,7 @@ public sealed class RunServiceTests
             ]),
             triggeredBy: null, CancellationToken.None));
 
-        Assert.That(ex!.Message, Does.Contain("mix incompatible base versions")
+        Assert.That(ex!.Message, Does.Contain("no common base")
             .And.Contain("ubuntu-22.04").And.Contain("ubuntu-24.04"),
             "Layers pinning different base versions can never build into one image.");
     }
@@ -393,11 +426,11 @@ public sealed class RunServiceTests
         await SeedActiveTypeAsync(registry, "wt", "docker://img");
         await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
             "dotnet-10", "environment", null, ["exec-env"], [],
-            ComposesEnvironment: true, EnvironmentBase: "linux", EnvironmentBaseVersion: "ubuntu-24.04"),
+            ComposesEnvironment: true, EnvironmentBases: [new EnvironmentBaseRef("linux", "ubuntu-24.04")]),
             CancellationToken.None);
         await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
             "node-22", "environment", null, ["exec-env"], [],
-            ComposesEnvironment: true, EnvironmentBase: "linux"), CancellationToken.None);
+            ComposesEnvironment: true, EnvironmentBases: [new EnvironmentBaseRef("linux")]), CancellationToken.None);
 
         await service.RunInlineAsync(
             new RunRequest("wt", SlotBindings:
@@ -419,10 +452,10 @@ public sealed class RunServiceTests
         await SeedActiveTypeAsync(registry, "wt", "docker://img");
         await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
             "dotnet-10", "environment", null, ["exec-env"], [],
-            ComposesEnvironment: true, EnvironmentBase: "linux"), CancellationToken.None);
+            ComposesEnvironment: true, EnvironmentBases: [new EnvironmentBaseRef("linux")]), CancellationToken.None);
         await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
             "node-22", "environment", null, ["exec-env"], [],
-            ComposesEnvironment: true, EnvironmentBase: "Linux"), CancellationToken.None);
+            ComposesEnvironment: true, EnvironmentBases: [new EnvironmentBaseRef("Linux")]), CancellationToken.None);
 
         await service.RunInlineAsync(
             new RunRequest("wt", SlotBindings:

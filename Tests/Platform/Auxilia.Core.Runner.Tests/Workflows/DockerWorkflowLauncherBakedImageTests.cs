@@ -146,6 +146,7 @@ public class DockerWorkflowLauncherBakedImageTests
         var sut = new DockerWorkflowLauncher(
             Options.Create(DefaultSettings),
             mockFactory.Object,
+            new FakePodHost(),
             NullLogger<DockerWorkflowLauncher>.Instance);
 
         // Create a stub plugin file in a temp dir

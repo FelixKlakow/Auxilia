@@ -27,6 +27,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     private readonly List<TriggerDeclaration> _triggers = new();
     private readonly List<WorkflowInputDescriptor> _inputs = new();
     private readonly List<string> _consumedArtifacts = new();
+    private readonly List<Companions.CompanionDeclaration> _companions = new();
+    private Companions.PodControlDeclaration? _podControl;
     private readonly WorkflowMetadata _metadata = new();
     private Action<IServiceCollection>? _configureServices;
     private Func<IServiceProvider, CancellationToken, Task>? _application;
@@ -156,6 +158,42 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             SetupScript = setupScript
         });
         return this;
+    }
+
+    public IWorkflowBuilder RequiresCompanion(
+        string name, string image, Action<Companions.ICompanionBuilder>? configure = null)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        ArgumentException.ThrowIfNullOrEmpty(image);
+        if (_companions.Any(c => c.Name == name))
+            throw new InvalidOperationException($"A companion with name '{name}' has already been declared.");
+        var builder = new Companions.CompanionBuilder(name, image);
+        configure?.Invoke(builder);
+        _companions.Add(builder.Build());
+        return this;
+    }
+
+    public IWorkflowBuilder RequiresPodControl(
+        int maxContainers, string? description = null, params string[] podVolumes)
+    {
+        if (_podControl is not null)
+            throw new InvalidOperationException("Pod control has already been declared.");
+        _podControl = new Companions.PodControlDeclaration(maxContainers, description)
+        {
+            PodVolumes = podVolumes
+        };
+        return this;
+    }
+
+    private IReadOnlyList<Companions.CompanionDeclaration> ValidatedCompanions()
+    {
+        if (_companions.Count == 0 && _podControl is null)
+            return _companions.AsReadOnly();
+        var errors = Companions.CompanionTopologyValidator.Validate(_companions, _podControl);
+        if (errors.Count > 0)
+            throw new InvalidOperationException(
+                "Invalid companion topology: " + string.Join(" ", errors));
+        return _companions.AsReadOnly();
     }
 
     public IWorkflowBuilder DeclaresSignal<TPayload>(string name, string? description = null)
@@ -336,6 +374,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
 
                 SlotActivator? slotActivator = null;
                 ResourceProxyClient? resourceProxyClient = null;
+                Companions.PodControlClient? podControlClient = null;
                 try
                 {
                     // Post-binding workspace setup (ARCHITECTURE §9): declared repository setup
@@ -350,6 +389,19 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                             ?? "workflow-resource-proxy",
                         WorkflowQueues.ResourceResponseQueueFor(instanceId));
                     await resourceProxyClient.StartAsync();
+
+                    // Runtime pod control: only for runs whose manifest declares the envelope
+                    // AND that the platform launched with a pod-control queue (a dev-mode run
+                    // without one simply gets no IPodController).
+                    if (_podControl is not null
+                        && System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.PodControlQueue)
+                            is { Length: > 0 } podControlQueue)
+                    {
+                        podControlClient = new Companions.PodControlClient(
+                            context.MessageBus, instanceId, instanceToken, podControlQueue,
+                            WorkflowQueues.PodControlResponseQueueFor(instanceId));
+                        await podControlClient.StartAsync();
+                    }
 
                     ISlotHandlerResolver? activeResolver = TestSlotHandlerResolver;
                     if (activeResolver is null && TestContext == null)
@@ -368,8 +420,11 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                     var services = new ServiceCollection();
                     services.AddSingleton(context.MessageBus);
                     services.AddSingleton<IWorkflowInputs>(workflowInputs);
+                    services.AddSingleton<IRunInputs>(new EnvironmentRunInputs(_inputs.AsReadOnly()));
                     services.AddSingleton(drainSignal);
                     services.AddSingleton(resourceProxyClient);
+                    if (podControlClient is not null)
+                        services.AddSingleton<Companions.IPodController>(podControlClient);
                     services.AddSingleton(new Views.DeclaredViews(_views.AsReadOnly()));
                     services.AddSingleton<Views.IViewPublisher>(
                         new Views.DefaultViewPublisher(context.MessageBus, instanceId, _views.AsReadOnly()));
@@ -448,6 +503,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                         await slotActivator.DisposeAsync();
                     if (resourceProxyClient is not null)
                         await resourceProxyClient.DisposeAsync();
+                    if (podControlClient is not null)
+                        await podControlClient.DisposeAsync();
                 }
                 return;
             }
@@ -475,7 +532,9 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             Inputs = _inputs.AsReadOnly(),
             ConsumedArtifacts = _consumedArtifacts.AsReadOnly(),
             InteractiveTerminalPort = _interactiveTerminalPort,
-            InteractiveTerminalGate = _interactiveTerminalGate
+            InteractiveTerminalGate = _interactiveTerminalGate,
+            Companions = ValidatedCompanions(),
+            PodControl = _podControl
         };
 
     internal WorkflowManifest BuildManifest(Guid instanceId = default)
@@ -492,6 +551,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             Inputs = _inputs.AsReadOnly(),
             ConsumedArtifacts = _consumedArtifacts.AsReadOnly(),
             InteractiveTerminalPort = _interactiveTerminalPort,
-            InteractiveTerminalGate = _interactiveTerminalGate
+            InteractiveTerminalGate = _interactiveTerminalGate,
+            Companions = ValidatedCompanions(),
+            PodControl = _podControl
         };
 }

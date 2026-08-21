@@ -78,8 +78,9 @@ public sealed class ProviderCatalogService(
             RequiredCredentialContract = request.RequiredCredentialContract,
             MountsIntoWorkspace = request.MountsIntoWorkspace,
             ComposesEnvironment = request.ComposesEnvironment,
-            EnvironmentBase = request.EnvironmentBase,
-            EnvironmentBaseVersion = request.EnvironmentBaseVersion,
+            EnvironmentBasesJson = request.EnvironmentBases is { Count: > 0 }
+                ? JsonSerializer.Serialize(request.EnvironmentBases)
+                : null,
             OAuthRefreshJson = request.OAuthRefresh is null
                 ? null
                 : JsonSerializer.Serialize(request.OAuthRefresh),
@@ -232,8 +233,9 @@ public sealed class ProviderCatalogService(
             provider.OAuthRefreshJson is { Length: > 0 } refreshJson
                 ? JsonSerializer.Deserialize<ProviderOAuthRefresh>(refreshJson)
                 : null,
-            provider.EnvironmentBase,
-            provider.EnvironmentBaseVersion)
+            provider.EnvironmentBasesJson is { Length: > 0 } basesJson
+                ? JsonSerializer.Deserialize<List<EnvironmentBaseRef>>(basesJson)
+                : null)
         {
             Grants = AccessGrantEvaluator.Parse(curation.GrantsJson)
         };

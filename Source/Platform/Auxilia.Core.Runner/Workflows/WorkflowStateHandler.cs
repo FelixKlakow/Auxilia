@@ -15,6 +15,8 @@ public sealed class WorkflowStateHandler(
     WorkflowStatusPublisher statusPublisher,
     ArtifactPersister artifactPersister,
     WorkspaceManager workspaceManager,
+    Pods.IPodHost podHost,
+    Pods.PodControlRegistry podControlRegistry,
     IOptions<WorkflowDispatcherSettings> dispatcherSettings,
     ILogger<WorkflowStateHandler> logger)
 {
@@ -72,24 +74,31 @@ public sealed class WorkflowStateHandler(
             message.ErrorMessage is null ? null : $$"""{"error":{{JsonSerializer.Serialize(message.ErrorMessage)}}}""",
             ct);
 
+        var workItemId = string.Empty;
+        if (record?.DispatchCommandJson is not null)
+        {
+            var command = JsonSerializer.Deserialize<RunWorkflowCommand>(record.DispatchCommandJson);
+            command?.Context.TryGetValue("WorkItemId", out workItemId!);
+        }
+
         // Declared outputs of a successful run are persisted to the artifact store.
         if (message.State == WorkflowState.Success && record is not null)
-        {
-            var workItemId = string.Empty;
-            if (record.DispatchCommandJson is not null)
-            {
-                var command = JsonSerializer.Deserialize<RunWorkflowCommand>(record.DispatchCommandJson);
-                command?.Context.TryGetValue("WorkItemId", out workItemId!);
-            }
-
             await artifactPersister.PersistOutputsAsync(
                 message.WorkflowInstanceId, record.WorkflowType, record.OutputsJson,
                 workItemId ?? string.Empty, ct);
-        }
 
-        // The run's repository workspace dies with the run (ARCHITECTURE §9).
+        // The run's repository workspace AND pod die with the run (ARCHITECTURE §9, run-pod
+        // design §A); every companion's log tail becomes a post-mortem artifact first.
         if (message.State is WorkflowState.Success or WorkflowState.Failed or WorkflowState.Cancelled)
+        {
             await workspaceManager.CleanupAsync(message.WorkflowInstanceId);
+            podControlRegistry.Consume(message.WorkflowInstanceId);
+            var companionLogs = await podHost.TeardownAsync(message.WorkflowInstanceId, ct);
+            if (companionLogs.Count > 0)
+                await artifactPersister.PersistCompanionLogsAsync(
+                    message.WorkflowInstanceId, record?.WorkflowType ?? "unknown",
+                    companionLogs, workItemId ?? string.Empty, ct);
+        }
 
         // Drain-and-replace: a drained long-living instance is replaced with a fresh run
         // that boots with the updated configuration (ARCHITECTURE §6).

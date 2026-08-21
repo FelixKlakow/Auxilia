@@ -105,7 +105,10 @@ public sealed class FailoverMonitorTests
                 new InMemoryDataAccess<Auxilia.PlatformData.Entities.GroupMembershipRecord>()),
             TestResourceAccess.EmptyPrincipalDirectory(),
             TestResourceAccess.Open,
-            new RunnerLivenessTracker(), _runs,
+            new RunnerLivenessTracker(),
+            new EnvironmentBaseService(
+                new InMemoryDataAccess<EnvironmentBaseRecord>(), new AuditLog(_audit, _time), _time),
+            _runs,
             new WorkflowStatusPublisher(_bus, _time), _time,
             Options.Create(_settings), NullLogger<RunService>.Instance);
 

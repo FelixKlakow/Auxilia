@@ -100,4 +100,39 @@ public sealed class ArtifactPersister(
             logger.LogWarning(ex, "Could not clean up output directory for run {InstanceId}.", instanceId);
         }
     }
+
+    /// <summary>
+    /// Persists the captured log tail of each torn-down companion as a
+    /// <c>companion-log-&lt;name&gt;</c> artifact — the post-mortem evidence of the run's pod.
+    /// Audited and announced like declared outputs, so the Core's mirror serves them to
+    /// clients (chaining on them is possible but nothing wires it by default).
+    /// </summary>
+    public async Task PersistCompanionLogsAsync(
+        Guid instanceId, string workflowType,
+        IReadOnlyList<Pods.CompanionLog> companionLogs, string workItemId,
+        CancellationToken ct = default)
+    {
+        foreach (var log in companionLogs)
+        {
+            if (log.LogTail is not { Length: > 0 } tail)
+                continue;
+            using var payload = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(tail));
+            var record = await artifactStore.SaveAsync(
+                $"companion-log-{log.InstanceName}", workflowType, workItemId, instanceId, payload, ct);
+            await auditLog.AppendAsync("core-runner", "artifact.persisted",
+                instanceId.ToString(), $"{record.ArtifactType} v{record.Version}", ct: ct);
+
+            if (!_exchangeDeclared)
+            {
+                await messageBus.DeclareTopicExchangeAsync(ArtifactPersistedEvent.ExchangeName, ct);
+                _exchangeDeclared = true;
+            }
+            await messageBus.PublishToTopicExchangeAsync(ArtifactPersistedEvent.ExchangeName,
+                ArtifactPersistedEvent.RoutingKeyFor(record.ArtifactType),
+                new ArtifactPersistedEvent(
+                    record.Id, record.ArtifactType, record.WorkflowType, record.WorkItemId,
+                    record.RunInstanceId, record.Version, record.ContentHash, record.SizeBytes,
+                    timeProvider.GetUtcNow()), ct);
+        }
+    }
 }

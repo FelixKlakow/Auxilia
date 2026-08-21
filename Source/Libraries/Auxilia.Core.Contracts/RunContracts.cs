@@ -101,4 +101,53 @@ public sealed record RunStreamEvent(
 {
     public const string StatusKind = "status";
     public const string ViewKind = "view";
+
+    /// <summary>
+    /// The typed status payload of a <see cref="StatusKind"/> frame; null for view frames or
+    /// an unparseable payload. Clients switch on <see cref="RunStreamStatus.State"/> with
+    /// <see cref="RunStates"/> instead of hand-parsing <see cref="PayloadJson"/>.
+    /// </summary>
+    public RunStreamStatus? AsStatus()
+        => Kind == StatusKind ? TryDeserialize<RunStreamStatus>() : null;
+
+    /// <summary>The typed view payload of a <see cref="ViewKind"/> frame; null otherwise.</summary>
+    public RunStreamView? AsView()
+        => Kind == ViewKind ? TryDeserialize<RunStreamView>() : null;
+
+    private T? TryDeserialize<T>() where T : class
+    {
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<T>(
+                PayloadJson, System.Text.Json.JsonSerializerOptions.Web);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
 }
+
+/// <summary>
+/// The typed shape of a status stream frame — the client-side mirror of the runner's wire
+/// status event. <see cref="WorkflowInstanceId"/> is the runner-assigned id (equal to
+/// <see cref="RunStreamEvent.RunId"/> unless the caller subscribed by the dispatch id).
+/// </summary>
+public sealed record RunStreamStatus(
+    Guid WorkflowInstanceId,
+    string WorkflowType,
+    string State,
+    string? ErrorMessage,
+    DateTimeOffset TimestampUtc,
+    Guid? OwnerServiceId = null,
+    Guid? CommandId = null)
+{
+    public bool IsTerminal => RunStates.IsTerminal(State);
+}
+
+/// <summary>The typed shape of a view stream frame: one item of a declared live view.</summary>
+public sealed record RunStreamView(
+    Guid WorkflowInstanceId,
+    string ViewName,
+    long Sequence,
+    string PayloadJson);

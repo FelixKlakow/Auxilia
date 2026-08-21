@@ -54,6 +54,7 @@ public sealed class WorkflowAuthoring(ICoreClient core)
         if (missing.Count > 0)
             throw new ArgumentException($"required slots not bound: {string.Join(", ", missing)}.");
 
+        ValidateInputValues(schema, request.Context, storedConfiguration: true);
         await ValidateEnvironmentBasesAsync(request.SlotBindings, ct);
 
         return await core.CreateConfigurationAsync(new CreateRunConfiguration(
@@ -62,10 +63,11 @@ public sealed class WorkflowAuthoring(ICoreClient core)
     }
 
     /// <summary>
-    /// One run composes ONE container image on ONE base: environment-composing bindings whose
-    /// catalog entries declare different bases (linux vs windows) can never build together, so
-    /// the mismatch fails here instead of at dispatch. The lookup runs only when the bindings
-    /// name at least two distinct inline provider types.
+    /// One run composes ONE container image on ONE base — but a layer may carry a variant per
+    /// base. Environment-composing bindings whose catalog entries share no base (or whose
+    /// version pins disagree on every shared base) can never build together, so the mismatch
+    /// fails here instead of at dispatch — mirroring the Core's check. The lookup runs only when
+    /// the bindings name at least two distinct inline provider types.
     /// </summary>
     private async Task ValidateEnvironmentBasesAsync(
         IReadOnlyList<SlotBinding> bindings, CancellationToken ct)
@@ -79,36 +81,97 @@ public sealed class WorkflowAuthoring(ICoreClient core)
             return;
 
         var catalog = (await core.QueryProviderCatalogAsync(new ProviderCatalogQuery(Take: 500), ct)).Items;
-        var entries = catalog
+        var bases = catalog
             .Where(e => e.ComposesEnvironment
-                        && providerTypes.Contains(e.ProviderType, StringComparer.OrdinalIgnoreCase))
-            .ToList();
-        var bases = entries
-            .Where(e => e.EnvironmentBase is { Length: > 0 })
-            .ToDictionary(e => e.ProviderType, e => e.EnvironmentBase!, StringComparer.OrdinalIgnoreCase);
-        if (bases.Values.Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
+                        && providerTypes.Contains(e.ProviderType, StringComparer.OrdinalIgnoreCase)
+                        && e.EnvironmentBases is { Count: > 0 })
+            .ToDictionary(e => e.ProviderType, e => e.EnvironmentBases!, StringComparer.OrdinalIgnoreCase);
+        if (bases.Count == 0)
+            return;
+
+        var candidateBases = bases.Values
+            .Select(refs => refs.Select(r => r.Name).ToHashSet(StringComparer.OrdinalIgnoreCase))
+            .Aggregate((intersection, next) =>
+            {
+                intersection.IntersectWith(next);
+                return intersection;
+            });
+        bool VersionsAgree(string baseName) => bases.Values
+            .Select(refs => refs.First(r =>
+                string.Equals(r.Name, baseName, StringComparison.OrdinalIgnoreCase)).Version)
+            .Where(v => v is { Length: > 0 })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count() <= 1;
+        if (!candidateBases.Any(VersionsAgree))
             throw new ArgumentException(
-                "environment capabilities mix incompatible bases — "
-                + string.Join(", ", bases.Select(b => $"'{b.Key}' ({b.Value})"))
-                + ". One run composes one image on one base; pick layers of a single base.");
-        // The version axis mirrors the dispatch check: pinned versions must agree, unpinned
-        // layers compose with any version.
-        var versions = entries
-            .Where(e => e.EnvironmentBaseVersion is { Length: > 0 })
-            .ToDictionary(e => e.ProviderType, e => e.EnvironmentBaseVersion!, StringComparer.OrdinalIgnoreCase);
-        if (versions.Values.Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
-            throw new ArgumentException(
-                "environment capabilities mix incompatible base versions — "
-                + string.Join(", ", versions.Select(b => $"'{b.Key}' ({b.Value})"))
-                + ". One run composes one image on one base version; pick compatible layers.");
+                "environment capabilities have no common base — "
+                + string.Join(", ", bases.Select(b =>
+                    $"'{b.Key}' ({string.Join("|", b.Value.Select(r => r.Version is { Length: > 0 } ? $"{r.Name}/{r.Version}" : r.Name))})"))
+                + ". One run composes one image on one base; every selected layer must share "
+                + "a base whose version pins agree.");
     }
 
-    /// <summary>Validates, creates, and immediately dispatches the configuration.</summary>
+    /// <summary>
+    /// Validates, creates, and immediately dispatches the configuration.
+    /// <paramref name="perRunContext"/> carries the values that are different every run by
+    /// nature (declared <c>PerRun</c> inputs — never storable in the configuration); they
+    /// overlay the stored context at dispatch.
+    /// </summary>
     public async Task<(RunConfiguration Configuration, RunAccepted Run)> ConfigureAndRunAsync(
-        WorkflowConfigurationRequest request, Guid? onBehalfOf = null, CancellationToken ct = default)
+        WorkflowConfigurationRequest request, Guid? onBehalfOf = null,
+        IReadOnlyDictionary<string, string>? perRunContext = null, CancellationToken ct = default)
     {
+        if (perRunContext is { Count: > 0 }
+            && await core.GetWorkflowSchemaAsync(request.WorkflowType, ct) is { } schema)
+            ValidateInputValues(schema, perRunContext, storedConfiguration: false);
         var configuration = await ConfigureAsync(request, ct);
-        var run = await core.RunConfigurationAsync(configuration.Id, onBehalfOf: onBehalfOf, ct: ct);
+        var run = await core.RunConfigurationAsync(
+            configuration.Id, onBehalfOf: onBehalfOf, context: perRunContext, ct: ct);
         return (configuration, run);
+    }
+
+    /// <summary>
+    /// Declared-input value validation, mirroring what dispatch UIs enforce: kind checks on
+    /// every provided value (choice membership, number/boolean parse) and — for a STORED
+    /// configuration — the rule that <c>PerRun</c> inputs are never fixable, only suppliable
+    /// at dispatch. Unknown context keys pass untouched: platform keys (<c>pod-bases</c>,
+    /// trigger extras) are legitimate context that is not a declared input.
+    /// </summary>
+    private static void ValidateInputValues(
+        WorkflowSchemaDto schema, IReadOnlyDictionary<string, string>? context, bool storedConfiguration)
+    {
+        if (context is not { Count: > 0 })
+            return;
+        var problems = new List<string>();
+        foreach (var input in schema.Inputs)
+        {
+            if (!context.TryGetValue(input.Name, out var value))
+                continue;
+            if (storedConfiguration && input.PerRun)
+            {
+                problems.Add(
+                    $"input '{input.Name}' is per-run — it is asked at dispatch and can never "
+                    + "be fixed in a stored configuration");
+                continue;
+            }
+            switch (input.Kind)
+            {
+                case InputKinds.Choice when input.Choices is { Count: > 0 } choices
+                                            && !choices.Contains(value, StringComparer.Ordinal):
+                    problems.Add(
+                        $"input '{input.Name}' must be one of [{string.Join(", ", choices)}], not '{value}'");
+                    break;
+                case InputKinds.Number when !double.TryParse(
+                    value, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out _):
+                    problems.Add($"input '{input.Name}' must be a number, not '{value}'");
+                    break;
+                case InputKinds.Boolean when !bool.TryParse(value, out _):
+                    problems.Add($"input '{input.Name}' must be true or false, not '{value}'");
+                    break;
+            }
+        }
+        if (problems.Count > 0)
+            throw new ArgumentException(string.Join(" ", problems));
     }
 }

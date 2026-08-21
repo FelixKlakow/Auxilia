@@ -16,6 +16,8 @@ await (workflowName switch
     EchoChoiceWorkflow.WorkflowName => EchoChoiceWorkflow.RunAsync(args),
     CredentialResolutionWorkflow.WorkflowName => CredentialResolutionWorkflow.RunAsync(args),
     WorkspaceRepositoryWorkflow.WorkflowName => WorkspaceRepositoryWorkflow.RunAsync(args),
+    PodScenarioWorkflow.WorkflowName => PodScenarioWorkflow.RunAsync(args),
+    PodRestartWorkflow.WorkflowName => PodRestartWorkflow.RunAsync(args),
     _ => throw new InvalidOperationException($"Unknown dummy workflow name: '{workflowName}'")
 });
 

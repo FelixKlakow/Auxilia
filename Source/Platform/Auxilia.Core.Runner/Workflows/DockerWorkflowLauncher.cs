@@ -18,6 +18,7 @@ namespace Auxilia.Core.Runner.Workflows;
 public sealed class DockerWorkflowLauncher(
     IOptions<DockerWorkflowLauncherSettings> settingsOptions,
     IDockerClientFactory clientFactory,
+    Pods.IPodHost podHost,
     ILogger<DockerWorkflowLauncher> logger) : IWorkflowLauncher, IWorkflowContainerHost
 {
 
@@ -37,6 +38,26 @@ public sealed class DockerWorkflowLauncher(
             request = request with { DockerImageUri = composed };
         }
 
+        // The run's pod comes up FIRST (private network, companions in start order, each
+        // readiness-gated); any failure from here to the workflow's start tears it down —
+        // a failed launch must never leave companions running.
+        if (request.Pod is { } pod)
+            await podHost.MaterializeAsync(client, pod, ct);
+        try
+        {
+            return await LaunchWorkflowContainerAsync(client, request, settings, ct);
+        }
+        catch when (request.Pod is { } failedPod)
+        {
+            await podHost.TeardownAsync(failedPod.InstanceId, CancellationToken.None);
+            throw;
+        }
+    }
+
+    private async Task<WorkflowLaunchResult> LaunchWorkflowContainerAsync(
+        IDockerClient client, WorkflowLaunchRequest request,
+        DockerWorkflowLauncherSettings settings, CancellationToken ct)
+    {
         var createParams = request.DockerImageUri is not null
             ? BuildBakedImageContainerParameters(request, settings)
             : BuildCreateContainerParameters(request, settings);
@@ -54,6 +75,15 @@ public sealed class DockerWorkflowLauncher(
         // record the re-adoption pass can match, never an anonymous container.
         if (request.OnContainerCreated is { } onCreated)
             await onCreated(created.ID);
+
+        // The workflow container joins the pod network ADDITIONALLY (alias "workflow"): it
+        // keeps its governed egress network, staying the pod's only path to the outside.
+        if (request.Pod is { } pod)
+            await client.Networks.ConnectNetworkAsync(pod.NetworkName, new NetworkConnectParameters
+            {
+                Container = created.ID,
+                EndpointConfig = new EndpointSettings { Aliases = ["workflow"] }
+            }, ct);
 
         // Pre-flight linker check (baked images): every member a plugin references on a shared
         // assembly must exist in the image's copy — build skew fails HERE with a clear message,
@@ -506,6 +536,7 @@ public sealed class DockerWorkflowLauncher(
             binds.Add($"{request.OutputDirectoryBind}:/workflow-output");
         if (request.WorkspaceDirectoryBind is not null)
             binds.Add($"{request.WorkspaceDirectoryBind}:/workspace");
+        AddPodVolumeBinds(binds, request);
 
         var parameters = new CreateContainerParameters
         {
@@ -557,6 +588,7 @@ public sealed class DockerWorkflowLauncher(
             binds.Add($"{request.OutputDirectoryBind}:/workflow-output");
         if (request.WorkspaceDirectoryBind is not null)
             binds.Add($"{request.WorkspaceDirectoryBind}:/workspace");
+        AddPodVolumeBinds(binds, request);
 
         var parameters = new CreateContainerParameters
         {
@@ -615,6 +647,15 @@ public sealed class DockerWorkflowLauncher(
                 [$"{port}/tcp"] = [new PortBinding { HostIP = "127.0.0.1", HostPort = "" }]
             };
         }
+    }
+
+    /// <summary>Every pod volume rides into the workflow container under <c>/workspace/pod/&lt;name&gt;</c>.</summary>
+    internal static void AddPodVolumeBinds(List<string> binds, WorkflowLaunchRequest request)
+    {
+        if (request.Pod is not { } pod)
+            return;
+        binds.AddRange(pod.Volumes.Select(v =>
+            $"{v.DockerVolumeName}:{Auxilia.Workflows.WorkflowEnvironmentVariables.PodVolumeRoot}/{v.Name}"));
     }
 
     internal static bool UsesLoopbackTerminal(DockerWorkflowLauncherSettings settings)

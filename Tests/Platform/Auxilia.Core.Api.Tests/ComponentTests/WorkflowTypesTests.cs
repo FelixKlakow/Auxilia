@@ -79,6 +79,25 @@ public sealed class WorkflowTypesTests : CoreApiComponentTestBase
     }
 
     [Test]
+    public async Task DockerRegistration_WithoutASchema_SaysTheSurfaceIsUndiscoverable()
+    {
+        var client = CreateClient();
+
+        var blind = await (await client.PostAsJsonAsync("/api/workflow-types",
+                new RegisterWorkflowTypeRequest("blind-wf", "docker://blind:1")))
+            .Content.ReadFromJsonAsync<WorkflowTypeRegistrationDto>();
+        Assert.That(blind!.StatusReason, Does.Contain("no declared schema"),
+            "the approver must see that this is a blind trust decision");
+
+        var declared = await (await client.PostAsJsonAsync("/api/workflow-types",
+                new RegisterWorkflowTypeRequest("declared-wf", "docker://declared:1",
+                    SchemaJson: """{"WorkflowName":"declared-wf","Slots":[],"EnvironmentRequirements":[]}""")))
+            .Content.ReadFromJsonAsync<WorkflowTypeRegistrationDto>();
+        Assert.That(declared!.StatusReason, Does.Not.Contain("no declared schema"),
+            "a declared schema removes the blind spot and the warning");
+    }
+
+    [Test]
     public async Task DenyRecordsTheReason_AndTheTypeCannotRun()
     {
         var client = CreateClient();

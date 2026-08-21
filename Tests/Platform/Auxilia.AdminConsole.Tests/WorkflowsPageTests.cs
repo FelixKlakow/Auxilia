@@ -289,7 +289,7 @@ public sealed class WorkflowsPageTests
 
     private static ProviderCatalogEntry EnvironmentLayer(string providerType, string environmentBase)
         => new(providerType, true, "environment", [], ["environment-capability"], null,
-            ComposesEnvironment: true, EnvironmentBase: environmentBase);
+            ComposesEnvironment: true, EnvironmentBases: [new EnvironmentBaseRef(environmentBase)]);
 
     private static WorkflowSchemaDto Schema(string type, params WorkflowSlotDto[] slots)
         => new(type, "1.0.0", "1", "Ephemeral", [], slots, [], [], [], [], null, "{}");

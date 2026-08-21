@@ -26,4 +26,10 @@ public sealed record WorkflowManifest(
 
     /// <summary>Per-run terminal gate (see <see cref="Workflows.InteractiveTerminalGate"/>), when declared.</summary>
     public InteractiveTerminalGate? InteractiveTerminalGate { get; init; }
+
+    /// <summary>Companion containers of the run's pod (see <see cref="Companions.CompanionDeclaration"/>).</summary>
+    public IReadOnlyList<Companions.CompanionDeclaration> Companions { get; init; } = [];
+
+    /// <summary>The runtime pod-control envelope, when declared.</summary>
+    public Companions.PodControlDeclaration? PodControl { get; init; }
 }

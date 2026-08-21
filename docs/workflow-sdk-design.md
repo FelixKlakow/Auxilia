@@ -441,15 +441,9 @@ Source/
 
 ---
 
-## 13. Multi-container support (future consideration)
+## 13. Multi-container support — DELIVERED as run pods (2026-08-15)
 
-Some workflows may require sidecar services in their execution environment (e.g. a local database, a mock API). Single-container environment requirements (tools, ports, OS) are fully supported from v1 via `EnvironmentRequirements`. To extend this to multi-container scenarios the following changes would be needed:
-
-- **`EnvironmentRequirements` extension** – add a `SidecarServices` collection describing additional containers (image, ports, health-check).
-- **Core.Runner scheduler** – must orchestrate a pod/compose group rather than a single container, and wait for all sidecars to be healthy before dispatching the workflow.
-- **Runner abstraction** – the current implicit single-container runner model would need to be replaced with a pluggable `IRunnerOrchestrator` (Docker Compose, Kubernetes Job, etc.).
-
-This is a significant scope increase and is explicitly deferred beyond v1.
+Delivered as **companion declarations** (not the sidecar sketch below): `RequiresCompanion(name, image, c => …)` declares digest-pinned inert services with readiness probes (`WithReadinessProbe`), resource caps, run-input-driven scaling within signed bounds (`WithScale`), start ordering (`WithStartAfter`), shared run-scoped volumes (`WithPodVolume`), and env values resolved per run (`CompanionValue.RunSecret/InstanceCount/InstanceEndpoints`). The declarations ride `WorkflowSchema.Companions` in the signed manifest; the runner materializes the pod on a private per-run network and announces the resolved topology via `Workflow__Companion__*` (root of shared volumes: `/workspace/pod`). For test-driven dynamic fleets, `RequiresPodControl(maxContainers, description, podVolumes)` declares the runtime-spawn envelope instead: the workflow receives an `IPodController` via DI (`SpawnAsync(CompanionSpec)`/`StopAsync`) whose spawns are runner-clamped to the envelope and to the configuration-pinned base images (context key `pod-bases` → the Core's digest-pinned environment-base catalog). Full design + trust model: `docs/test-fabric-and-swarm-design.md` §A.
 
 
 ## Operator steering channel (2026-07-27)

@@ -473,6 +473,19 @@ public sealed class CoreClient : ICoreClient
     public Task DeleteEnvironmentLayerAsync(string providerType, CancellationToken ct = default)
         => DeleteAsync($"/api/environment-layers/{Uri.EscapeDataString(providerType)}", ct);
 
+    public async Task<EnvironmentLayerDto?> DeleteEnvironmentLayerVariantAsync(
+        string providerType, string baseEnvironment, CancellationToken ct = default)
+    {
+        using var cts = UnaryCts(ct);
+        using var response = await http.DeleteAsync(
+            $"/api/environment-layers/{Uri.EscapeDataString(providerType)}/variants/{Uri.EscapeDataString(baseEnvironment)}",
+            cts.Token);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return null;
+        await EnsureSuccessAsync(response, cts.Token);
+        return await response.Content.ReadFromJsonAsync<EnvironmentLayerDto>(cts.Token);
+    }
+
     // --- Repositories ---
 
     public Task<IReadOnlyList<WorkspaceResource>> ListWorkspacesAsync(CancellationToken ct = default)

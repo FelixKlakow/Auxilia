@@ -39,6 +39,9 @@ snapshot-first frames); unary calls run under a per-call timeout. Every Core sur
 | `Auxilia.Core.Contracts` | The wire contracts |
 | `Auxilia.Core.Client` | Typed HTTP client for the full Core API (this package) |
 | `Auxilia.Workflows.Client` | Workflow-domain library: authoring, triggers, artifact chaining |
+| `Auxilia.Workflows` | Workflow SDK for the programs themselves |
+| `Auxilia.Messaging` | Message-bus abstraction + RabbitMQ implementation |
+| `Auxilia.AI` | AI session abstraction for agentic workflow steps |
 | `Auxilia.Steering.Codec` | Dependency-free steering wire protocol |
 
 ## License

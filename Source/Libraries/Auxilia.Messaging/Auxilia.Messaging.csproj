@@ -6,6 +6,26 @@
         <Nullable>enable</Nullable>
     </PropertyGroup>
 
+    <PropertyGroup Label="Packaging">
+        <PackageId>Auxilia.Messaging</PackageId>
+        <Version>0.2.0</Version>
+        <Authors>Felix Klakow</Authors>
+        <Description>The Auxilia message-bus abstraction (IMessageBusClient) with its RabbitMQ implementation and an injectable fake for tests — the single path every Auxilia component uses to talk to the broker. Referenced by the workflow SDK; not needed by pure Core clients.</Description>
+        <RepositoryUrl>https://github.com/FelixKlakow/Auxilia</RepositoryUrl>
+        <PackageProjectUrl>https://github.com/FelixKlakow/Auxilia</PackageProjectUrl>
+        <PackageLicenseFile>LICENSE</PackageLicenseFile>
+        <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <PackageTags>auxilia;messaging;rabbitmq</PackageTags>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="..\..\..\LICENSE" Pack="true" PackagePath="" Visible="false" />
+        <None Include="README.md" Pack="true" PackagePath="" />
+    </ItemGroup>
+
     <ItemGroup>
         <PackageReference Include="OpenTelemetry.Api" Version="1.17.0" />
         <PackageReference Include="RabbitMQ.Client" Version="7.2.1" />

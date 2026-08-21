@@ -88,6 +88,37 @@ public sealed class ArtifactSurfaceTests : CoreApiComponentTestBase
     }
 
     [Test]
+    public async Task Query_ByRunId_AcceptsTheDispatchId_LikeEveryOtherRunRead()
+    {
+        // A pure client only ever holds RunAccepted.RunId (= the dispatch command id); the
+        // runner records artifacts under its own instance id. The query must resolve the alias.
+        var client = CreateClient();
+        var commandId = Guid.NewGuid();
+        var instanceId = Guid.NewGuid();
+        await MessageBus.SimulateReceivedAsync(
+            Auxilia.Workflows.Messaging.Messages.WorkflowStatusEvent.ExchangeName,
+            new Auxilia.Workflows.Messaging.Messages.WorkflowStatusEvent(
+                instanceId, "producer-wf", "Success", null, DateTimeOffset.UtcNow,
+                CommandId: commandId));
+        await MessageBus.SimulateReceivedAsync(ArtifactPersistedEvent.ExchangeName,
+            new ArtifactPersistedEvent(Guid.NewGuid(), "report", "producer-wf", "WI-run",
+                instanceId, 1, "H", 7, DateTimeOffset.UtcNow));
+
+        var byDispatchId = await client.GetFromJsonAsync<PagedResult<ArtifactDto>>(
+            $"/api/artifacts?runId={commandId}");
+        var byInstanceId = await client.GetFromJsonAsync<PagedResult<ArtifactDto>>(
+            $"/api/artifacts?runId={instanceId}");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(byDispatchId!.Items, Has.Count.EqualTo(1),
+                "the dispatch id a client holds must find the run's artifacts");
+            Assert.That(byDispatchId.Items[0].RunInstanceId, Is.EqualTo(instanceId));
+            Assert.That(byInstanceId!.Items, Has.Count.EqualTo(1), "the instance id keeps working");
+        });
+    }
+
+    [Test]
     public async Task GetById_ReturnsTheMirroredArtifact_Or404()
     {
         var client = CreateClient();

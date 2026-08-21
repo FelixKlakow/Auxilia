@@ -44,6 +44,11 @@ Source/Platform/Auxilia.Core.Runner/
     ├── EnvironmentValidator.cs / RunnerProfile.cs / ValidationResult.cs  # Manifest env requirements vs runner capabilities
     ├── WorkspaceManager.cs           # Warm cache + per-run CoW repo snapshots and mounts; empty-workspace scratch dirs
     ├── NetworkPolicyResolver.cs      # Effective egress policy (manifest baseline + run config, clamped by platform ceiling)
+    ├── Pods/                         # Run pods (test-fabric design §A): PodPlanner (pure count/placeholder/DAG resolution)
+    │                                 #   + DockerPodHost (per-run --internal network, companions, volumes, teardown/orphan sweep)
+    │                                 #   + PodControlHandler/-Registry (runtime spawn/stop: token-authenticated queue, envelope
+    │                                 #     clamps runtime-spawned containers only (auxilia.companion-runtime label; declared
+    │                                 #     templates never consume it), configuration-pinned base map from PodBaseImagesJson)
     ├── ResourceProxyHandler.cs / IResourceConnector.cs  # Audited Resource Proxy calls on the workflow's behalf
     ├── ArtifactPersister.cs          # Persists declared artifact outputs to the Artifact Store
     ├── SignalDispatcher.cs / ViewDataHandler.cs / WorkflowStateHandler.cs  # Signals; live view data; WorkflowStateMessage

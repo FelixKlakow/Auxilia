@@ -151,10 +151,13 @@ public class WorkflowDispatcherTests
             TestStores.NewArtifactStore(),
             new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
             TestStores.NewWorkspaceManager(),
+            TestStores.NewHostPlatformProbe(),
             Mock.Of<IRepositoryAuthResolver>(),
             new AuditLog(_auditRecords, TimeProvider.System),
             TestStores.NewInstanceInfo(),
             new Auxilia.PlatformData.Protection.NullSettingsProtector(),
+            new FakePodHost(),
+            new Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry(),
             NullLogger<WorkflowDispatcher>.Instance);
 
         await _sut.StartAsync(CancellationToken.None);
@@ -371,10 +374,13 @@ public class WorkflowDispatcherTests
             TestStores.NewArtifactStore(),
             new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
             TestStores.NewWorkspaceManager(),
+            TestStores.NewHostPlatformProbe(),
             Mock.Of<IRepositoryAuthResolver>(),
             new AuditLog(_auditRecords, TimeProvider.System),
             TestStores.NewInstanceInfo(),
             new Auxilia.PlatformData.Protection.NullSettingsProtector(),
+            new FakePodHost(),
+            new Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry(),
             NullLogger<WorkflowDispatcher>.Instance);
         await _sut.StartAsync(CancellationToken.None);
 
@@ -461,10 +467,13 @@ public class WorkflowDispatcherTests
             TestStores.NewArtifactStore(),
             new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
             TestStores.NewWorkspaceManager(),
+            TestStores.NewHostPlatformProbe(),
             Mock.Of<IRepositoryAuthResolver>(),
             new AuditLog(_auditRecords, TimeProvider.System),
             TestStores.NewInstanceInfo(),
             new Auxilia.PlatformData.Protection.NullSettingsProtector(),
+            new FakePodHost(),
+            new Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry(),
             NullLogger<WorkflowDispatcher>.Instance);
         await _sut.StartAsync(CancellationToken.None);
 

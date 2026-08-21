@@ -16,7 +16,8 @@ $headers = @{ Authorization = "Bearer $ApiKey" }
 
 $configurations = (Invoke-RestMethod "$CoreUrl/api/configurations?take=200" -Headers $headers).items
 foreach ($configuration in $configurations) {
-    if ($TestTypes -contains $configuration.workflowType -or $configuration.tags -contains "test") {
+    if ($TestTypes -contains $configuration.workflowType -or
+        $configuration.tags -contains "test" -or $configuration.tags -contains "#test") {
         Invoke-RestMethod -Method Delete "$CoreUrl/api/configurations/$($configuration.id)" -Headers $headers | Out-Null
         Write-Host "Deleted configuration '$($configuration.name)' ($($configuration.workflowType))."
     }

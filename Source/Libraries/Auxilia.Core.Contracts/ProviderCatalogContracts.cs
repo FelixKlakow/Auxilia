@@ -41,8 +41,7 @@ public sealed record ProviderCatalogEntry(
     bool MountsIntoWorkspace = false,
     bool ComposesEnvironment = false,
     ProviderOAuthRefresh? OAuthRefresh = null,
-    string? EnvironmentBase = null,
-    string? EnvironmentBaseVersion = null)
+    IReadOnlyList<EnvironmentBaseRef>? EnvironmentBases = null)
 {
     /// <summary>
     /// Who may bind this entry into a run (dispatch-enforced); empty follows the platform's
@@ -104,8 +103,7 @@ public sealed record RegisterSlotProvider(
     bool ComposesEnvironment = false,
     ProviderOAuthRefresh? OAuthRefresh = null,
     ProviderModelCatalog? ModelCatalog = null,
-    string? EnvironmentBase = null,
-    string? EnvironmentBaseVersion = null);
+    IReadOnlyList<EnvironmentBaseRef>? EnvironmentBases = null);
 
 /// <summary>One manifest setting of a provider being registered.</summary>
 public sealed record RegisterProviderSetting(

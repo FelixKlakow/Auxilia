@@ -159,6 +159,72 @@ public sealed class AdminWorkflowTypesPageTests
     }
 
     [Test]
+    public void Details_OfAPodType_RenderTheSpawnSummaryProminently()
+    {
+        var core = new FakeCoreClient();
+        core.WorkflowTypes.Add(Type("pod-scenario", WorkflowTypeStatus.Pending));
+        core.WorkflowSchemas["pod-scenario"] = new WorkflowSchemaDto(
+            "pod-scenario", "1.0.0", "1", "Job", [], [], [], [], [], [], null, "{}",
+            Status: WorkflowTypeStatus.Pending)
+        {
+            Companions =
+            [
+                new WorkflowCompanionDto("rabbit", "rabbitmq@sha256:aaaa", 1, 1, null, []),
+                new WorkflowCompanionDto("machine", "sim@sha256:bbbb", 0, 8, "machines", ["rabbit"], 512, 1.5)
+            ],
+            PodControl = new WorkflowPodControlDto(2, "Simulated machines", ["logs"]),
+            MaxPodContainers = 11
+        };
+        using var ctx = NewContext(core);
+        var cut = Render(ctx, AuthWith(PermissionActions.WorkflowTypeSign, PermissionActions.WorkflowTypeManage));
+
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Details").Click();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(cut.Markup, Does.Contain("Spawn summary"),
+                "the approval-relevant pod topology must be called out");
+            Assert.That(cut.Markup, Does.Contain("up to 11 pod container(s)"));
+            Assert.That(cut.Markup, Does.Contain("runtime-spawn envelope of 2"));
+            Assert.That(cut.Markup, Does.Contain("Declared companions"));
+            Assert.That(cut.Markup, Does.Contain("0–8"), "the scale bounds show per companion");
+            Assert.That(cut.Markup, Does.Contain("512 MB · 1.5 CPU"));
+            Assert.That(cut.Markup, Does.Contain("Simulated machines"), "the envelope's declared purpose shows");
+            Assert.That(cut.Markup, Does.Contain("logs"), "the shared pod volumes show");
+        });
+    }
+
+    [Test]
+    public void Details_OfAPodlessType_ShowNoSpawnSummary()
+    {
+        var core = new FakeCoreClient();
+        core.WorkflowTypes.Add(Type("plain", WorkflowTypeStatus.Active));
+        core.WorkflowSchemas["plain"] = new WorkflowSchemaDto(
+            "plain", "1.0.0", "1", "Job", [], [], [], [], [], [], null, "{}");
+        using var ctx = NewContext(core);
+        var cut = Render(ctx, AuthWith(PermissionActions.WorkflowTypeManage));
+
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Details").Click();
+
+        Assert.That(cut.Markup, Does.Not.Contain("Spawn summary"));
+    }
+
+    [Test]
+    public void Details_WithoutAReadableSchema_WarnTheApproverOfTheBlindSpot()
+    {
+        var core = new FakeCoreClient();
+        core.WorkflowTypes.Add(Type("mystery", WorkflowTypeStatus.Pending));
+        // No WorkflowSchemas entry: a docker:// type registered without a declared schema.
+        using var ctx = NewContext(core);
+        var cut = Render(ctx, AuthWith(PermissionActions.WorkflowTypeSign, PermissionActions.WorkflowTypeManage));
+
+        cut.FindAll("button").First(b => b.TextContent.Trim() == "Details").Click();
+
+        Assert.That(cut.Markup, Does.Contain("No declared schema"),
+            "approving a schemaless type is a blind trust decision — the page must say so");
+    }
+
+    [Test]
     public void ShowsAccessDenied_OnForbidden()
     {
         var core = new FakeCoreClient

@@ -1,9 +1,11 @@
 # Auxilia.CodingSession.Workflow
 
-Live interactive coding session as a LongLiving workflow: the real Claude Code CLI runs
-inside this container against the Workspace-Manager-mounted repository, viewable and
-steerable through the platform's authenticated web terminal, and the run completes when
-the CLI exits.
+Live interactive coding session as a LongLiving workflow: a real coding-agent CLI — Claude
+Code, GitHub Copilot, or Codex, whichever provider the `coding-agent` slot binds (the image
+ships all three; the slot's `CodingAgentCredentials` supplies the CLI path and credential
+environment) — runs inside this container against the Workspace-Manager-mounted repository,
+viewable and steerable through the platform's authenticated web terminal, and the run
+completes when the CLI exits.
 
 ## How the session works
 

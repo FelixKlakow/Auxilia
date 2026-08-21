@@ -26,6 +26,8 @@ public sealed class WorkflowReadoptionService(
     IWorkflowContainerHost containerHost,
     WorkflowInstanceRegistry instanceRegistry,
     WorkflowInstanceTokenRegistry tokenRegistry,
+    WorkflowSchemaStore schemaStore,
+    Pods.PodControlRegistry podControlRegistry,
     WorkflowDispatcher dispatcher,
     WorkflowStatusPublisher statusPublisher,
     WorkspaceManager workspaceManager,
@@ -33,6 +35,7 @@ public sealed class WorkflowReadoptionService(
     IOptions<WorkflowDispatcherSettings> dispatcherSettings,
     CoreRunnerInfo instanceInfo,
     AuditLog auditLog,
+    Pods.IPodHost podHost,
     ILogger<WorkflowReadoptionService> logger)
 {
     public async Task<ReadoptionPlan> RunAsync(CancellationToken ct = default)
@@ -57,6 +60,7 @@ public sealed class WorkflowReadoptionService(
         foreach (var (record, container) in plan.Adopt)
         {
             RestoreToken(record);
+            await RestorePodControlAsync(record, ct);
             containerHost.AttachExitWatcher(container.ContainerId,
                 exit => HandleReadoptedExitAsync(record, exit));
             logger.LogInformation(
@@ -103,6 +107,11 @@ public sealed class WorkflowReadoptionService(
                 await CleanupRunRootsAsync(instanceId);
         }
 
+        // Pods whose run no longer lives here die with their runs: everything except the
+        // adopted (and exit-collecting, torn down via their exit path) instances is swept.
+        var live = plan.Adopt.Concat(plan.CollectExit).Select(p => p.Record.Id).ToHashSet();
+        await podHost.SweepOrphanedAsync(live, ct);
+
         logger.LogInformation(
             "Re-adoption complete. Adopted={Adopted} ExitsCollected={Exits} FailedRecords={Failed} CleanKilled={Killed}",
             plan.Adopt.Count, plan.CollectExit.Count, plan.FailRecord.Count, plan.CleanKill.Count);
@@ -132,6 +141,37 @@ public sealed class WorkflowReadoptionService(
         }
     }
 
+    /// <summary>
+    /// Rebuilds the run's pod-control state after a restart — the registry is runner-memory.
+    /// Everything is reconstructable: the envelope from the schema store, the base map from
+    /// the persisted dispatch command, network/volume names deterministically re-planned by
+    /// <see cref="Pods.PodPlanner"/> — so an adopted run keeps its runtime spawn capability.
+    /// </summary>
+    private async Task RestorePodControlAsync(WorkflowInstanceRecord record, CancellationToken ct)
+    {
+        var schema = await schemaStore.GetSchemaAsync(record.WorkflowType, ct);
+        if (schema?.PodControl is not { } podControl)
+            return;
+        if (DispatchCommandOf(record) is not { } command)
+        {
+            logger.LogWarning(
+                "Run {InstanceId} declares a pod-control envelope but has no persisted dispatch command — runtime spawns stay refused.",
+                record.Id);
+            return;
+        }
+        var podPlan = Pods.PodPlanner.Plan(
+            schema.Companions, podControl, command.Context, record.Id);
+        if (podPlan is null)
+            return;
+        podControlRegistry.Register(record.Id, new Pods.PodControlState(
+            podControl.MaxContainers,
+            WorkflowDispatcher.ParseBaseImages(command.PodBaseImagesJson),
+            podPlan.NetworkName,
+            podPlan.Volumes.ToDictionary(v => v.Name, v => v.DockerVolumeName)));
+        await auditLog.AppendAsync("core-runner", "workflow.pod-control.restored",
+            record.Id.ToString(), podControl.MaxContainers.ToString(), ct: ct);
+    }
+
     private async Task HandleReadoptedExitAsync(WorkflowInstanceRecord record, ContainerExit exit)
     {
         await dispatcher.HandleContainerExitAsync(record.Id, record.WorkflowType, exit);
@@ -143,6 +183,7 @@ public sealed class WorkflowReadoptionService(
     private async Task CleanupRunRootsAsync(Guid instanceId)
     {
         await workspaceManager.CleanupAsync(instanceId);
+        await podHost.TeardownAsync(instanceId);
         var outputRoot = Path.Combine(
             dispatcherSettings.Value.RunOutputDirectory, instanceId.ToString("N"));
         try
@@ -157,12 +198,15 @@ public sealed class WorkflowReadoptionService(
     }
 
     private static Guid? CommandIdOf(WorkflowInstanceRecord record)
+        => DispatchCommandOf(record)?.CommandId;
+
+    private static RunWorkflowCommand? DispatchCommandOf(WorkflowInstanceRecord record)
     {
         if (record.DispatchCommandJson is not { Length: > 0 } json)
             return null;
         try
         {
-            return JsonSerializer.Deserialize<RunWorkflowCommand>(json)?.CommandId;
+            return JsonSerializer.Deserialize<RunWorkflowCommand>(json);
         }
         catch (JsonException)
         {

@@ -75,4 +75,10 @@ internal static class TestStores
 
     public static CoreRunnerInfo NewInstanceInfo()
         => new(Guid.NewGuid(), DateTime.UtcNow);
+
+    /// <summary>A probe with no reachable daemon — dispatch falls back to the linux base.</summary>
+    public static RunnerHostPlatformProbe NewHostPlatformProbe()
+        => new(Moq.Mock.Of<IDockerClientFactory>(),
+            Options.Create(new DockerWorkflowLauncherSettings()),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<RunnerHostPlatformProbe>.Instance);
 }
