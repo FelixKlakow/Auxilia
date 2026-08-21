@@ -2,19 +2,91 @@
   {
     "Id": "409599cc-5dc4-59b6-a3ce-5f165696e048",
     "ProviderType": "dotnet-10",
-    "Description": "The .NET 10 SDK preinstalled — build, test, and run .NET projects inside the session.",
-    "VariantsJson": "[{\"BaseEnvironment\": \"linux\", \"SetupScript\": \"curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh\\nbash /tmp/dotnet-install.sh --channel 10.0 --install-dir /usr/share/dotnet\\nln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet\\nrm /tmp/dotnet-install.sh\\ndotnet --list-sdks\", \"BaseVersion\": null}]",
+    "Description": "The .NET 10 SDK preinstalled \u2014 build, test, and run .NET projects inside the session.",
+    "VariantsJson": "[{\u0022BaseEnvironment\u0022:\u0022linux\u0022,\u0022SetupScript\u0022:\u0022curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh\\r\\nbash /tmp/dotnet-install.sh --channel 10.0 --install-dir /usr/share/dotnet\\r\\nln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet\\r\\nrm /tmp/dotnet-install.sh\\r\\ndotnet --list-sdks\u0022,\u0022BaseVersion\u0022:null}]",
     "Version": "10.0",
-    "UpdatedUtc": "2026-07-27T20:53:40.6339184+00:00",
-    "UpdatedBy": "cf486163-06a5-4515-8389-197be1f6a142"
+    "UpdatedUtc": "2026-08-21T12:03:37.8402248+00:00",
+    "UpdatedBy": "d8d3e117-6735-4186-abe5-83ccb08049ad"
   },
   {
     "Id": "1beefa4f-f686-5cf4-a511-e44312379876",
     "ProviderType": "node-22",
-    "Description": "Node.js 22 with npm preinstalled — build and run JavaScript/TypeScript projects inside the session.",
-    "VariantsJson": "[{\"BaseEnvironment\": \"linux\", \"SetupScript\": \"curl -fsSL https://deb.nodesource.com/setup_22.x | bash -\\napt-get install -y --no-install-recommends nodejs\\nrm -rf /var/lib/apt/lists/*\\nnode --version && npm --version\", \"BaseVersion\": null}]",
+    "Description": "Node.js 22 with npm preinstalled \u2014 build and run JavaScript/TypeScript projects inside the session.",
+    "VariantsJson": "[{\u0022BaseEnvironment\u0022:\u0022linux\u0022,\u0022SetupScript\u0022:\u0022curl -fsSL https://deb.nodesource.com/setup_22.x | bash -\\r\\napt-get install -y --no-install-recommends nodejs\\r\\nrm -rf /var/lib/apt/lists/*\\r\\nnode --version \\u0026\\u0026 npm --version\u0022,\u0022BaseVersion\u0022:null}]",
     "Version": "22",
-    "UpdatedUtc": "2026-07-27T20:53:40.690731+00:00",
-    "UpdatedBy": "cf486163-06a5-4515-8389-197be1f6a142"
+    "UpdatedUtc": "2026-08-21T12:03:37.9418996+00:00",
+    "UpdatedBy": "d8d3e117-6735-4186-abe5-83ccb08049ad"
+  },
+  {
+    "Id": "8db51420-6a6d-5a14-847c-e00a49c7539f",
+    "ProviderType": "dotnet-9",
+    "Description": "The .NET 9 SDK preinstalled.",
+    "VariantsJson": "[{\u0022BaseEnvironment\u0022:\u0022linux\u0022,\u0022SetupScript\u0022:\u0022curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh\\r\\nbash /tmp/dotnet-install.sh --channel 9.0 --install-dir /usr/share/dotnet\\r\\nln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet\\r\\nrm /tmp/dotnet-install.sh\\r\\ndotnet --list-sdks\u0022,\u0022BaseVersion\u0022:null}]",
+    "Version": "9.0",
+    "UpdatedUtc": "2026-08-21T12:03:37.8756816+00:00",
+    "UpdatedBy": "d8d3e117-6735-4186-abe5-83ccb08049ad"
+  },
+  {
+    "Id": "42d61af8-dd60-5b93-886f-3239d081809f",
+    "ProviderType": "dotnet-8",
+    "Description": "The .NET 8 (LTS) SDK preinstalled.",
+    "VariantsJson": "[{\u0022BaseEnvironment\u0022:\u0022linux\u0022,\u0022SetupScript\u0022:\u0022curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh\\r\\nbash /tmp/dotnet-install.sh --channel 8.0 --install-dir /usr/share/dotnet\\r\\nln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet\\r\\nrm /tmp/dotnet-install.sh\\r\\ndotnet --list-sdks\u0022,\u0022BaseVersion\u0022:null}]",
+    "Version": "8.0",
+    "UpdatedUtc": "2026-08-21T12:03:37.9083117+00:00",
+    "UpdatedBy": "d8d3e117-6735-4186-abe5-83ccb08049ad"
+  },
+  {
+    "Id": "c0a2b438-5741-55a1-8d55-f7e354d6404f",
+    "ProviderType": "node-20",
+    "Description": "Node.js 20 (LTS) with npm preinstalled.",
+    "VariantsJson": "[{\u0022BaseEnvironment\u0022:\u0022linux\u0022,\u0022SetupScript\u0022:\u0022curl -fsSL https://deb.nodesource.com/setup_20.x | bash -\\r\\napt-get install -y --no-install-recommends nodejs\\r\\nrm -rf /var/lib/apt/lists/*\\r\\nnode --version \\u0026\\u0026 npm --version\u0022,\u0022BaseVersion\u0022:null}]",
+    "Version": "20",
+    "UpdatedUtc": "2026-08-21T12:03:37.9748945+00:00",
+    "UpdatedBy": "d8d3e117-6735-4186-abe5-83ccb08049ad"
+  },
+  {
+    "Id": "af127bbb-1933-508e-97bb-adf59838c2d7",
+    "ProviderType": "python-3.12",
+    "Description": "Python 3.12 with pip and venv preinstalled \u2014 run Python tooling and projects inside the session.",
+    "VariantsJson": "[{\u0022BaseEnvironment\u0022:\u0022linux\u0022,\u0022SetupScript\u0022:\u0022apt-get update\\r\\napt-get install -y --no-install-recommends python3 python3-pip python3-venv\\r\\nrm -rf /var/lib/apt/lists/*\\r\\nln -sf /usr/bin/python3 /usr/local/bin/python\\r\\npython --version \\u0026\\u0026 pip3 --version\u0022,\u0022BaseVersion\u0022:null}]",
+    "Version": "3.12",
+    "UpdatedUtc": "2026-08-21T12:03:38.00692+00:00",
+    "UpdatedBy": "d8d3e117-6735-4186-abe5-83ccb08049ad"
+  },
+  {
+    "Id": "7018e1ff-7cdb-5691-80e6-ee1e0c5b3ed7",
+    "ProviderType": "java-21",
+    "Description": "Eclipse Temurin JDK 21 preinstalled \u2014 build and run JVM projects inside the session.",
+    "VariantsJson": "[{\u0022BaseEnvironment\u0022:\u0022linux\u0022,\u0022SetupScript\u0022:\u0022apt-get update \\u0026\\u0026 apt-get install -y --no-install-recommends wget apt-transport-https gpg\\r\\nwget -qO - https://packages.adoptium.net/artifactory/api/gpg/key/public | gpg --dearmor -o /etc/apt/trusted.gpg.d/adoptium.gpg\\r\\necho \\u0022deb https://packages.adoptium.net/artifactory/deb $(. /etc/os-release \\u0026\\u0026 echo $VERSION_CODENAME) main\\u0022 \\u003E /etc/apt/sources.list.d/adoptium.list\\r\\napt-get update \\u0026\\u0026 apt-get install -y --no-install-recommends temurin-21-jdk\\r\\nrm -rf /var/lib/apt/lists/*\\r\\njava --version\u0022,\u0022BaseVersion\u0022:null}]",
+    "Version": "21",
+    "UpdatedUtc": "2026-08-21T12:03:38.0409296+00:00",
+    "UpdatedBy": "d8d3e117-6735-4186-abe5-83ccb08049ad"
+  },
+  {
+    "Id": "deafd62d-8ada-5fff-a127-943558b65a38",
+    "ProviderType": "go-1.23",
+    "Description": "Go 1.23 toolchain preinstalled.",
+    "VariantsJson": "[{\u0022BaseEnvironment\u0022:\u0022linux\u0022,\u0022SetupScript\u0022:\u0022curl -fsSL https://go.dev/dl/go1.23.4.linux-amd64.tar.gz -o /tmp/go.tar.gz\\r\\ntar -C /usr/local -xzf /tmp/go.tar.gz\\r\\nln -sf /usr/local/go/bin/go /usr/local/bin/go\\r\\nrm /tmp/go.tar.gz\\r\\ngo version\u0022,\u0022BaseVersion\u0022:null}]",
+    "Version": "1.23",
+    "UpdatedUtc": "2026-08-21T12:03:38.0747323+00:00",
+    "UpdatedBy": "d8d3e117-6735-4186-abe5-83ccb08049ad"
+  },
+  {
+    "Id": "37ec544d-8500-51b3-b72b-f3ec28c04ebc",
+    "ProviderType": "rust-stable",
+    "Description": "Rust stable toolchain (rustup, cargo) preinstalled.",
+    "VariantsJson": "[{\u0022BaseEnvironment\u0022:\u0022linux\u0022,\u0022SetupScript\u0022:\u0022apt-get update \\u0026\\u0026 apt-get install -y --no-install-recommends curl ca-certificates gcc libc6-dev\\r\\nrm -rf /var/lib/apt/lists/*\\r\\ncurl --proto \\u0027=https\\u0027 --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable\\r\\nln -sf /root/.cargo/bin/* /usr/local/bin/\\r\\ncargo --version\u0022,\u0022BaseVersion\u0022:null}]",
+    "Version": "stable",
+    "UpdatedUtc": "2026-08-21T12:03:38.1066182+00:00",
+    "UpdatedBy": "d8d3e117-6735-4186-abe5-83ccb08049ad"
+  },
+  {
+    "Id": "32db81d6-3cef-5b32-8edb-04d503ef57cc",
+    "ProviderType": "cpp-toolchain",
+    "Description": "C/C\u002B\u002B build toolchain: gcc, make, cmake, ninja.",
+    "VariantsJson": "[{\u0022BaseEnvironment\u0022:\u0022linux\u0022,\u0022SetupScript\u0022:\u0022apt-get update\\r\\napt-get install -y --no-install-recommends build-essential cmake ninja-build\\r\\nrm -rf /var/lib/apt/lists/*\\r\\ngcc --version \\u0026\\u0026 cmake --version\u0022,\u0022BaseVersion\u0022:null}]",
+    "Version": null,
+    "UpdatedUtc": "2026-08-21T12:03:38.1393628+00:00",
+    "UpdatedBy": "d8d3e117-6735-4186-abe5-83ccb08049ad"
   }
 ]

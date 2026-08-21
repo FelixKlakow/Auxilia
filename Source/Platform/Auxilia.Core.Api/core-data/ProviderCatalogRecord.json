@@ -78,5 +78,77 @@
     "Category": "",
     "DescriptorOverridesJson": "[]",
     "GrantsJson": "[]"
+  },
+  {
+    "Id": "e1de1667-1d5e-5a1b-a00e-45693ba4a319",
+    "ProviderType": "dotnet-9",
+    "Available": true,
+    "Category": "",
+    "DescriptorOverridesJson": "[]",
+    "GrantsJson": "[]"
+  },
+  {
+    "Id": "348b69bd-3cac-5391-a661-6b32edc9b6a2",
+    "ProviderType": "dotnet-8",
+    "Available": true,
+    "Category": "",
+    "DescriptorOverridesJson": "[]",
+    "GrantsJson": "[]"
+  },
+  {
+    "Id": "55db6be1-ed76-56ef-acfc-5f45612d6cde",
+    "ProviderType": "node-20",
+    "Available": true,
+    "Category": "",
+    "DescriptorOverridesJson": "[]",
+    "GrantsJson": "[]"
+  },
+  {
+    "Id": "83e10175-d57f-5be7-a8f5-f0f94a9798fd",
+    "ProviderType": "python-3.12",
+    "Available": true,
+    "Category": "",
+    "DescriptorOverridesJson": "[]",
+    "GrantsJson": "[]"
+  },
+  {
+    "Id": "5bf31d55-cab4-5ece-aed7-794deec20570",
+    "ProviderType": "java-21",
+    "Available": true,
+    "Category": "",
+    "DescriptorOverridesJson": "[]",
+    "GrantsJson": "[]"
+  },
+  {
+    "Id": "6aa7281f-62d0-5c73-92c6-5a72accf46fe",
+    "ProviderType": "go-1.23",
+    "Available": true,
+    "Category": "",
+    "DescriptorOverridesJson": "[]",
+    "GrantsJson": "[]"
+  },
+  {
+    "Id": "88abd82b-385a-54cb-9eb4-612895413565",
+    "ProviderType": "rust-stable",
+    "Available": true,
+    "Category": "",
+    "DescriptorOverridesJson": "[]",
+    "GrantsJson": "[]"
+  },
+  {
+    "Id": "2f0128f0-872a-5b0f-99f0-f3f6fea73a2b",
+    "ProviderType": "cpp-toolchain",
+    "Available": true,
+    "Category": "",
+    "DescriptorOverridesJson": "[]",
+    "GrantsJson": "[]"
+  },
+  {
+    "Id": "c273b9d5-2c8f-5e0f-9f5c-e33a5df2d6f9",
+    "ProviderType": "codex-cli",
+    "Available": true,
+    "Category": "",
+    "DescriptorOverridesJson": "[]",
+    "GrantsJson": "[]"
   }
 ]

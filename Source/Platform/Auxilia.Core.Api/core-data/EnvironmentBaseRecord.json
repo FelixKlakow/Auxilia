@@ -1,0 +1,47 @@
+[
+  {
+    "Id": "5a09e631-24cc-5318-810e-f3de5037613b",
+    "Name": "linux",
+    "Version": "ubuntu-24.04",
+    "Description": "Ubuntu 24.04 LTS",
+    "ImageReference": null,
+    "UpdatedUtc": "2026-08-21T11:58:43.5215169+00:00",
+    "UpdatedBy": "d8d3e117-6735-4186-abe5-83ccb08049ad"
+  },
+  {
+    "Id": "e951d203-3d60-5504-aa03-64dd5e06d28a",
+    "Name": "linux",
+    "Version": "ubuntu-22.04",
+    "Description": "Ubuntu 22.04 LTS",
+    "ImageReference": null,
+    "UpdatedUtc": "2026-08-21T11:58:43.5696463+00:00",
+    "UpdatedBy": "d8d3e117-6735-4186-abe5-83ccb08049ad"
+  },
+  {
+    "Id": "9bd6f182-6a74-53d1-8330-c2f4e536836c",
+    "Name": "linux",
+    "Version": "debian-12",
+    "Description": "Debian 12 (bookworm)",
+    "ImageReference": null,
+    "UpdatedUtc": "2026-08-21T11:58:43.6203737+00:00",
+    "UpdatedBy": "d8d3e117-6735-4186-abe5-83ccb08049ad"
+  },
+  {
+    "Id": "60351415-0823-514b-bff2-f317f304acad",
+    "Name": "windows",
+    "Version": "server-2025",
+    "Description": "Windows Server 2025",
+    "ImageReference": null,
+    "UpdatedUtc": "2026-08-21T11:58:43.6696378+00:00",
+    "UpdatedBy": "d8d3e117-6735-4186-abe5-83ccb08049ad"
+  },
+  {
+    "Id": "8d4d94c0-548d-5ea7-b8a0-9889b04310ac",
+    "Name": "windows",
+    "Version": "server-2022",
+    "Description": "Windows Server 2022",
+    "ImageReference": null,
+    "UpdatedUtc": "2026-08-21T11:58:43.7189493+00:00",
+    "UpdatedBy": "d8d3e117-6735-4186-abe5-83ccb08049ad"
+  }
+]

@@ -419,20 +419,36 @@ if (-not $SkipWorkflows) {
     }
     $registered = @((Invoke-Core GET "/api/workflow-types?take=200").items)
     foreach ($workflow in $workflows) {
-        if ($registered | Where-Object workflowType -eq $workflow.type) {
-            Write-Host "  workflow type $($workflow.type) already registered"
-            continue
+        $existing = $registered | Where-Object workflowType -eq $workflow.type
+        # Declare the schema at registration (--emit-schema): the approval panel sees inputs +
+        # spawn summary up front, and the stored schema (incl. providedTools for the tool-match
+        # gate) refreshes WITHOUT waiting for a run — a stale schema would otherwise reject
+        # agent bindings until the type's first successful run, which the stale schema blocks.
+        $schemaJson = $null
+        try {
+            $emitted = & dotnet run --no-build --project "$repo\Source\Workflows\$($workflow.project)" -- --emit-schema 2>$null
+            if ($LASTEXITCODE -eq 0 -and $emitted) {
+                $schemaJson = ($emitted -join "`n").Trim()
+                $null = $schemaJson | ConvertFrom-Json  # sanity: refuse to send non-JSON output
+            }
         }
-        $result = Invoke-Core POST "/api/workflow-types" @{
+        catch { $schemaJson = $null }
+        $body = @{
             workflowType = $workflow.type
             packageUri   = "docker://$($workflow.image):$ImageTag"
         }
+        if ($schemaJson) { $body.schemaJson = $schemaJson }
+        elseif ($existing) {
+            Write-Host "  workflow type $($workflow.type) already registered (no local schema emitted - kept as-is)"
+            continue
+        }
+        $result = Invoke-Core POST "/api/workflow-types" $body
         if ($result.status -eq "Pending") {
             # A docker:// coordinate carries no verifiable signature — the registering
             # administrator IS the signing authority here, so approve in the same breath.
             Invoke-Core POST "/api/workflow-types/$($workflow.type)/approve" @{} | Out-Null
         }
-        Write-Host "  workflow type $($workflow.type) registered ($($workflow.image):$ImageTag)" -ForegroundColor Green
+        Write-Host "  workflow type $($workflow.type) $(if ($existing) { 'schema refreshed' } else { 'registered' }) ($($workflow.image):$ImageTag)" -ForegroundColor Green
     }
 }
 
