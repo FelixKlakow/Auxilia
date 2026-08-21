@@ -13,10 +13,11 @@ public sealed record WorkflowConfigurationRequest(
 
 /// <summary>
 /// The authoring convenience on top of the raw client: validates a configuration against the
-/// workflow type's schema FROM THE CORE REGISTRY (declared slots, required slots, provider-type
-/// narrowing, connector existence) before creating it — a bad configuration fails fast with a
-/// precise error instead of a dispatch-time surprise. The Core re-validates on submit; this is
-/// the client-side fast path, not the authority.
+/// workflow type's schema FROM THE CORE REGISTRY (declared slots, required slots, provider
+/// tool requirements against the image's provided tools, connector existence) before creating
+/// it — a bad configuration fails fast with a precise error instead of a dispatch-time
+/// surprise. The Core re-validates on submit; this is the client-side fast path, not the
+/// authority.
 /// </summary>
 public sealed class WorkflowAuthoring(ICoreClient core)
 {
@@ -30,17 +31,29 @@ public sealed class WorkflowAuthoring(ICoreClient core)
             ?? throw new KeyNotFoundException(
                 $"workflow type '{request.WorkflowType}' is not registered in the Core.");
 
+        // Tool matching: a provider that declares required tools binds only into workflows whose
+        // image provides them. Lazy — the catalog is fetched on the first provider-typed binding.
+        var provided = schema.ProvidedTools.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        IReadOnlyList<ProviderCatalogEntry>? catalog = null;
+
         foreach (var binding in request.SlotBindings)
         {
             var slot = schema.Slots.FirstOrDefault(s => s.SlotName == binding.SlotName)
                 ?? throw new ArgumentException(
                     $"slot '{binding.SlotName}' is not declared by workflow type '{schema.WorkflowType}'.");
 
-            if (slot.ProviderTypes is { Count: > 0 } narrowed
-                && binding.ProviderType is { } provider
-                && !narrowed.Contains(provider))
-                throw new ArgumentException(
-                    $"slot '{slot.SlotName}' only admits provider types [{string.Join(", ", narrowed)}], not '{provider}'.");
+            if (binding.ProviderType is { Length: > 0 } provider)
+            {
+                catalog ??= (await core.QueryProviderCatalogAsync(
+                    new ProviderCatalogQuery(Available: true, Take: 200), ct)).Items;
+                var entry = catalog.FirstOrDefault(e =>
+                    string.Equals(e.ProviderType, provider, StringComparison.OrdinalIgnoreCase));
+                if (entry is { RequiredTools.Count: > 0 }
+                    && entry.RequiredTools.Where(t => !provided.Contains(t)).ToList() is { Count: > 0 } missingTools)
+                    throw new ArgumentException(
+                        $"slot '{slot.SlotName}' cannot bind provider '{provider}' — it requires "
+                        + $"tool(s) the workflow's image does not provide: {string.Join(", ", missingTools)}.");
+            }
 
             if (binding.ConnectorId is { } connectorId
                 && await core.GetConnectorAsync(connectorId, ct) is null)

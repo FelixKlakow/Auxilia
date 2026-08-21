@@ -15,15 +15,32 @@ public sealed class WorkflowAuthoringTests
     {
         _core = new FakeCoreClient();
         _authoring = new WorkflowAuthoring(_core);
+        // The schema declares what the image bundles; each provider declares what it needs —
+        // the whitelist is gone, matching is the intersection of the two.
         _core.Schemas["implementation"] = Schema(
-            new WorkflowSlotDto("coding-agent", null, null, Optional: false, null,
-                ProviderTypes: ["claude-code-cli", "github-copilot-cli"]),
+            new WorkflowSlotDto("coding-agent", null, null, Optional: false, null),
             new WorkflowSlotDto("work-items", null, null, Optional: false, null),
             new WorkflowSlotDto("notifier", null, null, Optional: true, null));
+        _core.ProviderCatalog.AddRange(
+        [
+            Provider("claude-code-cli", requiredTools: ["claude"]),
+            Provider("github-copilot-cli", requiredTools: ["copilot"]),
+            Provider("codex-cli", requiredTools: ["codex"]),
+            Provider("tfs-account")
+        ]);
     }
 
     private static WorkflowSchemaDto Schema(params WorkflowSlotDto[] slots)
-        => new("implementation", "1.0", "1", "LongLiving", [], slots, [], [], [], [], null, "{}");
+        => new("implementation", "1.0", "1", "LongLiving", [], slots, [], [], [], [], null, "{}")
+        {
+            ProvidedTools = ["claude", "copilot"]
+        };
+
+    private static ProviderCatalogEntry Provider(string providerType, IReadOnlyList<string>? requiredTools = null)
+        => new(providerType, Available: true, "coding-agent", [], [], null)
+        {
+            RequiredTools = requiredTools ?? []
+        };
 
     private static WorkflowConfigurationRequest Request(params SlotBinding[] bindings)
         => new("My config", "implementation", bindings);
@@ -41,10 +58,22 @@ public sealed class WorkflowAuthoringTests
             new SlotBinding("no-such-slot"))));
 
     [Test]
-    public void ProviderTypeOutsideTheNarrowing_IsRejected()
-        => Assert.ThrowsAsync<ArgumentException>(() => _authoring.ConfigureAsync(Request(
-            new SlotBinding("coding-agent", ProviderType: "rogue-agent"),
+    public void ProviderRequiringAToolTheImageLacks_IsRejected()
+    {
+        var ex = Assert.ThrowsAsync<ArgumentException>(() => _authoring.ConfigureAsync(Request(
+            new SlotBinding("coding-agent", ProviderType: "codex-cli"),
             new SlotBinding("work-items"))));
+        Assert.That(ex!.Message, Does.Contain("codex"));
+    }
+
+    [Test]
+    public async Task ProviderWithoutToolRequirements_MatchesOnContractAlone()
+    {
+        await _authoring.ConfigureAsync(Request(
+            new SlotBinding("coding-agent", ProviderType: "claude-code-cli"),
+            new SlotBinding("work-items", ProviderType: "tfs-account")));
+        Assert.That(_core.CreatedConfigurations, Has.Count.EqualTo(1));
+    }
 
     [Test]
     public void MissingRequiredSlot_IsRejected_OptionalMayStayUnbound()

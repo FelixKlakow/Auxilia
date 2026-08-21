@@ -32,4 +32,7 @@ public sealed record WorkflowManifest(
 
     /// <summary>The runtime pod-control envelope, when declared.</summary>
     public Companions.PodControlDeclaration? PodControl { get; init; }
+
+    /// <summary>Tool names the workflow's image bundles (see <see cref="WorkflowSchema.ProvidedTools"/>).</summary>
+    public IReadOnlyList<string> ProvidedTools { get; init; } = [];
 }

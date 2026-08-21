@@ -20,11 +20,11 @@ public static class CopilotWorkflow
 
     public static Task Main(string[] args) =>
         WorkflowBuilder.Create(WorkflowType)
+            // What the Dockerfile installs — agent providers match on it, not on provider names.
+            .ProvidesTools("copilot")
             .Requires<ICodingAgent>("coding-agent",
                 new AiCapabilities { MinContextWindow = 128_000, SupportedModalities = [Modality.Text] },
-                "The autonomous coding agent executing the instruction (the GitHub Copilot CLI)",
-                // This package's image bundles the Copilot CLI only — narrow the ICodingAgent match.
-                providerTypes: ["github-copilot-cli"])
+                "The autonomous coding agent executing the instruction (the GitHub Copilot CLI)")
             .Requires<ISourceControlAccess>("repository",
                 new SourceControlCapabilities { RequiredPermissions = [Permission.Read] },
                 "The repositories the agent works on — prepared into the run's workspace before launch",

@@ -28,6 +28,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     private readonly List<WorkflowInputDescriptor> _inputs = new();
     private readonly List<string> _consumedArtifacts = new();
     private readonly List<Companions.CompanionDeclaration> _companions = new();
+    private readonly List<string> _providedTools = new();
     private Companions.PodControlDeclaration? _podControl;
     private readonly WorkflowMetadata _metadata = new();
     private Action<IServiceCollection>? _configureServices;
@@ -57,7 +58,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
 
     public IWorkflowBuilder Requires<TService>(
         string name, ICapability capabilities, string? description = null, bool optional = false,
-        bool allowMultiple = false, IReadOnlyList<string>? providerTypes = null)
+        bool allowMultiple = false)
     {
         if (_slots.Any(s => s.SlotName == name))
             throw new InvalidOperationException($"A slot with name '{name}' has already been declared.");
@@ -66,9 +67,20 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             ServiceType = typeof(TService),
             Contract = typeof(TService).FullName,
             Optional = optional,
-            AllowMultiple = allowMultiple,
-            ProviderTypes = providerTypes is { Count: > 0 } ? providerTypes : null
+            AllowMultiple = allowMultiple
         });
+        return this;
+    }
+
+    public IWorkflowBuilder ProvidesTools(params string[] tools)
+    {
+        foreach (var tool in tools)
+        {
+            ArgumentException.ThrowIfNullOrEmpty(tool);
+            var normalized = tool.Trim();
+            if (!_providedTools.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+                _providedTools.Add(normalized);
+        }
         return this;
     }
 
@@ -534,7 +546,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             InteractiveTerminalPort = _interactiveTerminalPort,
             InteractiveTerminalGate = _interactiveTerminalGate,
             Companions = ValidatedCompanions(),
-            PodControl = _podControl
+            PodControl = _podControl,
+            ProvidedTools = _providedTools.AsReadOnly()
         };
 
     internal WorkflowManifest BuildManifest(Guid instanceId = default)
@@ -553,6 +566,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             InteractiveTerminalPort = _interactiveTerminalPort,
             InteractiveTerminalGate = _interactiveTerminalGate,
             Companions = ValidatedCompanions(),
-            PodControl = _podControl
+            PodControl = _podControl,
+            ProvidedTools = _providedTools.AsReadOnly()
         };
 }

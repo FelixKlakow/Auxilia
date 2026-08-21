@@ -99,13 +99,20 @@ public sealed class RunServiceTests
             new StaticWorkflowType { WorkflowType = type, PackageUri = packageUri, SchemaJson = schemaJson },
             CancellationToken.None);
 
-    /// <summary>A schema whose coding-agent slot narrows the admissible provider types.</summary>
-    private static string NarrowedSchemaJson() => System.Text.Json.JsonSerializer.Serialize(
+    /// <summary>A schema whose image provides only the claude tool.</summary>
+    private static string ToolSchemaJson() => System.Text.Json.JsonSerializer.Serialize(
         new Auxilia.Workflows.WorkflowSchema(
             "wt",
-            [new Auxilia.Workflows.SlotDefinition("coding-agent", null)
-                { Contract = "ICodingAgent", ProviderTypes = ["claude-code-cli"] }],
-            []));
+            [new Auxilia.Workflows.SlotDefinition("coding-agent", null) { Contract = "ICodingAgent" }],
+            [])
+        {
+            ProvidedTools = ["claude"]
+        });
+
+    private Task RegisterAgentProviderAsync(string providerType, params string[] requiredTools)
+        => _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
+            providerType, "coding-agent", null, ["ICodingAgent"], [],
+            RequiredTools: requiredTools), CancellationToken.None);
 
     [Test]
     public async Task RunInline_PublishesCommand_WithRegistryPackage_WithoutRequestedBy()
@@ -132,7 +139,7 @@ public sealed class RunServiceTests
     public async Task RunInline_CarriesTheRegistrySchemaOnTheCommand()
     {
         var (service, bus, _, registry, _) = New();
-        var schemaJson = NarrowedSchemaJson();
+        var schemaJson = ToolSchemaJson();
         await SeedActiveTypeAsync(registry, "wt", "docker://img", schemaJson);
 
         await service.RunInlineAsync(
@@ -215,23 +222,26 @@ public sealed class RunServiceTests
     }
 
     [Test]
-    public async Task RunInline_BindingOutsideTheSlotsProviderTypeNarrowing_Throws()
+    public async Task RunInline_ProviderRequiringAToolTheImageLacks_Throws()
     {
         var (service, _, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img", NarrowedSchemaJson());
+        await SeedActiveTypeAsync(registry, "wt", "docker://img", ToolSchemaJson());
+        await RegisterAgentProviderAsync("github-copilot-cli", "copilot");
 
         var ex = Assert.ThrowsAsync<InvalidOperationException>(() => service.RunInlineAsync(
             new RunRequest("wt",
                 SlotBindings: [new SlotBinding("coding-agent", ProviderType: "github-copilot-cli")]),
             triggeredBy: null, CancellationToken.None));
-        Assert.That(ex!.Message, Does.Contain("does not admit provider 'github-copilot-cli'"));
+        Assert.That(ex!.Message, Does.Contain("copilot"),
+            "the missing tool — not a provider whitelist — is the rejection reason");
     }
 
     [Test]
-    public async Task RunInline_BindingWithinTheSlotsProviderTypeNarrowing_Dispatches()
+    public async Task RunInline_ProviderWhoseToolsTheImageProvides_Dispatches()
     {
         var (service, bus, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img", NarrowedSchemaJson());
+        await SeedActiveTypeAsync(registry, "wt", "docker://img", ToolSchemaJson());
+        await RegisterAgentProviderAsync("claude-code-cli", "claude");
 
         await service.RunInlineAsync(
             new RunRequest("wt",

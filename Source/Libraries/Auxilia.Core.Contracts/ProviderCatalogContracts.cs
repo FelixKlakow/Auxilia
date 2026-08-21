@@ -48,6 +48,13 @@ public sealed record ProviderCatalogEntry(
     /// <c>security.default-resource-access</c> setting (restricted = administrators only).
     /// </summary>
     public IReadOnlyList<AccessGrant> Grants { get; init; } = [];
+
+    /// <summary>
+    /// Tool names this provider needs inside the run container (manifest-declared, e.g. the CLI
+    /// it drives) — editors offer and the Core admits the provider only for workflows whose
+    /// schema provides every listed tool. Empty = no in-image requirement.
+    /// </summary>
+    public IReadOnlyList<string> RequiredTools { get; init; } = [];
 }
 
 /// <summary>
@@ -103,7 +110,8 @@ public sealed record RegisterSlotProvider(
     bool ComposesEnvironment = false,
     ProviderOAuthRefresh? OAuthRefresh = null,
     ProviderModelCatalog? ModelCatalog = null,
-    IReadOnlyList<EnvironmentBaseRef>? EnvironmentBases = null);
+    IReadOnlyList<EnvironmentBaseRef>? EnvironmentBases = null,
+    IReadOnlyList<string>? RequiredTools = null);
 
 /// <summary>One manifest setting of a provider being registered.</summary>
 public sealed record RegisterProviderSetting(

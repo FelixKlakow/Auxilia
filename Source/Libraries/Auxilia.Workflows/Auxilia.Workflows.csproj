@@ -8,7 +8,7 @@
 
   <PropertyGroup Label="Packaging">
     <PackageId>Auxilia.Workflows</PackageId>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <Authors>Felix Klakow</Authors>
     <Description>The Auxilia workflow SDK — author signed, stateful workflow programs that run in isolated containers: the WorkflowBuilder (declared inputs, outputs, views, companions, pod control, repositories, network endpoints), the typed run-input accessor, the runner handshake, and the bus-side messaging contracts. Everything a workflow binary needs; clients use Auxilia.Workflows.Client instead.</Description>
     <RepositoryUrl>https://github.com/FelixKlakow/Auxilia</RepositoryUrl>

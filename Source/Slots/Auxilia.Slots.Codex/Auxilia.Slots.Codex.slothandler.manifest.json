@@ -7,6 +7,7 @@
     "Auxilia.Workflows.AiAgent.CodingAgent.ICodingAgent"
   ],
   "Category": "coding-agent",
+  "RequiredTools": ["codex"],
   "Description": "Runs the OpenAI Codex CLI as the coding agent of a workflow; the API key reaches the agent container just-in-time.",
   "Settings": [
     {

@@ -20,6 +20,9 @@ parity.
   all handled by `Run(args)`; your code is the application delegate.
 - **Companions & pod control** — declare digest-pinned service containers and spawn more
   at runtime inside the signed envelope, on the run's private zero-egress pod network.
+- **Tool-provision matching** — `ProvidesTools("claude", "copilot")` declares the CLIs the
+  workflow's image bundles; slot handlers declare what they need (`RequiredTools` in their
+  manifest) and match data-driven — no provider names in workflow source.
 
 ## Package family
 

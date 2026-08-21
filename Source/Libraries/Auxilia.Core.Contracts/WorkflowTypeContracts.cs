@@ -95,9 +95,8 @@ public sealed record WorkflowTypeAccessChange(
 /// <summary>
 /// One declared slot of a workflow: the config editor binds it to a connector. <see cref="Contract"/>
 /// is the capability contract the slot expects (offer only matching connectors); <see cref="CapabilitiesJson"/>
-/// carries the schema-declared capability requirement object as raw JSON. <see cref="ProviderTypes"/>
-/// is the workflow's declared narrowing — when present, editors offer (and the Core admits) only
-/// bindings of these provider types.
+/// carries the schema-declared capability requirement object as raw JSON. Providers declaring
+/// required tools additionally match against the schema's <see cref="WorkflowSchemaDto.ProvidedTools"/>.
 /// </summary>
 public sealed record WorkflowSlotDto(
     string SlotName,
@@ -105,8 +104,7 @@ public sealed record WorkflowSlotDto(
     string? Description,
     bool Optional,
     string? CapabilitiesJson,
-    bool AllowMultiple = false,
-    IReadOnlyList<string>? ProviderTypes = null);
+    bool AllowMultiple = false);
 
 /// <summary>One run input a workflow declares; the dispatch/config UI renders these generically.</summary>
 public sealed record WorkflowInputDto(
@@ -192,6 +190,13 @@ public sealed record WorkflowSchemaDto(
     /// pod-control envelope.
     /// </summary>
     public int MaxPodContainers { get; init; }
+
+    /// <summary>
+    /// Tool names the workflow's image bundles (open vocabulary, e.g. the CLIs its Dockerfile
+    /// installs) — matched against each provider's <see cref="ProviderCatalogEntry.RequiredTools"/>:
+    /// a provider is offerable and bindable only when every tool it requires is provided here.
+    /// </summary>
+    public IReadOnlyList<string> ProvidedTools { get; init; } = [];
 }
 
 /// <summary>The declared runtime-spawn envelope — part of the approval's spawn summary.</summary>

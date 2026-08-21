@@ -25,16 +25,17 @@ public static class ImplementationWorkflow
                 new TaskSourceCapabilities { SupportedItemTypes = [ItemType.UserStory] },
                 "The story source — TFS/Azure DevOps (or mail); states are read from and "
                 + "written back to this source")
+            // What the Dockerfile installs — agent providers match on it, not on provider names.
+            .ProvidesTools("claude", "copilot")
             .Requires<ICodingAgent>("coding-agent",
                 new AiCapabilities { MinContextWindow = 128_000, SupportedModalities = [Modality.Text] },
                 "The AUTHOR: one interactive CLI instance (visible in the run terminal) spans "
-                + "refinement, plan, and implementation by default",
-                providerTypes: ["claude-code-cli", "github-copilot-cli"])
+                + "refinement, plan, and implementation by default")
             .Requires<ICodingAgent>("review-agent",
                 new AiCapabilities { MinContextWindow = 128_000, SupportedModalities = [Modality.Text] },
                 "The REVIEWER: a second agent instance for plan and code review; unbound = "
                 + "AI review steps are skipped",
-                optional: true, providerTypes: ["claude-code-cli", "github-copilot-cli"])
+                optional: true)
             .Requires<ISourceControlAccess>("repository",
                 new SourceControlCapabilities { RequiredPermissions = [Permission.Read, Permission.Write] },
                 "The repository the story is implemented in (bind with pushing allowed)")

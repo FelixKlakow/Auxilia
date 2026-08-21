@@ -41,6 +41,20 @@ public class WorkflowBuilderTests
     }
 
     [Test]
+    public void ProvidesTools_RidesSchemaAndManifest_DedupedCaseInsensitively()
+    {
+        var builder = (WorkflowBuilder)WorkflowBuilder.Create("test")
+            .ProvidesTools("claude", "copilot")
+            .ProvidesTools("Claude", " copilot ");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(builder.BuildSchema().ProvidedTools, Is.EqualTo(new[] { "claude", "copilot" }));
+            Assert.That(builder.BuildManifest().ProvidedTools, Is.EqualTo(new[] { "claude", "copilot" }));
+        });
+    }
+
+    [Test]
     public void WithInteractiveTerminal_PortAndGate_RideSchemaAndManifest()
     {
         var builder = (WorkflowBuilder)WorkflowBuilder.Create("test")

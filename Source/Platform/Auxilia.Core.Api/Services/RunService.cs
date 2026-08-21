@@ -178,7 +178,7 @@ public sealed class RunService(
         // A slot that narrows its admissible provider types is enforced here: the narrowing is the
         // workflow's own schema declaration (e.g. its image bundles exactly one agent CLI), so an
         // out-of-set binding could never execute and must fail the dispatch, not the run.
-        await ValidateSlotProviderTypesAsync(workflowType, slotBindings, ct);
+        await ValidateSlotToolsAsync(workflowType, slotBindings, ct);
 
         // Bindings of providers that mount into the workspace become generic workspace mounts:
         // the binding's settings are re-keyed by the provider's declared setting ROLES (a pure
@@ -400,28 +400,31 @@ public sealed class RunService(
             commandId, workflowType, RunStates.Dispatched, commandId: commandId, ct: ct);
     }
 
-    /// <summary>Rejects bindings whose provider type falls outside the slot's declared narrowing.</summary>
-    private async Task ValidateSlotProviderTypesAsync(
+    /// <summary>
+    /// Rejects bindings whose provider requires tools the workflow's image does not provide —
+    /// the data-driven successor of the retired per-slot provider-type whitelist: the provider's
+    /// manifest declares what it needs in the container, the schema declares what the image
+    /// bundles, and the Core only intersects the two. No schema yet = nothing to check against
+    /// (the same blind-trust window the registry approval surfaces).
+    /// </summary>
+    private async Task ValidateSlotToolsAsync(
         string workflowType, IReadOnlyList<SlotBinding> slotBindings, CancellationToken ct)
     {
         var schema = await schemaReader.GetSchemaAsync(workflowType, ct);
-        var narrowedSlots = schema?.Slots
-            .Where(s => s.ProviderTypes is { Count: > 0 })
-            .ToDictionary(s => s.SlotName, s => s.ProviderTypes!, StringComparer.Ordinal);
-        if (narrowedSlots is not { Count: > 0 })
+        if (schema is null)
             return;
+        var provided = schema.ProvidedTools.ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var binding in slotBindings)
         {
-            if (!narrowedSlots.TryGetValue(binding.SlotName, out var admitted))
+            var entry = await ResolveCatalogEntryAsync(binding, ct);
+            if (entry is not { RequiredTools.Count: > 0 })
                 continue;
-            var providerType = binding.ProviderType;
-            if (string.IsNullOrEmpty(providerType) && binding.ConnectorId is not null)
-                providerType = (await connectors.GetAsync(binding.ConnectorId.Value, ct))?.ProviderType;
-            if (providerType is { Length: > 0 }
-                && !admitted.Contains(providerType, StringComparer.OrdinalIgnoreCase))
+            var missing = entry.RequiredTools.Where(t => !provided.Contains(t)).ToList();
+            if (missing.Count > 0)
                 throw new InvalidOperationException(
-                    $"slot '{binding.SlotName}' of '{workflowType}' does not admit provider "
-                    + $"'{providerType}' — the workflow declares: {string.Join(", ", admitted)}");
+                    $"slot '{binding.SlotName}' of '{workflowType}' cannot bind provider "
+                    + $"'{entry.ProviderType}' — it requires tool(s) the workflow's image does "
+                    + $"not provide: {string.Join(", ", missing)}");
         }
     }
 

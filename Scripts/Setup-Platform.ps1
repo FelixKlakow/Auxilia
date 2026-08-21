@@ -286,6 +286,7 @@ $providers = @(
         providerType = "claude-code-cli"; category = "coding-agent"
         description = "Runs the Claude Code CLI as the coding agent of a workflow; credentials reach the agent container just-in-time."
         contracts = @("Auxilia.Workflows.AiAgent.CodingAgent.ICodingAgent")
+        requiredTools = @("claude")
         settings = @(
             @{ key = "OAuthToken"; label = "Claude account"; kind = "Secret"; connectFlow = "anthropic-claude"; helpText = "The connected Claude account the CLI runs with." }
             @{ key = "OAuthRefreshToken"; label = "Refresh token"; kind = "Secret"; helpText = "Captured by Connect - lets the Core refresh the access token at delivery time." }
@@ -311,6 +312,7 @@ $providers = @(
         providerType = "github-copilot-cli"; category = "coding-agent"
         description = "Runs the GitHub Copilot CLI as the coding agent of a workflow; the token reaches the agent container just-in-time."
         contracts = @("Auxilia.Workflows.AiAgent.CodingAgent.ICodingAgent")
+        requiredTools = @("copilot")
         settings = @(
             @{ key = "token"; label = "GitHub account"; kind = "Secret"; required = $true; connectFlow = "github"; helpText = "A GitHub token with Copilot access." }
             @{ key = "UseSdkSession"; label = "Interactive session (SDK)"; kind = "Boolean"; helpText = "Full interactivity via the Copilot SDK. Off = plain headless mode." }
@@ -322,6 +324,7 @@ $providers = @(
         providerType = "codex-cli"; category = "coding-agent"
         description = "Runs the OpenAI Codex CLI as the coding agent of a workflow; the API key reaches the agent container just-in-time."
         contracts = @("Auxilia.Workflows.AiAgent.CodingAgent.ICodingAgent")
+        requiredTools = @("codex")
         settings = @(
             @{ key = "ApiKey"; label = "OpenAI API key"; kind = "Secret"; required = $true; helpText = "An OpenAI API key with Codex access." }
             @{ key = "Model"; label = "Model"; kind = "Text" }
@@ -384,13 +387,10 @@ $providers = @(
 $catalog = @((Invoke-Core GET "/api/provider-catalog?take=200").items)
 foreach ($provider in $providers) {
     $existing = $catalog | Where-Object providerType -eq $provider.providerType
-    if (-not $existing) {
-        Invoke-Core POST "/api/provider-catalog" $provider | Out-Null
-        Write-Host "  provider $($provider.providerType) registered" -ForegroundColor Green
-    }
-    else {
-        Write-Host "  provider $($provider.providerType) already registered"
-    }
+    # Always POST: registration upserts the provider record (descriptors, contracts,
+    # requiredTools) while curation — availability and grants — lives separately and survives.
+    Invoke-Core POST "/api/provider-catalog" $provider | Out-Null
+    Write-Host "  provider $($provider.providerType) $(if ($existing) { 'refreshed' } else { 'registered' })" -ForegroundColor Green
     if (-not $existing -or $existing.available -ne $true) {
         Invoke-Core POST "/api/provider-catalog/$($provider.providerType)/availability" @{ available = $true } | Out-Null
         Write-Host "  provider $($provider.providerType) made available" -ForegroundColor Green

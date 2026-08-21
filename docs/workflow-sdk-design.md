@@ -490,12 +490,24 @@ the runner ships every sibling non-`Auxilia.*` DLL into the container beside the
 deserialize case-SENSITIVELY — PascalCase keys).
 
 Schema declarations also grew generically: `Requires<T>(..., allowMultiple: true)` lets one slot
-carry several bindings (multi-repository runs); `Requires<T>(..., providerTypes: [...])` narrows
-the contract match to the providers the workflow's package can actually execute (enforced at
-dispatch by the Core); an optional multi-binding `environment` slot selects environment
-capabilities (see ARCHITECTURE §9); and `RequiresInput(WorkflowInputDescriptor)` declares typed
-inputs (`Kind` = Text/Multiline/Boolean/Choice/Number, `DefaultValue`, `Choices`,
-`ChoiceLabels`) that editors render without knowing the workflow.
+carry several bindings (multi-repository runs); an optional multi-binding `environment` slot
+selects environment capabilities (see ARCHITECTURE §9); and
+`RequiresInput(WorkflowInputDescriptor)` declares typed inputs (`Kind` =
+Text/Multiline/Boolean/Choice/Number, `DefaultValue`, `Choices`, `ChoiceLabels`) that editors
+render without knowing the workflow.
+
+**Tool-provision matching (2026-08-21 — replaced the per-slot provider-type whitelist).** A
+slot handler that drives a binary inside the run container declares it in its manifest
+(`"RequiredTools": ["claude"]` — an open vocabulary, surfaced on the provider-catalog entry),
+and a workflow declares what its image bundles with `ProvidesTools("claude", "copilot")`
+(published as the schema's `ProvidedTools`). A provider is offerable in editors and bindable at
+dispatch only when every tool it requires is provided; a provider requiring no tools matches on
+contract alone. The Core enforces the intersection at dispatch (`RunService`), the authoring
+client fails fast, and editors filter — all data-driven, so registering a NEW agent handler
+never requires editing or re-signing existing workflows: the moment a workflow's image bundles
+the tool (and declares it), the provider matches. The former
+`Requires<T>(..., providerTypes: [...])` whitelist — which hard-coded provider identities into
+workflow source — is gone.
 
 ## Platform events (2026-08-08)
 

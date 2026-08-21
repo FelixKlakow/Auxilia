@@ -8,14 +8,21 @@ public interface IWorkflowBuilder
     /// <summary>
     /// Declares a capability slot. The contract type name of <typeparamref name="TService"/> is
     /// published in the schema so configuration tooling offers only matching providers; an
-    /// <paramref name="optional"/> slot may stay unbound in a workflow configuration.
-    /// <paramref name="providerTypes"/> narrows the contract match to the providers the workflow's
-    /// package can actually execute (e.g. the one CLI bundled in its image); null admits any
-    /// provider implementing the contract.
+    /// <paramref name="optional"/> slot may stay unbound in a workflow configuration. Providers
+    /// that declare required tools additionally match against <see cref="ProvidesTools"/>.
     /// </summary>
     IWorkflowBuilder Requires<TService>(
         string name, ICapability capabilities, string? description = null, bool optional = false,
-        bool allowMultiple = false, IReadOnlyList<string>? providerTypes = null);
+        bool allowMultiple = false);
+
+    /// <summary>
+    /// Declares the tools the workflow's IMAGE bundles (e.g. the CLIs its Dockerfile installs) —
+    /// an open vocabulary. A slot provider that declares required tools (its manifest's
+    /// <c>RequiredTools</c>) is offerable and bindable only when every one of them is provided
+    /// here; providers requiring no tools match on contract alone. Never name provider types —
+    /// name what the image contains.
+    /// </summary>
+    IWorkflowBuilder ProvidesTools(params string[] tools);
 
     IWorkflowBuilder RequiresEnvironment(Action<IEnvironmentBuilder> configure);
 

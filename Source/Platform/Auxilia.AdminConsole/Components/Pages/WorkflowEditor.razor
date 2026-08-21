@@ -524,12 +524,17 @@ else
         return edit;
     }
 
-    // --- Provider narrowing ---
+    // --- Provider matching ---
 
-    /// <summary>Available catalog providers admitted by the slot's declared narrowing and contract.</summary>
+    /// <summary>
+    /// Available catalog providers matching the slot's contract whose required tools the
+    /// workflow's image provides (a provider requiring no tools matches on contract alone).
+    /// </summary>
     private List<ProviderCatalogEntry> EligibleProviders(WorkflowSlotDto slot)
         => _catalog
-            .Where(p => slot.ProviderTypes is null || slot.ProviderTypes.Contains(p.ProviderType))
+            .Where(p => p.RequiredTools.Count == 0
+                        || p.RequiredTools.All(t => (_schema?.ProvidedTools ?? [])
+                            .Contains(t, StringComparer.OrdinalIgnoreCase)))
             .Where(p => slot.Contract is null or "" || p.Contracts.Contains(slot.Contract))
             .OrderBy(p => p.ProviderType, StringComparer.OrdinalIgnoreCase)
             .ToList();

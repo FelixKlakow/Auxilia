@@ -17,6 +17,14 @@ public sealed record PluginManifest(
     /// <summary>Human slot-kind tag (e.g. "task-source"); admins may override it in the catalog.</summary>
     public string? Category { get; init; }
 
+    /// <summary>
+    /// Tool names this handler needs INSIDE the run container (e.g. the CLI binary it drives,
+    /// <c>"claude"</c>) — an open vocabulary matched against the workflow schema's
+    /// <c>ProvidedTools</c>: the provider is bindable only into workflows whose image provides
+    /// every listed tool. Empty means no in-image requirement (contract match alone decides).
+    /// </summary>
+    public IReadOnlyList<string>? RequiredTools { get; init; }
+
     /// <summary>One plain-language sentence describing what the provider does, shown to admins and configurators.</summary>
     public string? Description { get; init; }
 

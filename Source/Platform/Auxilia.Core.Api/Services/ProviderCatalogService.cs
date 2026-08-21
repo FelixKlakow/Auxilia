@@ -81,6 +81,9 @@ public sealed class ProviderCatalogService(
             EnvironmentBasesJson = request.EnvironmentBases is { Count: > 0 }
                 ? JsonSerializer.Serialize(request.EnvironmentBases)
                 : null,
+            RequiredToolsJson = request.RequiredTools is { Count: > 0 }
+                ? JsonSerializer.Serialize(request.RequiredTools)
+                : null,
             OAuthRefreshJson = request.OAuthRefresh is null
                 ? null
                 : JsonSerializer.Serialize(request.OAuthRefresh),
@@ -237,7 +240,10 @@ public sealed class ProviderCatalogService(
                 ? JsonSerializer.Deserialize<List<EnvironmentBaseRef>>(basesJson)
                 : null)
         {
-            Grants = AccessGrantEvaluator.Parse(curation.GrantsJson)
+            Grants = AccessGrantEvaluator.Parse(curation.GrantsJson),
+            RequiredTools = provider.RequiredToolsJson is { Length: > 0 } toolsJson
+                ? JsonSerializer.Deserialize<List<string>>(toolsJson) ?? []
+                : []
         };
     }
 

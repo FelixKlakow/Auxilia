@@ -60,6 +60,14 @@ public sealed record WorkflowSchema(
     /// <see cref="Companions.PodControlDeclaration"/>); null = no runtime spawning.
     /// </summary>
     public Companions.PodControlDeclaration? PodControl { get; init; }
+
+    /// <summary>
+    /// Tool names the workflow's IMAGE bundles (e.g. the CLIs its Dockerfile installs) — an open
+    /// vocabulary matched against each slot provider's declared required tools: a provider is
+    /// bindable only when every tool it requires is provided. Empty admits only providers that
+    /// require no tools.
+    /// </summary>
+    public IReadOnlyList<string> ProvidedTools { get; init; } = [];
 }
 
 /// <summary>

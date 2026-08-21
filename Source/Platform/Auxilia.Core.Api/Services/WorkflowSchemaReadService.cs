@@ -79,8 +79,7 @@ public sealed class WorkflowSchemaReadService(IDataAccess<CoreWorkflowTypeRecord
                 s.Description,
                 s.Optional,
                 s.Capabilities is null ? null : JsonSerializer.Serialize(s.Capabilities, JsonOptions),
-                s.AllowMultiple,
-                s.ProviderTypes)).ToList(),
+                s.AllowMultiple)).ToList(),
             schema.Inputs.Select(i => new WorkflowInputDto(
                 i.Name, i.Label, i.Required, i.Description, i.Kind, i.DefaultValue, i.Choices,
                 i.ChoiceLabels, i.PerRun)).ToList(),
@@ -104,6 +103,7 @@ public sealed class WorkflowSchemaReadService(IDataAccess<CoreWorkflowTypeRecord
                     podControl.MaxContainers, podControl.Description, podControl.PodVolumes)
                 : null,
             MaxPodContainers = Auxilia.Workflows.Companions.CompanionTopologyValidator
-                .MaxContainers(schema.Companions, schema.PodControl)
+                .MaxContainers(schema.Companions, schema.PodControl),
+            ProvidedTools = schema.ProvidedTools
         };
 }

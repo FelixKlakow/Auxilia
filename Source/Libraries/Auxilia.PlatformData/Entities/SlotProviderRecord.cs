@@ -30,6 +30,9 @@ public sealed record SlotProviderRecord : IEntity
     /// </summary>
     public string? EnvironmentBasesJson { get; init; }
 
+    /// <summary>Serialized list of tool names the handler needs inside the run container, when any.</summary>
+    public string? RequiredToolsJson { get; init; }
+
     /// <summary>Serialized <c>ProviderOAuthRefresh</c> — the data-driven token-refresh spec, when any.</summary>
     public string? OAuthRefreshJson { get; init; }
 
