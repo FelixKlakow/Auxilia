@@ -124,7 +124,7 @@ public sealed class RunService(
             SchemaJson = (await workflowTypes.GetRecordAsync(workflowType, ct))?.SchemaJson
                          ?? original.SchemaJson,
         };
-        var rerunCommandJson = System.Text.Json.JsonSerializer.Serialize(command);
+        var rerunCommandJson = System.Text.Json.JsonSerializer.Serialize(ResolutionTokens.Redacted(command));
         await credentialResolver.StashAsync(
             commandId, resolutionToken, stash.Bindings, triggeredBy ?? stash.TriggeredBy,
             rerunCommandJson, ct);
@@ -349,11 +349,13 @@ public sealed class RunService(
             PodBaseImagesJson: await SerializeSpawnableBasesAsync(context, ct));
 
         // Stash the resolution context AND the dispatch command itself (keyed by CommandId), so an
-        // orphaned run can be re-dispatched once on failover without the Core reading the runner's DB.
-        var commandJson = System.Text.Json.JsonSerializer.Serialize(command);
+        // orphaned run can be re-dispatched once on failover without the Core reading the runner's
+        // DB. The stored copy is redacted: a re-dispatch mints a fresh token and package URL, so
+        // only the bus copy the runner receives carries the plaintext capability.
+        var storedCommandJson = System.Text.Json.JsonSerializer.Serialize(ResolutionTokens.Redacted(command));
         await credentialResolver.StashAsync(
-            commandId, resolutionToken, stashedBindings, triggeredBy, commandJson, ct);
-        await RecordDispatchedAsync(commandId, workflowType, commandJson, ct);
+            commandId, resolutionToken, stashedBindings, triggeredBy, storedCommandJson, ct);
+        await RecordDispatchedAsync(commandId, workflowType, storedCommandJson, ct);
 
         await bus.PublishAsync(settings.Value.RunCommandQueue, command, ct);
         logger.LogInformation(

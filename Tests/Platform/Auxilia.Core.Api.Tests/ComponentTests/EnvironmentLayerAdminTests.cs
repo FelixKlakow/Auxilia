@@ -84,7 +84,7 @@ public sealed class EnvironmentLayerAdminTests : CoreApiComponentTestBase
         await CreateClient().PostAsJsonAsync("/api/environment-layers", Blender());
         var runId = Guid.NewGuid();
         await Factory.Services.GetRequiredService<IDataAccess<CoreRunResolutionRecord>>()
-            .SaveAsync(new CoreRunResolutionRecord { Id = runId, ResolutionToken = "tok-1" });
+            .SaveAsync(new CoreRunResolutionRecord { Id = runId, ResolutionTokenHash = Auxilia.Core.Api.Services.ResolutionTokens.Hash("tok-1") });
         var anonymous = Factory.CreateClient();
 
         var ok = await anonymous.GetAsync(
@@ -112,7 +112,7 @@ public sealed class EnvironmentLayerAdminTests : CoreApiComponentTestBase
             BaseEnvironment: EnvironmentBases.Windows));
         var runId = Guid.NewGuid();
         await Factory.Services.GetRequiredService<IDataAccess<CoreRunResolutionRecord>>()
-            .SaveAsync(new CoreRunResolutionRecord { Id = runId, ResolutionToken = "tok-2" });
+            .SaveAsync(new CoreRunResolutionRecord { Id = runId, ResolutionTokenHash = Auxilia.Core.Api.Services.ResolutionTokens.Hash("tok-2") });
 
         var response = await Factory.CreateClient().GetAsync(
             $"/api/environment-layers/msbuild-17/content?runId={runId}&token=tok-2");
@@ -131,7 +131,7 @@ public sealed class EnvironmentLayerAdminTests : CoreApiComponentTestBase
             BaseEnvironment: EnvironmentBases.Windows, Version: "4.2"));
         var runId = Guid.NewGuid();
         await Factory.Services.GetRequiredService<IDataAccess<CoreRunResolutionRecord>>()
-            .SaveAsync(new CoreRunResolutionRecord { Id = runId, ResolutionToken = "tok-3" });
+            .SaveAsync(new CoreRunResolutionRecord { Id = runId, ResolutionTokenHash = Auxilia.Core.Api.Services.ResolutionTokens.Hash("tok-3") });
         var anonymous = Factory.CreateClient();
 
         var linux = await anonymous.GetAsync(

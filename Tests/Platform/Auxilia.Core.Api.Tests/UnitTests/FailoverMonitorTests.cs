@@ -503,7 +503,9 @@ public sealed class FailoverMonitorTests
 
         var remaining = (await _resolutions.ReadAsync()).ToList();
         Assert.That(remaining, Has.Count.EqualTo(1));
-        Assert.That(remaining[0].ResolutionToken, Is.EqualTo("fresh-token"));
+        Assert.That(remaining[0].ResolutionTokenHash,
+            Is.EqualTo(Auxilia.Core.Api.Services.ResolutionTokens.Hash("fresh-token")),
+            "the stash keeps only the token's digest, keyed to the surviving record");
     }
 
     [Test]

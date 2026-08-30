@@ -1389,7 +1389,7 @@ app.MapGet("/api/environment-layers/{providerType}/content", async (
         CancellationToken ct, string? @base = null) =>
 {
     var resolution = await resolutions.ReadAsync(runId, ct);
-    if (resolution is null || resolution.ResolutionToken != token)
+    if (resolution is null || !Auxilia.Core.Api.Services.ResolutionTokens.Matches(resolution.ResolutionTokenHash, token))
         return Results.Json(new { error = "invalid resolution token" }, statusCode: StatusCodes.Status403Forbidden);
     // The runner states the base it hosts; an omitted base keeps the linux default.
     var signed = await svc.ReadFragmentAsync(providerType, @base ?? EnvironmentBases.Linux, ct);
@@ -1582,7 +1582,8 @@ app.MapGet("/api/workflow-types/{type}/package", async (
     else
     {
         var resolution = runId is { } run ? await resolutions.ReadAsync(run, ct) : null;
-        if (resolution is null || string.IsNullOrEmpty(token) || resolution.ResolutionToken != token)
+        if (resolution is null || string.IsNullOrEmpty(token)
+            || !Auxilia.Core.Api.Services.ResolutionTokens.Matches(resolution.ResolutionTokenHash, token))
             return Results.Json(new { error = "invalid resolution token" }, statusCode: StatusCodes.Status403Forbidden);
     }
     var package = await registry.ReadStoredPackageAsync(type, ct);

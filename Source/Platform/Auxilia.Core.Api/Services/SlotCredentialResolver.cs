@@ -25,14 +25,17 @@ public sealed class SlotCredentialResolver(
     TimeProvider clock,
     IOptions<CoreApiSettings> settings)
 {
-    /// <summary>Records the run's resolution context at dispatch time (references only, never secrets).</summary>
+    /// <summary>
+    /// Records the run's resolution context at dispatch time (references only, never secrets —
+    /// the token itself is stored only as its digest).
+    /// </summary>
     public Task StashAsync(
         Guid runId, string resolutionToken, IReadOnlyList<SlotBinding> bindings,
         Guid? triggeredBy, string? dispatchCommandJson = null, CancellationToken ct = default)
         => store.SaveAsync(new CoreRunResolutionRecord
         {
             Id = runId,
-            ResolutionToken = resolutionToken,
+            ResolutionTokenHash = ResolutionTokens.Hash(resolutionToken),
             SlotBindingsJson = JsonSerializer.Serialize(bindings),
             TriggeredByPrincipalId = triggeredBy,
             DispatchCommandJson = dispatchCommandJson,
@@ -59,8 +62,7 @@ public sealed class SlotCredentialResolver(
         if (record is null)
             return await RejectAsync(runId, "unknown-run", "unknown run", ct);
 
-        if (!CryptographicOperations.FixedTimeEquals(
-                Encoding.UTF8.GetBytes(record.ResolutionToken), Encoding.UTF8.GetBytes(resolutionToken)))
+        if (!ResolutionTokens.Matches(record.ResolutionTokenHash, resolutionToken))
             return await RejectAsync(runId, "invalid-resolution-token", "invalid resolution token", ct);
 
         var bindings = JsonSerializer.Deserialize<List<SlotBinding>>(record.SlotBindingsJson) ?? [];

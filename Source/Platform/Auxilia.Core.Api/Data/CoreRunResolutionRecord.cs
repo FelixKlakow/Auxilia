@@ -12,8 +12,11 @@ public sealed record CoreRunResolutionRecord : IEntity
     /// <summary>The run id (= dispatch <c>CommandId</c>).</summary>
     public Guid Id { get; init; }
 
-    /// <summary>Opaque token minted at dispatch; the runner must present it to resolve any slot of this run.</summary>
-    public required string ResolutionToken { get; init; }
+    /// <summary>
+    /// SHA-256 digest of the opaque token minted at dispatch; the runner must present the token
+    /// to resolve any slot of this run. Only the digest is stored — the Core verifies, never replays.
+    /// </summary>
+    public required string ResolutionTokenHash { get; init; }
 
     /// <summary>The run's slot bindings (connector references / inline provider settings), serialized as JSON.</summary>
     public string SlotBindingsJson { get; init; } = "[]";
@@ -27,7 +30,8 @@ public sealed record CoreRunResolutionRecord : IEntity
     /// <summary>
     /// The serialized <see cref="Auxilia.Workflows.Messaging.Messages.RunWorkflowCommand"/> dispatched for
     /// this run (keyed by its <c>CommandId</c>). Kept so an orphaned run can be re-dispatched once on
-    /// failover; carries a resolution token but no secret.
+    /// failover; the resolution token and the token-authorized package URL are redacted before
+    /// persistence — a re-dispatch mints fresh ones.
     /// </summary>
     public string? DispatchCommandJson { get; init; }
 

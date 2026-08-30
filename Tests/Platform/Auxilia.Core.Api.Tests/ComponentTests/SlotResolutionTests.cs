@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Auxilia.Core.Contracts;
 using Auxilia.Workflows.Messaging.Messages;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Auxilia.Core.Api.Tests.ComponentTests;
 
@@ -92,6 +93,28 @@ public sealed class SlotResolutionTests : CoreApiComponentTestBase
 
         var response = await ResolveAsync(CreateAnonymousClient(), runId, "not-the-token", "sc", publicKey);
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+    }
+
+    [Test]
+    public async Task Dispatch_PersistsOnlyTheTokenDigest_AndARedactedCommand()
+    {
+        var (runId, token) = await DispatchCredentialedRunAsync(CreateClient());
+
+        var resolution = await Factory.Services
+            .GetRequiredService<Auxilia.UniversalDataAccess.IDataAccess<Auxilia.Core.Api.Data.CoreRunResolutionRecord>>()
+            .ReadAsync(runId);
+        var run = await Factory.Services
+            .GetRequiredService<Auxilia.UniversalDataAccess.IDataAccess<Auxilia.Core.Api.Data.CoreRunRecord>>()
+            .ReadAsync(runId);
+        Assert.Multiple(() =>
+        {
+            Assert.That(resolution!.ResolutionTokenHash, Is.Not.EqualTo(token),
+                "the record must hold the digest, never the bearer token");
+            Assert.That(resolution.DispatchCommandJson, Does.Not.Contain(token),
+                "the stashed command must be redacted");
+            Assert.That(run!.DispatchCommandJson, Does.Not.Contain(token),
+                "the run record's command copy must be redacted");
+        });
     }
 
     [Test]
