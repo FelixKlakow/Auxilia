@@ -48,19 +48,36 @@ public class PullRequestAccessCapabilitiesTests
     }
 
     [Test]
-    public void RoundTrip_PrHostType_Typed()
+    public void RoundTrip_PrHostType_Preserved()
     {
         var original = new PullRequestAccessCapabilities
         {
             RequiredPermissions = [PullRequestPermission.Read],
-            PrHostType = SourceHostType.GitHub
+            PrHostType = SourceHostTypes.AzureDevOps
         };
 
         var json = JsonSerializer.Serialize(original);
         var deserialized = JsonSerializer.Deserialize<PullRequestAccessCapabilities>(json);
 
         Assert.That(deserialized, Is.Not.Null);
-        Assert.That(deserialized!.PrHostType, Is.EqualTo(SourceHostType.GitHub));
+        Assert.That(deserialized!.PrHostType, Is.EqualTo(SourceHostTypes.AzureDevOps));
+    }
+
+    [Test]
+    public void RoundTrip_UnknownPrHostTypeString_Preserved()
+    {
+        // Host types are an OPEN vocabulary — a value the SDK has never heard of must survive.
+        var original = new PullRequestAccessCapabilities
+        {
+            RequiredPermissions = [PullRequestPermission.Read],
+            PrHostType = "some-future-host"
+        };
+
+        var json = JsonSerializer.Serialize(original);
+        var deserialized = JsonSerializer.Deserialize<PullRequestAccessCapabilities>(json);
+
+        Assert.That(deserialized, Is.Not.Null);
+        Assert.That(deserialized!.PrHostType, Is.EqualTo("some-future-host"));
     }
 
     [Test]

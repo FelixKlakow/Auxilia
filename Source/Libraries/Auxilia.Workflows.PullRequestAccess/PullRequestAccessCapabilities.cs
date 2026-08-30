@@ -8,7 +8,12 @@ namespace Auxilia.Workflows.PullRequestAccess;
 public record PullRequestAccessCapabilities : ICapability
 {
     public required PullRequestPermission[] RequiredPermissions { get; init; }
-    public SourceHostType? PrHostType { get; init; }
+
+    /// <summary>
+    /// Open host-type vocabulary (see <see cref="SourceHostTypes"/>); compare OrdinalIgnoreCase
+    /// and tolerate unknown values.
+    /// </summary>
+    public string? PrHostType { get; init; }
 
     /// <summary>
     /// Opaque forward-compatibility passthrough.

@@ -16,7 +16,7 @@ Source/Libraries/Auxilia.Workflows.SourceControl/
 ├── Mcp/SourceControlWriteAccessMcpTools.cs     # MCP tools exposing write/push operations to the agent
 ├── ChangedFile.cs / ChangeKind.cs              # Changed-file record + change-kind enum
 ├── SourceControlOperation.cs                   # Operation keys used by the policy decorators
-├── SourceControlCapabilities.cs                # ICapability: RequiredPermissions[], SupportedHostTypes?
+├── SourceControlCapabilities.cs                # ICapability: RequiredPermissions[], SupportedHostTypes? (open string vocabulary — SourceHostTypes constants, OrdinalIgnoreCase)
 ├── Permission.cs                               # Enum of SCM permissions (Read, Write, Admin…)
 └── SourceControlWorkflowBuilderExtensions.cs   # RequiresSourceControl() — thin wrapper over builder.Requires<T>
 ```

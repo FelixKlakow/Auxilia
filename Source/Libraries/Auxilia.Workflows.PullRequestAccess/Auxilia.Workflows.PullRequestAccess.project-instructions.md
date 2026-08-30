@@ -19,7 +19,7 @@ provider (GitHub/ADO/…) is supplied by a separate slot package.
 ```
 Source/Libraries/Auxilia.Workflows.PullRequestAccess/
 ├── IPullRequestAccess.cs                          # runtime contract (changed files, diffs, comments, open PR)
-├── PullRequestAccessCapabilities.cs               # ICapability: RequiredPermissions[], PrHostType
+├── PullRequestAccessCapabilities.cs               # ICapability: RequiredPermissions[], PrHostType? (open string vocabulary — SourceHostTypes constants, OrdinalIgnoreCase)
 ├── PullRequestPermission.cs                       # Read / Write
 ├── PullRequestOperation.cs                        # policy-keyed operation enum
 ├── PullRequestAccessWorkflowBuilderExtensions.cs  # RequiresPullRequestAccess() over builder.Requires<T>

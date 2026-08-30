@@ -8,7 +8,12 @@ namespace Auxilia.Workflows.SourceControl;
 public record SourceControlCapabilities : ICapability
 {
     public required Permission[] RequiredPermissions { get; init; }
-    public SourceHostType[]? SupportedHostTypes { get; init; }
+
+    /// <summary>
+    /// Open host-type vocabulary (see <see cref="SourceHostTypes"/>); compare OrdinalIgnoreCase
+    /// and tolerate unknown values.
+    /// </summary>
+    public string[]? SupportedHostTypes { get; init; }
 
     /// <summary>
     /// Opaque forward-compatibility passthrough.

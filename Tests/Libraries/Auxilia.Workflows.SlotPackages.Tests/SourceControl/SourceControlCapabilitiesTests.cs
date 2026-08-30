@@ -14,7 +14,7 @@ public class SourceControlCapabilitiesTests
         var original = new SourceControlCapabilities
         {
             RequiredPermissions = [Permission.Read, Permission.Write],
-            SupportedHostTypes = [SourceHostType.GitHub, SourceHostType.GitLab]
+            SupportedHostTypes = [SourceHostTypes.GitHub, SourceHostTypes.GitLab, SourceHostTypes.AzureDevOps]
         };
 
         var json = JsonSerializer.Serialize(original);
@@ -66,9 +66,27 @@ public class SourceControlCapabilitiesTests
     }
 
     [Test]
-    public void SourceHostType_EnumValues_SerializeAsStrings()
+    public void RoundTrip_UnknownHostTypeString_Preserved()
     {
-        Assert.That(JsonSerializer.Serialize(SourceHostType.GitHub), Is.EqualTo(@"""GitHub"""));
-        Assert.That(JsonSerializer.Serialize(SourceHostType.GitLab), Is.EqualTo(@"""GitLab"""));
+        // Host types are an OPEN vocabulary — a value the SDK has never heard of must survive.
+        var original = new SourceControlCapabilities
+        {
+            RequiredPermissions = [Permission.Read],
+            SupportedHostTypes = ["some-future-host"]
+        };
+
+        var json = JsonSerializer.Serialize(original);
+        var deserialized = JsonSerializer.Deserialize<SourceControlCapabilities>(json);
+
+        Assert.That(deserialized, Is.Not.Null);
+        Assert.That(deserialized!.SupportedHostTypes, Is.EqualTo(new[] { "some-future-host" }));
+    }
+
+    [Test]
+    public void WellKnownHostTypes_AreLowercaseStrings()
+    {
+        Assert.That(SourceHostTypes.GitHub, Is.EqualTo("github"));
+        Assert.That(SourceHostTypes.GitLab, Is.EqualTo("gitlab"));
+        Assert.That(SourceHostTypes.AzureDevOps, Is.EqualTo("azure-devops"));
     }
 }

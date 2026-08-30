@@ -125,7 +125,7 @@ public record AiCapabilities : ICapability
 public record SourceControlCapabilities : ICapability
 {
     public required Permission[] RequiredPermissions { get; init; }
-    public string[]? SupportedHostTypes { get; init; }  // optional
+    public string[]? SupportedHostTypes { get; init; }  // optional; open vocabulary — well-known values in SourceHostTypes ("github", "gitlab", "azure-devops"), compared OrdinalIgnoreCase
 
     [JsonExtensionData]
     public IDictionary<string, JsonElement>? Extensions { get; init; }
@@ -502,7 +502,11 @@ slot handler that drives a binary inside the run container declares it in its ma
 and a workflow declares what its image bundles with `ProvidesTools("claude", "copilot")`
 (published as the schema's `ProvidedTools`). A provider is offerable in editors and bindable at
 dispatch only when every tool it requires is provided; a provider requiring no tools matches on
-contract alone. The Core enforces the intersection at dispatch (`RunService`), the authoring
+contract alone. The Core enforces the intersection at dispatch (`RunService`) on the EXPANDED
+bindings — after workspace references resolve their provider type, covering inline,
+connector-resolved, and workspace-resolved providers alike — and re-checks it (plus the catalog
+grant gate) on every rerun against the freshly resolved schema; provider types match
+case-insensitively end-to-end (record ids derive from the lowercased type). The authoring
 client fails fast, and editors filter — all data-driven, so registering a NEW agent handler
 never requires editing or re-signing existing workflows: the moment a workflow's image bundles
 the tool (and declares it), the provider matches. The former
