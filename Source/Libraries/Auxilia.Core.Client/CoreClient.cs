@@ -94,7 +94,11 @@ public sealed class CoreClient : ICoreClient
         => StreamResilientAsync<RunStreamEvent>(
             () => NewSseRequest($"/api/runs/{runId}/stream"),
             isTerminal: evt => evt.Kind == RunStreamEvent.StatusKind && RunStates.IsTerminal(StatusStateOf(evt)),
-            sequenceOf: evt => evt.Kind == RunStreamEvent.ViewKind ? evt.Sequence : null,
+            // Sequence is per-(run, VIEW) monotonic, so the dedupe key must carry the view name —
+            // a single high-water mark would drop live frames of whichever view's counter lags.
+            dedupeOf: evt => evt.Kind == RunStreamEvent.ViewKind
+                ? (evt.AsView()?.ViewName ?? "", evt.Sequence)
+                : null,
             ct);
 
     public Task<PagedResult<RunViewItem>> GetRunViewsAsync(
@@ -173,7 +177,7 @@ public sealed class CoreClient : ICoreClient
                 ("artifactType", artifactType),
                 ("workItemId", workItemId))),
             isTerminal: _ => false,
-            sequenceOf: _ => null,
+            dedupeOf: _ => null,
             ct);
 
     // --- Events ---
@@ -195,7 +199,7 @@ public sealed class CoreClient : ICoreClient
                 ("eventType", eventType),
                 ("workItemId", workItemId))),
             isTerminal: _ => false,
-            sequenceOf: _ => null,
+            dedupeOf: _ => null,
             ct);
 
     // --- Resilient SSE core (reconnect + idle detection live HERE, never in callers) ---
@@ -212,14 +216,17 @@ public sealed class CoreClient : ICoreClient
     /// close without a prior terminal event IS a drop (the Core recycled). A terminal event ends
     /// the enumeration for good. Auth/not-found errors (non-transient) rethrow; every other
     /// failure surfaces as a <see cref="StreamConnectionFrame{TEvent}"/> and is retried. Events
-    /// carrying a sequence are deduped across resubscribes (the server snapshot re-delivers).
-    /// Keepalive comments reset the idle watchdog; silence beyond
-    /// <see cref="CoreClientOptions.StreamIdleTimeoutSeconds"/> counts as a drop.
+    /// carrying a dedupe key are deduped per key across resubscribes (the server snapshot
+    /// re-delivers) — sequences are only monotonic within a key (e.g. per view name), never across
+    /// keys. Keepalive comments reset the idle watchdog; silence beyond
+    /// <see cref="CoreClientOptions.StreamIdleTimeoutSeconds"/> counts as a drop — during the
+    /// connect phase too: an accepted connection that never sends response headers would otherwise
+    /// hang <c>SendAsync</c> forever (observed against a live Core).
     /// </summary>
     private async IAsyncEnumerable<ClientStreamFrame<TEvent>> StreamResilientAsync<TEvent>(
         Func<HttpRequestMessage> requestFactory,
         Func<TEvent, bool> isTerminal,
-        Func<TEvent, long?> sequenceOf,
+        Func<TEvent, (string Key, long Sequence)?> dedupeOf,
         [EnumeratorCancellation] CancellationToken ct)
     {
         var attempt = 0;
@@ -227,7 +234,8 @@ public sealed class CoreClient : ICoreClient
         var maxBackoff = TimeSpan.FromSeconds(Math.Max(1, options.StreamReconnectMaxBackoffSeconds));
         var idleTimeout = TimeSpan.FromSeconds(options.StreamIdleTimeoutSeconds);
         var backoff = initialBackoff;
-        long maxSeenSequence = -1;
+        // Survives reconnects on purpose: the server re-delivers a snapshot on every resubscribe.
+        var maxSeenSequences = new Dictionary<string, long>(StringComparer.Ordinal);
 
         while (true)
         {
@@ -238,13 +246,27 @@ public sealed class CoreClient : ICoreClient
             try
             {
                 using var request = requestFactory();
-                response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-                await EnsureSuccessAsync(response, ct);
+                // HttpClient.Timeout is disabled, so the connect phase needs its own watchdog:
+                // reuse the idle timeout — headers that never arrive are just pre-body silence.
+                using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                if (idleTimeout > TimeSpan.Zero)
+                    connectCts.CancelAfter(idleTimeout);
+                response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, connectCts.Token);
+                await EnsureSuccessAsync(response, connectCts.Token);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 response?.Dispose();
                 throw;
+            }
+            catch (OperationCanceledException ex)
+            {
+                // Only the connect watchdog can cancel here (the caller's ct is checked above) —
+                // treat it like any other transient drop and retry.
+                failure = new TimeoutException(
+                    $"The SSE connect produced no response headers within {idleTimeout.TotalSeconds:0}s — treating the connection as dead.", ex);
+                response?.Dispose();
+                response = null;
             }
             catch (CoreApiException ex) when (!IsTransient(ex.StatusCode))
             {
@@ -252,7 +274,7 @@ public sealed class CoreClient : ICoreClient
                 response?.Dispose();
                 throw;
             }
-            catch (Exception ex) when (ex is HttpRequestException or IOException or CoreApiException or TaskCanceledException)
+            catch (Exception ex) when (ex is HttpRequestException or IOException or CoreApiException)
             {
                 failure = ex;
                 response?.Dispose();
@@ -311,11 +333,12 @@ public sealed class CoreClient : ICoreClient
                             if (evt is null)
                                 continue;
 
-                            if (sequenceOf(evt) is { } sequence)
+                            if (dedupeOf(evt) is { } dedupe)
                             {
-                                if (sequence <= maxSeenSequence)
+                                if (maxSeenSequences.TryGetValue(dedupe.Key, out var maxSeen)
+                                    && dedupe.Sequence <= maxSeen)
                                     continue; // resubscribe overlap — already delivered
-                                maxSeenSequence = sequence;
+                                maxSeenSequences[dedupe.Key] = dedupe.Sequence;
                             }
 
                             backoff = initialBackoff; // a live event proves the link — reset
@@ -347,7 +370,8 @@ public sealed class CoreClient : ICoreClient
             return await reader.ReadLineAsync(ct);
         // CANCEL the read on idle timeout — never abandon it: disposing the response with a
         // read still in flight can wedge the connection teardown, and the NEXT subscribe then
-        // hangs in SendAsync forever (observed against a live Core).
+        // hangs in SendAsync forever (observed against a live Core; the connect watchdog in
+        // StreamResilientAsync bounds that hang as well).
         using var idle = CancellationTokenSource.CreateLinkedTokenSource(ct);
         idle.CancelAfter(idleTimeout);
         try

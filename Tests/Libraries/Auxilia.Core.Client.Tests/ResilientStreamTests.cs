@@ -34,6 +34,13 @@ public sealed class ResilientStreamTests
             RunStreamEvent.ViewKind, Guid.Empty, sequence, "{}", DateTimeOffset.UtcNow),
             JsonSerializerOptions.Web);
 
+    private static string ViewLine(string viewName, long sequence)
+        => "data: " + JsonSerializer.Serialize(new RunStreamEvent(
+            RunStreamEvent.ViewKind, Guid.Empty, sequence,
+            JsonSerializer.Serialize(
+                new RunStreamView(Guid.Empty, viewName, sequence, "{}"), JsonSerializerOptions.Web),
+            DateTimeOffset.UtcNow), JsonSerializerOptions.Web);
+
     private static async Task<List<ClientStreamFrame<RunStreamEvent>>> DrainAsync(
         CoreClient client, TimeSpan? timeout = null)
     {
@@ -126,6 +133,69 @@ public sealed class ResilientStreamTests
     }
 
     [Test]
+    public async Task InterleavedViews_WithIndependentSequences_AllFramesDelivered()
+    {
+        // Sequence is per-(run, view) monotonic: on a healthy first connection a view whose
+        // counter lags another's must NOT be deduped against the other view's high-water mark.
+        var handler = new SseScriptHandler()
+            .Enqueue(new SseConnection(HttpStatusCode.OK,
+                [
+                    StatusLine("Running"),
+                    ViewLine("workspace", 1), ViewLine("session", 1), ViewLine("workspace", 2),
+                    ViewLine("session", 2), ViewLine("workspace", 3),
+                    StatusLine("Success")
+                ]));
+
+        var frames = await DrainAsync(NewClient(handler));
+        var events = frames.OfType<StreamEventFrame<RunStreamEvent>>().Select(f => f.Event).ToList();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(handler.ConnectionsServed, Is.EqualTo(1));
+            Assert.That(events
+                    .Where(e => e.Kind == RunStreamEvent.ViewKind)
+                    .Select(e => (e.AsView()!.ViewName, e.Sequence)),
+                Is.EqualTo(new[]
+                {
+                    ("workspace", 1L), ("session", 1L), ("workspace", 2L),
+                    ("session", 2L), ("workspace", 3L)
+                }), "every view frame of every view arrives — the dedupe is keyed per view");
+            Assert.That(events.Count(e => e.Kind == RunStreamEvent.StatusKind), Is.EqualTo(2),
+                "non-view frames are untouched by the dedupe");
+        });
+    }
+
+    [Test]
+    public async Task ResubscribeReplay_IsDeduplicatedPerView()
+    {
+        var handler = new SseScriptHandler()
+            .Enqueue(new SseConnection(HttpStatusCode.OK,
+                [ViewLine("workspace", 1), ViewLine("workspace", 2), ViewLine("session", 1)],
+                SseConnectionEnd.ThrowMidStream))
+            // The backfill overlap re-delivers everything; only the genuinely new frames
+            // (workspace 3, session 2) may reach the consumer again.
+            .Enqueue(new SseConnection(HttpStatusCode.OK,
+                [
+                    ViewLine("workspace", 1), ViewLine("workspace", 2), ViewLine("session", 1),
+                    ViewLine("workspace", 3), ViewLine("session", 2),
+                    StatusLine("Success")
+                ]));
+
+        var frames = await DrainAsync(NewClient(handler));
+        var views = frames.OfType<StreamEventFrame<RunStreamEvent>>()
+            .Select(f => f.Event)
+            .Where(e => e.Kind == RunStreamEvent.ViewKind)
+            .Select(e => (e.AsView()!.ViewName, e.Sequence))
+            .ToList();
+
+        Assert.That(views, Is.EqualTo(new[]
+        {
+            ("workspace", 1L), ("workspace", 2L), ("session", 1L),
+            ("workspace", 3L), ("session", 2L)
+        }), "duplicates dedupe within their view; the other view's counter never interferes");
+    }
+
+    [Test]
     public void NonTransientInitialError_Throws_WithoutRetry()
     {
         var handler = new SseScriptHandler()
@@ -192,6 +262,51 @@ public sealed class ResilientStreamTests
             Assert.That(frames.OfType<StreamEventFrame<RunStreamEvent>>().Count(), Is.EqualTo(1),
                 "comment lines are keepalives, never events");
         });
+    }
+
+    [Test]
+    public async Task ConnectThatNeverProducesHeaders_IsTreatedAsADrop_AndRetried()
+    {
+        var handler = new SseScriptHandler()
+            // The wedged mode observed against a live Core: the connection is accepted but
+            // response headers never arrive. Without the connect watchdog SendAsync hangs forever.
+            .Enqueue(new SseConnection(HttpStatusCode.OK, ResponseDelay: Timeout.InfiniteTimeSpan))
+            .Enqueue(new SseConnection(HttpStatusCode.OK, [StatusLine("Success")]));
+
+        var client = NewClient(handler, new CoreClientOptions
+        {
+            StreamReconnectInitialBackoffSeconds = 0,
+            StreamIdleTimeoutSeconds = 1 // also bounds the connect phase
+        });
+        var frames = await DrainAsync(client, TimeSpan.FromSeconds(20));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(handler.ConnectionsServed, Is.EqualTo(2),
+                "a connect with no headers within the idle timeout must count as a dead connection");
+            Assert.That(frames.OfType<StreamConnectionFrame<RunStreamEvent>>()
+                    .Single(f => f.State == StreamConnectionState.Reconnecting).Cause,
+                Is.InstanceOf<TimeoutException>());
+            Assert.That(frames.OfType<StreamEventFrame<RunStreamEvent>>().Count(), Is.EqualTo(1));
+        });
+    }
+
+    [Test]
+    public void CallerCancellationDuringConnect_EndsTheEnumeration_NoRetry()
+    {
+        var handler = new SseScriptHandler()
+            .Enqueue(new SseConnection(HttpStatusCode.OK, ResponseDelay: Timeout.InfiniteTimeSpan));
+
+        // Idle timeout disabled: only the caller's token can end the hanging connect.
+        var client = NewClient(handler);
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+
+        Assert.CatchAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (var _ in client.StreamRunAsync(Guid.NewGuid(), cts.Token)) { }
+        });
+        Assert.That(handler.ConnectionsServed, Is.EqualTo(1),
+            "a caller cancel during connect exits the stream — it is never retried");
     }
 
     [Test]

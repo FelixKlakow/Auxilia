@@ -20,7 +20,9 @@ public sealed class CoreClientOptions
 
     /// <summary>
     /// A stream silent for longer than this (no events AND no server keepalive pings) is treated
-    /// as a dead connection and reconnected. Must exceed the Core's SseKeepaliveSeconds; 0 disables.
+    /// as a dead connection and reconnected. Also bounds the connect phase: a connection that
+    /// never produces response headers counts as silent and is retried. Must exceed the Core's
+    /// SseKeepaliveSeconds; 0 disables.
     /// </summary>
     public int StreamIdleTimeoutSeconds { get; set; } = 90;
 
