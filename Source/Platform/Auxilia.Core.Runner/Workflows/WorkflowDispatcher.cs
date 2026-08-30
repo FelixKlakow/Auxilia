@@ -81,9 +81,14 @@ public sealed class WorkflowDispatcher(
         // rejections — so every outcome is visible in the dashboard.
         var issued = tokenRegistry.Issue(workflowType);
         var instanceId = issued.WorkflowInstanceId;
+        // The resolution token is a bearer capability against the Core's slot-resolution
+        // endpoint — persisted only protected at rest (same protector as the instance token);
+        // every reader of DispatchCommandJson that needs it unprotects symmetrically.
         await instanceRegistry.CreateAsync(
             instanceId, workflowType, "Received",
-            instanceInfo.ServiceId, JsonSerializer.Serialize(command), ct: ct);
+            instanceInfo.ServiceId,
+            JsonSerializer.Serialize(DispatchCommandProtection.Protect(command, settingsProtector)),
+            ct: ct);
         // Claim transition: stamp the owning runner + originating command so a bus consumer can
         // attribute this run to us (and recover our stored dispatch command) without reading our DB.
         await statusPublisher.PublishAsync(instanceId, workflowType, "Received",
@@ -177,7 +182,7 @@ public sealed class WorkflowDispatcher(
         // Resolve slot-handler plugins for the run's provider types (sent by the Core). An
         // unregistered provider type fails pre-flight.
         var pluginFiles = new List<SlotPluginFile>();
-        foreach (var providerType in (command.SlotProviderTypes ?? []).Distinct())
+        foreach (var providerType in (command.SlotProviderTypes ?? []).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             var dllPath = await providerRegistry.GetDllPathAsync(providerType, ct);
             if (dllPath is null)
@@ -677,8 +682,12 @@ public sealed class WorkflowDispatcher(
     /// <summary>
     /// The container exit watcher's report: after a short grace (in-flight completion events may
     /// still land), a run whose state is not terminal is failed with the exit code and log tail.
-    /// A normal exit (the workflow reported Success/Failed/Cancelled over the bus, or a
-    /// long-living drain) changes nothing.
+    /// A normal exit (the workflow reported Success/Failed/Cancelled over the bus) changes
+    /// nothing. A container exiting while its record is Draining gets ONE more grace window for
+    /// the terminal message of a graceful drain to land; a record still Draining after it
+    /// crashed mid-drain — it is failed like any crash AND its replacement is dispatched (the
+    /// bus-driven drain-replace in <see cref="WorkflowStateHandler"/> can never fire without a
+    /// terminal message).
     /// </summary>
     internal async Task HandleContainerExitAsync(Guid instanceId, string workflowType, ContainerExit exit)
     {
@@ -687,10 +696,21 @@ public sealed class WorkflowDispatcher(
             await Task.Delay(TimeSpan.FromSeconds(dispatcherSettings.Value.ContainerExitGraceSeconds));
 
             var record = await instanceRegistry.GetAsync(instanceId);
-            if (record?.State is null or "Success" or "Failed" or "Cancelled" or "PreFlightFailed" or "Draining")
+            if (record?.State is null or "Success" or "Failed" or "Cancelled" or "PreFlightFailed")
                 return;
 
-            var reason = $"workflow container exited (code {exit.ExitCode}) before completing"
+            var draining = record.State == "Draining";
+            if (draining)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(dispatcherSettings.Value.ContainerExitGraceSeconds));
+                record = await instanceRegistry.GetAsync(instanceId);
+                if (record?.State is not "Draining")
+                    return; // the graceful drain's terminal message won the race
+            }
+
+            var reason = (draining
+                    ? $"workflow container crashed while draining (code {exit.ExitCode})"
+                    : $"workflow container exited (code {exit.ExitCode}) before completing")
                 + (string.IsNullOrWhiteSpace(exit.LogTail)
                     ? " — the container produced no output"
                     : $" — last output: {Truncate(exit.LogTail, 2000)}");
@@ -703,10 +723,20 @@ public sealed class WorkflowDispatcher(
             tokenRegistry.Consume(instanceId);
             await auditLog.AppendAsync(
                 "core-runner", "workflow.container-exit", instanceId.ToString(), "failed", reason);
-            // A crashed workflow never sends the terminal state message that normally tears
-            // its pod down — sweep here (idempotent, no-op for pod-less runs).
+            // A crashed workflow never sends the terminal state message that normally tears its
+            // pod down and cleans its run roots — sweep everything here (idempotent, best-effort,
+            // no-op for pod-less runs).
             podControlRegistry.Consume(instanceId);
-            await podHost.TeardownAsync(instanceId);
+            await RunRootsCleanup.CleanupAsync(
+                workspaceManager, podHost, dispatcherSettings.Value, logger, instanceId);
+
+            // A crash mid-drain must still produce the replacement instance the graceful
+            // drain-replace path would have dispatched.
+            if (draining)
+                await DrainReplacement.PublishAsync(
+                    messageBus, settingsProtector, auditLog,
+                    dispatcherSettings.Value.CommandQueueName,
+                    instanceId, record.DispatchCommandJson, logger, CancellationToken.None);
         }
         catch (Exception ex)
         {

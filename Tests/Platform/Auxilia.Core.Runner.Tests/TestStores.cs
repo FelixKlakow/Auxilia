@@ -81,4 +81,19 @@ internal static class TestStores
         => new(Moq.Mock.Of<IDockerClientFactory>(),
             Options.Create(new DockerWorkflowLauncherSettings()),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<RunnerHostPlatformProbe>.Instance);
+
+    /// <summary>
+    /// Reversible protector whose ciphertext is visibly distinct from the plaintext — lets
+    /// tests assert what is stored protected vs. what rides live paths in plaintext.
+    /// </summary>
+    public sealed class PrefixSettingsProtector : Auxilia.PlatformData.Protection.ISettingsProtector
+    {
+        public string Protect(string plaintext)
+            => "enc:" + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(plaintext));
+
+        public string Unprotect(string protectedValue)
+            => protectedValue.StartsWith("enc:", StringComparison.Ordinal)
+                ? System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(protectedValue["enc:".Length..]))
+                : throw new FormatException("value was not protected by this protector");
+    }
 }

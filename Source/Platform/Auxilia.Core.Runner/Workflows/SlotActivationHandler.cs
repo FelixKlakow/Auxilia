@@ -22,6 +22,7 @@ public sealed class SlotActivationHandler(
     WorkflowInstanceTokenRegistry tokenRegistry,
     AuditLog auditLog,
     IOptions<WorkflowDispatcherSettings> dispatcherSettings,
+    Auxilia.PlatformData.Protection.ISettingsProtector settingsProtector,
     ILogger<SlotActivationHandler> logger)
 {
     private IAsyncDisposable? _subscription;
@@ -65,8 +66,11 @@ public sealed class SlotActivationHandler(
 
         // A run always carries a run-scoped resolution token: the Core resolves the connector and
         // encrypts it for this instance, so plaintext never enters the runner — we only relay the
-        // ciphertext. There is no local credential store.
-        var command = TryParseCommand(instance.DispatchCommandJson);
+        // ciphertext. There is no local credential store. The stored token is protected at rest
+        // (see DispatchCommandProtection) — unprotect before presenting it to the Core.
+        var command = TryParseCommand(instance.DispatchCommandJson) is { } stored
+            ? DispatchCommandProtection.Unprotect(stored, settingsProtector, logger)
+            : null;
         if (command?.ResolutionToken is not { Length: > 0 } resolutionToken)
         {
             await auditLog.AppendAsync(

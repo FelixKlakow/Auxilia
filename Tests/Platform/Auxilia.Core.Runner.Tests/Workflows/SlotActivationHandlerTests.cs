@@ -48,7 +48,8 @@ public class SlotActivationHandlerTests
 
     private async Task<SlotActivationHandler> StartHandlerAsync(
         bool requireInstanceToken = true,
-        ICoreCredentialClient? coreClient = null)
+        ICoreCredentialClient? coreClient = null,
+        Auxilia.PlatformData.Protection.ISettingsProtector? settingsProtector = null)
     {
         var settings = Options.Create(new WorkflowDispatcherSettings
         {
@@ -62,6 +63,7 @@ public class SlotActivationHandlerTests
             _tokenRegistry,
             new AuditLog(_auditRecords, _time),
             settings,
+            settingsProtector ?? new Auxilia.PlatformData.Protection.NullSettingsProtector(),
             NullLogger<SlotActivationHandler>.Instance);
         await handler.StartAsync(CancellationToken.None);
         return handler;
@@ -288,6 +290,28 @@ public class SlotActivationHandlerTests
         });
         Assert.That(stub.LastCall!.Value.RunId, Is.EqualTo(coreRunId));
         Assert.That(stub.LastCall.Value.Token, Is.EqualTo("run-token-abc"));
+    }
+
+    [Test]
+    public async Task HandleAsync_ResolutionTokenProtectedAtRest_PresentsThePlaintextToTheCore()
+    {
+        // The dispatcher persists the resolution token protected (DispatchCommandProtection);
+        // the activation path must unprotect it before asking the Core to resolve the slot.
+        var protector = new TestStores.PrefixSettingsProtector();
+        var issued = _tokenRegistry.Issue("TestWorkflow");
+        await SeedDispatchedInstanceAsync(
+            issued.WorkflowInstanceId, protector.Protect("plain-run-token"));
+        var stub = new StubCoreCredentialClient { Result = SampleCredential() };
+        await StartHandlerAsync(coreClient: stub, settingsProtector: protector);
+
+        await _bus.InvokeAsync(new SlotActivationRequest(
+            issued.WorkflowInstanceId, "slotA", ValidPublicKey(), issued.Token), CancellationToken.None);
+
+        Assert.That(stub.LastCall, Is.Not.Null, "the activation must reach the Core");
+        Assert.That(stub.LastCall!.Value.Token, Is.EqualTo("plain-run-token"),
+            "the Core must be presented the live token, never the at-rest ciphertext");
+        var response = (SlotActivationResponse)_bus.Published[0].Message;
+        Assert.That(response.Success, Is.True);
     }
 
     private sealed class StubCoreCredentialClient : ICoreCredentialClient

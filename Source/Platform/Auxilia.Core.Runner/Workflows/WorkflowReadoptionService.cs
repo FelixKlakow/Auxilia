@@ -180,22 +180,9 @@ public sealed class WorkflowReadoptionService(
         await CleanupRunRootsAsync(record.Id);
     }
 
-    private async Task CleanupRunRootsAsync(Guid instanceId)
-    {
-        await workspaceManager.CleanupAsync(instanceId);
-        await podHost.TeardownAsync(instanceId);
-        var outputRoot = Path.Combine(
-            dispatcherSettings.Value.RunOutputDirectory, instanceId.ToString("N"));
-        try
-        {
-            if (Directory.Exists(outputRoot))
-                Directory.Delete(outputRoot, recursive: true);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            logger.LogWarning(ex, "Could not delete run output root {OutputRoot}.", outputRoot);
-        }
-    }
+    private Task CleanupRunRootsAsync(Guid instanceId)
+        => RunRootsCleanup.CleanupAsync(
+            workspaceManager, podHost, dispatcherSettings.Value, logger, instanceId);
 
     private static Guid? CommandIdOf(WorkflowInstanceRecord record)
         => DispatchCommandOf(record)?.CommandId;

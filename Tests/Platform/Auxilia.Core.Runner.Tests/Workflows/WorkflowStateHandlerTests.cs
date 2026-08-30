@@ -78,6 +78,7 @@ public class WorkflowStateHandlerTests
             new FakePodHost(),
             new Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry(),
             Options.Create(_settings),
+            new Auxilia.PlatformData.Protection.NullSettingsProtector(),
             NullLogger<WorkflowStateHandler>.Instance);
 
         await _sut.StartAsync(CancellationToken.None);
@@ -198,6 +199,45 @@ public class WorkflowStateHandlerTests
         Assert.That(replacement.WorkflowType, Is.EqualTo(original.WorkflowType));
         Assert.That(replacement.WorkflowPackageUri, Is.EqualTo(original.WorkflowPackageUri));
         Assert.That(replacement.Context, Is.EqualTo(original.Context));
+    }
+
+    [Test]
+    public async Task WhenDrainingInstanceHasProtectedResolutionToken_ReplacementCarriesThePlaintext()
+    {
+        // The stored dispatch command protects its resolution token at rest; the replacement
+        // must ride the bus with the plaintext, exactly like the original dispatch did.
+        var protector = new TestStores.PrefixSettingsProtector();
+        var handler = new WorkflowStateHandler(
+            _mockBus.Object, _registry, _tokenRegistry, TestStores.NewAuditLog(),
+            TestStores.NewStatusPublisher(_mockBus.Object),
+            TestStores.NewArtifactPersister(_mockBus.Object, _artifactStore, _settings),
+            TestStores.NewWorkspaceManager(_settings),
+            new FakePodHost(), new Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry(),
+            Options.Create(_settings), protector, NullLogger<WorkflowStateHandler>.Instance);
+        await handler.StartAsync(CancellationToken.None);
+
+        var instanceId = Guid.NewGuid();
+        var stored = new RunWorkflowCommand(
+            Guid.NewGuid(), "service-workflow", "docker://svc",
+            new Dictionary<string, string>(),
+            ResolutionToken: protector.Protect("plain-resolution-token"));
+        await _registry.CreateAsync(
+            instanceId, "service-workflow", "Draining",
+            dispatchCommandJson: JsonSerializer.Serialize(stored));
+
+        RunWorkflowCommand? replacement = null;
+        _mockBus
+            .Setup(b => b.PublishAsync(CommandQueue, It.IsAny<RunWorkflowCommand>(), It.IsAny<CancellationToken>()))
+            .Callback<string, RunWorkflowCommand, CancellationToken>((_, cmd, _) => replacement = cmd)
+            .Returns(Task.CompletedTask);
+
+        await _capturedHandler!(
+            new WorkflowStateMessage(instanceId, WorkflowState.Success, null), CancellationToken.None);
+        await handler.StopAsync();
+
+        Assert.That(replacement, Is.Not.Null);
+        Assert.That(replacement!.ResolutionToken, Is.EqualTo("plain-resolution-token"),
+            "The replacement dispatch must carry the live token, not the at-rest ciphertext.");
     }
 
     [Test]

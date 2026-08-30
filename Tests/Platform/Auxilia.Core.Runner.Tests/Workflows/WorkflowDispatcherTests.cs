@@ -663,4 +663,185 @@ public class WorkflowDispatcherTests
         var record = await _instanceRegistry.GetAsync(instanceId);
         Assert.That(record!.State, Is.EqualTo("Success"), "a normal exit after completion is not a failure");
     }
+
+    // ------------------------------------------------------------------ Resolution token at rest
+
+    /// <summary>A dispatcher wired like the SetUp one, with the varying collaborators injectable.</summary>
+    private WorkflowDispatcher BuildDispatcher(
+        WorkflowDispatcherSettings? dispatcherSettings = null,
+        Auxilia.PlatformData.Protection.ISettingsProtector? protector = null,
+        FakePodHost? podHost = null)
+    {
+        var settings = dispatcherSettings ?? new WorkflowDispatcherSettings { ContainerExitGraceSeconds = 0 };
+        return new WorkflowDispatcher(
+            _mockBus.Object,
+            _mockLauncher.Object,
+            Options.Create(DefaultSettings()),
+            Options.Create(settings),
+            CreateHttpClientFactory(_validPackageZip),
+            _mockVerifier.Object,
+            _mockPendingPackages.Object,
+            TestStores.NewSlotProviderRegistry(),
+            _tokenRegistry,
+            TestStores.NewPolicyEngine(),
+            _instanceRegistry,
+            TestStores.NewStatusPublisher(_mockBus.Object),
+            _schemaStore,
+            TestStores.NewWorkflowPackageStore(),
+            TestStores.NewArtifactStore(),
+            new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
+            TestStores.NewWorkspaceManager(settings),
+            TestStores.NewHostPlatformProbe(),
+            Mock.Of<IRepositoryAuthResolver>(),
+            new AuditLog(_auditRecords, TimeProvider.System),
+            TestStores.NewInstanceInfo(),
+            protector ?? new Auxilia.PlatformData.Protection.NullSettingsProtector(),
+            podHost ?? new FakePodHost(),
+            new Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry(),
+            NullLogger<WorkflowDispatcher>.Instance);
+    }
+
+    [Test]
+    public async Task WhenRunCommandCarriesResolutionToken_PersistedCommandJsonHoldsOnlyTheProtectedForm()
+    {
+        var protector = new TestStores.PrefixSettingsProtector();
+        await _sut.StopAsync();
+        _sut = BuildDispatcher(protector: protector);
+        await _sut.StartAsync(CancellationToken.None);
+
+        WorkflowLaunchRequest? captured = null;
+        _mockLauncher
+            .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
+            .ReturnsAsync(new WorkflowLaunchResult());
+
+        var command = new RunWorkflowCommand(
+            Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
+            new Dictionary<string, string>(), ResolutionToken: "top-secret-token");
+
+        await _capturedHandler!(command, CancellationToken.None);
+
+        var instanceId = Guid.Parse(captured!.EnvironmentVariables[WorkflowEnvironmentVariables.InstanceId]);
+        var record = await _instanceRegistry.GetAsync(instanceId);
+        Assert.That(record!.DispatchCommandJson, Is.Not.Null);
+        Assert.That(record.DispatchCommandJson, Does.Not.Contain("top-secret-token"),
+            "the resolution token is a bearer credential — it must never be persisted in plaintext");
+
+        // The reader path round-trips: deserialize + Unprotect yields the live token.
+        var stored = JsonSerializer.Deserialize<RunWorkflowCommand>(record.DispatchCommandJson!)!;
+        var unprotected = DispatchCommandProtection.Unprotect(
+            stored, protector, NullLogger<WorkflowDispatcherTests>.Instance);
+        Assert.That(unprotected.ResolutionToken, Is.EqualTo("top-secret-token"));
+    }
+
+    // ------------------------------------------------------------------ Drain crash
+
+    [Test]
+    public async Task ContainerExit_WhileDrainingWithNoTerminalMessage_FailsTearsDownAndDispatchesReplacement()
+    {
+        var protector = new TestStores.PrefixSettingsProtector();
+        var podHost = new FakePodHost();
+        var dispatcher = BuildDispatcher(protector: protector, podHost: podHost);
+
+        var instanceId = Guid.NewGuid();
+        var original = new RunWorkflowCommand(
+            Guid.NewGuid(), "service-workflow", "docker://svc",
+            new Dictionary<string, string> { ["KEY"] = "value" },
+            ResolutionToken: protector.Protect("plain-run-token"));
+        await _instanceRegistry.CreateAsync(
+            instanceId, "service-workflow", "Draining",
+            dispatchCommandJson: JsonSerializer.Serialize(original));
+
+        RunWorkflowCommand? replacement = null;
+        _mockBus
+            .Setup(b => b.PublishAsync(
+                "workflow.run-commands", It.IsAny<RunWorkflowCommand>(), It.IsAny<CancellationToken>()))
+            .Callback<string, RunWorkflowCommand, CancellationToken>((_, cmd, _) => replacement = cmd)
+            .Returns(Task.CompletedTask);
+
+        await dispatcher.HandleContainerExitAsync(
+            instanceId, "service-workflow", new ContainerExit(137, "killed"));
+
+        var record = await _instanceRegistry.GetAsync(instanceId);
+        Assert.Multiple(() =>
+        {
+            Assert.That(record!.State, Is.EqualTo("Failed"),
+                "a container crashing mid-drain must fail its run — the terminal message is never coming");
+            Assert.That(record.ErrorMessage, Does.Contain("draining").And.Contain("137"));
+            Assert.That(podHost.TornDown, Does.Contain(instanceId), "the crashed run's pod must die with it");
+        });
+        _mockBus.Verify(b => b.PublishToTopicExchangeAsync(
+            "workflow.status", It.IsAny<string>(),
+            It.Is<WorkflowStatusEvent>(
+                e => e.WorkflowInstanceId == instanceId && e.State == "Failed"),
+            It.IsAny<CancellationToken>()), Times.Once);
+        Assert.That(replacement, Is.Not.Null, "the drain-replace contract must survive a crash mid-drain");
+        Assert.Multiple(() =>
+        {
+            Assert.That(replacement!.CommandId, Is.Not.EqualTo(original.CommandId));
+            Assert.That(replacement.WorkflowType, Is.EqualTo("service-workflow"));
+            Assert.That(replacement.Context, Is.EqualTo(original.Context));
+            Assert.That(replacement.ResolutionToken, Is.EqualTo("plain-run-token"),
+                "the replacement rides the bus with the live token, not the at-rest ciphertext");
+        });
+    }
+
+    [Test]
+    public async Task ContainerExit_WhileDrainingButTerminalMessageLandsInGrace_ChangesNothing()
+    {
+        // The graceful-drain race: the record is terminal by the time the drain grace re-read
+        // happens (grace = 0 here, so the state set below IS the re-read's view).
+        var instanceId = Guid.NewGuid();
+        await _instanceRegistry.CreateAsync(instanceId, "service-workflow", "Draining");
+        await _instanceRegistry.SetStateAsync(instanceId, "Success");
+
+        await _sut.HandleContainerExitAsync(instanceId, "service-workflow", new ContainerExit(0, null));
+
+        var record = await _instanceRegistry.GetAsync(instanceId);
+        Assert.That(record!.State, Is.EqualTo("Success"));
+        _mockBus.Verify(b => b.PublishAsync(
+                It.IsAny<string>(), It.IsAny<RunWorkflowCommand>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    // ------------------------------------------------------------------ Crash run-root cleanup
+
+    [Test]
+    public async Task ContainerExit_WithoutTerminalState_CleansWorkspaceAndOutputDirectory()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"auxilia-dispatcher-crash-{Guid.NewGuid():N}");
+        var settings = new WorkflowDispatcherSettings
+        {
+            ContainerExitGraceSeconds = 0,
+            RunOutputDirectory = Path.Combine(tempRoot, "run-output"),
+            WorkspaceRootDirectory = Path.Combine(tempRoot, "workspaces")
+        };
+        var dispatcher = BuildDispatcher(dispatcherSettings: settings);
+        try
+        {
+            var instanceId = Guid.NewGuid();
+            await _instanceRegistry.CreateAsync(instanceId, "my-workflow", "Running");
+            var workspaceRoot = Path.Combine(settings.WorkspaceRootDirectory, instanceId.ToString("N"));
+            var outputRoot = Path.Combine(settings.RunOutputDirectory, instanceId.ToString("N"));
+            Directory.CreateDirectory(workspaceRoot);
+            Directory.CreateDirectory(outputRoot);
+            await File.WriteAllTextAsync(Path.Combine(outputRoot, "partial.json"), "{}");
+
+            await dispatcher.HandleContainerExitAsync(
+                instanceId, "my-workflow", new ContainerExit(1, "boom"));
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(Directory.Exists(workspaceRoot), Is.False,
+                    "a crashed run's workspace must die with the run — nothing else will clean it");
+                Assert.That(Directory.Exists(outputRoot), Is.False,
+                    "a crashed run's output directory must die with the run — nothing else will clean it");
+            });
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+                Directory.Delete(tempRoot, recursive: true);
+        }
+    }
 }

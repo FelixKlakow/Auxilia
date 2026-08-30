@@ -40,11 +40,14 @@ public sealed class DockerWorkflowLauncher(
 
         // The run's pod comes up FIRST (private network, companions in start order, each
         // readiness-gated); any failure from here to the workflow's start tears it down —
-        // a failed launch must never leave companions running.
-        if (request.Pod is { } pod)
-            await podHost.MaterializeAsync(client, pod, ct);
+        // a failed launch must never leave companions running. Materialization itself is
+        // inside the teardown scope: a companion failing readiness mid-pod must not leave the
+        // earlier companions (or the network/volumes) behind. Teardown removes by labels, so
+        // it is tolerant of arbitrary partial materialization.
         try
         {
+            if (request.Pod is { } pod)
+                await podHost.MaterializeAsync(client, pod, ct);
             return await LaunchWorkflowContainerAsync(client, request, settings, ct);
         }
         catch when (request.Pod is { } failedPod)
@@ -71,75 +74,76 @@ public sealed class DockerWorkflowLauncher(
             "Workflow container created. ContainerId={ContainerId}",
             created.ID[..Math.Min(12, created.ID.Length)]);
 
-        // Persist the container↔run mapping BEFORE start: a crash from here on must leave a
-        // record the re-adoption pass can match, never an anonymous container.
-        if (request.OnContainerCreated is { } onCreated)
-            await onCreated(created.ID);
-
-        // The workflow container joins the pod network ADDITIONALLY (alias "workflow"): it
-        // keeps its governed egress network, staying the pod's only path to the outside.
-        if (request.Pod is { } pod)
-            await client.Networks.ConnectNetworkAsync(pod.NetworkName, new NetworkConnectParameters
-            {
-                Container = created.ID,
-                EndpointConfig = new EndpointSettings { Aliases = ["workflow"] }
-            }, ct);
-
-        // Pre-flight linker check (baked images): every member a plugin references on a shared
-        // assembly must exist in the image's copy — build skew fails HERE with a clear message,
-        // not mid-session with a MissingMethodException.
-        if (request is { DockerImageUri: not null, SlotPluginFiles.Count: > 0 })
+        // Everything between creation and a successful start must remove the created container
+        // on failure — it would otherwise linger (with pod volumes bound) until the next runner
+        // restart. Nothing watches an unstarted container, so removal here races nobody.
+        try
         {
-            try
-            {
-                await VerifyPluginCompatibilityAsync(client, created.ID, request.SlotPluginFiles, ct);
-            }
-            catch
-            {
-                await TryRemoveContainerAsync(client, created.ID);
-                throw;
-            }
-        }
+            // Persist the container↔run mapping BEFORE start: a crash from here on must leave a
+            // record the re-adoption pass can match, never an anonymous container.
+            if (request.OnContainerCreated is { } onCreated)
+                await onCreated(created.ID);
 
-        if (request.SlotPluginFiles.Count > 0)
-        {
-            if (request.DockerImageUri is not null)
-            {
-                // Baked-image path: no bind-mount; inject via Docker tar API.
-                var containerPluginDir = request.PluginDirectory ?? "/app";
-                using var tarStream = BuildSlotPluginTar(request.SlotPluginFiles);
-                await client.Containers.ExtractArchiveToContainerAsync(
-                    created.ID,
-                    new ContainerPathStatParameters { Path = containerPluginDir },
-                    tarStream,
-                    ct);
-            }
-            else
-            {
-                // ZIP-extracted path: copy files into the bind-mounted extracted directory.
-                var pkgManifest = JsonSerializer.Deserialize<WorkflowPackageManifest>(
-                    File.ReadAllText(Path.Combine(request.ExtractedContentDirectory, "package-manifest.json")),
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
-                var execRelDir = Path.GetDirectoryName(pkgManifest.ExecutableRelativePath)?.Replace('\\', '/');
-                var targetDir = string.IsNullOrEmpty(execRelDir)
-                    ? request.ExtractedContentDirectory
-                    : Path.Combine(request.ExtractedContentDirectory,
-                                   execRelDir.Replace('/', Path.DirectorySeparatorChar));
-
-                Directory.CreateDirectory(targetDir);
-                foreach (var file in request.SlotPluginFiles)
+            // The workflow container joins the pod network ADDITIONALLY (alias "workflow"): it
+            // keeps its governed egress network, staying the pod's only path to the outside.
+            if (request.Pod is { } pod)
+                await client.Networks.ConnectNetworkAsync(pod.NetworkName, new NetworkConnectParameters
                 {
-                    File.Copy(file.DllPath,
-                              Path.Combine(targetDir, Path.GetFileName(file.DllPath)),
-                              overwrite: true);
-                    File.Copy(file.ManifestPath,
-                              Path.Combine(targetDir, Path.GetFileName(file.ManifestPath)),
-                              overwrite: true);
+                    Container = created.ID,
+                    EndpointConfig = new EndpointSettings { Aliases = ["workflow"] }
+                }, ct);
+
+            // Pre-flight linker check (baked images): every member a plugin references on a shared
+            // assembly must exist in the image's copy — build skew fails HERE with a clear message,
+            // not mid-session with a MissingMethodException.
+            if (request is { DockerImageUri: not null, SlotPluginFiles.Count: > 0 })
+                await VerifyPluginCompatibilityAsync(client, created.ID, request.SlotPluginFiles, ct);
+
+            if (request.SlotPluginFiles.Count > 0)
+            {
+                if (request.DockerImageUri is not null)
+                {
+                    // Baked-image path: no bind-mount; inject via Docker tar API.
+                    var containerPluginDir = request.PluginDirectory ?? "/app";
+                    using var tarStream = BuildSlotPluginTar(request.SlotPluginFiles);
+                    await client.Containers.ExtractArchiveToContainerAsync(
+                        created.ID,
+                        new ContainerPathStatParameters { Path = containerPluginDir },
+                        tarStream,
+                        ct);
+                }
+                else
+                {
+                    // ZIP-extracted path: copy files into the bind-mounted extracted directory.
+                    var pkgManifest = JsonSerializer.Deserialize<WorkflowPackageManifest>(
+                        File.ReadAllText(Path.Combine(request.ExtractedContentDirectory, "package-manifest.json")),
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+                    var execRelDir = Path.GetDirectoryName(pkgManifest.ExecutableRelativePath)?.Replace('\\', '/');
+                    var targetDir = string.IsNullOrEmpty(execRelDir)
+                        ? request.ExtractedContentDirectory
+                        : Path.Combine(request.ExtractedContentDirectory,
+                                       execRelDir.Replace('/', Path.DirectorySeparatorChar));
+
+                    Directory.CreateDirectory(targetDir);
+                    foreach (var file in request.SlotPluginFiles)
+                    {
+                        File.Copy(file.DllPath,
+                                  Path.Combine(targetDir, Path.GetFileName(file.DllPath)),
+                                  overwrite: true);
+                        File.Copy(file.ManifestPath,
+                                  Path.Combine(targetDir, Path.GetFileName(file.ManifestPath)),
+                                  overwrite: true);
+                    }
                 }
             }
-        }
 
-        await client.Containers.StartContainerAsync(created.ID, new ContainerStartParameters(), ct);
+            await client.Containers.StartContainerAsync(created.ID, new ContainerStartParameters(), ct);
+        }
+        catch
+        {
+            await TryRemoveContainerAsync(client, created.ID);
+            throw;
+        }
 
         logger.LogInformation(
             "Workflow container started. RuntimeImage={RuntimeImage} ContainerId={ContainerId}",
@@ -308,7 +312,7 @@ public sealed class DockerWorkflowLauncher(
         }
         catch (DockerApiException ex)
         {
-            logger.LogWarning(ex, "Could not remove container {ContainerId} after a failed pre-flight.", containerId);
+            logger.LogWarning(ex, "Could not remove container {ContainerId} after a failed launch.", containerId);
         }
     }
 

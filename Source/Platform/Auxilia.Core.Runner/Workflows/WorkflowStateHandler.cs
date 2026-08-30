@@ -18,6 +18,7 @@ public sealed class WorkflowStateHandler(
     Pods.IPodHost podHost,
     Pods.PodControlRegistry podControlRegistry,
     IOptions<WorkflowDispatcherSettings> dispatcherSettings,
+    Auxilia.PlatformData.Protection.ISettingsProtector settingsProtector,
     ILogger<WorkflowStateHandler> logger)
 {
     private IAsyncDisposable? _subscription;
@@ -101,23 +102,13 @@ public sealed class WorkflowStateHandler(
         }
 
         // Drain-and-replace: a drained long-living instance is replaced with a fresh run
-        // that boots with the updated configuration (ARCHITECTURE §6).
-        if (record is { State: "Draining", DispatchCommandJson: not null })
-        {
-            var original = JsonSerializer.Deserialize<RunWorkflowCommand>(record.DispatchCommandJson);
-            if (original is not null)
-            {
-                var replacement = original with { CommandId = Guid.NewGuid() };
-                await messageBus.PublishAsync(
-                    dispatcherSettings.Value.CommandQueueName, replacement, ct);
-                await auditLog.AppendAsync(
-                    "steering-instance", "workflow.drain-replaced",
-                    message.WorkflowInstanceId.ToString(), replacement.CommandId.ToString(), ct: ct);
-                logger.LogInformation(
-                    "Drained instance {InstanceId} replaced — new dispatch {CommandId}.",
-                    message.WorkflowInstanceId, replacement.CommandId);
-            }
-        }
+        // that boots with the updated configuration (ARCHITECTURE §6). Shared with the
+        // dispatcher's drain-crash path — a container dying mid-drain never reaches here.
+        if (record is { State: "Draining" })
+            await DrainReplacement.PublishAsync(
+                messageBus, settingsProtector, auditLog,
+                dispatcherSettings.Value.CommandQueueName,
+                message.WorkflowInstanceId, record.DispatchCommandJson, logger, ct);
     }
 
     public async ValueTask StopAsync()
