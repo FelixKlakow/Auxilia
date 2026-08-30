@@ -22,3 +22,7 @@ only for private repos), `Branch` (Text, defaults to `main`).
 - The token is sent ONLY as the `Authorization: Bearer` header — never in error messages,
   logs, or URLs. `WorkingPath` is empty: there is no mounted checkout.
 - Every request carries a `User-Agent: Auxilia` header; GitHub rejects requests without one.
+- Live repository/branch pickers (the `github-account` credential provider) are NOT code in
+  this package or in the Core: they are data-driven `ProviderBrowseSpec`s carried by the
+  provider's catalog registration (`Scripts/Setup-Platform.ps1` and the Core's `core-data`
+  seed) and executed generically by the Core's `ConnectorBrowseService`.

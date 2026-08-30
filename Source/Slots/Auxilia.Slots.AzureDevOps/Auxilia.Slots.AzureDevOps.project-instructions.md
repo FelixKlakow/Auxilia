@@ -19,6 +19,10 @@ sidecar — the naming contract of `FileSystemPluginDiscovery`.
   read; `GetStatesAsync` on an unknown item returns empty; `GetWorkItemAsync` maps 404 → null.
 - `MessageHandler` on the handler (and the access-class constructor parameter) is the only
   HTTP seam (`InternalsVisibleTo` `Auxilia.Slots.AzureDevOps.Tests`).
+- Live repository/branch pickers for `tfs-account` connectors are NOT code in this package or
+  in the Core: they are data-driven `ProviderBrowseSpec`s carried by the provider's catalog
+  registration (`Scripts/Setup-Platform.ps1` and the Core's `core-data` seed) and executed
+  generically by the Core's `ConnectorBrowseService`.
 
 ## File / Folder Map
 ```

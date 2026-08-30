@@ -13,8 +13,11 @@ namespace Auxilia.Core.Api.Tests.ComponentTests;
 /// The connector-browse route + DTO wire-up through the typed <see cref="ICoreClient"/> — the
 /// repository/branch pickers in the operator UIs ride exclusively on
 /// <see cref="ICoreClient.BrowseConnectorAsync"/>, so this is the tier where a wiring regression
-/// would otherwise only surface as a broken picker at runtime. The upstream Git REST API is a
-/// stubbed HTTP handler; the browse LOGIC is covered by ConnectorBrowseAzureDevOpsTests.
+/// would otherwise only surface as a broken picker at runtime. Browsing executes the browse
+/// specs REGISTERED with the provider (data-driven; no vendor code in the Core), so the test
+/// registers the tfs-account payload first. The upstream Git REST API is a stubbed HTTP
+/// handler; the browse LOGIC is covered by ConnectorBrowseAzureDevOpsTests and
+/// ConnectorBrowseSpecTests.
 /// </summary>
 [TestFixture]
 [Category("Component")]
@@ -65,14 +68,20 @@ public sealed class ConnectorBrowseComponentTests : CoreApiComponentTestBase
         Content = new StringContent(body, Encoding.UTF8, "application/json"),
     };
 
+    private static Task RegisterTfsAccountAsync(ICoreClient core)
+        => core.RegisterProviderAsync(new RegisterSlotProvider(
+            "tfs-account", "account", null, ["git-credential"], [],
+            BrowseSpecs: UnitTests.ConnectorBrowseAzureDevOpsTests.TfsBrowseSpecs));
+
     [Test]
     public async Task BrowseRepositoriesThenBranches_RoundTripsThroughTheClient()
     {
         ICoreClient core = new CoreClient(CreateClient());
+        await RegisterTfsAccountAsync(core);
         var connector = await core.CreateConnectorAsync(new CreateConnector(
             "tfs", "tfs-account", new Dictionary<string, string>
             {
-                ["Token"] = "ado-pat",
+                ["token"] = "ado-pat",
                 ["OrgUrl"] = OrgUrl,
             }));
 
@@ -91,6 +100,7 @@ public sealed class ConnectorBrowseComponentTests : CoreApiComponentTestBase
     public async Task BrowseWithoutACredential_SurfacesA400_SoPickersFallBackToManualEntry()
     {
         ICoreClient core = new CoreClient(CreateClient());
+        await RegisterTfsAccountAsync(core);
         var bare = await core.CreateConnectorAsync(new CreateConnector(
             "bare", "tfs-account", new Dictionary<string, string> { ["OrgUrl"] = OrgUrl }));
 

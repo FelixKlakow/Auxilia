@@ -95,6 +95,47 @@ public sealed record ProviderModelCatalog(
     IReadOnlyDictionary<string, string>? BearerHeaders = null);
 
 /// <summary>
+/// Declares, as pure data, ONE live-browse kind of a provider (e.g. <c>"repositories"</c>,
+/// <c>"branches"</c>): the request template, how the connector's credential authenticates the
+/// call (bearer or PAT basic auth — both named by SETTING KEY), and where item ids/labels sit
+/// in the response. The Core executes this generically — like <see cref="ProviderModelCatalog"/>
+/// and <see cref="ProviderOAuthRefresh"/>, the vendor knowledge lives in the registration.
+/// <para>
+/// <c>{placeholders}</c> in URL templates resolve to: <c>{context}</c> — the browse request's
+/// context verbatim; <c>{context:owner-repo}</c> — the context's last two URL path segments with
+/// a trailing <c>.git</c> stripped; <c>{resolved.&lt;path&gt;}</c> — a field of the item the
+/// <see cref="Resolve"/> pre-step matched; any other name — the connector setting of that key,
+/// trailing '/' trimmed. Field paths (<see cref="IdField"/> etc.) dot-traverse nested objects.
+/// </para>
+/// </summary>
+public sealed record ProviderBrowseSpec(
+    string UrlTemplate,
+    string IdField,
+    string? ItemsPath = null,
+    string? LabelField = null,
+    string? LabelPrefixField = null,
+    string? IdTrimPrefix = null,
+    IReadOnlyDictionary<string, string>? Headers = null,
+    string? BearerSettingKey = null,
+    string? BasicPasswordSettingKey = null,
+    bool SortByLabel = false,
+    ProviderBrowseResolve? Resolve = null);
+
+/// <summary>
+/// Optional pre-step of a <see cref="ProviderBrowseSpec"/>: list candidate items, match the
+/// browse CONTEXT against them (normalized-URL match on <see cref="MatchUrlField"/> first, then
+/// the context's last path segment against <see cref="MatchNameField"/>), and expose the matched
+/// item's <see cref="ExportFields"/> as <c>{resolved.&lt;path&gt;}</c> placeholders to the main
+/// request — e.g. resolving a clone URL to a repository id before listing its branches.
+/// </summary>
+public sealed record ProviderBrowseResolve(
+    string UrlTemplate,
+    string ItemsPath,
+    string MatchUrlField,
+    string MatchNameField,
+    IReadOnlyList<string> ExportFields);
+
+/// <summary>
 /// Registers (or updates) a slot provider's descriptor in the Core catalog — normally mirrored
 /// from a plugin manifest by deployment tooling; also the API a runner or operator uses to make
 /// a provider configurable. Registration does NOT make it available (deny-by-default curation).
@@ -111,7 +152,8 @@ public sealed record RegisterSlotProvider(
     ProviderOAuthRefresh? OAuthRefresh = null,
     ProviderModelCatalog? ModelCatalog = null,
     IReadOnlyList<EnvironmentBaseRef>? EnvironmentBases = null,
-    IReadOnlyList<string>? RequiredTools = null);
+    IReadOnlyList<string>? RequiredTools = null,
+    IReadOnlyDictionary<string, ProviderBrowseSpec>? BrowseSpecs = null);
 
 /// <summary>One manifest setting of a provider being registered.</summary>
 public sealed record RegisterProviderSetting(

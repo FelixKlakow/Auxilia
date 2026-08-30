@@ -89,7 +89,10 @@ public sealed class ProviderCatalogService(
                 : JsonSerializer.Serialize(request.OAuthRefresh),
             ModelCatalogJson = request.ModelCatalog is null
                 ? null
-                : JsonSerializer.Serialize(request.ModelCatalog)
+                : JsonSerializer.Serialize(request.ModelCatalog),
+            BrowseSpecsJson = request.BrowseSpecs is { Count: > 0 }
+                ? JsonSerializer.Serialize(request.BrowseSpecs)
+                : null
         };
         await providers.SaveAsync(record, ct);
         await auditLog.AppendAsync(actor, "provider-catalog.registered", request.ProviderType, "registered", ct: ct);
@@ -183,6 +186,15 @@ public sealed class ProviderCatalogService(
         => await providers.ReadAsync(SlotProviderRecord.IdFor(providerType), ct) is
                { ModelCatalogJson.Length: > 0 } record
             ? JsonSerializer.Deserialize<ProviderModelCatalog>(record.ModelCatalogJson)
+            : null;
+
+    /// <summary>The provider's data-driven browse spec for one kind, or null when it declares none.</summary>
+    public async Task<ProviderBrowseSpec?> GetBrowseSpecAsync(string providerType, string kind, CancellationToken ct)
+        => await providers.ReadAsync(SlotProviderRecord.IdFor(providerType), ct) is
+               { BrowseSpecsJson.Length: > 0 } record
+           && JsonSerializer.Deserialize<Dictionary<string, ProviderBrowseSpec>>(record.BrowseSpecsJson) is { } specs
+           && specs.TryGetValue(kind, out var spec)
+            ? spec
             : null;
 
     /// <summary>The catalog entry of one provider, or null when it is not registered.</summary>

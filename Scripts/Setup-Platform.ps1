@@ -338,6 +338,21 @@ $providers = @(
         settings = @(
             @{ key = "token"; label = "GitHub account"; kind = "Secret"; required = $true; connectFlow = "github" }
         )
+        # Data-driven live browsing (the Core executes these specs generically; no vendor code).
+        browseSpecs = @{
+            repositories = @{
+                urlTemplate = "https://api.github.com/user/repos?per_page=100&sort=pushed"
+                idField = "clone_url"; labelField = "full_name"
+                headers = @{ "Accept" = "application/vnd.github+json"; "User-Agent" = "Auxilia-Core" }
+                bearerSettingKey = "token"
+            }
+            branches = @{
+                urlTemplate = "https://api.github.com/repos/{context:owner-repo}/branches?per_page=100"
+                idField = "name"; labelField = "name"
+                headers = @{ "Accept" = "application/vnd.github+json"; "User-Agent" = "Auxilia-Core" }
+                bearerSettingKey = "token"
+            }
+        }
     }
     @{
         providerType = "tfs-account"; category = "account"
@@ -348,6 +363,27 @@ $providers = @(
             @{ key = "OrgUrl"; label = "Organization / collection URL"; kind = "Text"; required = $true; helpText = "e.g. https://dev.azure.com/my-org or https://tfs.company.com/tfs/DefaultCollection" }
             @{ key = "username"; label = "Username (optional)"; kind = "Text" }
         )
+        # Data-driven live browsing over the ADO/TFS Git REST API (cloud and on-prem alike);
+        # branches resolve the clone URL to project/repo ids via the declared resolve pre-step.
+        browseSpecs = @{
+            repositories = @{
+                urlTemplate = "{OrgUrl}/_apis/git/repositories?api-version=7.1"
+                itemsPath = "value"; idField = "remoteUrl"; labelField = "name"; labelPrefixField = "project.name"
+                headers = @{ "Accept" = "application/json" }
+                basicPasswordSettingKey = "token"; sortByLabel = $true
+            }
+            branches = @{
+                urlTemplate = "{OrgUrl}/{resolved.project.id}/_apis/git/repositories/{resolved.id}/refs?filter=heads/&api-version=7.1"
+                itemsPath = "value"; idField = "name"; idTrimPrefix = "refs/heads/"
+                headers = @{ "Accept" = "application/json" }
+                basicPasswordSettingKey = "token"
+                resolve = @{
+                    urlTemplate = "{OrgUrl}/_apis/git/repositories?api-version=7.1"
+                    itemsPath = "value"; matchUrlField = "remoteUrl"; matchNameField = "name"
+                    exportFields = @("project.id", "id")
+                }
+            }
+        }
     }
     @{
         providerType = "git-repository"; category = "workspace"

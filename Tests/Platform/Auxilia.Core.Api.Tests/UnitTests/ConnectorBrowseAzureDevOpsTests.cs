@@ -13,10 +13,13 @@ using Microsoft.Extensions.Options;
 namespace Auxilia.Core.Api.Tests.UnitTests;
 
 /// <summary>
-/// Azure DevOps / TFS browsing against a MOCKED HTTP layer speaking the real Git REST API
-/// response shapes (no official ADO container exists — the server is Windows-only and
-/// licensed). The stub asserts the exact URLs and the PAT basic-auth header the service sends,
-/// so a real-tenant verification only has to confirm connectivity, not behavior.
+/// Azure DevOps / TFS browsing through the REGISTERED data-driven browse specs (the Core holds
+/// no ADO code — the specs here mirror the tfs-account registration payload in
+/// Scripts/Setup-Platform.ps1 and the core-data seed) against a MOCKED HTTP layer speaking the
+/// real Git REST API response shapes (no official ADO container exists — the server is
+/// Windows-only and licensed). The stub asserts the exact URLs and the PAT basic-auth header
+/// the generic executor sends, so a real-tenant verification only has to confirm connectivity,
+/// not behavior.
 /// </summary>
 [TestFixture]
 [Category("Unit")]
@@ -24,6 +27,34 @@ public sealed class ConnectorBrowseAzureDevOpsTests
 {
     private const string OrgUrl = "https://tfs.example.com/tfs/DefaultCollection";
     private const string Pat = "ado-pat-secret";
+
+    /// <summary>The tfs-account browse registration — the same DATA Setup-Platform.ps1 posts.</summary>
+    internal static readonly Dictionary<string, ProviderBrowseSpec> TfsBrowseSpecs = new()
+    {
+        ["repositories"] = new ProviderBrowseSpec(
+            UrlTemplate: "{OrgUrl}/_apis/git/repositories?api-version=7.1",
+            IdField: "remoteUrl",
+            ItemsPath: "value",
+            LabelField: "name",
+            LabelPrefixField: "project.name",
+            Headers: new Dictionary<string, string> { ["Accept"] = "application/json" },
+            BasicPasswordSettingKey: "token",
+            SortByLabel: true),
+        ["branches"] = new ProviderBrowseSpec(
+            UrlTemplate: "{OrgUrl}/{resolved.project.id}/_apis/git/repositories/{resolved.id}"
+                         + "/refs?filter=heads/&api-version=7.1",
+            IdField: "name",
+            ItemsPath: "value",
+            IdTrimPrefix: "refs/heads/",
+            Headers: new Dictionary<string, string> { ["Accept"] = "application/json" },
+            BasicPasswordSettingKey: "token",
+            Resolve: new ProviderBrowseResolve(
+                UrlTemplate: "{OrgUrl}/_apis/git/repositories?api-version=7.1",
+                ItemsPath: "value",
+                MatchUrlField: "remoteUrl",
+                MatchNameField: "name",
+                ExportFields: ["project.id", "id"])),
+    };
 
     private static readonly string RepositoriesJson = JsonSerializer.Serialize(new
     {
@@ -78,11 +109,18 @@ public sealed class ConnectorBrowseAzureDevOpsTests
 
         var protector = new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32));
         var connectors = new ConnectorService(
-            new InMemoryDataAccess<Auxilia.Core.Api.Data.CoreConnectorRecord>(), protector, TimeProvider.System);
+            new InMemoryDataAccess<Auxilia.Core.Api.Data.CoreConnectorRecord>(), protector,
+            new AccessGrantEvaluator(
+                new InMemoryDataAccess<Auxilia.PlatformData.Entities.PrincipalRecord>(),
+                new InMemoryDataAccess<Auxilia.PlatformData.Entities.GroupMembershipRecord>()),
+            TimeProvider.System);
         var catalog = new ProviderCatalogService(
             new InMemoryDataAccess<Auxilia.PlatformData.Entities.SlotProviderRecord>(),
             new InMemoryDataAccess<Auxilia.PlatformData.Entities.ProviderCatalogRecord>(),
             new AuditLog(new InMemoryDataAccess<Auxilia.PlatformData.Entities.AuditRecord>(), TimeProvider.System));
+        await catalog.RegisterAsync("test", new RegisterSlotProvider(
+            "tfs-account", "account", null, ["git-credential"], [],
+            BrowseSpecs: TfsBrowseSpecs), CancellationToken.None);
         var refresher = new ConnectorTokenRefresher(
             connectors, catalog,
             new StubHttpClientFactory(handler), TimeProvider.System,
