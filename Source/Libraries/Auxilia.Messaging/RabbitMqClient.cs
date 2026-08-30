@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using OpenTelemetry;
 using OpenTelemetry.Context.Propagation;
 using RabbitMQ.Client;
@@ -15,13 +17,19 @@ namespace Auxilia.Messaging;
 /// </summary>
 public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
 {
+    // Bounds the deliveries a single consumer may hold unacked so one node cannot pull an
+    // entire backlog into memory and starve the competing consumers on a shared queue.
+    private const ushort ConsumerPrefetchCount = 32;
+
     private readonly IConnection _connection;
     private readonly IChannel _publishChannel;
+    private readonly ILogger _logger;
 
-    private RabbitMqClient(IConnection connection, IChannel publishChannel)
+    private RabbitMqClient(IConnection connection, IChannel publishChannel, ILogger logger)
     {
         _connection = connection;
         _publishChannel = publishChannel;
+        _logger = logger;
     }
 
     public async ValueTask DisposeAsync()
@@ -163,49 +171,7 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
         var queueName = queueDeclareResult.QueueName;
         await channel.QueueBindAsync(queueName, exchangeName, string.Empty, null, cancellationToken: cancellationToken);
 
-        var consumer = new AsyncEventingBasicConsumer(channel);
-        consumer.ReceivedAsync += async (_, ea) =>
-        {
-            var parentContext = Propagators.DefaultTextMapPropagator.Extract(
-                default,
-                ea.BasicProperties.Headers,
-                static (headers, key) =>
-                {
-                    if (headers == null || !headers.TryGetValue(key, out var val))
-                        return [];
-                    var str = val is byte[] bytes ? Encoding.UTF8.GetString(bytes) : val?.ToString();
-                    return str is null ? [] : [str];
-                });
-
-            using var activity = MessagingTelemetry.ActivitySource.StartActivity(
-                "rabbitmq.consume",
-                ActivityKind.Consumer,
-                parentContext.ActivityContext);
-            activity?.SetTag("messaging.system", "rabbitmq");
-            activity?.SetTag("messaging.destination", exchangeName);
-            activity?.SetTag("messaging.operation", "receive");
-
-            MessagingTelemetry.ReceiveCounter.Add(1, new TagList { { "messaging.queue", queueName } });
-
-            // A fanout exchange delivers a copy of every message to every bound queue, so a
-            // consumer typed as T can receive a message of a different type. Skip anything
-            // whose tagged type doesn't match T rather than let lenient deserialization
-            // fabricate a partially-null record. Untagged messages (Type == null) are
-            // processed as before, for backward compatibility.
-            var messageType = ea.BasicProperties.Type;
-            if (messageType is not null && messageType != typeof(T).FullName)
-            {
-                await channel.BasicAckAsync(ea.DeliveryTag, false);
-                return;
-            }
-
-            var body = Encoding.UTF8.GetString(ea.Body.ToArray());
-            var msg = JsonSerializer.Deserialize<T>(body);
-            if (msg is not null)
-                await handler(msg, CancellationToken.None);
-            await channel.BasicAckAsync(ea.DeliveryTag, false);
-        };
-        var consumerTag = await channel.BasicConsumeAsync(queueName, false, consumer, cancellationToken);
+        var consumerTag = await StartConsumerAsync(channel, queueName, exchangeName, handler, cancellationToken);
         return new SubscriptionHandle(channel, consumerTag);
     }
 
@@ -223,45 +189,7 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
             cancellationToken: cancellationToken);
         await channel.QueueBindAsync(queueName, exchangeName, string.Empty, null, cancellationToken: cancellationToken);
 
-        var consumer = new AsyncEventingBasicConsumer(channel);
-        consumer.ReceivedAsync += async (_, ea) =>
-        {
-            var parentContext = Propagators.DefaultTextMapPropagator.Extract(
-                default,
-                ea.BasicProperties.Headers,
-                static (headers, key) =>
-                {
-                    if (headers == null || !headers.TryGetValue(key, out var val))
-                        return [];
-                    var str = val is byte[] bytes ? Encoding.UTF8.GetString(bytes) : val?.ToString();
-                    return str is null ? [] : [str];
-                });
-
-            using var activity = MessagingTelemetry.ActivitySource.StartActivity(
-                "rabbitmq.consume",
-                ActivityKind.Consumer,
-                parentContext.ActivityContext);
-            activity?.SetTag("messaging.system", "rabbitmq");
-            activity?.SetTag("messaging.destination", exchangeName);
-            activity?.SetTag("messaging.operation", "receive");
-
-            MessagingTelemetry.ReceiveCounter.Add(1, new TagList { { "messaging.queue", queueName } });
-
-            // Same type-tag guard as every other consumer: the fanout delivers everything.
-            var messageType = ea.BasicProperties.Type;
-            if (messageType is not null && messageType != typeof(T).FullName)
-            {
-                await channel.BasicAckAsync(ea.DeliveryTag, false);
-                return;
-            }
-
-            var body = Encoding.UTF8.GetString(ea.Body.ToArray());
-            var msg = JsonSerializer.Deserialize<T>(body);
-            if (msg is not null)
-                await handler(msg, CancellationToken.None);
-            await channel.BasicAckAsync(ea.DeliveryTag, false);
-        };
-        var consumerTag = await channel.BasicConsumeAsync(queueName, false, consumer, cancellationToken);
+        var consumerTag = await StartConsumerAsync(channel, queueName, exchangeName, handler, cancellationToken);
         return new SubscriptionHandle(channel, consumerTag);
     }
 
@@ -272,19 +200,28 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         var channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken);
-        var queueDeclareResult = await channel.QueueDeclareAsync(
-            string.Empty, false, true, true, null, cancellationToken: cancellationToken);
-        var queueName = queueDeclareResult.QueueName;
+        // A CLIENT-generated queue name, not a server-generated one: automatic topology recovery
+        // re-declares a client-named queue under the SAME name after a connection blip, while a
+        // server-named queue comes back under a NEW broker name — every later Add/RemoveBinding
+        // on the captured stale name would 404 and close the bind channel, silently killing all
+        // NEW selective subscriptions until process restart. Non-exclusive + auto-delete keeps
+        // the old lifecycle (the queue disappears once its consumer is gone) while still letting
+        // recovery re-declare it on the fresh connection.
+        var queueName = $"topic-sub-{Guid.NewGuid():N}";
+        await channel.QueueDeclareAsync(
+            queueName, durable: false, exclusive: false, autoDelete: true, arguments: null,
+            cancellationToken: cancellationToken);
         foreach (var routingKey in routingKeys)
             await channel.QueueBindAsync(queueName, exchangeName, routingKey, null, cancellationToken: cancellationToken);
 
-        var consumerTag = await AttachConsumerAsync(channel, queueName, exchangeName, handler, cancellationToken);
+        var consumerTag = await StartConsumerAsync(channel, queueName, exchangeName, handler, cancellationToken);
         // Binding mutations get their OWN channel: a channel is not safe for concurrent
         // operations, and the consumer channel acks deliveries concurrently with late
         // Add/RemoveBinding calls — sharing it can wedge the channel (deliveries and RPC
         // replies stop, silently). The queue is the shared identity; the channel is not.
-        var bindChannel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken);
-        return new TopicSubscriptionHandle(channel, bindChannel, consumerTag, queueName, exchangeName);
+        // The handle creates that channel lazily from the connection so it can also replace
+        // it after a connection recovery closed the previous one.
+        return new TopicSubscriptionHandle(_connection, channel, consumerTag, queueName, exchangeName);
     }
 
     public async Task<IAsyncDisposable> SubscribeToTopicExchangeSharedAsync<T>(
@@ -302,57 +239,8 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
             cancellationToken: cancellationToken);
         await channel.QueueBindAsync(queueName, exchangeName, bindingKey, null, cancellationToken: cancellationToken);
 
-        var consumerTag = await AttachConsumerAsync(channel, queueName, exchangeName, handler, cancellationToken);
+        var consumerTag = await StartConsumerAsync(channel, queueName, exchangeName, handler, cancellationToken);
         return new SubscriptionHandle(channel, consumerTag);
-    }
-
-    private static async Task<string> AttachConsumerAsync<T>(
-        IChannel channel,
-        string queueName,
-        string exchangeName,
-        Func<T, CancellationToken, Task> handler,
-        CancellationToken cancellationToken)
-    {
-        var consumer = new AsyncEventingBasicConsumer(channel);
-        consumer.ReceivedAsync += async (_, ea) =>
-        {
-            var parentContext = Propagators.DefaultTextMapPropagator.Extract(
-                default,
-                ea.BasicProperties.Headers,
-                static (headers, key) =>
-                {
-                    if (headers == null || !headers.TryGetValue(key, out var val))
-                        return [];
-                    var str = val is byte[] bytes ? Encoding.UTF8.GetString(bytes) : val?.ToString();
-                    return str is null ? [] : [str];
-                });
-
-            using var activity = MessagingTelemetry.ActivitySource.StartActivity(
-                "rabbitmq.consume",
-                ActivityKind.Consumer,
-                parentContext.ActivityContext);
-            activity?.SetTag("messaging.system", "rabbitmq");
-            activity?.SetTag("messaging.destination", exchangeName);
-            activity?.SetTag("messaging.operation", "receive");
-
-            MessagingTelemetry.ReceiveCounter.Add(1, new TagList { { "messaging.queue", queueName } });
-
-            // Same type-tag guard as every other consumer: multiple message types can share
-            // an exchange, and lenient deserialization must not fabricate partially-null records.
-            var messageType = ea.BasicProperties.Type;
-            if (messageType is not null && messageType != typeof(T).FullName)
-            {
-                await channel.BasicAckAsync(ea.DeliveryTag, false);
-                return;
-            }
-
-            var body = Encoding.UTF8.GetString(ea.Body.ToArray());
-            var msg = JsonSerializer.Deserialize<T>(body);
-            if (msg is not null)
-                await handler(msg, CancellationToken.None);
-            await channel.BasicAckAsync(ea.DeliveryTag, false);
-        };
-        return await channel.BasicConsumeAsync(queueName, false, consumer, cancellationToken);
     }
 
     public async Task<IAsyncDisposable> SubscribeAsync<T>(
@@ -361,6 +249,25 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         var channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken);
+        var consumerTag = await StartConsumerAsync(channel, queueName, queueName, handler, cancellationToken);
+        return new SubscriptionHandle(channel, consumerTag);
+    }
+
+    /// <summary>
+    ///     Applies the per-consumer prefetch bound and attaches the single consumer pipeline every
+    ///     subscription shares: trace extraction, the type-tag guard, and explicit ack/nack of every
+    ///     delivery — a throwing handler nacks (requeue once, then drop) instead of leaving the
+    ///     delivery unacked forever.
+    /// </summary>
+    private async Task<string> StartConsumerAsync<T>(
+        IChannel channel,
+        string queueName,
+        string destination,
+        Func<T, CancellationToken, Task> handler,
+        CancellationToken cancellationToken)
+    {
+        await channel.BasicQosAsync(0, ConsumerPrefetchCount, global: false, cancellationToken);
+
         var consumer = new AsyncEventingBasicConsumer(channel);
         consumer.ReceivedAsync += async (_, ea) =>
         {
@@ -381,16 +288,16 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
                 ActivityKind.Consumer,
                 parentContext.ActivityContext);
             activity?.SetTag("messaging.system", "rabbitmq");
-            activity?.SetTag("messaging.destination", queueName);
+            activity?.SetTag("messaging.destination", destination);
             activity?.SetTag("messaging.operation", "receive");
 
             MessagingTelemetry.ReceiveCounter.Add(1, new TagList { { "messaging.queue", queueName } });
 
-            // A fanout exchange delivers a copy of every message to every bound queue, so a
-            // consumer typed as T can receive a message of a different type. Skip anything
-            // whose tagged type doesn't match T rather than let lenient deserialization
-            // fabricate a partially-null record. Untagged messages (Type == null) are
-            // processed as before, for backward compatibility.
+            // Multiple message types can share an exchange (a fanout delivers everything), so a
+            // consumer typed as T can receive a message of a different type. Skip anything whose
+            // tagged type doesn't match T rather than let lenient deserialization fabricate a
+            // partially-null record. Untagged messages (Type == null) are processed as before,
+            // for backward compatibility.
             var messageType = ea.BasicProperties.Type;
             if (messageType is not null && messageType != typeof(T).FullName)
             {
@@ -398,18 +305,47 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
                 return;
             }
 
-            var body = Encoding.UTF8.GetString(ea.Body.ToArray());
-            var msg = JsonSerializer.Deserialize<T>(body);
-            if (msg is not null)
+            try
+            {
+                var body = Encoding.UTF8.GetString(ea.Body.ToArray());
+                var msg = JsonSerializer.Deserialize<T>(body);
+                if (msg is null)
+                {
+                    // A body that deserializes to null (the literal "null") can never become
+                    // processable — drop it explicitly instead of acking it as handled.
+                    _logger.LogWarning(
+                        "Message on queue {Queue} deserialized to null; dropping (nack without requeue).",
+                        queueName);
+                    await channel.BasicNackAsync(ea.DeliveryTag, false, requeue: false);
+                    return;
+                }
+
                 await handler(msg, CancellationToken.None);
+            }
+            catch (Exception exception)
+            {
+                // Resilience lives inside the client (repo rule): a throwing handler must not
+                // leave the delivery unacked until channel close. A first delivery is requeued
+                // for one retry (transient faults); an already-redelivered message is treated
+                // as poison and dropped so a deterministic failure cannot loop forever.
+                var requeue = !ea.Redelivered;
+                _logger.LogError(
+                    exception,
+                    "Handler for queue {Queue} threw; nacking delivery (requeue: {Requeue}).",
+                    queueName,
+                    requeue);
+                await channel.BasicNackAsync(ea.DeliveryTag, false, requeue);
+                return;
+            }
+
             await channel.BasicAckAsync(ea.DeliveryTag, false);
         };
-        var consumerTag = await channel.BasicConsumeAsync(queueName, false, consumer, cancellationToken);
-        return new SubscriptionHandle(channel, consumerTag);
+        return await channel.BasicConsumeAsync(queueName, false, consumer, cancellationToken);
     }
 
     public static async Task<RabbitMqClient> CreateAsync(string hostName, int port = 5672,
         string userName = "guest", string password = "guest",
+        ILogger? logger = null,
         CancellationToken cancellationToken = default)
     {
         var factory = new ConnectionFactory
@@ -422,7 +358,7 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
         };
         var connection = await factory.CreateConnectionAsync(cancellationToken);
         var channel = await connection.CreateChannelAsync(cancellationToken: cancellationToken);
-        return new RabbitMqClient(connection, channel);
+        return new RabbitMqClient(connection, channel, logger ?? NullLogger.Instance);
     }
 
     private sealed class SubscriptionHandle(IChannel channel, string consumerTag) : IAsyncDisposable
@@ -435,19 +371,21 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
     }
 
     private sealed class TopicSubscriptionHandle(
-        IChannel channel, IChannel bindChannel, string consumerTag, string queueName, string exchangeName)
+        IConnection connection, IChannel channel, string consumerTag, string queueName, string exchangeName)
         : ITopicSubscription
     {
         // Binding mutations arrive from concurrent SSE opens/closes; they are serialized here
-        // and ride the DEDICATED bind channel — never the consumer channel, whose concurrent
+        // and ride a DEDICATED bind channel — never the consumer channel, whose concurrent
         // acks would race them (a channel is not safe for concurrent operations).
         private readonly SemaphoreSlim _gate = new(1, 1);
+        private IChannel? _bindChannel;
 
         public async Task AddBindingAsync(string routingKey, CancellationToken cancellationToken = default)
         {
             await _gate.WaitAsync(cancellationToken);
             try
             {
+                var bindChannel = await GetBindChannelAsync(cancellationToken);
                 await bindChannel.QueueBindAsync(
                     queueName, exchangeName, routingKey, null, cancellationToken: cancellationToken);
             }
@@ -459,17 +397,34 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
             await _gate.WaitAsync(cancellationToken);
             try
             {
+                var bindChannel = await GetBindChannelAsync(cancellationToken);
                 await bindChannel.QueueUnbindAsync(
                     queueName, exchangeName, routingKey, null, cancellationToken);
             }
             finally { _gate.Release(); }
         }
 
+        /// <summary>
+        ///     Returns the bind channel, replacing it if a connection recovery (or a channel
+        ///     fault) closed the previous one — bindings must keep working for the life of the
+        ///     subscription, not the life of one channel. Callers hold <see cref="_gate" />.
+        /// </summary>
+        private async Task<IChannel> GetBindChannelAsync(CancellationToken cancellationToken)
+        {
+            if (_bindChannel is { IsOpen: true })
+                return _bindChannel;
+            if (_bindChannel is not null)
+                await _bindChannel.DisposeAsync();
+            _bindChannel = await connection.CreateChannelAsync(cancellationToken: cancellationToken);
+            return _bindChannel;
+        }
+
         public async ValueTask DisposeAsync()
         {
             await channel.BasicCancelAsync(consumerTag);
             await channel.DisposeAsync();
-            await bindChannel.DisposeAsync();
+            if (_bindChannel is not null)
+                await _bindChannel.DisposeAsync();
             _gate.Dispose();
         }
     }

@@ -47,12 +47,13 @@ try
     builder.Services.AddSingleton(new CoreRunnerInfo(serviceId, startupTime));
 
     // --- Messaging ---
-    builder.Services.AddSingleton<IMessageBusClient>(_ =>
+    builder.Services.AddSingleton<IMessageBusClient>(sp =>
         RabbitMqClient.CreateAsync(
             builder.Configuration["RabbitMq:Host"] ?? "localhost",
             int.Parse(builder.Configuration["RabbitMq:Port"] ?? "5672"),
             builder.Configuration["RabbitMq:UserName"] ?? "guest",
-            builder.Configuration["RabbitMq:Password"] ?? "guest"
+            builder.Configuration["RabbitMq:Password"] ?? "guest",
+            sp.GetRequiredService<ILogger<RabbitMqClient>>()
         ).GetAwaiter().GetResult());
 
     // --- Runner profile ---

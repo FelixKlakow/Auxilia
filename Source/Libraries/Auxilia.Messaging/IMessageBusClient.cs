@@ -71,7 +71,7 @@ public interface IMessageBusClient
         => PublishToExchangeAsync(exchangeName, message, cancellationToken);
 
     /// <summary>
-    ///     Creates a private exclusive queue on a topic exchange, binds the given routing keys,
+    ///     Creates a private auto-delete queue on a topic exchange, binds the given routing keys,
     ///     and subscribes. Bindings can be added/removed while consuming
     ///     (<see cref="ITopicSubscription"/>) — the per-node selective-ingest primitive for SSE
     ///     fan-out. The default degrades to an everything-subscription with no-op bindings.
