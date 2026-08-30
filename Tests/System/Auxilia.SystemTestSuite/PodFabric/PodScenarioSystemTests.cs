@@ -165,10 +165,13 @@ public sealed class PodScenarioSystemTests
                 ["name"] = new Dictionary<string, bool> { [$"auxilia-pod-{instanceId:N}"] = true }
             }
         }, cancellationToken);
+        var volumes = await docker.Volumes.ListAsync(
+            new VolumesListParameters { Filters = labelFilter }, cancellationToken);
         Assert.Multiple(() =>
         {
             Assert.That(companions, Is.Empty, "every companion must die with the run");
             Assert.That(networks, Is.Empty, "the per-run pod network must die with the run");
+            Assert.That(volumes.Volumes ?? [], Is.Empty, "the per-run pod volumes must die with the run");
         });
     }
 

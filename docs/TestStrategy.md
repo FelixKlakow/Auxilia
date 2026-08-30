@@ -89,6 +89,7 @@ are replaced with in-process abstractions / stubs.
 | *(fixture-owned setup)*       | RabbitMQ + Mongo + Core.Api + Core.Runner                        | `DispatchTimeoutSystemTests` (`Dispatched` truth + `dispatch-never-claimed` sweep) |
 | `EndToEndEnvironment`         | GreenMail + RabbitMQ + Mongo + git server + Core.Runner + **Core.Api** + **TriggerHost** + **AdminConsole** | `EndToEndSystemTests`, `ClaudeCodeWorkflowSystemTests`, `ConsoleSessionTerminalSystemTests` (ticketed terminal proxy), `EmailPluginDependencySystemTests` (bundled mail stack in-container), `ImplementationWorkflowSystemTests`, `CodeReviewDispatchSystemTests` |
 | `CoreClientEnvironment`       | RabbitMQ + Core.Runner + **Core.Api** (JSON store, survives container restarts; short SSE keepalive) | `CoreClientSurfaceSystemTests`, `CoreClientStreamSystemTests` |
+| `PodFabricEnvironment`        | RabbitMQ + Core.Api + Core.Runner + a throwaway local registry (mints digest-pinned base refs); builds the `Auxilia.SimStack` companion image from source | `PodScenarioSystemTests` (dynamic fleet, pod isolation, teardown), `PodReadoptionSystemTests` (runner restart re-adopts the pod) |
 
 > **The client library is first-class here:** the `CoreClientSurface` fixtures drive the Core
 > EXCLUSIVELY through `ICoreClient` over real sockets — the full typed surface (identity,
