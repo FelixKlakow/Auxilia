@@ -34,6 +34,22 @@ public class DeterministicGuidTests
     }
 
     [Test]
+    public void ProviderTypeKeyedIds_AreCaseInsensitive()
+    {
+        // Provider types are case-insensitive platform-wide: Core store, dispatch lookup, and
+        // the runner registry must converge on ONE record regardless of the caller's casing.
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                Entities.SlotProviderRecord.IdFor("GitHub-Copilot-CLI"),
+                Is.EqualTo(Entities.SlotProviderRecord.IdFor("github-copilot-cli")));
+            Assert.That(
+                Entities.ProviderCatalogRecord.IdFor("GitHub-Copilot-CLI"),
+                Is.EqualTo(Entities.ProviderCatalogRecord.IdFor("github-copilot-cli")));
+        });
+    }
+
+    [Test]
     public void For_ProducesVersion5Guid()
     {
         var guid = DeterministicGuid.For("anything");

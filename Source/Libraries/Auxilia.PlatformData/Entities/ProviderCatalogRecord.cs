@@ -26,5 +26,7 @@ public sealed record ProviderCatalogRecord : IEntity
     /// </summary>
     public string GrantsJson { get; init; } = "[]";
 
-    public static Guid IdFor(string providerType) => DeterministicGuid.For("provider-catalog", providerType);
+    /// <summary>Case-insensitive: every case variant of a provider type converges on one record.</summary>
+    public static Guid IdFor(string providerType)
+        => DeterministicGuid.For("provider-catalog", providerType.ToLowerInvariant());
 }

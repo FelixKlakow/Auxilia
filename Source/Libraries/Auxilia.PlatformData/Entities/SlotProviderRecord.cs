@@ -39,8 +39,13 @@ public sealed record SlotProviderRecord : IEntity
     /// <summary>Serialized <c>ProviderModelCatalog</c> — the data-driven model-listing spec, when any.</summary>
     public string? ModelCatalogJson { get; init; }
 
+    /// <summary>Serialized <c>Dictionary&lt;string, ProviderBrowseSpec&gt;</c> — the data-driven browse specs per browse kind, when any.</summary>
+    public string? BrowseSpecsJson { get; init; }
+
     /// <summary>Manifest-declared plain-language description of what the provider does.</summary>
     public string? Description { get; init; }
 
-    public static Guid IdFor(string providerType) => DeterministicGuid.For("slot-provider", providerType);
+    /// <summary>Case-insensitive: every case variant of a provider type converges on one record.</summary>
+    public static Guid IdFor(string providerType)
+        => DeterministicGuid.For("slot-provider", providerType.ToLowerInvariant());
 }

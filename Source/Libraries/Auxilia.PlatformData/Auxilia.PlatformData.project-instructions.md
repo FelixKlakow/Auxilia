@@ -4,7 +4,7 @@ Durable platform state: the entity records every platform service persists (work
 
 ## Architecture
 
-- Every entity gets a **deterministic ID** via `DeterministicGuid.For(...)` derived from its natural key (e.g. workflow type + slot name), so upserts from any replica converge on the same record.
+- Every entity gets a **deterministic ID** via `DeterministicGuid.For(...)` derived from its natural key (e.g. workflow type + slot name), so upserts from any replica converge on the same record. Provider-type-keyed records (`SlotProviderRecord`, `ProviderCatalogRecord`, and the Core's `EnvironmentLayerRecord`) lowercase the provider type in `IdFor` — provider types are case-insensitive platform-wide, so Core store, dispatch lookup, and runner registry converge regardless of casing.
 - `AddPlatformEntity<TEntity>` picks the storage backend per `PlatformDataSettings.Backend`: `InMemory` (tests), `Json` (dev/single node, default), `MongoDb` (production, shared across replicas).
 - Secrets inside entities are stored **protected**: callers run settings through `ISettingsProtector` before persisting. `AesGcmSettingsProtector` is active when `ProtectionKeyBase64` is configured; otherwise `NullSettingsProtector` passes values through (dev only — log a warning at wiring time).
 - Entities are dumb records — no behaviour, no service dependencies, `Status`/`State` as strings so no service-layer enums leak in.

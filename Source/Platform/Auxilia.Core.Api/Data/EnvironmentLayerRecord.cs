@@ -28,5 +28,7 @@ public sealed record EnvironmentLayerRecord : IEntity
 
     public Guid? UpdatedBy { get; init; }
 
-    public static Guid IdFor(string providerType) => DeterministicGuid.For("environment-layer", providerType);
+    /// <summary>Case-insensitive: every case variant of a provider type converges on one record.</summary>
+    public static Guid IdFor(string providerType)
+        => DeterministicGuid.For("environment-layer", providerType.ToLowerInvariant());
 }

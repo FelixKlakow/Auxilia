@@ -67,7 +67,8 @@ public sealed class RunService(
     /// resolution token, the original bindings re-stashed under them (so JIT credential
     /// resolution works — reusing the old token against a new command id could not resolve),
     /// and the package coordinate re-resolved from the registry. The caller's eligibility for
-    /// every bound connector is re-checked — a rerun is a new run, not a replay of old trust.
+    /// every bound connector, the tool matching, and the catalog grant gate are all re-checked
+    /// against the fresh schema — a rerun is a new run, not a replay of old trust.
     /// </summary>
     public async Task<RunAccepted> RerunAsync(
         Data.CoreRunRecord run, Guid? triggeredBy, CancellationToken ct,
@@ -81,6 +82,7 @@ public sealed class RunService(
             throw new InvalidOperationException("this run carries no stored dispatch command to rerun from");
         var stash = await credentialResolver.GetStashAsync(originalCommandId, ct)
                     ?? throw new InvalidOperationException("this run's resolution context is no longer stored");
+        var workflowType = original.WorkflowType ?? run.WorkflowType;
 
         foreach (var connectorId in stash.Bindings
                      .Where(b => b.ConnectorId is not null)
@@ -89,10 +91,20 @@ public sealed class RunService(
             if (!await connectorAccess.CanUseAsync(connectorId, triggeredBy, ct))
                 throw new ConnectorAccessDeniedException(connectorId);
 
+        // The stashed bindings must ALSO still pass today's tool matching and catalog grant gate
+        // against the freshly resolved schema — the same per-binding gate as a first dispatch.
+        var providedTools = await ProvidedToolsAsync(workflowType, ct);
+        foreach (var binding in stash.Bindings)
+            // A synthetic mount-auth slot carries only the mount's credential connector; its
+            // mount provider's entry was gated when the workspace binding expanded — the
+            // connector eligibility check above is the gate that applies to it here.
+            if (!binding.SlotName.StartsWith(MountAuthSlotPrefix, StringComparison.Ordinal))
+                await ValidateBindingAsync(workflowType, binding, providedTools, triggeredBy, ct);
+
         var commandId = Guid.NewGuid();
         var resolutionToken = Guid.NewGuid().ToString("N");
         var packageUri = await workflowTypes.ResolvePackageUriForDispatchAsync(
-            original.WorkflowType ?? run.WorkflowType, commandId, resolutionToken, ct);
+            workflowType, commandId, resolutionToken, ct);
         var context = original.Context;
         if (contextOverlay is { Count: > 0 })
         {
@@ -109,8 +121,8 @@ public sealed class RunService(
             Context = context,
             // Re-resolve the schema like the package coordinate — the registry may have a
             // fresher one than the original dispatch carried.
-            SchemaJson = (await workflowTypes.GetRecordAsync(
-                original.WorkflowType ?? run.WorkflowType, ct))?.SchemaJson ?? original.SchemaJson,
+            SchemaJson = (await workflowTypes.GetRecordAsync(workflowType, ct))?.SchemaJson
+                         ?? original.SchemaJson,
         };
         var rerunCommandJson = System.Text.Json.JsonSerializer.Serialize(command);
         await credentialResolver.StashAsync(
@@ -175,10 +187,10 @@ public sealed class RunService(
                 "no live Core.Runner is connected — the run cannot execute. Start a runner "
                 + "(or set CoreApi:AllowDispatchWithoutRunner to queue deliberately).");
 
-        // A slot that narrows its admissible provider types is enforced here: the narrowing is the
-        // workflow's own schema declaration (e.g. its image bundles exactly one agent CLI), so an
-        // out-of-set binding could never execute and must fail the dispatch, not the run.
-        await ValidateSlotToolsAsync(workflowType, slotBindings, ct);
+        // Tool matching and the catalog grant gate run per binding INSIDE the loop below, after
+        // workspace expansion — a workspace reference only acquires its provider type when the
+        // stored resource expands, and both checks must cover those bindings too.
+        var providedTools = await ProvidedToolsAsync(workflowType, ct);
 
         // Bindings of providers that mount into the workspace become generic workspace mounts:
         // the binding's settings are re-keyed by the provider's declared setting ROLES (a pure
@@ -216,11 +228,7 @@ public sealed class RunService(
                 };
             }
 
-            var entry = await ResolveCatalogEntryAsync(binding, ct);
-            // ONE grant gate for every catalog-curated resource a run binds — slot providers,
-            // environment layers, and workspace-mounting providers alike.
-            if (entry is not null)
-                await EnsureMayUseCatalogEntryAsync(entry, triggeredBy, ct);
+            var entry = await ValidateBindingAsync(workflowType, binding, providedTools, triggeredBy, ct);
             // Environment-composing bindings are pure selections: the provider type IS the
             // capability id — no plugin, no credential, interpreted only by the runner.
             if (entry is { ComposesEnvironment: true })
@@ -321,7 +329,7 @@ public sealed class RunService(
             .Where(b => !string.IsNullOrEmpty(b.ProviderType))
             .Select(b => b.ProviderType!)
             .Concat(connectorProviderTypes)
-            .Distinct()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         var command = new RunWorkflowCommand(
@@ -401,31 +409,40 @@ public sealed class RunService(
     }
 
     /// <summary>
-    /// Rejects bindings whose provider requires tools the workflow's image does not provide —
-    /// the data-driven successor of the retired per-slot provider-type whitelist: the provider's
-    /// manifest declares what it needs in the container, the schema declares what the image
-    /// bundles, and the Core only intersects the two. No schema yet = nothing to check against
-    /// (the same blind-trust window the registry approval surfaces).
+    /// The tool set the workflow's image provides per its registered schema; null when no schema
+    /// is registered yet = nothing to check against (the same blind-trust window the registry
+    /// approval surfaces).
     /// </summary>
-    private async Task ValidateSlotToolsAsync(
-        string workflowType, IReadOnlyList<SlotBinding> slotBindings, CancellationToken ct)
+    private async Task<HashSet<string>?> ProvidedToolsAsync(string workflowType, CancellationToken ct)
+        => (await schemaReader.GetSchemaAsync(workflowType, ct))?
+            .ProvidedTools.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The per-binding dispatch gate, shared by first dispatch and rerun. Rejects a binding whose
+    /// provider requires tools the workflow's image does not provide — the data-driven successor
+    /// of the retired per-slot provider-type whitelist: the provider's manifest declares what it
+    /// needs in the container, the schema declares what the image bundles, and the Core only
+    /// intersects the two. Then applies the ONE grant gate for every catalog-curated resource a
+    /// run binds — slot providers, environment layers, and workspace-mounting providers alike.
+    /// </summary>
+    private async Task<ProviderCatalogEntry?> ValidateBindingAsync(
+        string workflowType, SlotBinding binding, IReadOnlySet<string>? providedTools,
+        Guid? triggeredBy, CancellationToken ct)
     {
-        var schema = await schemaReader.GetSchemaAsync(workflowType, ct);
-        if (schema is null)
-            return;
-        var provided = schema.ProvidedTools.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var binding in slotBindings)
+        var entry = await ResolveCatalogEntryAsync(binding, ct);
+        if (entry is null)
+            return null;
+        if (providedTools is not null && entry.RequiredTools.Count > 0)
         {
-            var entry = await ResolveCatalogEntryAsync(binding, ct);
-            if (entry is not { RequiredTools.Count: > 0 })
-                continue;
-            var missing = entry.RequiredTools.Where(t => !provided.Contains(t)).ToList();
+            var missing = entry.RequiredTools.Where(t => !providedTools.Contains(t)).ToList();
             if (missing.Count > 0)
                 throw new InvalidOperationException(
                     $"slot '{binding.SlotName}' of '{workflowType}' cannot bind provider "
                     + $"'{entry.ProviderType}' — it requires tool(s) the workflow's image does "
                     + $"not provide: {string.Join(", ", missing)}");
         }
+        await EnsureMayUseCatalogEntryAsync(entry, triggeredBy, ct);
+        return entry;
     }
 
     /// <summary>The catalog entry behind a binding — inline provider type or the connector's.</summary>

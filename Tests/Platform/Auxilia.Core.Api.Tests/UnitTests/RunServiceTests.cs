@@ -21,6 +21,7 @@ public sealed class RunServiceTests
 {
     private ProviderCatalogService _providerCatalog = null!;
     private WorkspaceResourceService _repositories = null!;
+    private ConnectorService _connectors = null!;
     private InMemoryDataAccess<CoreRunRecord> _runs = null!;
 
     private (RunService Service, FakeMessageBusClient Bus, RunConfigurationService Configs,
@@ -34,7 +35,11 @@ public sealed class RunServiceTests
             TimeProvider.System);
         var protector = new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32));
         var connectorStore = new InMemoryDataAccess<CoreConnectorRecord>();
-        var connectors = new ConnectorService(connectorStore, protector, TimeProvider.System);
+        var connectors = _connectors = new ConnectorService(
+            connectorStore, protector,
+            new AccessGrantEvaluator(
+                new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>()),
+            TimeProvider.System);
         var delegatedTokens = new DelegatedTokenStore(
             new InMemoryDataAccess<DelegatedUserTokenRecord>(), protector, TimeProvider.System);
         var resolver = new SlotCredentialResolver(
@@ -508,6 +513,157 @@ public sealed class RunServiceTests
                 "reusing the old token against a new command id could never resolve credentials");
             Assert.That(rerun.Context["K"], Is.EqualTo("V"), "the original context is preserved");
         });
+    }
+
+    /// <summary>The stored run row a rerun starts from, as RunTrackingService would have left it.</summary>
+    private static Auxilia.Core.Api.Data.CoreRunRecord RunRecordFor(RunWorkflowCommand original) => new()
+    {
+        Id = Guid.NewGuid(),
+        WorkflowType = original.WorkflowType ?? "wt",
+        State = "Failed",
+        CommandId = original.CommandId,
+        DispatchCommandJson = System.Text.Json.JsonSerializer.Serialize(original),
+    };
+
+    [Test]
+    public async Task RunInline_ConnectorResolvedProviderRequiringAToolTheImageLacks_Throws()
+    {
+        var (service, _, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img", ToolSchemaJson());
+        await RegisterAgentProviderAsync("github-copilot-cli", "copilot");
+        var connector = await _connectors.CreateAsync(
+            new CreateConnector("copilot-account", "github-copilot-cli",
+                new Dictionary<string, string> { ["token"] = "secret" }, ResourceScope.Company),
+            ownerPrincipalId: null, CancellationToken.None);
+
+        var ex = Assert.ThrowsAsync<InvalidOperationException>(() => service.RunInlineAsync(
+            new RunRequest("wt",
+                // The binding names ONLY the connector — the provider type resolves from the store.
+                SlotBindings: [new SlotBinding("coding-agent", ConnectorId: connector.Id)]),
+            triggeredBy: null, CancellationToken.None));
+        Assert.That(ex!.Message, Does.Contain("copilot"),
+            "tool matching must cover connector-resolved providers, not only inline provider types");
+    }
+
+    [Test]
+    public async Task RunInline_ConnectorResolvedProviderWhoseToolsTheImageProvides_Dispatches()
+    {
+        var (service, bus, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img", ToolSchemaJson());
+        await RegisterAgentProviderAsync("claude-code-cli", "claude");
+        var connector = await _connectors.CreateAsync(
+            new CreateConnector("claude-account", "claude-code-cli",
+                new Dictionary<string, string> { ["token"] = "secret" }, ResourceScope.Company),
+            ownerPrincipalId: null, CancellationToken.None);
+
+        await service.RunInlineAsync(
+            new RunRequest("wt",
+                SlotBindings: [new SlotBinding("coding-agent", ConnectorId: connector.Id)]),
+            triggeredBy: null, CancellationToken.None);
+
+        Assert.That(
+            bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>().Count(),
+            Is.EqualTo(1));
+    }
+
+    [Test]
+    public async Task RunInline_WorkspaceResolvedProviderRequiringAToolTheImageLacks_Throws()
+    {
+        var (service, _, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img", ToolSchemaJson());
+        await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
+            "svn-repository", "workspace", null, ["src-ctl"],
+            [new RegisterProviderSetting("CloneUrl", "Repository", "Text", Required: true, Role: "clone-url")],
+            MountsIntoWorkspace: true, RequiredTools: ["subversion"]), CancellationToken.None);
+        var repository = await _repositories.CreateAsync(new CreateWorkspaceResource(
+                "Legacy repo", "svn-repository",
+                new Dictionary<string, string> { ["CloneUrl"] = "https://example.test/legacy" },
+                Scope: ResourceScope.Company),
+            ownerPrincipalId: null, CancellationToken.None);
+
+        var ex = Assert.ThrowsAsync<InvalidOperationException>(() => service.RunInlineAsync(
+            // The binding names ONLY the workspace — the provider type appears on expansion.
+            new RunRequest("wt", SlotBindings: [new SlotBinding("repo", WorkspaceId: repository.Id)]),
+            triggeredBy: null, CancellationToken.None));
+        Assert.That(ex!.Message, Does.Contain("subversion"),
+            "tool matching runs on the EXPANDED bindings, so workspace-resolved providers fail at dispatch");
+    }
+
+    [Test]
+    public async Task RunInline_CaseVariantProviderType_IsToolValidatedAgainstTheCatalogEntry()
+    {
+        var (service, _, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img", ToolSchemaJson());
+        await RegisterAgentProviderAsync("github-copilot-cli", "copilot");
+
+        var ex = Assert.ThrowsAsync<InvalidOperationException>(() => service.RunInlineAsync(
+            new RunRequest("wt",
+                SlotBindings: [new SlotBinding("coding-agent", ProviderType: "GitHub-Copilot-CLI")]),
+            triggeredBy: null, CancellationToken.None));
+        Assert.That(ex!.Message, Does.Contain("copilot"),
+            "a case-variant provider type resolves the SAME catalog entry (ids derive from the "
+            + "lowercased type) instead of silently skipping validation and dying at the runner");
+    }
+
+    [Test]
+    public async Task RunInline_CaseVariantProviderTypeWhoseToolsTheImageProvides_Dispatches()
+    {
+        var (service, bus, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img", ToolSchemaJson());
+        await RegisterAgentProviderAsync("claude-code-cli", "claude");
+
+        await service.RunInlineAsync(
+            new RunRequest("wt",
+                SlotBindings: [new SlotBinding("coding-agent", ProviderType: "Claude-Code-CLI")]),
+            triggeredBy: null, CancellationToken.None);
+
+        Assert.That(
+            bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>().Count(),
+            Is.EqualTo(1), "provider types are case-insensitive end-to-end");
+    }
+
+    [Test]
+    public async Task Rerun_ProviderWhoseRequiredToolsAreNoLongerSatisfied_Throws()
+    {
+        var (service, bus, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img", ToolSchemaJson());
+        await RegisterAgentProviderAsync("claude-code-cli", "claude");
+        await service.RunInlineAsync(
+            new RunRequest("wt",
+                SlotBindings: [new SlotBinding("coding-agent", ProviderType: "claude-code-cli")]),
+            triggeredBy: null, CancellationToken.None);
+        var original = bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>().Single();
+
+        // The provider's manifest changed since the original dispatch: it now needs a tool the
+        // workflow's image does not provide.
+        await RegisterAgentProviderAsync("claude-code-cli", "copilot");
+
+        var ex = Assert.ThrowsAsync<InvalidOperationException>(() => service.RerunAsync(
+            RunRecordFor(original), triggeredBy: null, CancellationToken.None));
+        Assert.That(ex!.Message, Does.Contain("copilot"),
+            "a rerun is a new run, not a replay of old trust — tool matching re-runs on the fresh state");
+    }
+
+    [Test]
+    public async Task Rerun_WithoutAGrantForACatalogGatedProvider_Throws()
+    {
+        var (service, bus, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img", ToolSchemaJson());
+        await RegisterAgentProviderAsync("claude-code-cli", "claude");
+        await service.RunInlineAsync(
+            new RunRequest("wt",
+                SlotBindings: [new SlotBinding("coding-agent", ProviderType: "claude-code-cli")]),
+            triggeredBy: null, CancellationToken.None);
+        var original = bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>().Single();
+
+        // The catalog entry got granted to somebody else since the original dispatch.
+        await _providerCatalog.SetGrantsAsync("test", "claude-code-cli",
+            [new AccessGrant(AccessGrantKind.Principal, Guid.NewGuid().ToString("D"))], CancellationToken.None);
+
+        var ex = Assert.ThrowsAsync<RunAccessDeniedException>(() => service.RerunAsync(
+            RunRecordFor(original), triggeredBy: Guid.NewGuid(), CancellationToken.None));
+        Assert.That(ex!.Message, Does.Contain("claude-code-cli"),
+            "the catalog grant gate applies to a rerun's principal like to any dispatch");
     }
 
     [Test]

@@ -19,6 +19,18 @@ public class SlotHandlerResolverTests
     }
 
     [Test]
+    public void Resolve_MatchesTheProviderTypeCaseInsensitively()
+    {
+        // Provider types are case-insensitive platform-wide (record ids derive from the
+        // lowercased type); the in-container resolver must agree with the Core and the runner.
+        var resolver = new SlotHandlerResolver();
+        var handler = new NoOpSlotHandler();
+        resolver.Register("provider-a", handler);
+
+        Assert.That(resolver.Resolve("Provider-A"), Is.SameAs(handler));
+    }
+
+    [Test]
     public void Resolve_WithUnknownProviderType_ThrowsKeyNotFoundException()
     {
         var resolver = new SlotHandlerResolver();
