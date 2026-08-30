@@ -34,6 +34,12 @@ public sealed class MongoDbContext<TEntity> : DbContext
         var entity = modelBuilder.Entity<TEntity>();
         entity.HasKey(e => e.Id);
 
+        // Versioned entities get their Version enforced as an optimistic-concurrency token:
+        // an update whose original Version no longer matches the stored document fails with
+        // DbUpdateConcurrencyException (a filtered replace on MongoDB), which backs TrySaveAsync.
+        if (typeof(IVersionedEntity).IsAssignableFrom(typeof(TEntity)))
+            entity.Property(nameof(IVersionedEntity.Version)).IsConcurrencyToken();
+
         // ToCollection is a MongoDB EF Core extension — safe to skip for InMemory/SQL providers
         if (Database.ProviderName?.Contains("MongoDB", StringComparison.OrdinalIgnoreCase) == true)
             entity.ToCollection(_settings.CollectionName);

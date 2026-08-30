@@ -167,28 +167,46 @@ public sealed class FailoverMonitor(
             .ToList();
         foreach (var run in unclaimed)
         {
+            // FRESH RE-READ: the allRuns snapshot can be stale — a runner's "Received" claim may
+            // have been processed (rekeying onto the instance id and DELETING this command-keyed
+            // row) between the snapshot and this point. Acting on stale state would re-dispatch a
+            // duplicate of the now-live run, resurrect the deleted row as a permanent Failed
+            // ghost, and delete the resolution stash the live run's JIT slot activations need.
+            var current = await runs.ReadAsync(run.Id, ct);
+            if (current is null
+                || current.State != Auxilia.Core.Contracts.RunStates.Dispatched
+                || current.UpdatedUtc >= claimCutoff)
+                continue;
+
             logger.LogWarning(
                 "Run {RunId} was dispatched at {Dispatched:O} and never claimed by any runner — failing it over.",
-                run.Id, run.UpdatedUtc);
+                current.Id, current.UpdatedUtc);
 
-            // Re-dispatch BEFORE the stash is deleted below — RerunAsync reads it.
-            await RedispatchAsync(run, ct);
-
-            await runs.SaveAsync(run with
+            // Terminal transition FIRST, as a conditional save against the version just observed:
+            // only the winner of this swap may re-dispatch and delete the stash. Losing it (a
+            // claim landed after the re-read, or another Core.Api node swept first) does nothing.
+            var won = await runs.TrySaveAsync(current with
             {
                 State = "Failed",
                 ErrorMessage = "dispatch-never-claimed",
                 UpdatedUtc = now
-            }, ct);
+            }, current.Version, ct);
+            if (!won)
+                continue;
+
             await auditLog.AppendAsync("core-api", "workflow.dispatch-timeout",
-                run.Id.ToString(), "dispatch-never-claimed", ct: ct);
-            await statusPublisher.PublishAsync(run.Id, run.WorkflowType, "Failed",
-                "dispatch-never-claimed", commandId: run.CommandId, ct: ct);
+                current.Id.ToString(), "dispatch-never-claimed", ct: ct);
+            await statusPublisher.PublishAsync(current.Id, current.WorkflowType, "Failed",
+                "dispatch-never-claimed", commandId: current.CommandId, ct: ct);
+
+            // Re-dispatch AFTER the won terminal swap and BEFORE the stash is deleted below —
+            // RerunAsync reads the stash, and a lost swap must not spawn a duplicate.
+            await RedispatchAsync(current, ct);
 
             // Delete the stale command's resolution stash: if a late runner ever dequeues the
             // original command, JIT credential resolution fails and the launch dies pre-flight —
             // the anti-duplicate-execution measure behind the terminal-sink guard.
-            await resolutions.RemoveAsync(run.Id, ct);
+            await resolutions.RemoveAsync(current.Id, ct);
         }
     }
 

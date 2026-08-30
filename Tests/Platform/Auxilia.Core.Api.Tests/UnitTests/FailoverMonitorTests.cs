@@ -29,9 +29,45 @@ public sealed class FailoverMonitorTests
         public override DateTimeOffset GetUtcNow() => Now;
     }
 
+    /// <summary>
+    /// Pass-through run store with a one-shot hook after the full-table read — the seam to
+    /// interleave "a runner's claim was processed on another node" between the sweep's snapshot
+    /// and its per-run work.
+    /// </summary>
+    private sealed class InterceptingRunStore(IDataAccess<CoreRunRecord> inner) : IDataAccess<CoreRunRecord>
+    {
+        public Func<Task>? AfterSnapshotRead { get; set; }
+
+        public IObservable<CoreRunRecord> EntityAdded => inner.EntityAdded;
+        public IObservable<CoreRunRecord> EntityUpdated => inner.EntityUpdated;
+        public IObservable<CoreRunRecord> EntityRemoved => inner.EntityRemoved;
+
+        public async Task<IQueryable<CoreRunRecord>> ReadAsync(CancellationToken ct)
+        {
+            var snapshot = await inner.ReadAsync(ct);
+            if (AfterSnapshotRead is { } hook)
+            {
+                AfterSnapshotRead = null; // one-shot
+                await hook();
+            }
+            return snapshot;
+        }
+
+        public Task<CoreRunRecord?> ReadAsync(Guid id, CancellationToken ct) => inner.ReadAsync(id, ct);
+        public Task<bool> SaveAsync(CoreRunRecord entity, CancellationToken ct) => inner.SaveAsync(entity, ct);
+
+        public Task<bool> TrySaveAsync(CoreRunRecord entity, long expectedVersion, CancellationToken ct)
+            => inner.TrySaveAsync(entity, expectedVersion, ct);
+
+        public Task<bool> RemoveAsync(Guid id) => inner.RemoveAsync(id);
+        public Task<bool> RemoveAsync(Guid id, CancellationToken ct) => inner.RemoveAsync(id, ct);
+    }
+
     private ManualTimeProvider _time = null!;
     private FakeMessageBusClient _bus = null!;
     private RunnerLivenessTracker _liveness = null!;
+    private InMemoryDataAccess<CoreRunRecord> _innerRuns = null!;
+    private InterceptingRunStore _runsInterceptor = null!;
     private IDataAccess<CoreRunRecord> _runs = null!;
     private IDataAccess<CoreRunResolutionRecord> _resolutions = null!;
     private IDataAccess<AuditRecord> _audit = null!;
@@ -46,7 +82,9 @@ public sealed class FailoverMonitorTests
         _time = new ManualTimeProvider();
         _bus = new FakeMessageBusClient();
         _liveness = new RunnerLivenessTracker();
-        _runs = new InMemoryDataAccess<CoreRunRecord>();
+        _innerRuns = new InMemoryDataAccess<CoreRunRecord>();
+        _runsInterceptor = new InterceptingRunStore(_innerRuns);
+        _runs = _runsInterceptor;
         _resolutions = new InMemoryDataAccess<CoreRunResolutionRecord>();
         _audit = new InMemoryDataAccess<AuditRecord>();
         _settings = new CoreApiSettings { HeartbeatTimeoutSeconds = 30, FailoverScanIntervalSeconds = 3600 };
@@ -55,7 +93,11 @@ public sealed class FailoverMonitorTests
         var protector = new Auxilia.PlatformData.Protection.AesGcmSettingsProtector(
             System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
         var connectorStore = new InMemoryDataAccess<CoreConnectorRecord>();
-        var connectors = new ConnectorService(connectorStore, protector, _time);
+        var connectors = new ConnectorService(
+            connectorStore, protector,
+            new AccessGrantEvaluator(
+                new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>()),
+            _time);
         _resolver = new SlotCredentialResolver(
             _resolutions, connectors,
             new ConnectorTokenRefresher(
@@ -123,7 +165,7 @@ public sealed class FailoverMonitorTests
     [TearDown]
     public void TearDown()
     {
-        (_runs as IDisposable)?.Dispose();
+        _innerRuns.Dispose();
         (_resolutions as IDisposable)?.Dispose();
         (_audit as IDisposable)?.Dispose();
     }
@@ -355,6 +397,56 @@ public sealed class FailoverMonitorTests
         Assert.That(await _resolutions.ReadAsync(run.Id), Is.Null,
             "The stale command's stash must be deleted so a late launch cannot resolve credentials.");
         Assert.That((await _audit.ReadAsync()).Any(a => a.Action == "workflow.dispatch-timeout"), Is.True);
+    }
+
+    [Test]
+    public async Task ClaimProcessedBetweenSnapshotAndSweep_SweepLeavesTheLiveRunAlone()
+    {
+        var run = await SeedDispatchedRunAsync(TimeSpan.FromSeconds(_settings.DispatchClaimTimeoutSeconds + 1));
+        var instanceId = Guid.NewGuid();
+        // Between the sweep's snapshot and its per-run work, the runner's "Received" claim is
+        // processed (on any node): the dispatch record is rekeyed onto the instance id and the
+        // command-keyed row deleted — exactly what RunTrackingService's rekey-on-claim does.
+        _runsInterceptor.AfterSnapshotRead = async () =>
+        {
+            await _runs.SaveAsync(run with { Id = instanceId, State = "Received", UpdatedUtc = _time.Now });
+            await _runs.RemoveAsync(run.Id);
+        };
+
+        await _sut.ScanOnceAsync(CancellationToken.None);
+
+        Assert.Multiple(async () =>
+        {
+            Assert.That(_bus.PublishedMessages.Where(p => p.Topic == _settings.RunCommandQueue), Is.Empty,
+                "The sweep must not re-dispatch a duplicate of the now-live run.");
+            Assert.That(await _runs.ReadAsync(run.Id), Is.Null,
+                "The rekeyed-away command row must not be resurrected as a Failed ghost.");
+            Assert.That((await _runs.ReadAsync(instanceId))!.State, Is.EqualTo("Received"),
+                "The live run must be untouched.");
+            Assert.That(await _resolutions.ReadAsync(run.Id), Is.Not.Null,
+                "The resolution stash the live run's JIT slot activations need must survive.");
+            Assert.That(_bus.PublishedMessages.Any(p =>
+                p.Message is WorkflowStatusEvent e && e.State == "Failed"), Is.False,
+                "No Failed verdict may be published for a claimed run.");
+        });
+    }
+
+    [Test]
+    public async Task DispatchRefreshedBetweenSnapshotAndSweep_IsSkipped()
+    {
+        var run = await SeedDispatchedRunAsync(TimeSpan.FromSeconds(_settings.DispatchClaimTimeoutSeconds + 1));
+        // The record moved past the claim cutoff after the snapshot — the fresh re-read must skip it.
+        _runsInterceptor.AfterSnapshotRead = () => _runs.SaveAsync(run with { UpdatedUtc = _time.Now });
+
+        await _sut.ScanOnceAsync(CancellationToken.None);
+
+        Assert.Multiple(async () =>
+        {
+            Assert.That((await _runs.ReadAsync(run.Id))!.State,
+                Is.EqualTo(Auxilia.Core.Contracts.RunStates.Dispatched));
+            Assert.That(_bus.PublishedMessages.Where(p => p.Topic == _settings.RunCommandQueue), Is.Empty);
+            Assert.That(await _resolutions.ReadAsync(run.Id), Is.Not.Null);
+        });
     }
 
     [Test]

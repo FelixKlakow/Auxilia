@@ -23,9 +23,50 @@ public sealed class RunTrackingServiceTests
         public override DateTimeOffset GetUtcNow() => Now;
     }
 
+    /// <summary>
+    /// Pass-through store with a one-shot hook after a by-id read — the seam to interleave a
+    /// concurrent write from "another Core.Api node" between the service's read and its save.
+    /// </summary>
+    private sealed class InterceptingRunStore(IDataAccess<CoreRunRecord> inner) : IDataAccess<CoreRunRecord>
+    {
+        public Func<Guid, Task>? AfterReadById { get; set; }
+
+        public IObservable<CoreRunRecord> EntityAdded => inner.EntityAdded;
+        public IObservable<CoreRunRecord> EntityUpdated => inner.EntityUpdated;
+        public IObservable<CoreRunRecord> EntityRemoved => inner.EntityRemoved;
+
+        public Task<IQueryable<CoreRunRecord>> ReadAsync() => ReadAsync(CancellationToken.None);
+        public Task<IQueryable<CoreRunRecord>> ReadAsync(CancellationToken ct) => inner.ReadAsync(ct);
+        public Task<CoreRunRecord?> ReadAsync(Guid id) => ReadAsync(id, CancellationToken.None);
+
+        public async Task<CoreRunRecord?> ReadAsync(Guid id, CancellationToken ct)
+        {
+            var result = await inner.ReadAsync(id, ct);
+            if (AfterReadById is { } hook)
+            {
+                AfterReadById = null; // one-shot: the retry's re-read must see the true state
+                await hook(id);
+            }
+            return result;
+        }
+
+        public Task<bool> SaveAsync(CoreRunRecord entity) => SaveAsync(entity, CancellationToken.None);
+        public Task<bool> SaveAsync(CoreRunRecord entity, CancellationToken ct) => inner.SaveAsync(entity, ct);
+
+        public Task<bool> TrySaveAsync(CoreRunRecord entity, long expectedVersion)
+            => TrySaveAsync(entity, expectedVersion, CancellationToken.None);
+
+        public Task<bool> TrySaveAsync(CoreRunRecord entity, long expectedVersion, CancellationToken ct)
+            => inner.TrySaveAsync(entity, expectedVersion, ct);
+
+        public Task<bool> RemoveAsync(Guid id, CancellationToken ct) => inner.RemoveAsync(id, ct);
+        public Task<bool> RemoveAsync(Guid id) => inner.RemoveAsync(id);
+    }
+
     private ManualTimeProvider _time = null!;
     private FakeMessageBusClient _bus = null!;
-    private IDataAccess<CoreRunRecord> _runs = null!;
+    private InMemoryDataAccess<CoreRunRecord> _innerRuns = null!;
+    private InterceptingRunStore _runs = null!;
     private IDataAccess<CoreRunResolutionRecord> _resolutions = null!;
     private WorkflowStatusPublisher _publisher = null!;
     private RunTrackingService _sut = null!;
@@ -35,7 +76,8 @@ public sealed class RunTrackingServiceTests
     {
         _time = new ManualTimeProvider();
         _bus = new FakeMessageBusClient();
-        _runs = new InMemoryDataAccess<CoreRunRecord>();
+        _innerRuns = new InMemoryDataAccess<CoreRunRecord>();
+        _runs = new InterceptingRunStore(_innerRuns);
         _resolutions = new InMemoryDataAccess<CoreRunResolutionRecord>();
         _publisher = new WorkflowStatusPublisher(_bus, _time);
         _sut = new RunTrackingService(_bus, _runs, _resolutions, NullLogger<RunTrackingService>.Instance);
@@ -46,7 +88,7 @@ public sealed class RunTrackingServiceTests
     public async Task TearDown()
     {
         await _sut.StopAsync(CancellationToken.None);
-        (_runs as IDisposable)?.Dispose();
+        _innerRuns.Dispose();
         (_resolutions as IDisposable)?.Dispose();
     }
 
@@ -131,6 +173,36 @@ public sealed class RunTrackingServiceTests
             Assert.That(record!.State, Is.EqualTo("Failed"),
                 "A late event from a stale command must not resurrect a run the Core declared dead.");
             Assert.That(record.ErrorMessage, Is.EqualTo("steering-instance-lost"));
+        });
+    }
+
+    [Test]
+    public async Task TerminalSavedByAnotherNode_BetweenReadAndSave_IsNotOverwrittenByTheStaleNonTerminal()
+    {
+        var instanceId = Guid.NewGuid();
+        // Multi-node interleaving on the shared core-api.run-tracking queue: THIS node reads for
+        // the non-terminal "Received" (sees nothing), then the OTHER node's terminal
+        // "PreFlightFailed" lands before this node saves. The conditional save must lose, and the
+        // retry's terminal-sink check must drop the stale event.
+        _runs.AfterReadById = async _ => await _innerRuns.SaveAsync(new CoreRunRecord
+        {
+            Id = instanceId,
+            WorkflowType = "wf-type",
+            State = "PreFlightFailed",
+            ErrorMessage = "signature-invalid",
+            CreatedUtc = _time.Now,
+            UpdatedUtc = _time.Now,
+            CompletedUtc = _time.Now
+        });
+
+        await _publisher.PublishAsync(instanceId, "wf-type", "Received");
+
+        var record = await _runs.ReadAsync(instanceId);
+        Assert.Multiple(() =>
+        {
+            Assert.That(record!.State, Is.EqualTo("PreFlightFailed"),
+                "A non-terminal event saved after the terminal verdict must never resurrect the run.");
+            Assert.That(record.ErrorMessage, Is.EqualTo("signature-invalid"));
         });
     }
 

@@ -48,7 +48,9 @@ public sealed class InMemoryDataAccess<TEntity> : IDataAccess<TEntity>, IDisposa
         bool updated;
         using (_lock.Write())
         {
-            updated = _store.ContainsKey(entity.Id);
+            updated = _store.TryGetValue(entity.Id, out var current);
+            if (entity is IVersionedEntity versioned)
+                versioned.Version = (current is IVersionedEntity stored ? stored.Version : 0) + 1;
             _store[entity.Id] = entity;
         }
 
@@ -58,6 +60,33 @@ public sealed class InMemoryDataAccess<TEntity> : IDataAccess<TEntity>, IDisposa
             _entityAdded.OnNext(entity);
 
         return Task.FromResult(updated);
+    }
+
+    public Task<bool> TrySaveAsync(TEntity entity, long expectedVersion) => TrySaveAsync(entity, expectedVersion, CancellationToken.None);
+
+    public Task<bool> TrySaveAsync(TEntity entity, long expectedVersion, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (entity is not IVersionedEntity versioned)
+            throw new NotSupportedException(
+                $"{typeof(TEntity).Name} does not implement {nameof(IVersionedEntity)} — conditional saves need a version.");
+        bool updated;
+        using (_lock.Write())
+        {
+            updated = _store.TryGetValue(entity.Id, out var current);
+            var currentVersion = current is IVersionedEntity stored ? stored.Version : 0;
+            if (currentVersion != expectedVersion)
+                return Task.FromResult(false);
+            versioned.Version = expectedVersion + 1;
+            _store[entity.Id] = entity;
+        }
+
+        if (updated)
+            _entityUpdated.OnNext(entity);
+        else
+            _entityAdded.OnNext(entity);
+
+        return Task.FromResult(true);
     }
 
     public Task<bool> RemoveAsync(Guid id) => RemoveAsync(id, CancellationToken.None);

@@ -7,8 +7,10 @@ namespace Auxilia.Core.Api.Services;
 
 /// <summary>
 /// Builds the Core's run view from the runner's lifecycle events. Subscribes to the
-/// <see cref="WorkflowStatusEvent.ExchangeName"/> fanout (its own exclusive queue — it competes
-/// with no one) and upserts a <see cref="CoreRunRecord"/> per instance on every transition.
+/// <see cref="WorkflowStatusEvent.ExchangeName"/> topic exchange on the SHARED
+/// <c>core-api.run-tracking</c> queue and upserts a <see cref="CoreRunRecord"/> per instance on
+/// every transition — via versioned compare-and-swap, because with N Core.Api nodes consecutive
+/// transitions of the same run land on different nodes.
 /// </summary>
 public sealed class RunTrackingService(
     IMessageBusClient bus,
@@ -32,6 +34,20 @@ public sealed class RunTrackingService(
 
     private async Task HandleAsync(WorkflowStatusEvent statusEvent, CancellationToken ct)
     {
+        // READ-CHECK-CAS LOOP: the shared queue round-robins transitions for the SAME run across
+        // Core.Api nodes, so another node can save between our read and our save (e.g. it saves a
+        // terminal PreFlightFailed while we process the paired non-terminal Received). The
+        // conditional save detects that; on a lost swap we re-read and re-apply every guard below.
+        while (true)
+        {
+            if (await TryApplyAsync(statusEvent, ct))
+                return;
+        }
+    }
+
+    /// <summary>One read-check-CAS attempt; false = the conditional save lost a race, retry.</summary>
+    private async Task<bool> TryApplyAsync(WorkflowStatusEvent statusEvent, CancellationToken ct)
+    {
         var existing = await runs.ReadAsync(statusEvent.WorkflowInstanceId, ct);
 
         // TERMINAL SINK: a terminal record never becomes non-terminal again. A late event from a
@@ -44,7 +60,7 @@ public sealed class RunTrackingService(
             logger.LogWarning(
                 "Dropping non-terminal status {State} for run {RunId}: the run is already {Existing}.",
                 statusEvent.State, statusEvent.WorkflowInstanceId, existing.State);
-            return;
+            return true;
         }
 
         // REKEY ON CLAIM: dispatch writes a Dispatched record under the COMMAND id — the only id
@@ -65,7 +81,7 @@ public sealed class RunTrackingService(
                 logger.LogWarning(
                     "Dropping status {State} for run {RunId}: its dispatch {CommandId} was already finalized as {Final}.",
                     statusEvent.State, statusEvent.WorkflowInstanceId, cid, byCommand.State);
-                return;
+                return true;
             }
             dispatchRecord = byCommand;
         }
@@ -79,7 +95,9 @@ public sealed class RunTrackingService(
         if (dispatchCommandJson is null && statusEvent.CommandId is { } commandId)
             dispatchCommandJson = (await resolutions.ReadAsync(commandId, ct))?.DispatchCommandJson;
 
-        await runs.SaveAsync(new CoreRunRecord
+        // Conditional save against the version just read (0 = the record must still be absent):
+        // a concurrent write by another node fails the swap instead of being silently overwritten.
+        var saved = await runs.TrySaveAsync(new CoreRunRecord
         {
             Id = statusEvent.WorkflowInstanceId,
             WorkflowType = statusEvent.WorkflowType,
@@ -97,10 +115,13 @@ public sealed class RunTrackingService(
             CommandId = statusEvent.CommandId ?? mergeBase?.CommandId,
             DispatchCommandJson = dispatchCommandJson,
             TerminalEndpoint = statusEvent.TerminalEndpoint ?? mergeBase?.TerminalEndpoint
-        }, ct);
+        }, existing?.Version ?? 0, ct);
+        if (!saved)
+            return false;
 
         if (dispatchRecord is not null)
             await runs.RemoveAsync(dispatchRecord.Id, ct);
+        return true;
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
