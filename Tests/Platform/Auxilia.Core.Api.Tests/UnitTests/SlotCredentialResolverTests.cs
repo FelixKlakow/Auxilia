@@ -27,7 +27,10 @@ public sealed class SlotCredentialResolverTests
     {
         var protector = new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32));
         var connectors = new ConnectorService(
-            new InMemoryDataAccess<CoreConnectorRecord>(), protector, TimeProvider.System);
+            new InMemoryDataAccess<CoreConnectorRecord>(), protector,
+            new AccessGrantEvaluator(
+                new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>()),
+            TimeProvider.System);
         var tokens = new DelegatedTokenStore(
             new InMemoryDataAccess<DelegatedUserTokenRecord>(), protector, TimeProvider.System);
         var resolver = new SlotCredentialResolver(
@@ -135,7 +138,10 @@ public sealed class SlotCredentialResolverTests
         var auditStore = new InMemoryDataAccess<AuditRecord>();
         var protector = new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32));
         var connectors = new ConnectorService(
-            new InMemoryDataAccess<CoreConnectorRecord>(), protector, TimeProvider.System);
+            new InMemoryDataAccess<CoreConnectorRecord>(), protector,
+            new AccessGrantEvaluator(
+                new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>()),
+            TimeProvider.System);
         var tokens = new DelegatedTokenStore(
             new InMemoryDataAccess<DelegatedUserTokenRecord>(), protector, TimeProvider.System);
         var resolver = new SlotCredentialResolver(

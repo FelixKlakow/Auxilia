@@ -6,14 +6,20 @@ using Auxilia.UniversalDataAccess;
 
 namespace Auxilia.Core.Api.Services;
 
+/// <summary>The caller a connector read is filtered for: connector managers see every connector.</summary>
+public readonly record struct ConnectorViewer(Guid? PrincipalId, bool SeesAll);
+
 /// <summary>
 /// Owns credential-bearing connectors. Setting values are protected on write and only ever
 /// decrypted for dispatch-time injection via <see cref="ResolveSettingsAsync"/> — read endpoints
-/// expose keys, never values.
+/// expose keys, never values. A Personal connector belongs to its owner and is visible only to
+/// the owner, granted subjects (<see cref="AccessGrantEvaluator"/>), and connector managers —
+/// the same ownership model as run configurations.
 /// </summary>
 public sealed class ConnectorService(
     IDataAccess<CoreConnectorRecord> store,
     ISettingsProtector protector,
+    AccessGrantEvaluator grants,
     TimeProvider clock)
 {
     /// <summary>
@@ -72,17 +78,46 @@ public sealed class ConnectorService(
         return true;
     }
 
+    /// <summary>Unfiltered read — for Core-internal paths that already authorized the caller.</summary>
     public async Task<Connector?> GetAsync(Guid id, CancellationToken ct)
         => await store.ReadAsync(id, ct) is { } r ? ToDto(r) : null;
 
-    public async Task<PagedResult<Connector>> QueryAsync(ConnectorQuery query, CancellationToken ct)
+    /// <summary>Visibility-filtered read: an invisible connector reads as not found.</summary>
+    public async Task<Connector?> GetAsync(Guid id, ConnectorViewer viewer, CancellationToken ct)
+    {
+        if (await store.ReadAsync(id, ct) is not { } record)
+            return null;
+        return await IsVisibleAsync(record, viewer, ct) ? ToDto(record) : null;
+    }
+
+    public async Task<PagedResult<Connector>> QueryAsync(
+        ConnectorQuery query, ConnectorViewer viewer, CancellationToken ct)
     {
         var all = (await store.ReadAsync(ct)).AsEnumerable();
         if (!string.IsNullOrWhiteSpace(query.ProviderType))
-            all = all.Where(c => c.ProviderType == query.ProviderType);
-        var ordered = all.OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            all = all.Where(c =>
+                string.Equals(c.ProviderType, query.ProviderType, StringComparison.OrdinalIgnoreCase));
+
+        var visible = new List<CoreConnectorRecord>();
+        foreach (var record in all)
+            if (await IsVisibleAsync(record, viewer, ct))
+                visible.Add(record);
+
+        var ordered = visible.OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToList();
         var page = ordered.Skip(query.Skip).Take(query.Take).Select(ToDto).ToList();
         return new PagedResult<Connector>(page, ordered.Count, query.Skip, query.Take);
+    }
+
+    private async Task<bool> IsVisibleAsync(
+        CoreConnectorRecord record, ConnectorViewer viewer, CancellationToken ct)
+    {
+        if (record.Scope != ResourceScope.Personal || viewer.SeesAll)
+            return true;
+        if (viewer.PrincipalId is not { } pid)
+            return false;
+        if (record.OwnerPrincipalId == pid)
+            return true;
+        return await grants.IsGrantedAsync(record.GrantsJson, pid, ct);
     }
 
     /// <summary>

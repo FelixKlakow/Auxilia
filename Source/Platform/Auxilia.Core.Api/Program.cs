@@ -20,12 +20,13 @@ using Microsoft.Extensions.Options;
 var builder = WebApplication.CreateBuilder(args);
 
 // --- Messaging ---
-builder.Services.AddSingleton<IMessageBusClient>(_ =>
+builder.Services.AddSingleton<IMessageBusClient>(sp =>
     RabbitMqClient.CreateAsync(
         builder.Configuration["RabbitMq:Host"] ?? "localhost",
         int.Parse(builder.Configuration["RabbitMq:Port"] ?? "5672"),
         builder.Configuration["RabbitMq:UserName"] ?? "guest",
-        builder.Configuration["RabbitMq:Password"] ?? "guest").GetAwaiter().GetResult());
+        builder.Configuration["RabbitMq:Password"] ?? "guest",
+        sp.GetRequiredService<ILogger<RabbitMqClient>>()).GetAwaiter().GetResult());
 
 // --- Core database (isolated from every other service — Principle 4) ---
 var platformData = new PlatformDataSettings();
@@ -1604,13 +1605,20 @@ app.MapPost("/api/connectors", async (
     return Results.Ok(await svc.CreateAsync(request, principalId, ct));
 }).RequireAuthorization();
 
+// Reads are visibility-filtered like configurations: connector managers see everything; everyone
+// else sees company connectors plus personal ones they own or were granted (principal/group/AD-group).
 app.MapGet("/api/connectors", async (
-        string? providerType, ConnectorService svc, CancellationToken ct, int skip = 0, int take = 50) =>
-    Results.Ok(await svc.QueryAsync(new ConnectorQuery(providerType, skip, take == 0 ? 50 : take), ct)))
+        string? providerType, HttpContext http, ConnectorService svc, CancellationToken ct,
+        int skip = 0, int take = 50) =>
+    Results.Ok(await svc.QueryAsync(
+        new ConnectorQuery(providerType, skip, take == 0 ? 50 : take),
+        ConnectorViewerOf(http.User), ct)))
     .RequireAuthorization();
 
-app.MapGet("/api/connectors/{id:guid}", async (Guid id, ConnectorService svc, CancellationToken ct) =>
-        await svc.GetAsync(id, ct) is { } connector ? Results.Ok(connector) : Results.NotFound())
+app.MapGet("/api/connectors/{id:guid}", async (
+        Guid id, HttpContext http, ConnectorService svc, CancellationToken ct) =>
+        await svc.GetAsync(id, ConnectorViewerOf(http.User), ct) is { } connector
+            ? Results.Ok(connector) : Results.NotFound())
     .RequireAuthorization();
 
 // Update a connector in place (owner, or a connector manager): rename and/or refresh settings —
@@ -1838,22 +1846,30 @@ app.MapGet("/api/groups", async (
     return Results.Ok(result);
 }).RequireAuthorization();
 
+// Group roles fan out to every member (the Policy Engine unions them into effective roles), so the
+// group path to Administrator is elevation-gated exactly like the direct grant: admitting a member
+// into an Administrator-holding group is an admin grant to that member.
 app.MapPost("/api/groups/{id:guid}/members", async (
         Guid id, AddGroupMemberRequest request, HttpContext http, IPolicyEngine policy,
-        GroupDirectory groups, CancellationToken ct) =>
+        GroupDirectory groups, ElevationTicketService elevation, CancellationToken ct) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PrincipalAdminister, ct) is { } fail)
         return fail;
+    if ((await groups.RolesAsync(id, ct)).Contains(BuiltInRoles.Administrator)
+        && RequireElevation(http, elevation) is { } denied)
+        return denied;
     await groups.AddMemberAsync(id, request.PrincipalId, ct);
     return Results.Accepted($"/api/groups/{id}");
 }).RequireAuthorization();
 
 app.MapPost("/api/groups/{id:guid}/roles", async (
         Guid id, AssignGroupRoleRequest request, HttpContext http, IPolicyEngine policy,
-        GroupDirectory groups, CancellationToken ct) =>
+        GroupDirectory groups, ElevationTicketService elevation, CancellationToken ct) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PrincipalAdminister, ct) is { } fail)
         return fail;
+    if (request.RoleName == BuiltInRoles.Administrator && RequireElevation(http, elevation) is { } denied)
+        return denied;
     try
     {
         await groups.AssignRoleAsync(id, request.RoleName, ct);
@@ -1920,8 +1936,10 @@ app.MapPost("/api/principals/{id:guid}/tags", async (
         : Results.NotFound();
 }).RequireAuthorization();
 
-// A caller may hold principal.administer all day; GRANTING administrator rights, revoking them,
-// or disabling a principal additionally demands a fresh step-up elevation (re-typed credential).
+// A caller may hold principal.administer all day; GRANTING administrator rights — directly, or via
+// the group path (assigning Administrator to a group, admitting a member into an Administrator-
+// holding group) — revoking them, or disabling a principal additionally demands a fresh step-up
+// elevation (re-typed credential).
 static IResult? RequireElevation(HttpContext http, ElevationTicketService elevation)
 {
     var token = http.Request.Headers[ElevationTicketService.HeaderName].FirstOrDefault();
@@ -2134,6 +2152,11 @@ app.Run();
 static ConfigurationViewer ViewerOf(System.Security.Claims.ClaimsPrincipal user) => new(
     CoreClaims.PrincipalIdOf(user),
     CoreClaims.HasRolePermission(user, PermissionActions.WorkflowConfigurationManage));
+
+// The connector twin of ViewerOf: connector managers (slot-config.write) see every connector.
+static ConnectorViewer ConnectorViewerOf(System.Security.Claims.ClaimsPrincipal user) => new(
+    CoreClaims.PrincipalIdOf(user),
+    CoreClaims.HasRolePermission(user, PermissionActions.SlotConfigWrite));
 
 // Exposed for WebApplicationFactory-based component tests.
 public partial class Program;

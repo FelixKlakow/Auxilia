@@ -106,6 +106,72 @@ public sealed class ConnectorAccessComponentTests : CoreApiComponentTestBase
         });
     }
 
+    // --- Read-surface visibility (the same model as configurations: invisible reads as not found) ---
+
+    private async Task<HttpClient> PlainUserClientAsync()
+    {
+        var directory = Factory.Services.GetRequiredService<Auxilia.Governance.PrincipalDirectory>();
+        var (principal, apiKey) = await directory.CreateApiKeyPrincipalAsync($"svc-{Guid.NewGuid():N}");
+        await directory.AssignRoleAsync(principal.Id, Auxilia.Governance.BuiltInRoles.User);
+        var client = Factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+        return client;
+    }
+
+    [Test]
+    public async Task List_AsPlainUser_HidesOthersPersonalConnectors_ShowsOwnAndCompany()
+    {
+        var user = await PlainUserClientAsync();
+        var userId = await PrincipalIdAsync(user);
+        var mine = await SeedConnectorAsync(ResourceScope.Personal, owner: userId);
+        var company = await SeedConnectorAsync(ResourceScope.Company);
+        var strangers = await SeedConnectorAsync(ResourceScope.Personal, owner: Guid.NewGuid());
+        var granted = await SeedConnectorAsync(ResourceScope.Personal, owner: Guid.NewGuid(),
+            new AccessGrant(AccessGrantKind.Principal, userId.ToString("D")));
+
+        var page = await user.GetFromJsonAsync<PagedResult<Connector>>("/api/connectors");
+        var ids = page!.Items.Select(c => c.Id).ToList();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(ids, Does.Contain(mine));
+            Assert.That(ids, Does.Contain(company));
+            Assert.That(ids, Does.Contain(granted), "a granted personal connector is visible");
+            Assert.That(ids, Does.Not.Contain(strangers),
+                "another principal's ungranted personal connector must be invisible");
+        });
+    }
+
+    [Test]
+    public async Task Get_SomeoneElsesPersonalConnector_AsPlainUser_ReadsAsNotFound()
+    {
+        var user = await PlainUserClientAsync();
+        var strangers = await SeedConnectorAsync(ResourceScope.Personal, owner: Guid.NewGuid());
+
+        var response = await user.GetAsync($"/api/connectors/{strangers}");
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound),
+            "an invisible resource reads as not found — never a 403 that leaks existence");
+    }
+
+    [Test]
+    public async Task List_AsConnectorManager_SeesEveryConnector()
+    {
+        var admin = CreateClient();
+        var strangers = await SeedConnectorAsync(ResourceScope.Personal, owner: Guid.NewGuid());
+        var company = await SeedConnectorAsync(ResourceScope.Company);
+
+        var page = await admin.GetFromJsonAsync<PagedResult<Connector>>("/api/connectors");
+        var ids = page!.Items.Select(c => c.Id).ToList();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(ids, Does.Contain(strangers), "a connector manager sees personal connectors of others");
+            Assert.That(ids, Does.Contain(company));
+        });
+    }
+
     [Test]
     public async Task SetGrants_ThenGet_ReflectsTheGrant()
     {

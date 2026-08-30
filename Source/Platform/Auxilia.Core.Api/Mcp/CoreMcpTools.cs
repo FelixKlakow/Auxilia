@@ -320,6 +320,11 @@ public sealed class CoreMcpTools(
         CoreClaims.PrincipalIdOf(context.User),
         context.User is { } user && CoreClaims.HasRolePermission(user, PermissionActions.WorkflowConfigurationManage));
 
+    /// <summary>The connector twin of <see cref="ViewerOf"/>: connector managers see every connector.</summary>
+    private static ConnectorViewer ConnectorViewerOf(RequestContext<CallToolRequestParams> context) => new(
+        CoreClaims.PrincipalIdOf(context.User),
+        context.User is { } user && CoreClaims.HasRolePermission(user, PermissionActions.SlotConfigWrite));
+
     [McpServerTool(Name = "list_runs")]
     [Description("Lists runs, newest first.")]
     public async Task<CallToolResult> ListRunsAsync(
@@ -483,13 +488,16 @@ public sealed class CoreMcpTools(
     }
 
     [McpServerTool(Name = "list_connectors")]
-    [Description("Lists connectors (setting keys only — secret values are never returned).")]
+    [Description("Lists the connectors visible to you: company connectors plus personal ones you own " +
+                 "or were granted (connector managers see all). Setting keys only — secret values are " +
+                 "never returned.")]
     public async Task<CallToolResult> ListConnectorsAsync(
         RequestContext<CallToolRequestParams> context, CancellationToken cancellationToken = default)
     {
         if (CoreClaims.PrincipalIdOf(context.User) is null)
             return NoPrincipal();
-        return JsonResult(await connectors.QueryAsync(new ConnectorQuery(), cancellationToken));
+        return JsonResult(await connectors.QueryAsync(
+            new ConnectorQuery(), ConnectorViewerOf(context), cancellationToken));
     }
 
     [McpServerTool(Name = "create_connector")]
@@ -861,7 +869,8 @@ public sealed class CoreMcpTools(
     [McpServerTool(Name = "step_up")]
     [Description("Re-proves YOUR OWN credential (API key) and returns a short-lived elevation token " +
                  "required by security-sensitive administration: assigning/revoking the Administrator " +
-                 "role and disabling principals. Pass the token as elevationToken to those tools.")]
+                 "role (directly, or to a group), adding members to an Administrator-holding group, " +
+                 "and disabling principals. Pass the token as elevationToken to those tools.")]
     public async Task<CallToolResult> StepUpAsync(
         RequestContext<CallToolRequestParams> context,
         [Description("Your own credential (the API key this session authenticates with).")] string secret,
@@ -1031,11 +1040,15 @@ public sealed class CoreMcpTools(
     }
 
     [McpServerTool(Name = "add_group_member")]
-    [Description("Adds a principal to a group.")]
+    [Description("Adds a principal to a group. Admitting a member into a group that holds the " +
+                 "Administrator role grants that member admin rights, so it requires a step-up " +
+                 "elevation exactly like a direct Administrator grant.")]
     public async Task<CallToolResult> AddGroupMemberAsync(
         RequestContext<CallToolRequestParams> context,
         [Description("Group id (GUID).")] string groupId,
         [Description("Principal id (GUID).")] string principalId,
+        [Description("Step-up elevation token (from step_up) — required when the group holds Administrator.")]
+        string? elevationToken = null,
         CancellationToken cancellationToken = default)
     {
         if (CoreClaims.PrincipalIdOf(context.User) is not { } actor)
@@ -1044,22 +1057,31 @@ public sealed class CoreMcpTools(
             return denial;
         if (!Guid.TryParse(groupId, out var gid) || !Guid.TryParse(principalId, out var pid))
             return Error("groupId and principalId must be GUIDs.");
+        if ((await groups.RolesAsync(gid, cancellationToken)).Contains(Governance.BuiltInRoles.Administrator)
+            && DenyWithoutElevation(context.User, elevationToken) is { } unelevated)
+            return unelevated;
         await groups.AddMemberAsync(gid, pid, cancellationToken);
         return JsonResult(new { groupId = gid, principalId = pid, added = true });
     }
 
     [McpServerTool(Name = "assign_group_role")]
-    [Description("Grants a built-in role to every member of a group.")]
+    [Description("Grants a built-in role to every member of a group. Assigning Administrator requires " +
+                 "a step-up elevation exactly like a direct Administrator grant.")]
     public async Task<CallToolResult> AssignGroupRoleAsync(
         RequestContext<CallToolRequestParams> context,
         [Description("Group id (GUID).")] string groupId,
         [Description("Role name (Administrator, Operator, User, Auditor).")] string roleName,
+        [Description("Step-up elevation token (from step_up) — required when assigning Administrator.")]
+        string? elevationToken = null,
         CancellationToken cancellationToken = default)
     {
         if (CoreClaims.PrincipalIdOf(context.User) is not { } actor)
             return NoPrincipal();
         if (await DenyAsync(actor, PermissionActions.PrincipalAdminister, null, cancellationToken) is { } denial)
             return denial;
+        if (roleName == Governance.BuiltInRoles.Administrator
+            && DenyWithoutElevation(context.User, elevationToken) is { } unelevated)
+            return unelevated;
         if (!Guid.TryParse(groupId, out var gid))
             return Error("groupId must be a GUID.");
         try

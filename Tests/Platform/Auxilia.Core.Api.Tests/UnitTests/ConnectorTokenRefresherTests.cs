@@ -34,7 +34,10 @@ public sealed class ConnectorTokenRefresherTests
         _refreshCalls = 0;
         _connectors = new ConnectorService(
             new InMemoryDataAccess<Auxilia.Core.Api.Data.CoreConnectorRecord>(),
-            new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32)), _time);
+            new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32)),
+            new AccessGrantEvaluator(
+                new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>()),
+            _time);
         _catalog = new ProviderCatalogService(
             new InMemoryDataAccess<SlotProviderRecord>(),
             new InMemoryDataAccess<ProviderCatalogRecord>(),

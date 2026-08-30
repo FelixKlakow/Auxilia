@@ -115,7 +115,9 @@ public interface ICoreClient
     Task<Connector> CreateConnectorAsync(CreateConnector request, CancellationToken ct = default);
     /// <summary>Renames a connector and/or upserts settings key-by-key — the credential-refresh path.</summary>
     Task<Connector> UpdateConnectorAsync(Guid id, UpdateConnector request, CancellationToken ct = default);
+    /// <summary>Visibility-filtered like configurations: an invisible personal connector reads as null.</summary>
     Task<Connector?> GetConnectorAsync(Guid id, CancellationToken ct = default);
+    /// <summary>Company + owned/granted personal connectors; connector managers see everything.</summary>
     Task<PagedResult<Connector>> QueryConnectorsAsync(ConnectorQuery query, CancellationToken ct = default);
     Task SetConnectorGrantsAsync(Guid id, SetConnectorGrants request, CancellationToken ct = default);
     /// <summary>Deletes a connector permanently (owner or connector manager).</summary>
@@ -207,7 +209,9 @@ public interface ICoreClient
     // --- Groups ---
     Task<GroupDto> CreateGroupAsync(CreateGroupRequest request, CancellationToken ct = default);
     Task<IReadOnlyList<GroupDto>> ListGroupsAsync(CancellationToken ct = default);
+    /// <summary>Adds a member; a group holding Administrator demands a prior <see cref="StepUpAsync"/>.</summary>
     Task AddGroupMemberAsync(Guid groupId, AddGroupMemberRequest request, CancellationToken ct = default);
+    /// <summary>Assigns a group role; Administrator demands a prior <see cref="StepUpAsync"/>.</summary>
     Task AssignGroupRoleAsync(Guid groupId, AssignGroupRoleRequest request, CancellationToken ct = default);
 
     // --- Principals (identity administration; requires principal.administer) ---
@@ -242,8 +246,9 @@ public interface ICoreClient
     Task<CurrentPrincipal> GetCurrentPrincipalAsync(CancellationToken ct = default);
     /// <summary>
     /// Step-up: re-proves the caller's OWN credential and holds the returned elevation for
-    /// subsequent security-sensitive calls (admin-role grant/revoke, principal disable) until it
-    /// expires. Those calls otherwise fail with the error detail <c>elevation-required</c>.
+    /// subsequent security-sensitive calls (admin-role grant/revoke — direct or via a group,
+    /// membership in an Administrator-holding group, principal disable) until it expires. Those
+    /// calls otherwise fail with the error detail <c>elevation-required</c>.
     /// </summary>
     Task<ElevationTicket> StepUpAsync(StepUpRequest request, CancellationToken ct = default);
     /// <summary>
