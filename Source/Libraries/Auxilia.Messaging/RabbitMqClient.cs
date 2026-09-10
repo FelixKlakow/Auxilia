@@ -7,6 +7,7 @@ using OpenTelemetry;
 using OpenTelemetry.Context.Propagation;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using RabbitMQ.Client.Exceptions;
 
 namespace Auxilia.Messaging;
 
@@ -14,6 +15,9 @@ namespace Auxilia.Messaging;
 ///     Production RabbitMQ implementation of <see cref="IMessageBusClient" />.
 ///     Messages are JSON-serialised with System.Text.Json.
 ///     Spans and metrics are recorded via <see cref="MessagingTelemetry" />.
+///     Publishes ride a channel with publisher confirmations tracked by the library: a publish
+///     completes only once the broker confirmed it and throws <see cref="PublishException" /> on
+///     a nack — a message the broker never took is never reported as sent.
 /// </summary>
 public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
 {
@@ -172,7 +176,7 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
         await channel.QueueBindAsync(queueName, exchangeName, string.Empty, null, cancellationToken: cancellationToken);
 
         var consumerTag = await StartConsumerAsync(channel, queueName, exchangeName, handler, cancellationToken);
-        return new SubscriptionHandle(channel, consumerTag);
+        return new SubscriptionHandle(channel, consumerTag, _logger);
     }
 
     public async Task<IAsyncDisposable> SubscribeToExchangeSharedAsync<T>(
@@ -190,7 +194,7 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
         await channel.QueueBindAsync(queueName, exchangeName, string.Empty, null, cancellationToken: cancellationToken);
 
         var consumerTag = await StartConsumerAsync(channel, queueName, exchangeName, handler, cancellationToken);
-        return new SubscriptionHandle(channel, consumerTag);
+        return new SubscriptionHandle(channel, consumerTag, _logger);
     }
 
     public async Task<ITopicSubscription> SubscribeToTopicExchangeAsync<T>(
@@ -221,7 +225,7 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
         // replies stop, silently). The queue is the shared identity; the channel is not.
         // The handle creates that channel lazily from the connection so it can also replace
         // it after a connection recovery closed the previous one.
-        return new TopicSubscriptionHandle(_connection, channel, consumerTag, queueName, exchangeName);
+        return new TopicSubscriptionHandle(_connection, channel, consumerTag, queueName, exchangeName, _logger);
     }
 
     public async Task<IAsyncDisposable> SubscribeToTopicExchangeSharedAsync<T>(
@@ -240,7 +244,7 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
         await channel.QueueBindAsync(queueName, exchangeName, bindingKey, null, cancellationToken: cancellationToken);
 
         var consumerTag = await StartConsumerAsync(channel, queueName, exchangeName, handler, cancellationToken);
-        return new SubscriptionHandle(channel, consumerTag);
+        return new SubscriptionHandle(channel, consumerTag, _logger);
     }
 
     public async Task<IAsyncDisposable> SubscribeAsync<T>(
@@ -250,7 +254,7 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
     {
         var channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken);
         var consumerTag = await StartConsumerAsync(channel, queueName, queueName, handler, cancellationToken);
-        return new SubscriptionHandle(channel, consumerTag);
+        return new SubscriptionHandle(channel, consumerTag, _logger);
     }
 
     /// <summary>
@@ -357,21 +361,53 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
             AutomaticRecoveryEnabled = true
         };
         var connection = await factory.CreateConnectionAsync(cancellationToken);
-        var channel = await connection.CreateChannelAsync(cancellationToken: cancellationToken);
+        // Publisher confirmations: BasicPublishAsync awaits the broker's ack (PublishException
+        // on nack/return) instead of completing once the frame left the socket.
+        var channel = await connection.CreateChannelAsync(
+            new CreateChannelOptions(
+                publisherConfirmationsEnabled: true,
+                publisherConfirmationTrackingEnabled: true),
+            cancellationToken);
         return new RabbitMqClient(connection, channel, logger ?? NullLogger.Instance);
     }
 
-    private sealed class SubscriptionHandle(IChannel channel, string consumerTag) : IAsyncDisposable
+    /// <summary>
+    ///     Cancels a consumer as a courtesy to the broker; a channel that is already closed
+    ///     (connection recovery, broker restart) makes the cancel throw, and that must never
+    ///     keep the channel itself from being disposed.
+    /// </summary>
+    private static async Task TryCancelConsumerAsync(IChannel channel, string consumerTag, ILogger logger)
     {
-        public async ValueTask DisposeAsync()
+        try
         {
             await channel.BasicCancelAsync(consumerTag);
-            await channel.DisposeAsync();
+        }
+        catch (Exception exception)
+        {
+            logger.LogDebug(exception,
+                "Consumer {ConsumerTag} could not be cancelled on dispose (channel already closed?); disposing the channel anyway.",
+                consumerTag);
         }
     }
 
-    private sealed class TopicSubscriptionHandle(
-        IConnection connection, IChannel channel, string consumerTag, string queueName, string exchangeName)
+    internal sealed class SubscriptionHandle(IChannel channel, string consumerTag, ILogger logger) : IAsyncDisposable
+    {
+        public async ValueTask DisposeAsync()
+        {
+            try
+            {
+                await TryCancelConsumerAsync(channel, consumerTag, logger);
+            }
+            finally
+            {
+                await channel.DisposeAsync();
+            }
+        }
+    }
+
+    internal sealed class TopicSubscriptionHandle(
+        IConnection connection, IChannel channel, string consumerTag, string queueName, string exchangeName,
+        ILogger logger)
         : ITopicSubscription
     {
         // Binding mutations arrive from concurrent SSE opens/closes; they are serialized here
@@ -421,11 +457,31 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
 
         public async ValueTask DisposeAsync()
         {
-            await channel.BasicCancelAsync(consumerTag);
-            await channel.DisposeAsync();
-            if (_bindChannel is not null)
-                await _bindChannel.DisposeAsync();
-            _gate.Dispose();
+            // Every resource is released even when an earlier step throws: a failing consumer
+            // cancel or channel dispose must not leak the bind channel (or the gate).
+            try
+            {
+                await TryCancelConsumerAsync(channel, consumerTag, logger);
+            }
+            finally
+            {
+                try
+                {
+                    await channel.DisposeAsync();
+                }
+                finally
+                {
+                    try
+                    {
+                        if (_bindChannel is not null)
+                            await _bindChannel.DisposeAsync();
+                    }
+                    finally
+                    {
+                        _gate.Dispose();
+                    }
+                }
+            }
         }
     }
 }

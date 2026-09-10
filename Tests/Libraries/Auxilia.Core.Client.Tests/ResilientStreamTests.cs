@@ -317,8 +317,26 @@ public sealed class ResilientStreamTests
 
         var client = NewClient(handler, new CoreClientOptions { UnaryTimeoutSeconds = 1 });
 
-        Assert.CatchAsync<OperationCanceledException>(
+        // The watchdog is a TIMEOUT, never a cancellation: long-running consumers key "host
+        // shutdown" on OperationCanceledException + their own token, so a slow Core must not
+        // wear that shape.
+        var ex = Assert.CatchAsync<TimeoutException>(
             async () => await client.GetRunAsync(Guid.NewGuid()));
+        Assert.That(ex!.InnerException, Is.InstanceOf<OperationCanceledException>());
+    }
+
+    [Test]
+    public void UnaryCall_CancelledByTheCaller_ThrowsOperationCanceled_NotTimeout()
+    {
+        var handler = new SseScriptHandler()
+            .Enqueue(new SseConnection(HttpStatusCode.OK, ResponseDelay: TimeSpan.FromSeconds(30)));
+        var client = NewClient(handler, new CoreClientOptions { UnaryTimeoutSeconds = 10 });
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+
+        var ex = Assert.CatchAsync<OperationCanceledException>(
+            async () => await client.GetRunAsync(Guid.NewGuid(), cts.Token));
+        Assert.That(ex, Is.Not.InstanceOf<TimeoutException>(),
+            "the caller's own cancel keeps its shape — that IS the shutdown signal");
     }
 
     [Test]

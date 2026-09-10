@@ -9,5 +9,5 @@ Everything is exercised through hand-written fakes — no Moq, no network, no Do
 ```
 Tests/Libraries/Auxilia.Adapters.Email.Tests/
 └── UnitTests/
-    └── EmailTaskSourceAdapterTests.cs   # PollDueTriggersAsync: filter + dispatch to RunWorkflowCommand (by config id), per-trigger poll interval, disabled/deleted-instance skip, health sidecar streak + recovery, mark-seen ordering
+    └── EmailTaskSourceAdapterTests.cs   # PollDueTriggersAsync: filter + dispatch to RunWorkflowCommand (by config id), per-trigger poll interval, disabled/deleted-instance skip, health sidecar streak + recovery, mark-seen ordering, multi-trigger mailbox (one fetch, no filter stealing), timed-out dispatch = health error not shutdown
 ```

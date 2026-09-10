@@ -68,12 +68,14 @@
     <Project Path="Tests\Platform\Auxilia.AdminConsole.Tests\Auxilia.AdminConsole.Tests.csproj" />
     <Project Path="Tests\Platform\Auxilia.Core.Api.Tests\Auxilia.Core.Api.Tests.csproj" />
     <Project Path="Tests\Platform\Auxilia.Core.Runner.Tests\Auxilia.Core.Runner.Tests.csproj" />
+    <Project Path="Tests\Platform\Auxilia.TriggerHost.Tests\Auxilia.TriggerHost.Tests.csproj" />
   </Folder>
   <Folder Name="/Tests/Libraries/">
     <Project Path="Tests\Libraries\Auxilia.Adapters.Email.Tests\Auxilia.Adapters.Email.Tests.csproj" />
     <Project Path="Tests\Libraries\Auxilia.Ai.Tests\Auxilia.Ai.Tests.csproj" />
     <Project Path="Tests\Libraries\Auxilia.Core.Client.Tests\Auxilia.Core.Client.Tests.csproj" />
     <Project Path="Tests\Libraries\Auxilia.Governance.Tests\Auxilia.Governance.Tests.csproj" />
+    <Project Path="Tests\Libraries\Auxilia.Messaging.Tests\Auxilia.Messaging.Tests.csproj" />
     <Project Path="Tests\Libraries\Auxilia.PlatformData.Tests\Auxilia.PlatformData.Tests.csproj" />
     <Project Path="Tests\Libraries\Auxilia.Steering.Codec.Tests\Auxilia.Steering.Codec.Tests.csproj" />
     <Project Path="Tests\Libraries\Auxilia.UniversalDataAccess.Tests\Auxilia.UniversalDataAccess.Tests.csproj" />

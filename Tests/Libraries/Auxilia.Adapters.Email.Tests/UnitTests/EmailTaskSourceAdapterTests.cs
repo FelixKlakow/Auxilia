@@ -26,11 +26,16 @@ public class EmailTaskSourceAdapterTests
     {
         public List<(string Topic, object Message)> Published { get; } = [];
 
+        /// <summary>Thrown by every publish while set — emulates a failing/slow Core dispatch.</summary>
+        public Exception? PublishError { get; set; }
+
         public Task DeclareQueueAsync(string queueName, CancellationToken ct = default) => Task.CompletedTask;
         public Task DeclareExchangeAsync(string exchangeName, CancellationToken ct = default) => Task.CompletedTask;
 
         public Task PublishAsync<T>(string topic, T message, CancellationToken ct = default)
         {
+            if (PublishError is { } error)
+                throw error;
             Published.Add((topic, message!));
             journal.Add($"publish:{topic}");
             return Task.CompletedTask;
@@ -54,9 +59,15 @@ public class EmailTaskSourceAdapterTests
     {
         public List<InboundMail> Unseen { get; } = [];
         public List<uint> MarkedSeen { get; } = [];
+        public int Fetches { get; private set; }
 
+        /// <summary>Like IMAP: a mail marked \Seen is no longer returned by an unseen fetch.</summary>
         public Task<IReadOnlyList<InboundMail>> FetchUnseenAsync(CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<InboundMail>>(Unseen.ToList());
+        {
+            Fetches++;
+            return Task.FromResult<IReadOnlyList<InboundMail>>(
+                Unseen.Where(m => !MarkedSeen.Contains(m.Uid)).ToList());
+        }
 
         public Task MarkSeenAsync(uint uid, CancellationToken ct = default)
         {
@@ -357,6 +368,71 @@ public class EmailTaskSourceAdapterTests
             Assert.That(client.MarkedSeen, Is.EquivalentTo(new uint[] { 1, 2, 3 }),
                 "filtered mails are marked seen so they are not re-evaluated forever");
         });
+    }
+
+    [Test]
+    public async Task TwoTriggersOnOneMailbox_EachSeesEveryUnseenMail_AndTheMailboxIsFetchedOnce()
+    {
+        var instance = await SeedInstanceAsync();
+        var reviews = await SeedTriggerAsync(instance.Id, subjectContains: "[review]");
+        var alerts = await SeedTriggerAsync(instance.Id, fromContains: "@ops.example");
+        var client = new FakeMailboxClient(_journal);
+        _factory.ByHost["imap.example.org"] = client;
+        client.Unseen.Add(Mail(messageId: "<review@x>", subject: "[review] PR-1", from: "alice@team.example", uid: 1));
+        client.Unseen.Add(Mail(messageId: "<alert@x>", subject: "Disk full", from: "bot@ops.example", uid: 2));
+        client.Unseen.Add(Mail(messageId: "<both@x>", subject: "[review] runbook", from: "bot@ops.example", uid: 3));
+        client.Unseen.Add(Mail(messageId: "<none@x>", subject: "Lunch", from: "alice@team.example", uid: 4));
+
+        await _sut.PollDueTriggersAsync(CancellationToken.None);
+
+        var dispatches = _bus.Published.Select(p => p.Message).OfType<RunWorkflowCommand>().ToList();
+        Assert.Multiple(() =>
+        {
+            Assert.That(dispatches.Where(d => d.WorkflowConfigurationId == reviews.WorkflowConfigurationId)
+                    .Select(d => d.Context["Title"]),
+                Is.EquivalentTo(new[] { "[review] PR-1", "[review] runbook" }));
+            Assert.That(dispatches.Where(d => d.WorkflowConfigurationId == alerts.WorkflowConfigurationId)
+                    .Select(d => d.Context["Title"]),
+                Is.EquivalentTo(new[] { "Disk full", "[review] runbook" }),
+                "the first trigger's filter must not steal the alert mail from the second");
+            Assert.That(client.MarkedSeen, Is.EquivalentTo(new uint[] { 1, 2, 3, 4 }),
+                "every mail is marked seen exactly once, after all triggers evaluated it");
+            Assert.That(client.Fetches, Is.EqualTo(1), "one mailbox fetch per poll, not one per trigger");
+        });
+
+        var reviewHealth = await _health.ReadAsync(reviews.Id);
+        var alertHealth = await _health.ReadAsync(alerts.Id);
+        Assert.Multiple(() =>
+        {
+            Assert.That(reviewHealth!.LastDispatchUtc, Is.EqualTo(_time.Now));
+            Assert.That(alertHealth!.LastDispatchUtc, Is.EqualTo(_time.Now));
+        });
+    }
+
+    [Test]
+    public async Task TimedOutDispatch_IsRecordedAsTriggerHealth_NotTreatedAsHostShutdown()
+    {
+        var instance = await SeedInstanceAsync();
+        var trigger = await SeedTriggerAsync(instance.Id);
+        var client = new FakeMailboxClient(_journal);
+        _factory.ByHost["imap.example.org"] = client;
+        client.Unseen.Add(Mail(uid: 9));
+        // The Core client's unary watchdog shape — an OperationCanceledException that is NOT ours.
+        _bus.PublishError = new TaskCanceledException("Core call timed out");
+
+        Assert.DoesNotThrowAsync(() => _sut.PollDueTriggersAsync(CancellationToken.None));
+
+        var health = await _health.ReadAsync(trigger.Id);
+        Assert.Multiple(() =>
+        {
+            Assert.That(health!.LastError, Does.Contain("timed out"));
+            Assert.That(client.MarkedSeen, Is.Empty, "an undispatched mail stays unseen for the retry");
+        });
+
+        _bus.PublishError = null;
+        _time.Now = _time.Now.AddSeconds(30);
+        await _sut.PollDueTriggersAsync(CancellationToken.None);
+        Assert.That(client.MarkedSeen, Is.EqualTo(new uint[] { 9 }), "the retry dispatches and marks seen");
     }
 
     [TestCase("[REVIEW]", "please [review] this", true)]

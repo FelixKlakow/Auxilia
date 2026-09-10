@@ -20,10 +20,15 @@ builder.Services.AddPlatformEntity<AuditRecord>(platformData);
 builder.Services.AddSettingsProtection(platformData);
 builder.Services.AddSingleton<AuditLog>();
 
-// A pure Core client: REST + SSE only — this host never touches the message bus.
-builder.Services.AddCoreClient(
-    builder.Configuration["Core:BaseAddress"] ?? "http://localhost:8080",
-    builder.Configuration["Core:ApiKey"] ?? "");
+// A pure Core client: REST + SSE only — this host never touches the message bus. The Core:*
+// section binds the WHOLE CoreClientOptions (address, key, stream reconnect/idle and unary
+// timeout knobs), not just the address and key.
+builder.Services.AddCoreClient(options =>
+{
+    builder.Configuration.GetSection("Core").Bind(options);
+    if (string.IsNullOrWhiteSpace(options.BaseAddress))
+        options.BaseAddress = "http://localhost:8080";
+});
 
 // The workflow-domain library: interval scheduler + artifact chaining over the Core's
 // filtered artifact SSE stream. Any app can embed the same pieces; this host is merely

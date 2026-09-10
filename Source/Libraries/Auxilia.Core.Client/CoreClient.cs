@@ -133,13 +133,13 @@ public sealed class CoreClient : ICoreClient
             : ticket;
     }
 
-    public async Task<int> ClearFinishedRunsAsync(CancellationToken ct = default)
-    {
-        using var cts = UnaryCts(ct);
-        using var response = await http.DeleteAsync("/api/runs", cts.Token);
-        await EnsureSuccessAsync(response, cts.Token);
-        return (await response.Content.ReadFromJsonAsync<ClearedRuns>(cts.Token))?.Deleted ?? 0;
-    }
+    public Task<int> ClearFinishedRunsAsync(CancellationToken ct = default)
+        => UnaryAsync(ct, async token =>
+        {
+            using var response = await http.DeleteAsync("/api/runs", token);
+            await EnsureSuccessAsync(response, token);
+            return (await response.Content.ReadFromJsonAsync<ClearedRuns>(token))?.Deleted ?? 0;
+        });
 
     private sealed record ClearedRuns(int Deleted);
 
@@ -497,18 +497,18 @@ public sealed class CoreClient : ICoreClient
     public Task DeleteEnvironmentLayerAsync(string providerType, CancellationToken ct = default)
         => DeleteAsync($"/api/environment-layers/{Uri.EscapeDataString(providerType)}", ct);
 
-    public async Task<EnvironmentLayerDto?> DeleteEnvironmentLayerVariantAsync(
+    public Task<EnvironmentLayerDto?> DeleteEnvironmentLayerVariantAsync(
         string providerType, string baseEnvironment, CancellationToken ct = default)
-    {
-        using var cts = UnaryCts(ct);
-        using var response = await http.DeleteAsync(
-            $"/api/environment-layers/{Uri.EscapeDataString(providerType)}/variants/{Uri.EscapeDataString(baseEnvironment)}",
-            cts.Token);
-        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-            return null;
-        await EnsureSuccessAsync(response, cts.Token);
-        return await response.Content.ReadFromJsonAsync<EnvironmentLayerDto>(cts.Token);
-    }
+        => UnaryAsync(ct, async token =>
+        {
+            using var response = await http.DeleteAsync(
+                $"/api/environment-layers/{Uri.EscapeDataString(providerType)}/variants/{Uri.EscapeDataString(baseEnvironment)}",
+                token);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+                return null;
+            await EnsureSuccessAsync(response, token);
+            return await response.Content.ReadFromJsonAsync<EnvironmentLayerDto>(token);
+        });
 
     // --- Repositories ---
 
@@ -719,87 +719,109 @@ public sealed class CoreClient : ICoreClient
     public Task<SharingSubjects> GetSharingSubjectsAsync(CancellationToken ct = default)
         => GetAsync<SharingSubjects>("/api/directory/subjects", ct);
 
-    public async Task<bool> CheckHealthAsync(CancellationToken ct = default)
-    {
-        using var cts = UnaryCts(ct);
-        using var response = await http.GetAsync("/health", cts.Token);
-        return response.IsSuccessStatusCode;
-    }
+    public Task<bool> CheckHealthAsync(CancellationToken ct = default)
+        => UnaryAsync(ct, async token =>
+        {
+            using var response = await http.GetAsync("/health", token);
+            return response.IsSuccessStatusCode;
+        });
 
     // --- Transport helpers (every non-success surfaces as CoreApiException) ---
     // Unary calls run under a linked per-call timeout: HttpClient.Timeout is disabled for the
     // sake of the SSE streams, so this is the only watchdog against a hung request.
 
-    private CancellationTokenSource UnaryCts(CancellationToken ct)
+    /// <summary>
+    /// Runs one unary call under the per-call watchdog. A watchdog expiry surfaces as
+    /// <see cref="TimeoutException"/> — never as the caller's cancellation: a slow Core must be
+    /// distinguishable from a host shutdown, and every long-running consumer (trigger engines,
+    /// intake adapters) keys "stop" on its own token, not on the exception type.
+    /// </summary>
+    private async Task<TResult> UnaryAsync<TResult>(CancellationToken ct, Func<CancellationToken, Task<TResult>> call)
     {
-        var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         if (options.UnaryTimeoutSeconds > 0)
             cts.CancelAfter(TimeSpan.FromSeconds(options.UnaryTimeoutSeconds));
-        return cts;
+        try
+        {
+            return await call(cts.Token);
+        }
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            // Only the watchdog (or a shared HttpClient's own Timeout) can cancel here.
+            throw new TimeoutException(
+                $"The Core API call produced no response within {options.UnaryTimeoutSeconds}s.", ex);
+        }
     }
 
-    private async Task<TResult> PostAsync<TRequest, TResult>(string url, TRequest body, CancellationToken ct)
-    {
-        using var cts = UnaryCts(ct);
-        using var response = await http.PostAsJsonAsync(url, body, cts.Token);
-        await EnsureSuccessAsync(response, cts.Token);
-        return (await response.Content.ReadFromJsonAsync<TResult>(cts.Token))!;
-    }
-
-    private async Task<TResult> PutAsync<TRequest, TResult>(string url, TRequest body, CancellationToken ct)
-    {
-        using var cts = UnaryCts(ct);
-        using var response = await http.PutAsJsonAsync(url, body, cts.Token);
-        await EnsureSuccessAsync(response, cts.Token);
-        return (await response.Content.ReadFromJsonAsync<TResult>(cts.Token))!;
-    }
-
-    private async Task<TResult> PostAsync<TResult>(string url, CancellationToken ct)
-    {
-        using var cts = UnaryCts(ct);
-        using var response = await http.PostAsync(url, null, cts.Token);
-        await EnsureSuccessAsync(response, cts.Token);
-        return (await response.Content.ReadFromJsonAsync<TResult>(cts.Token))!;
-    }
-
-    private async Task PostAsync<TRequest>(string url, TRequest body, CancellationToken ct)
-    {
-        using var cts = UnaryCts(ct);
-        using var response = await http.PostAsJsonAsync(url, body, cts.Token);
-        await EnsureSuccessAsync(response, cts.Token);
-    }
-
-    private async Task PostAsync(string url, CancellationToken ct)
-    {
-        using var cts = UnaryCts(ct);
-        using var response = await http.PostAsync(url, null, cts.Token);
-        await EnsureSuccessAsync(response, cts.Token);
-    }
-
-    private async Task<TResult> GetAsync<TResult>(string url, CancellationToken ct)
-    {
-        using var cts = UnaryCts(ct);
-        using var response = await http.GetAsync(url, cts.Token);
-        await EnsureSuccessAsync(response, cts.Token);
-        return (await response.Content.ReadFromJsonAsync<TResult>(cts.Token))!;
-    }
-
-    private async Task<TResult?> GetOrNullAsync<TResult>(string url, CancellationToken ct) where TResult : class
-    {
-        using var cts = UnaryCts(ct);
-        using var response = await http.GetAsync(url, cts.Token);
-        if (response.StatusCode == HttpStatusCode.NotFound)
+    private Task UnaryAsync(CancellationToken ct, Func<CancellationToken, Task> call)
+        => UnaryAsync<object?>(ct, async token =>
+        {
+            await call(token);
             return null;
-        await EnsureSuccessAsync(response, cts.Token);
-        return await response.Content.ReadFromJsonAsync<TResult>(cts.Token);
-    }
+        });
 
-    private async Task DeleteAsync(string url, CancellationToken ct)
-    {
-        using var cts = UnaryCts(ct);
-        using var response = await http.DeleteAsync(url, cts.Token);
-        await EnsureSuccessAsync(response, cts.Token);
-    }
+    private Task<TResult> PostAsync<TRequest, TResult>(string url, TRequest body, CancellationToken ct)
+        => UnaryAsync(ct, async token =>
+        {
+            using var response = await http.PostAsJsonAsync(url, body, token);
+            await EnsureSuccessAsync(response, token);
+            return (await response.Content.ReadFromJsonAsync<TResult>(token))!;
+        });
+
+    private Task<TResult> PutAsync<TRequest, TResult>(string url, TRequest body, CancellationToken ct)
+        => UnaryAsync(ct, async token =>
+        {
+            using var response = await http.PutAsJsonAsync(url, body, token);
+            await EnsureSuccessAsync(response, token);
+            return (await response.Content.ReadFromJsonAsync<TResult>(token))!;
+        });
+
+    private Task<TResult> PostAsync<TResult>(string url, CancellationToken ct)
+        => UnaryAsync(ct, async token =>
+        {
+            using var response = await http.PostAsync(url, null, token);
+            await EnsureSuccessAsync(response, token);
+            return (await response.Content.ReadFromJsonAsync<TResult>(token))!;
+        });
+
+    private Task PostAsync<TRequest>(string url, TRequest body, CancellationToken ct)
+        => UnaryAsync(ct, async token =>
+        {
+            using var response = await http.PostAsJsonAsync(url, body, token);
+            await EnsureSuccessAsync(response, token);
+        });
+
+    private Task PostAsync(string url, CancellationToken ct)
+        => UnaryAsync(ct, async token =>
+        {
+            using var response = await http.PostAsync(url, null, token);
+            await EnsureSuccessAsync(response, token);
+        });
+
+    private Task<TResult> GetAsync<TResult>(string url, CancellationToken ct)
+        => UnaryAsync(ct, async token =>
+        {
+            using var response = await http.GetAsync(url, token);
+            await EnsureSuccessAsync(response, token);
+            return (await response.Content.ReadFromJsonAsync<TResult>(token))!;
+        });
+
+    private Task<TResult?> GetOrNullAsync<TResult>(string url, CancellationToken ct) where TResult : class
+        => UnaryAsync(ct, async token =>
+        {
+            using var response = await http.GetAsync(url, token);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+                return null;
+            await EnsureSuccessAsync(response, token);
+            return await response.Content.ReadFromJsonAsync<TResult>(token);
+        });
+
+    private Task DeleteAsync(string url, CancellationToken ct)
+        => UnaryAsync(ct, async token =>
+        {
+            using var response = await http.DeleteAsync(url, token);
+            await EnsureSuccessAsync(response, token);
+        });
 
     private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken ct)
     {

@@ -122,6 +122,81 @@ public sealed class ScheduledTriggerEngineTests
     }
 
     [Test]
+    public async Task TimedOutDispatch_IsLoggedAndRetried_NotTreatedAsShutdown()
+    {
+        await _store.SaveAsync(new ScheduledTriggerDefinition
+        {
+            IntervalSeconds = 60, ConfigurationId = Guid.NewGuid()
+        });
+        // The Core client's watchdog / HttpClient.Timeout shape — not the engine's own token.
+        _core.DispatchError = new TaskCanceledException("Core call timed out");
+
+        Assert.DoesNotThrowAsync(() => _engine.TickAsync());
+        Assert.That((await _store.GetScheduledTriggersAsync()).Single().LastDispatchedUtc, Is.Null);
+
+        _core.DispatchError = null;
+        await _engine.TickAsync();
+        Assert.That(_core.ConfigurationRuns, Has.Count.EqualTo(1));
+    }
+
+    [Test]
+    public async Task HostedLoop_SurvivesAFailingStoreRead_AndKeepsTicking()
+    {
+        var flaky = new FlakyStore(_store);
+        _engine.Dispose();
+        _engine = new ScheduledTriggerEngine(flaky, _core, _time,
+            Options.Create(new WorkflowClientOptions()),
+            NullLogger<ScheduledTriggerEngine>.Instance);
+        await _store.SaveAsync(new ScheduledTriggerDefinition
+        {
+            IntervalSeconds = 1, ConfigurationId = Guid.NewGuid()
+        });
+        flaky.FailNextReads = 2; // the first ticks fail OUTSIDE the per-trigger guard
+
+        await _engine.StartAsync(CancellationToken.None);
+        try
+        {
+            for (var i = 0; i < 50 && _core.ConfigurationRuns.IsEmpty; i++)
+            {
+                _time.Advance(TimeSpan.FromSeconds(10));
+                await Task.Delay(10);
+            }
+            Assert.That(flaky.FailNextReads, Is.Zero, "the failing reads happened");
+            Assert.That(_core.ConfigurationRuns, Is.Not.Empty,
+                "a failing sweep is logged and retried — it must not end the scheduler for the process lifetime");
+        }
+        finally
+        {
+            await _engine.StopAsync(CancellationToken.None);
+        }
+    }
+
+    /// <summary>Delegating store whose scheduled-trigger read fails a configurable number of times.</summary>
+    private sealed class FlakyStore(ITriggerStore inner) : ITriggerStore
+    {
+        public int FailNextReads { get; set; }
+
+        public Task<IReadOnlyList<ScheduledTriggerDefinition>> GetScheduledTriggersAsync(CancellationToken ct = default)
+        {
+            if (FailNextReads > 0)
+            {
+                FailNextReads--;
+                throw new TimeoutException("store unreachable");
+            }
+            return inner.GetScheduledTriggersAsync(ct);
+        }
+
+        public Task<IReadOnlyList<ArtifactTriggerDefinition>> GetArtifactTriggersAsync(CancellationToken ct = default) => inner.GetArtifactTriggersAsync(ct);
+        public Task<IReadOnlyList<EventTriggerDefinition>> GetEventTriggersAsync(CancellationToken ct = default) => inner.GetEventTriggersAsync(ct);
+        public Task SaveAsync(ScheduledTriggerDefinition trigger, CancellationToken ct = default) => inner.SaveAsync(trigger, ct);
+        public Task SaveAsync(ArtifactTriggerDefinition trigger, CancellationToken ct = default) => inner.SaveAsync(trigger, ct);
+        public Task SaveAsync(EventTriggerDefinition trigger, CancellationToken ct = default) => inner.SaveAsync(trigger, ct);
+        public Task DeleteScheduledTriggerAsync(Guid id, CancellationToken ct = default) => inner.DeleteScheduledTriggerAsync(id, ct);
+        public Task DeleteArtifactTriggerAsync(Guid id, CancellationToken ct = default) => inner.DeleteArtifactTriggerAsync(id, ct);
+        public Task DeleteEventTriggerAsync(Guid id, CancellationToken ct = default) => inner.DeleteEventTriggerAsync(id, ct);
+    }
+
+    [Test]
     public async Task HostedLoop_TicksOnTheTimer()
     {
         await _store.SaveAsync(new ScheduledTriggerDefinition

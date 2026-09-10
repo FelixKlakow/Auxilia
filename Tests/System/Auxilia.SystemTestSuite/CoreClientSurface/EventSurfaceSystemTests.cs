@@ -92,7 +92,7 @@ public sealed class EventSurfaceSystemTests
             Context = CoreClientEnvironment.ContextFor(
                 CoreClientEnvironment.EchoWorkflowType, ("MESSAGE", marker))
         }, ct);
-        var engine = new EventTriggerEngine(store, Admin, NullLogger<EventTriggerEngine>.Instance);
+        var engine = new EventTriggerEngine(store, Admin, TimeProvider.System, NullLogger<EventTriggerEngine>.Instance);
         await engine.StartAsync(ct);
         try
         {

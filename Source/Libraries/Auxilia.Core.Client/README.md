@@ -29,7 +29,8 @@ await foreach (var frame in core.StreamRunAsync(accepted.RunId))
 ```
 
 Streams are resilient by design (automatic reconnect with backoff, idle detection,
-snapshot-first frames); unary calls run under a per-call timeout. Every Core surface is on
+snapshot-first frames); unary calls run under a per-call timeout that surfaces as
+`TimeoutException`, never as your own cancellation. Every Core surface is on
 `ICoreClient`, so test doubles are one interface away.
 
 ## Package family

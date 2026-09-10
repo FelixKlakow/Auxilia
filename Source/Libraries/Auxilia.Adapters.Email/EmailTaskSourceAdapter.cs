@@ -23,12 +23,15 @@ public sealed class MailboxTriggerAdapterSettings
 }
 
 /// <summary>
-/// Work-item-event trigger source (ARCHITECTURE §6): polls every enabled mailbox trigger's
-/// mailbox (an email slot instance holds the credentials) and dispatches the trigger's
-/// workflow configuration once per unseen message. The IMAP \Seen flag is the idempotency
-/// guard; the work-item ID is a stable hash of the Message-Id so re-deliveries converge on
-/// the same lineage. Dispatches carry the trigger's run-as principal and pass the same
-/// policy checks as manual runs.
+/// Work-item-event trigger source (ARCHITECTURE §6): polls every mailbox (an email slot
+/// instance holds the credentials) that an enabled trigger references and dispatches, per
+/// unseen message, the workflow configuration of EVERY enabled trigger of that mailbox whose
+/// filters match — the mailbox is fetched once per poll and a mail is marked \Seen only after
+/// all of its triggers were evaluated, so one trigger's filter never steals mail from another.
+/// The IMAP \Seen flag is the idempotency guard; the work-item ID is a stable hash of the
+/// Message-Id so re-deliveries converge on the same lineage. Dispatches carry the trigger's
+/// run-as principal and pass the same policy checks as manual runs. Only the host's own token
+/// stops the adapter — a slow Core (unary timeout) is logged and retried.
 /// </summary>
 public sealed class EmailTaskSourceAdapter(
     IDataAccess<MailboxTriggerRecord> triggers,
@@ -59,37 +62,54 @@ public sealed class EmailTaskSourceAdapter(
             {
                 await PollDueTriggersAsync(stoppingToken);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {
                 logger.LogWarning(ex, "Mailbox trigger sweep failed — will retry next tick.");
             }
         } while (await timer.WaitForNextTickAsync(stoppingToken));
     }
 
+    /// <summary>
+    /// One sweep: every mailbox with at least one due, enabled trigger is polled ONCE and all of
+    /// its enabled triggers evaluate the unseen mail together (a mailbox is polled at the pace
+    /// of its most frequent trigger).
+    /// </summary>
     internal async Task PollDueTriggersAsync(CancellationToken ct)
     {
-        var records = (await triggers.ReadAsync(ct)).ToList().Where(t => t.Enabled).ToList();
-        foreach (var trigger in records)
+        var mailboxes = (await triggers.ReadAsync(ct))
+            .Where(t => t.Enabled)
+            .GroupBy(t => t.SlotInstanceId);
+        foreach (var mailbox in mailboxes)
         {
             var now = timeProvider.GetUtcNow();
-            var interval = TimeSpan.FromSeconds(Math.Max(1, trigger.PollIntervalSeconds));
-            if (_lastPolls.TryGetValue(trigger.Id, out var lastPoll) && now - lastPoll < interval)
+            var due = mailbox.Where(t => IsDue(t, now)).ToList();
+            if (due.Count == 0)
                 continue;
-            _lastPolls[trigger.Id] = now;
+            var group = mailbox.ToList();
+            foreach (var trigger in group)
+                _lastPolls[trigger.Id] = now;
 
             try
             {
-                var dispatched = await PollTriggerAsync(trigger, ct);
-                await WriteHealthAsync(trigger.Id, now, error: null, dispatched, ct);
+                var dispatched = await PollMailboxAsync(mailbox.Key, group, ct);
+                foreach (var trigger in group)
+                    await WriteHealthAsync(trigger.Id, now, error: null, dispatched.GetValueOrDefault(trigger.Id), ct);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!ct.IsCancellationRequested)
             {
-                // One unreachable mailbox must not stall the other triggers.
+                // One unreachable mailbox (or a slow Core) must not stall the other mailboxes.
                 logger.LogWarning(ex,
-                    "Mailbox poll failed for trigger {TriggerId} — will retry next interval.", trigger.Id);
-                await WriteHealthAsync(trigger.Id, now, error: ex.Message, dispatched: 0, ct);
+                    "Mailbox poll failed for slot instance {SlotInstanceId} — will retry next interval.", mailbox.Key);
+                foreach (var trigger in group)
+                    await WriteHealthAsync(trigger.Id, now, error: ex.Message, dispatched: 0, ct);
             }
         }
+    }
+
+    private bool IsDue(MailboxTriggerRecord trigger, DateTimeOffset now)
+    {
+        var interval = TimeSpan.FromSeconds(Math.Max(1, trigger.PollIntervalSeconds));
+        return !_lastPolls.TryGetValue(trigger.Id, out var lastPoll) || now - lastPoll >= interval;
     }
 
     /// <summary>
@@ -113,9 +133,11 @@ public sealed class EmailTaskSourceAdapter(
         }, ct);
     }
 
-    private async Task<int> PollTriggerAsync(MailboxTriggerRecord trigger, CancellationToken ct)
+    /// <summary>Polls one mailbox for all of its triggers; returns the dispatch count per trigger.</summary>
+    private async Task<Dictionary<Guid, int>> PollMailboxAsync(
+        Guid slotInstanceId, IReadOnlyList<MailboxTriggerRecord> group, CancellationToken ct)
     {
-        var instance = await slotInstances.ReadAsync(trigger.SlotInstanceId, ct)
+        var instance = await slotInstances.ReadAsync(slotInstanceId, ct)
                        ?? throw new InvalidOperationException(
                            "The trigger references a deleted slot instance.");
 
@@ -126,17 +148,19 @@ public sealed class EmailTaskSourceAdapter(
 
         var mailbox = mailboxFactory.Create(settings);
         var unseen = await mailbox.FetchUnseenAsync(ct);
-        var dispatched = 0;
+        var dispatched = group.ToDictionary(t => t.Id, _ => 0);
 
         foreach (var mail in unseen)
         {
-            if (!MatchesFilters(trigger, mail))
+            var matching = group.Where(t => MatchesFilters(t, mail)).ToList();
+            if (matching.Count == 0)
             {
-                // Filtered mails are marked seen without a dispatch so they are not
-                // re-evaluated on every poll. Never log subjects or senders.
+                // A mail no trigger of this mailbox wants is marked seen without a dispatch so
+                // it is not re-evaluated on every poll. Never log subjects or senders.
                 await mailbox.MarkSeenAsync(mail.Uid, ct);
                 logger.LogInformation(
-                    "Mail skipped by trigger filters. Trigger={TriggerId} Uid={Uid}", trigger.Id, mail.Uid);
+                    "Mail skipped by every trigger filter. SlotInstance={SlotInstanceId} Uid={Uid}",
+                    slotInstanceId, mail.Uid);
                 continue;
             }
 
@@ -152,23 +176,27 @@ public sealed class EmailTaskSourceAdapter(
                 ["MailUid"] = mail.Uid.ToString()
             };
 
-            // The dispatch seam decides how the run reaches the platform; mail dispatches carry
-            // no type — the trigger's workflow configuration supplies it.
-            var dispatchId = await dispatcher.DispatchAsync(
-                trigger.WorkflowConfigurationId, workflowType: null,
-                context, trigger.RunAsPrincipalId, ct);
+            foreach (var trigger in matching)
+            {
+                // The dispatch seam decides how the run reaches the platform; mail dispatches
+                // carry no type — the trigger's workflow configuration supplies it.
+                var dispatchId = await dispatcher.DispatchAsync(
+                    trigger.WorkflowConfigurationId, workflowType: null,
+                    context, trigger.RunAsPrincipalId, ct);
 
-            // Marked seen only after the dispatch was accepted: a crash in between causes a
-            // re-dispatch, which the platform's idempotency contract absorbs (same WorkItemId).
+                await auditLog.AppendAsync("email-adapter", "trigger.mail-dispatch",
+                    workItemId, dispatchId.ToString(), ct: ct);
+
+                logger.LogInformation(
+                    "Mail dispatched as work item. WorkItem={WorkItemId} Configuration={ConfigurationId} Dispatch={DispatchId}",
+                    workItemId, trigger.WorkflowConfigurationId, dispatchId);
+                dispatched[trigger.Id]++;
+            }
+
+            // Marked seen only after EVERY matching trigger's dispatch was accepted: a crash in
+            // between causes a re-dispatch, which the platform's idempotency contract absorbs
+            // (same WorkItemId per configuration).
             await mailbox.MarkSeenAsync(mail.Uid, ct);
-
-            await auditLog.AppendAsync("email-adapter", "trigger.mail-dispatch",
-                workItemId, dispatchId.ToString(), ct: ct);
-
-            logger.LogInformation(
-                "Mail dispatched as work item. WorkItem={WorkItemId} Configuration={ConfigurationId} Dispatch={DispatchId}",
-                workItemId, trigger.WorkflowConfigurationId, dispatchId);
-            dispatched++;
         }
 
         return dispatched;

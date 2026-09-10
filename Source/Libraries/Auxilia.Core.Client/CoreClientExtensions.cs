@@ -67,10 +67,11 @@ public static class CoreClientExtensions
     /// Registers <see cref="ICoreClient"/> that authenticates <b>per request</b> as the current caller:
     /// a <see cref="CoreCallerTokenHandler"/> resolves the supplied <see cref="ICoreCallerTokenProvider"/>
     /// and sets a per-request bearer (e.g. the signed-in console user's Core-minted token). When the
-    /// provider yields no token, it falls back to <see cref="CoreClientOptions.ApiKey"/> — so a host can
-    /// use the same client for both delegated (user) and service (app-key) calls. The provider is
-    /// resolved from DI via <paramref name="tokenProviderFactory"/>, letting it read per-request state
-    /// (e.g. an <c>IHttpContextAccessor</c>).
+    /// provider yields no token the request goes out unauthenticated — a delegated client never falls
+    /// back to <see cref="CoreClientOptions.ApiKey"/>; a host that needs service-scoped calls registers
+    /// a separate client through the app-key overload. The provider is resolved from DI via
+    /// <paramref name="tokenProviderFactory"/>, letting it read per-request state (e.g. an
+    /// <c>IHttpContextAccessor</c>).
     /// </summary>
     public static IHttpClientBuilder AddCoreClient(
         this IServiceCollection services,
@@ -86,7 +87,7 @@ public static class CoreClientExtensions
             })
             .AddTypedClient<ICoreClient>(http => new CoreClient(http, options))
             .AddHttpMessageHandler(sp =>
-                new CoreCallerTokenHandler(tokenProviderFactory(sp), options.ApiKey));
+                new CoreCallerTokenHandler(tokenProviderFactory(sp)));
     }
 
     /// <summary>Wraps an existing (already-authenticated) HttpClient — for tests and simple hosts.</summary>

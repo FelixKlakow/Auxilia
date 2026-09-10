@@ -3,7 +3,8 @@
 The [Auxilia](https://github.com/FelixKlakow/Auxilia) message-bus abstraction: every
 Auxilia component talks to the broker through `IMessageBusClient` — queues, topic
 exchanges, typed publish/subscribe — with the RabbitMQ implementation and an injectable
-fake for tests. Referenced by the workflow SDK (`Auxilia.Workflows`); pure Core clients
+fake for tests. Publishes are broker-confirmed (a publish completes only once RabbitMQ
+acknowledged it). Referenced by the workflow SDK (`Auxilia.Workflows`); pure Core clients
 never need it (they use the Core's filtered event streams instead).
 
 ## License

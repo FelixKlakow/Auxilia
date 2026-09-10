@@ -17,7 +17,12 @@ host only provides the always-on process, its storage, and `/health`.
 - `public partial class Program;` supports `WebApplicationFactory` component tests.
 
 ## Configuration
-- `Core:BaseAddress`, `Core:ApiKey` — the Core to drive (service principal key).
+- `Core:*` — the WHOLE `CoreClientOptions` bound from one section: `BaseAddress` (default
+  `http://localhost:8080`), `ApiKey` (service principal key), and the client knobs
+  `StreamReconnectInitialBackoffSeconds` / `StreamReconnectMaxBackoffSeconds` /
+  `StreamIdleTimeoutSeconds` / `UnaryTimeoutSeconds`.
 - `PlatformData:*` — this host's storage backend.
 - `MailboxTriggers:TickSeconds` — email intake sweep.
-- `WorkflowClient:*` — engine pacing (`SchedulerIntervalSeconds`, `StreamReconnectMaxBackoffSeconds`).
+- `WorkflowClient:SchedulerIntervalSeconds` — scheduler pacing (`WorkflowClientOptions`).
+- `Tests/Platform/Auxilia.TriggerHost.Tests` boots the host through `WebApplicationFactory`
+  and pins the `Core:*` binding.

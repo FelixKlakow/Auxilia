@@ -18,7 +18,7 @@ public sealed class ArtifactChainingEngineTests
     {
         _core = new FakeCoreClient();
         _store = new InMemoryTriggerStore();
-        _engine = new ArtifactChainingEngine(_store, _core, NullLogger<ArtifactChainingEngine>.Instance);
+        _engine = new ArtifactChainingEngine(_store, _core, TimeProvider.System, NullLogger<ArtifactChainingEngine>.Instance);
     }
 
     [TearDown]
@@ -166,6 +166,77 @@ public sealed class ArtifactChainingEngineTests
         await WaitUntilAsync(() => _core.ConfigurationRuns.Count == 3);
         Assert.That(_core.ConfigurationRuns, Has.Count.EqualTo(3),
             "the missed artifact dispatches exactly once (dedupe), fresh live events keep flowing");
+    }
+
+    [Test]
+    public async Task DropBeforeAnyLiveEvent_StillCatchesUpFromTheConsumerStart()
+    {
+        await _store.SaveAsync(new ArtifactTriggerDefinition
+        {
+            ArtifactType = "review", ConfigurationId = Guid.NewGuid()
+        });
+        await _engine.StartAsync(CancellationToken.None);
+        await WaitForSubscriptionsAsync(1);
+
+        // No live event was ever handled; the Core recycles and an artifact lands in the gap.
+        var missed = new ArtifactDto(Guid.NewGuid(), "review", "producer-wf", "WI-9", Guid.NewGuid(),
+            1, "HASH", 5, DateTimeOffset.UtcNow);
+        _core.StoredArtifacts.Add(missed);
+        _core.DropAllStreams();
+
+        await WaitUntilAsync(() => _core.ConfigurationRuns.Count == 1);
+        Assert.That(_core.ConfigurationRuns.Single().Context!["ArtifactId"],
+            Is.EqualTo(missed.Id.ToString("D")),
+            "the cursor is seeded at consumer start — the gap before the first live event is not lost");
+    }
+
+    [Test]
+    public async Task CatchUp_PagesUnderAFixedBound_SoASharedTimestampAtThePageEdgeIsNotSkipped()
+    {
+        await _store.SaveAsync(new ArtifactTriggerDefinition
+        {
+            ArtifactType = "review", ConfigurationId = Guid.NewGuid()
+        });
+        await _engine.StartAsync(CancellationToken.None);
+        await WaitForSubscriptionsAsync(1);
+
+        // 201 artifacts share ONE timestamp: the first page (200) ends on it, the 201st sits
+        // behind the page edge with the same CreatedUtc — a moving "after" bound would skip it.
+        var stamp = DateTimeOffset.UtcNow;
+        var gap = Enumerable.Range(0, 201)
+            .Select(_ => new ArtifactDto(Guid.NewGuid(), "review", "producer-wf", "WI-page", Guid.NewGuid(),
+                1, "HASH", 5, stamp))
+            .ToList();
+        _core.StoredArtifacts.AddRange(gap);
+        _core.DropAllStreams();
+
+        await WaitUntilAsync(() => _core.ConfigurationRuns.Count == 201);
+        var dispatchedIds = _core.ConfigurationRuns.Select(r => r.Context!["ArtifactId"]).ToList();
+        Assert.That(dispatchedIds, Is.EquivalentTo(gap.Select(a => a.Id.ToString("D"))),
+            "every artifact of the gap dispatches exactly once");
+    }
+
+    [Test]
+    public async Task DispatchTimeout_DoesNotStopTheConsumer()
+    {
+        await _store.SaveAsync(new ArtifactTriggerDefinition
+        {
+            ArtifactType = "review", ConfigurationId = Guid.NewGuid()
+        });
+        await _engine.StartAsync(CancellationToken.None);
+        await WaitForSubscriptionsAsync(1);
+
+        // A unary watchdog / HttpClient timeout wears an OperationCanceledException shape —
+        // it is NOT the engine's own stop signal and must not end the consumer.
+        _core.DispatchError = new TaskCanceledException("Core call timed out");
+        _core.PublishArtifact(Event("review", "WI-slow"));
+        await Task.Delay(100);
+        _core.DispatchError = null;
+
+        _core.PublishArtifact(Event("review", "WI-next"));
+        await WaitUntilAsync(() => _core.ConfigurationRuns.Count == 1);
+        Assert.That(_core.ConfigurationRuns.Single().Context!["WorkItemId"], Is.EqualTo("WI-next"),
+            "the consumer survives the timed-out dispatch and keeps chaining");
     }
 
     [Test]

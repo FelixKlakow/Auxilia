@@ -14,15 +14,27 @@ namespace Auxilia.Workflows.Client.Triggers;
 /// needs <see cref="RefreshAsync"/> (or a host restart) to open its stream.
 /// Reconnect lives INSIDE <see cref="ICoreClient"/>; on every reconnected frame this engine
 /// CATCHES UP via <see cref="ICoreClient.QueryEventsAsync"/> (events published during the
-/// disconnect window are not replayed by the stream) and dedupes against double delivery.
+/// disconnect window are not replayed by the stream) and dedupes against double delivery. The
+/// catch-up cursor is seeded from the host clock when a consumer starts, so a drop BEFORE the
+/// first live event still defines a gap (assumes host/Core clocks agree to within
+/// <see cref="CatchUpOverlap"/>). Only the engine's own token stops a consumer; a failing
+/// dispatch, store read, or unary timeout is logged and the stream continues.
 /// </summary>
 public sealed class EventTriggerEngine(
     ITriggerStore store,
     ICoreClient core,
+    TimeProvider timeProvider,
     ILogger<EventTriggerEngine> logger) : IHostedService, IDisposable
 {
     /// <summary>Dispatched-event-id memory per consumer, bounding the catch-up/live dedupe.</summary>
     internal const int DedupeCapacity = 512;
+
+    /// <summary>
+    /// How far BEFORE the newest handled timestamp a catch-up re-reads: the query is strictly
+    /// "created after" and stores round timestamps, so an event sharing the last handled
+    /// millisecond would otherwise be skipped. The id dedupe absorbs the re-read.
+    /// </summary>
+    internal static readonly TimeSpan CatchUpOverlap = TimeSpan.FromSeconds(1);
 
     private readonly object _gate = new();
     private readonly Dictionary<string, (CancellationTokenSource Cts, Task Consumer)> _consumers = new(StringComparer.Ordinal);
@@ -68,9 +80,10 @@ public sealed class EventTriggerEngine(
     private async Task ConsumeAsync(string eventType, CancellationToken ct)
     {
         // The client stream reconnects internally; this loop only reacts to its frames. Track the
-        // newest handled CreatedUtc so a reconnect can query the gap, and remember recently
-        // dispatched event ids so catch-up overlapping the live stream dispatches once.
-        DateTimeOffset? lastSeenUtc = null;
+        // newest handled CreatedUtc (seeded with the consumer's start so a drop before the first
+        // live event still has a gap to query), and remember recently dispatched event ids so
+        // catch-up overlapping the live stream dispatches once.
+        var lastSeenUtc = timeProvider.GetUtcNow();
         var dispatched = new HashSet<Guid>();
         var dispatchedOrder = new Queue<Guid>();
 
@@ -81,10 +94,19 @@ public sealed class EventTriggerEngine(
                 switch (frame)
                 {
                     case StreamEventFrame<EventStreamEvent> evt:
-                        if (Remember(evt.Event.Event.Id))
+                        if (!Remember(evt.Event.Event.Id))
+                            break;
+                        lastSeenUtc = Max(lastSeenUtc, evt.Event.Event.CreatedUtc);
+                        try
                         {
-                            lastSeenUtc = Max(lastSeenUtc, evt.Event.Event.CreatedUtc);
                             await HandleAsync(evt.Event, ct);
+                        }
+                        catch (Exception ex) when (!ct.IsCancellationRequested)
+                        {
+                            // A failed trigger read is not a stream fault — the stream continues.
+                            logger.LogError(ex,
+                                "Handling event {EventId} of '{EventType}' failed — the stream continues.",
+                                evt.Event.Event.Id, eventType);
                         }
                         break;
 
@@ -124,34 +146,35 @@ public sealed class EventTriggerEngine(
             return true;
         }
 
-        static DateTimeOffset? Max(DateTimeOffset? a, DateTimeOffset b) => a is { } x && x > b ? x : b;
+        static DateTimeOffset Max(DateTimeOffset a, DateTimeOffset b) => a > b ? a : b;
 
-        // Events persisted while disconnected: page the store oldest-first from the last
-        // handled timestamp and run them through the same trigger dispatch (deduped above).
+        // Events persisted while disconnected: page the store oldest-first under ONE fixed
+        // lower bound (a bound that moves per page skips events sharing a page's last
+        // timestamp) and run them through the same trigger dispatch (deduped above).
         async Task CatchUpAsync(CancellationToken innerCt)
         {
-            if (lastSeenUtc is not { } since)
-                return; // nothing handled yet — no gap to define
+            var since = lastSeenUtc - CatchUpOverlap;
+            var skip = 0;
             try
             {
                 while (true)
                 {
                     var page = await core.QueryEventsAsync(
-                        new EventQuery(eventType, CreatedAfterUtc: since, Take: 200), innerCt);
+                        new EventQuery(eventType, CreatedAfterUtc: since, Skip: skip, Take: 200), innerCt);
                     foreach (var evt in page.Items)
                     {
                         lastSeenUtc = Max(lastSeenUtc, evt.CreatedUtc);
                         if (Remember(evt.Id))
                             await HandleAsync(new EventStreamEvent(evt, evt.CreatedUtc), innerCt);
                     }
-                    if (page.Items.Count == 0 || lastSeenUtc is not { } advanced || advanced <= since)
+                    skip += page.Items.Count;
+                    if (page.Items.Count == 0 || skip >= page.Total)
                         break;
-                    since = advanced;
                 }
                 logger.LogInformation(
                     "Event stream for '{EventType}' reconnected — catch-up complete.", eventType);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!innerCt.IsCancellationRequested)
             {
                 logger.LogWarning(ex,
                     "Catch-up query for '{EventType}' failed — live events continue; the gap retries on the next reconnect.",
@@ -198,7 +221,7 @@ public sealed class EventTriggerEngine(
                     "Event trigger {TriggerId} dispatched. Event={EventType} RunId={RunId}",
                     trigger.Id, evt.Event.EventType, accepted.RunId);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!ct.IsCancellationRequested)
             {
                 logger.LogError(ex,
                     "Event trigger {TriggerId} failed to dispatch for event {EventId}.",

@@ -21,13 +21,22 @@ Triggers fire only while some host embedding this library runs.
   definitions are not Core state — what-follows-what is workflow-domain policy.
 - **Every dispatch goes through the Core Run API** on behalf of the trigger's run-as
   principal, passing the same policy checks as a manual run. One failing trigger is logged
-  and skipped; engines never die from a single bad dispatch.
+  and skipped; engines never die from a single bad dispatch, a failing store read, or a slow
+  Core — **only the engine's own token stops it**: every guard is `when
+  (!ct.IsCancellationRequested)`, never `is not OperationCanceledException` (the Core client's
+  unary watchdog is a `TimeoutException`, and a shared `HttpClient.Timeout` still cancels).
+  The scheduler's store read sits inside the per-tick guard for the same reason.
 - **Stream reconnect lives in `Auxilia.Core.Client`**, not here — the engines consume the
   resilient frame stream and add what only they can: on every reconnect they CATCH UP via
-  the matching query (`QueryArtifactsAsync`/`QueryEventsAsync` with `CreatedAfterUtc:
-  lastSeen`; gap events are not replayed by the stream) and dedupe catch-up/live overlap by
-  id (bounded memory). Adding a trigger for a NEW artifact/event type needs `RefreshAsync` to
-  open its filtered stream; edits to existing triggers apply per event without a restart.
+  the matching query (`QueryArtifactsAsync`/`QueryEventsAsync` with `CreatedAfterUtc`; gap
+  events are not replayed by the stream) and dedupe catch-up/live overlap by id (bounded
+  memory). The catch-up cursor is **seeded from the host clock when a consumer starts**
+  (`TimeProvider`), so a drop before the first live event still defines a gap; the query runs
+  under ONE fixed lower bound — `lastSeen − CatchUpOverlap` (1 s, absorbs the strict "after"
+  and timestamp rounding) — and pages with `Skip`, because a bound that moves per page skips
+  items sharing a page's last timestamp. Adding a trigger for a NEW artifact/event type needs
+  `RefreshAsync` to open its filtered stream; edits to existing triggers apply per event
+  without a restart.
 - **ITriggerStore is a breaking surface by design:** a new trigger kind adds per-kind members
   (get/save/delete); external store implementations break loudly at compile time instead of a
   feature silently no-opping.

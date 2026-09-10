@@ -17,7 +17,7 @@ public sealed class EventTriggerEngineTests
     {
         _core = new FakeCoreClient();
         _store = new InMemoryTriggerStore();
-        _engine = new EventTriggerEngine(_store, _core, NullLogger<EventTriggerEngine>.Instance);
+        _engine = new EventTriggerEngine(_store, _core, TimeProvider.System, NullLogger<EventTriggerEngine>.Instance);
     }
 
     [TearDown]
@@ -169,6 +169,76 @@ public sealed class EventTriggerEngineTests
         await WaitUntilAsync(() => _core.ConfigurationRuns.Count == 3);
         Assert.That(_core.ConfigurationRuns, Has.Count.EqualTo(3),
             "the missed event dispatches exactly once (dedupe), fresh live events keep flowing");
+    }
+
+    [Test]
+    public async Task DropBeforeAnyLiveEvent_StillCatchesUpFromTheConsumerStart()
+    {
+        await _store.SaveAsync(new EventTriggerDefinition
+        {
+            EventType = "review-ready", ConfigurationId = Guid.NewGuid()
+        });
+        await _engine.StartAsync(CancellationToken.None);
+        await WaitForSubscriptionsAsync(1);
+
+        // No live event was ever handled; the Core recycles and an event fires in the gap.
+        var missed = new EventDto(Guid.NewGuid(), "review-ready", "producer-wf", "WI-9", null,
+            null, DateTimeOffset.UtcNow);
+        _core.StoredEvents.Add(missed);
+        _core.DropAllEventStreams();
+
+        await WaitUntilAsync(() => _core.ConfigurationRuns.Count == 1);
+        Assert.That(_core.ConfigurationRuns.Single().Context!["EventId"],
+            Is.EqualTo(missed.Id.ToString("D")),
+            "the cursor is seeded at consumer start — the gap before the first live event is not lost");
+    }
+
+    [Test]
+    public async Task CatchUp_PagesUnderAFixedBound_SoASharedTimestampAtThePageEdgeIsNotSkipped()
+    {
+        await _store.SaveAsync(new EventTriggerDefinition
+        {
+            EventType = "review-ready", ConfigurationId = Guid.NewGuid()
+        });
+        await _engine.StartAsync(CancellationToken.None);
+        await WaitForSubscriptionsAsync(1);
+
+        // 201 events share ONE timestamp: the first page (200) ends on it, the 201st sits
+        // behind the page edge with the same CreatedUtc — a moving "after" bound would skip it.
+        var stamp = DateTimeOffset.UtcNow;
+        var gap = Enumerable.Range(0, 201)
+            .Select(_ => new EventDto(Guid.NewGuid(), "review-ready", "producer-wf", "WI-page", null, null, stamp))
+            .ToList();
+        _core.StoredEvents.AddRange(gap);
+        _core.DropAllEventStreams();
+
+        await WaitUntilAsync(() => _core.ConfigurationRuns.Count == 201);
+        var dispatchedIds = _core.ConfigurationRuns.Select(r => r.Context!["EventId"]).ToList();
+        Assert.That(dispatchedIds, Is.EquivalentTo(gap.Select(e => e.Id.ToString("D"))),
+            "every event of the gap dispatches exactly once");
+    }
+
+    [Test]
+    public async Task DispatchTimeout_DoesNotStopTheConsumer()
+    {
+        await _store.SaveAsync(new EventTriggerDefinition
+        {
+            EventType = "review-ready", ConfigurationId = Guid.NewGuid()
+        });
+        await _engine.StartAsync(CancellationToken.None);
+        await WaitForSubscriptionsAsync(1);
+
+        // A unary watchdog / HttpClient timeout wears an OperationCanceledException shape —
+        // it is NOT the engine's own stop signal and must not end the consumer.
+        _core.DispatchError = new TaskCanceledException("Core call timed out");
+        _core.PublishEvent(Event("review-ready", "WI-slow"));
+        await Task.Delay(100);
+        _core.DispatchError = null;
+
+        _core.PublishEvent(Event("review-ready", "WI-next"));
+        await WaitUntilAsync(() => _core.ConfigurationRuns.Count == 1);
+        Assert.That(_core.ConfigurationRuns.Single().Context!["WorkItemId"], Is.EqualTo("WI-next"),
+            "the consumer survives the timed-out dispatch and keeps dispatching");
     }
 
     [Test]

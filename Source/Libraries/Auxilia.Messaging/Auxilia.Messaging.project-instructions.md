@@ -6,6 +6,10 @@ Thin transport abstraction over RabbitMQ. All other projects depend on `IMessage
 
 `RabbitMqClient` uses one shared channel for publishing and creates a dedicated channel per `SubscribeAsync` call. W3C trace context is injected into message headers on publish and extracted on receive, keeping distributed traces connected across process boundaries. The `IAsyncDisposable` returned by `SubscribeAsync` tears down that channel.
 
+Publish semantics: the publish channel runs with **publisher confirmations tracked by the library** (`CreateChannelOptions(publisherConfirmationsEnabled, publisherConfirmationTrackingEnabled)`), so every `Publish*Async` completes only once the broker confirmed the message and throws `PublishException` on a nack/return — a message the broker never took is never reported as sent. Subscription dispose is leak-proof: the courtesy `BasicCancelAsync` is guarded (a channel closed by recovery makes it throw), and the consumer channel, the topic handle's bind channel, and its gate are released in nested `finally` blocks.
+
+Testing: the subscription handles are `internal` and unit-tested against Moq'd channels in `Tests/Libraries/Auxilia.Messaging.Tests`; everything with broker semantics (confirmations, ack/nack, routing, recovery) is covered only by the Docker system suite under `Tests/System/Auxilia.SystemTestSuite/Messaging/`.
+
 Consumer semantics (all subscription variants share one pipeline):
 - Every delivery is explicitly acked or nacked. A throwing handler nacks the delivery: a first delivery is requeued for one retry, an already-redelivered message is dropped as poison — resilience lives inside the client (repo rule), never in callers or decorators. A body that deserializes to `null` is nacked without requeue instead of being acked as handled. Failures are logged via the optional `ILogger` passed to `CreateAsync`.
 - Every consumer channel sets a per-consumer prefetch bound (`BasicQosAsync`, 32, non-global) so one node cannot pull an entire backlog into memory and defeat the competing-consumer shared-queue pattern.

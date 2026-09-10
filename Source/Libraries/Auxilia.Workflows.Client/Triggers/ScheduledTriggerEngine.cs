@@ -11,7 +11,8 @@ namespace Auxilia.Workflows.Client.Triggers;
 /// enabled trigger through the Core Run API on behalf of its run-as principal. Runs as an
 /// <see cref="IHostedService"/> in a server host, or a desktop host calls
 /// <see cref="TickAsync"/> on its own cadence — triggers fire only while some host runs.
-/// A single failing trigger is logged and skipped; the sweep continues.
+/// A single failing trigger is logged and skipped; a failing sweep (store or Core unreachable,
+/// a unary timeout) is logged and retried next tick. Only the engine's OWN token stops it.
 /// </summary>
 public sealed class ScheduledTriggerEngine(
     ITriggerStore store,
@@ -39,9 +40,20 @@ public sealed class ScheduledTriggerEngine(
         try
         {
             while (await timer.WaitForNextTickAsync(ct))
-                await TickAsync(ct);
+            {
+                try
+                {
+                    await TickAsync(ct);
+                }
+                catch (Exception ex) when (!ct.IsCancellationRequested)
+                {
+                    // The store read (or anything else outside the per-trigger guard) failed —
+                    // a slow Core is a TimeoutException, not a shutdown; retry next tick.
+                    logger.LogError(ex, "Scheduled trigger sweep failed — will retry next interval.");
+                }
+            }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             // Host shutdown.
         }
@@ -67,7 +79,7 @@ public sealed class ScheduledTriggerEngine(
                 logger.LogInformation(
                     "Scheduled trigger {TriggerId} dispatched. RunId={RunId}", trigger.Id, accepted.RunId);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!ct.IsCancellationRequested)
             {
                 logger.LogError(ex,
                     "Scheduled trigger {TriggerId} failed to dispatch — will retry next interval.", trigger.Id);
