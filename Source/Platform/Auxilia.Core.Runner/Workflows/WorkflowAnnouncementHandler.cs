@@ -50,6 +50,16 @@ public sealed class WorkflowAnnouncementHandler(
                 return;
             }
 
+            // The announced name selects the pending package + schema: it must be the type
+            // the token was issued for.
+            if (!tokenRegistry.Validate(message.WorkflowInstanceId, message.InstanceToken, message.WorkflowName))
+            {
+                logger.LogWarning(
+                    "Rejected WorkflowAnnouncement: announced {WorkflowName} but the instance token was issued for another type. InstanceId={InstanceId}",
+                    message.WorkflowName, message.WorkflowInstanceId);
+                return;
+            }
+
             // Authenticated instances are only ever answered on the queue the platform
             // pre-created at launch — the self-declared ResponseTopic is ignored.
             responseTopic = WorkflowQueues.ResponseQueueFor(message.WorkflowInstanceId);
@@ -59,7 +69,7 @@ public sealed class WorkflowAnnouncementHandler(
             "Received WorkflowAnnouncement: Workflow={WorkflowName} InstanceId={InstanceId}. Sending Run directive.",
             message.WorkflowName, message.WorkflowInstanceId);
 
-        if (pendingPackages.TryConsume(message.WorkflowName, out var extractedPath))
+        if (pendingPackages.TryConsume(message.WorkflowInstanceId, out var extractedPath))
         {
             var schemaJson = await File.ReadAllTextAsync(
                 Path.Combine(extractedPath, "workflow-schema.json"), ct);

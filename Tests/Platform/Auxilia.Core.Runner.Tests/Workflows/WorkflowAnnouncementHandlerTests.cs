@@ -29,7 +29,7 @@ public class WorkflowAnnouncementHandlerTests
 
         string? outPath;
         _mockPendingPackages
-            .Setup(p => p.TryConsume(It.IsAny<string>(), out outPath))
+            .Setup(p => p.TryConsume(It.IsAny<Guid>(), out outPath))
             .Returns(false);
 
         var disposable = new Mock<IAsyncDisposable>();
@@ -205,7 +205,7 @@ public class WorkflowAnnouncementHandlerTests
 
             string? outPath = tempDir;
             _mockPendingPackages
-                .Setup(p => p.TryConsume(workflowName, out outPath))
+                .Setup(p => p.TryConsume(instanceId, out outPath))
                 .Returns(true);
 
             var message = new WorkflowAnnouncementMessage(instanceId, workflowName, "pubkey", "reply-topic");
@@ -252,6 +252,21 @@ public class WorkflowAnnouncementHandlerTests
 
         var message = new WorkflowAnnouncementMessage(
             issued.WorkflowInstanceId, "wf", "pk", "self-declared", "wrong-token");
+        await _capturedHandler!(message, CancellationToken.None);
+
+        _mockBus.Verify(
+            b => b.PublishAsync(It.IsAny<string>(), It.IsAny<WorkflowDirective>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Test]
+    public async Task WhenTokenRequired_AndAnnouncedNameIsAnotherType_NoDirectiveIsPublished()
+    {
+        var issued = _tokenRegistry.Issue("wf");
+        await MakeTokenRequiringHandlerAsync();
+
+        var message = new WorkflowAnnouncementMessage(
+            issued.WorkflowInstanceId, "other-wf", "pk", "self-declared", issued.Token);
         await _capturedHandler!(message, CancellationToken.None);
 
         _mockBus.Verify(

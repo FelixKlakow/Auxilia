@@ -91,21 +91,59 @@ public class WorkflowInstanceTokenRegistryTests
         Assert.That(_sut.Validate(issued.WorkflowInstanceId, issued.Token), Is.True);
     }
 
+    // ------------------------------------------------------------------ Workflow-type binding
+
+    [Test]
+    public void Validate_ClaimedTypeMatchesIssuedType_ReturnsTrue()
+    {
+        var issued = _sut.Issue("wf-a");
+        Assert.That(_sut.Validate(issued.WorkflowInstanceId, issued.Token, "wf-a"), Is.True);
+    }
+
+    [Test]
+    public void Validate_ClaimedTypeDiffersFromIssuedType_ReturnsFalse()
+    {
+        // A run of type A must not be able to speak as type B with A's token.
+        var issued = _sut.Issue("wf-a");
+        Assert.That(_sut.Validate(issued.WorkflowInstanceId, issued.Token, "wf-b"), Is.False);
+    }
+
+    [Test]
+    public void Validate_ClaimedTypeIsCaseVariant_ReturnsFalse()
+    {
+        var issued = _sut.Issue("wf-a");
+        Assert.That(_sut.Validate(issued.WorkflowInstanceId, issued.Token, "WF-A"), Is.False);
+    }
+
+    [Test]
+    public void TryBeginRegistration_ClaimedTypeDiffersFromIssuedType_ReturnsFalseAndDoesNotRegister()
+    {
+        var issued = _sut.Issue("wf-a");
+
+        Assert.That(_sut.TryBeginRegistration(issued.WorkflowInstanceId, issued.Token, "wf-b"), Is.False);
+        Assert.Multiple(() =>
+        {
+            Assert.That(_sut.IsRegistered(issued.WorkflowInstanceId), Is.False);
+            Assert.That(_sut.TryBeginRegistration(issued.WorkflowInstanceId, issued.Token, "wf-a"), Is.True,
+                "A rejected cross-type attempt must not burn the legitimate registration.");
+        });
+    }
+
     // ------------------------------------------------------------------ TryBeginRegistration
 
     [Test]
     public void TryBeginRegistration_ValidToken_ReturnsTrue()
     {
         var issued = _sut.Issue("wf");
-        Assert.That(_sut.TryBeginRegistration(issued.WorkflowInstanceId, issued.Token), Is.True);
+        Assert.That(_sut.TryBeginRegistration(issued.WorkflowInstanceId, issued.Token, "wf"), Is.True);
     }
 
     [Test]
     public void TryBeginRegistration_SecondCall_ReturnsFalse()
     {
         var issued = _sut.Issue("wf");
-        Assert.That(_sut.TryBeginRegistration(issued.WorkflowInstanceId, issued.Token), Is.True);
-        Assert.That(_sut.TryBeginRegistration(issued.WorkflowInstanceId, issued.Token), Is.False,
+        Assert.That(_sut.TryBeginRegistration(issued.WorkflowInstanceId, issued.Token, "wf"), Is.True);
+        Assert.That(_sut.TryBeginRegistration(issued.WorkflowInstanceId, issued.Token, "wf"), Is.False,
             "Registration must be single-use.");
     }
 
@@ -113,7 +151,7 @@ public class WorkflowInstanceTokenRegistryTests
     public void TryBeginRegistration_WrongToken_ReturnsFalse()
     {
         var issued = _sut.Issue("wf");
-        Assert.That(_sut.TryBeginRegistration(issued.WorkflowInstanceId, "wrong"), Is.False);
+        Assert.That(_sut.TryBeginRegistration(issued.WorkflowInstanceId, "wrong", "wf"), Is.False);
         Assert.That(_sut.IsRegistered(issued.WorkflowInstanceId), Is.False);
     }
 
@@ -122,7 +160,7 @@ public class WorkflowInstanceTokenRegistryTests
     {
         var issued = _sut.Issue("wf");
         _time.Now += TimeSpan.FromMinutes(16);
-        Assert.That(_sut.TryBeginRegistration(issued.WorkflowInstanceId, issued.Token), Is.False);
+        Assert.That(_sut.TryBeginRegistration(issued.WorkflowInstanceId, issued.Token, "wf"), Is.False);
     }
 
     // ------------------------------------------------------------------ Post-registration token lifetime
@@ -132,7 +170,7 @@ public class WorkflowInstanceTokenRegistryTests
     {
         // The token remains the instance credential for just-in-time slot activations.
         var issued = _sut.Issue("wf");
-        _sut.TryBeginRegistration(issued.WorkflowInstanceId, issued.Token);
+        _sut.TryBeginRegistration(issued.WorkflowInstanceId, issued.Token, "wf");
 
         Assert.That(_sut.Validate(issued.WorkflowInstanceId, issued.Token), Is.True);
     }
@@ -142,7 +180,7 @@ public class WorkflowInstanceTokenRegistryTests
     {
         // The issuance lifetime bounds only the launch→registration window.
         var issued = _sut.Issue("wf");
-        _sut.TryBeginRegistration(issued.WorkflowInstanceId, issued.Token);
+        _sut.TryBeginRegistration(issued.WorkflowInstanceId, issued.Token, "wf");
 
         _time.Now += TimeSpan.FromMinutes(16);
 
@@ -170,7 +208,7 @@ public class WorkflowInstanceTokenRegistryTests
     public void IsRegistered_AfterRegistration_ReturnsTrue()
     {
         var issued = _sut.Issue("wf");
-        _sut.TryBeginRegistration(issued.WorkflowInstanceId, issued.Token);
+        _sut.TryBeginRegistration(issued.WorkflowInstanceId, issued.Token, "wf");
         Assert.That(_sut.IsRegistered(issued.WorkflowInstanceId), Is.True);
     }
 
@@ -184,7 +222,7 @@ public class WorkflowInstanceTokenRegistryTests
     public void Consume_RegisteredInstance_RemovesEntry()
     {
         var issued = _sut.Issue("wf");
-        _sut.TryBeginRegistration(issued.WorkflowInstanceId, issued.Token);
+        _sut.TryBeginRegistration(issued.WorkflowInstanceId, issued.Token, "wf");
 
         _sut.Consume(issued.WorkflowInstanceId);
 

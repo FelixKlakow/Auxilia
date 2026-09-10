@@ -3,9 +3,15 @@ using Auxilia.Workflows.Messaging.Messages;
 
 namespace Auxilia.Core.Runner.Workflows;
 
+/// <summary>
+/// Forwards every <see cref="CancelWorkflowCommand"/> from the shared <c>workflow.cancel-commands</c>
+/// queue to the instance's own <c>workflow-cancel-{id}</c> queue — UNCONDITIONALLY. The shared queue
+/// hands each cancel to ONE runner of the pool, which need not own the instance; forwarding by id
+/// (instead of dropping "unknown" instances) makes the per-instance queue the single meeting
+/// point, where the owning container's SDK consumes it.
+/// </summary>
 public sealed class WorkflowCancelDispatcher(
     IMessageBusClient messageBus,
-    WorkflowInstanceRegistry instanceRegistry,
     ILogger<WorkflowCancelDispatcher> logger)
 {
     private IAsyncDisposable? _subscription;
@@ -21,15 +27,6 @@ public sealed class WorkflowCancelDispatcher(
 
     private async Task HandleAsync(CancelWorkflowCommand command, CancellationToken ct)
     {
-        var typeName = await instanceRegistry.GetWorkflowTypeAsync(command.WorkflowInstanceId, ct);
-        if (typeName is null)
-        {
-            logger.LogWarning(
-                "Received CancelWorkflowCommand for unknown instance {InstanceId} — ignoring.",
-                command.WorkflowInstanceId);
-            return;
-        }
-
         var topic = $"workflow-cancel-{command.WorkflowInstanceId}";
         // Declare-before-publish: a cancel racing the workflow's startup must PARK on the queue
         // until the instance subscribes — published unrouted it is silently dropped, and a
@@ -38,8 +35,8 @@ public sealed class WorkflowCancelDispatcher(
         await messageBus.PublishAsync(topic, command, ct);
 
         logger.LogInformation(
-            "Dispatched cancel command to {Topic} for instance {InstanceId} (type: {WorkflowType}).",
-            topic, command.WorkflowInstanceId, typeName);
+            "Forwarded cancel command to {Topic} for instance {InstanceId}.",
+            topic, command.WorkflowInstanceId);
     }
 
     public async ValueTask StopAsync()

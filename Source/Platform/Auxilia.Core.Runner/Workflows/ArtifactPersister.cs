@@ -90,15 +90,8 @@ public sealed class ArtifactPersister(
                 "Artifact persisted. Run={InstanceId} Type={ArtifactType} Version={Version} Hash={Hash}",
                 instanceId, record.ArtifactType, record.Version, record.ContentHash);
         }
-
-        try
-        {
-            Directory.Delete(outputDir, recursive: true);
-        }
-        catch (IOException ex)
-        {
-            logger.LogWarning(ex, "Could not clean up output directory for run {InstanceId}.", instanceId);
-        }
+        // The output directory is not deleted here: RunRootsCleanup sweeps it on EVERY terminal
+        // path (the state handler calls it right after persistence), not only on success.
     }
 
     /// <summary>

@@ -458,6 +458,31 @@ public class WorkflowRegistrationHandlerTests
     }
 
     [Test]
+    public async Task HandleAsync_TokenRequired_ManifestNamesAnotherType_PublishesNothingAndKeepsSchemaUntouched()
+    {
+        // The token was issued for OtherWorkflow; the manifest claims SlotlessWorkflow and would
+        // otherwise rewrite SlotlessWorkflow's schema of record.
+        var registry = MakeTokenRegistry();
+        var issued = registry.Issue("OtherWorkflow");
+        var schemaStore = TestStores.NewWorkflowSchemaStore();
+
+        var bus = new CapturingFakeMessageBusClient();
+        var handler = MakeHandler(bus, tokenRegistry: registry, requireInstanceToken: true, schemaStore: schemaStore);
+        await handler.StartAsync(CancellationToken.None);
+
+        await bus.InvokeAsync(SlotlessRequest(issued.WorkflowInstanceId, issued.Token), CancellationToken.None);
+
+        Assert.Multiple(async () =>
+        {
+            Assert.That(bus.Published, Is.Empty);
+            Assert.That(handler.RegisteredCount, Is.Zero);
+            Assert.That(await schemaStore.GetSchemaAsync("SlotlessWorkflow"), Is.Null);
+            Assert.That(registry.IsRegistered(issued.WorkflowInstanceId), Is.False,
+                "A cross-type attempt must not burn the instance's single registration.");
+        });
+    }
+
+    [Test]
     public async Task HandleAsync_TokenRequired_TokenIsSingleUse_SecondRegistrationRejected()
     {
         var registry = MakeTokenRegistry();

@@ -43,6 +43,7 @@ public class WorkflowCancelPipelineComponentTests
                 services.AddSingleton<AuditLog>();
 
                 services.AddSingleton(TimeProvider.System);
+                services.AddSingleton(new CoreRunnerInfo(Guid.NewGuid(), DateTime.UtcNow));
                 services.AddSingleton<WorkflowStatusPublisher>();
                 services.AddSingleton<WorkflowInstanceRegistry>();
                 services.AddSingleton<Auxilia.Core.Runner.Workflows.Storage.WorkflowInstanceTokenRegistry>();
@@ -96,20 +97,21 @@ public class WorkflowCancelPipelineComponentTests
     }
 
     [Test]
-    public async Task WhenCancelCommandPublished_UnknownInstance_NothingPublished()
+    public async Task WhenCancelCommandPublished_InstanceNotOwnedHere_IsForwardedToPerInstanceTopic()
     {
-        var unknownId = Guid.NewGuid();
-        var command = new CancelWorkflowCommand(unknownId);
+        // In a runner pool the shared queue delivers the cancel to ANY runner; it must still
+        // reach the owning container via the per-instance queue.
+        var foreignId = Guid.NewGuid();
+        var command = new CancelWorkflowCommand(foreignId);
+        var cancelTopic = $"workflow-cancel-{foreignId}";
 
         await _bus.SimulateReceivedAsync("workflow.cancel-commands", command);
 
-        await Task.Delay(200);
-
-        var cancelTopic = $"workflow-cancel-{unknownId}";
-        Assert.That(
-            _bus.PublishedMessages.Any(m => m.Topic == cancelTopic),
-            Is.False,
-            "A cancel message was unexpectedly published for an unknown instance.");
+        var published = await _bus.WaitForConditionAsync(
+            () => _bus.PublishedMessages.Any(m => m.Topic == cancelTopic),
+            Timeout);
+        Assert.That(published, Is.True,
+            "A cancel for an instance this runner does not own must still be forwarded by id.");
     }
 
     [Test]

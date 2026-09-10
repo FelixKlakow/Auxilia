@@ -102,7 +102,7 @@ public class WorkflowDispatcherDockerImageUriTests
         _mockHttpFactory    = new Mock<IHttpClientFactory>();
 
         _mockVerifier.Setup(v => v.Verify(It.IsAny<Stream>())).Returns(true);
-        _mockPendingPackages.Setup(p => p.Store(It.IsAny<string>(), It.IsAny<string>()));
+        _mockPendingPackages.Setup(p => p.Store(It.IsAny<Guid>(), It.IsAny<string>()));
         _mockLauncher
             .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new WorkflowLaunchResult());

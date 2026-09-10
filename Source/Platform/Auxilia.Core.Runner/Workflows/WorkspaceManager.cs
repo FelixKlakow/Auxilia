@@ -8,9 +8,13 @@ namespace Auxilia.Core.Runner.Workflows;
 
 /// <summary>
 /// Prepares per-run workspaces (ARCHITECTURE §9). Cached repositories are cloned once into
-/// the warm cache, refreshed via <c>git fetch</c> on reuse, and copied into an isolated
-/// per-run directory the launcher bind-mounts at <c>/workspace</c>. The copy is a plain
-/// recursive copy — CoW snapshots on non-overlayfs hosts are a documented follow-up.
+/// the warm cache, refreshed via <c>git fetch</c> on reuse (the checkout advanced to the
+/// fetched tip of the requested branch), and copied into an isolated per-run directory the
+/// launcher bind-mounts at <c>/workspace</c>. The copy is a plain recursive copy — CoW
+/// snapshots on non-overlayfs hosts are a documented follow-up. The cache is keyed by the
+/// credential-stripped URL; a clone credential is injected per git command
+/// (<c>-c url.&lt;tokened&gt;.insteadOf=&lt;stripped&gt;</c>) and never persisted in any
+/// <c>.git/config</c>.
 /// <c>NoCache</c> repositories are cloned straight into the run directory and never touch
 /// the cache. Empty workspaces (the non-git materializer) are fresh scratch directories under
 /// the same layout — no clone, no credential, no cache.
@@ -117,9 +121,11 @@ public sealed class WorkspaceManager(
         => Path.Combine(settings.Value.WorkspaceRootDirectory, instanceId.ToString("N"));
 
     /// <summary>
-    /// Clones the repository into the warm cache on first use; refreshes an existing entry
-    /// via <c>git fetch</c>. A failed fetch logs a warning and proceeds with the stale cache —
-    /// availability over freshness.
+    /// Clones the repository into the warm cache on first use; refreshes an existing entry via
+    /// an authenticated <c>git fetch</c> and advances the checkout to the fetched tip of the
+    /// requested (or default) branch, so runs start on the current commit. A failed fetch logs
+    /// a warning and proceeds with the stale cache — availability over freshness; the branch
+    /// checkout still happens from the refs the cache already holds.
     /// </summary>
     private async Task<string> EnsureWarmCacheAsync(RepositoryDeclaration repository, CancellationToken ct)
     {
@@ -133,7 +139,8 @@ public sealed class WorkspaceManager(
 
         try
         {
-            await RunGitAsync(["-C", cacheDir, "fetch", "--all", "--prune"], repository.CloneUrl, ct);
+            await RunGitAsync(
+                ["-C", cacheDir, "fetch", "--prune", "origin"], repository.CloneUrl, ct, authenticated: true);
         }
         catch (InvalidOperationException ex)
         {
@@ -141,12 +148,29 @@ public sealed class WorkspaceManager(
                 "Warm-cache fetch failed for repository {RepositoryId} ({CloneUrl}) — proceeding with the stale cache.",
                 repository.Id, StripUserInfo(repository.CloneUrl));
         }
+
+        var branch = repository.Branch ?? await DefaultBranchAsync(cacheDir, repository.CloneUrl, ct);
+        await RunGitAsync(
+            ["-C", cacheDir, "checkout", "--force", "-B", branch, $"refs/remotes/origin/{branch}"],
+            repository.CloneUrl, ct);
         return cacheDir;
+    }
+
+    /// <summary>The origin's default branch as recorded at clone time (<c>origin/HEAD</c>).</summary>
+    private static async Task<string> DefaultBranchAsync(string cacheDir, string cloneUrl, CancellationToken ct)
+    {
+        var head = await RunGitAsync(
+            ["-C", cacheDir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], cloneUrl, ct);
+        const string prefix = "origin/";
+        return head.StartsWith(prefix, StringComparison.Ordinal) ? head[prefix.Length..] : head;
     }
 
     private static async Task CloneAsync(RepositoryDeclaration repository, string targetDirectory, CancellationToken ct)
     {
-        var args = new List<string> { "clone", repository.CloneUrl };
+        // The clone always names the credential-stripped URL: that is what git records as the
+        // origin, so no .git/config — cache or per-run — ever holds the clone credential; the
+        // credential rides only in the command's own -c configuration (ARCHITECTURE §8).
+        var args = new List<string> { "clone", StripUserInfo(repository.CloneUrl) };
         if (repository.Branch is not null)
         {
             args.Add("--branch");
@@ -154,37 +178,30 @@ public sealed class WorkspaceManager(
         }
         args.Add(targetDirectory);
 
-        await RunGitAsync(args, repository.CloneUrl, ct);
+        await RunGitAsync(args, repository.CloneUrl, ct, authenticated: true);
 
-        // A tokened clone URL would otherwise sit in the copy's .git/config and ride into the
-        // workflow container — workflows never hold raw credentials (ARCHITECTURE §8).
         // EXCEPTION (Model B, decided 2026-07-27): a push-enabled mount keeps its scoped
         // credential on the per-run clone so the agent can push; each push is governed by the
         // agent's per-action permission policy, and the clone never enters the warm cache.
-        // When the connector supplied a push-scoped token, THAT replaces the clone credential
-        // on the remote — the container holds push authority only, not the full token.
-        if (repository.AllowPush)
-        {
-            if (repository.PushCloneUrl is { Length: > 0 } pushUrl
-                && !string.Equals(pushUrl, repository.CloneUrl, StringComparison.Ordinal))
-                await RunGitAsync(
-                    ["-C", targetDirectory, "remote", "set-url", "origin", pushUrl],
-                    repository.CloneUrl, ct);
+        // When the connector supplied a push-scoped token, THAT is the remote's credential —
+        // the container holds push authority only, not the full token.
+        if (!repository.AllowPush)
             return;
-        }
-        var stripped = StripUserInfo(repository.CloneUrl);
-        if (!string.Equals(stripped, repository.CloneUrl, StringComparison.Ordinal))
+        var pushUrl = repository.PushCloneUrl is { Length: > 0 } scoped ? scoped : repository.CloneUrl;
+        if (!string.Equals(pushUrl, StripUserInfo(repository.CloneUrl), StringComparison.Ordinal))
             await RunGitAsync(
-                ["-C", targetDirectory, "remote", "set-url", "origin", stripped],
+                ["-C", targetDirectory, "remote", "set-url", "origin", pushUrl],
                 repository.CloneUrl, ct);
     }
 
     /// <summary>
     /// Runs one git command with redirected output, a hard per-command timeout, and an empty
-    /// credential helper so git never prompts. Non-zero exit throws with the (redacted) stderr.
+    /// credential helper so git never prompts; returns the trimmed stdout. An
+    /// <paramref name="authenticated"/> command additionally receives the clone credential as a
+    /// per-invocation URL rewrite. Non-zero exit throws with the (redacted) stderr.
     /// </summary>
-    private static async Task RunGitAsync(
-        IReadOnlyList<string> args, string cloneUrl, CancellationToken ct)
+    private static async Task<string> RunGitAsync(
+        IReadOnlyList<string> args, string cloneUrl, CancellationToken ct, bool authenticated = false)
     {
         var psi = new ProcessStartInfo("git")
         {
@@ -194,6 +211,9 @@ public sealed class WorkspaceManager(
         };
         psi.ArgumentList.Add("-c");
         psi.ArgumentList.Add("credential.helper=");
+        if (authenticated)
+            foreach (var arg in CredentialConfigFor(cloneUrl))
+                psi.ArgumentList.Add(arg);
         foreach (var arg in args)
             psi.ArgumentList.Add(arg);
         psi.Environment["GIT_TERMINAL_PROMPT"] = "0";
@@ -219,27 +239,53 @@ public sealed class WorkspaceManager(
                 $"git {commandName} for {StripUserInfo(cloneUrl)} exceeded the {GitCommandTimeout.TotalMinutes:0}-minute timeout.");
         }
 
-        await stdoutTask;
+        var stdout = await stdoutTask;
         var stderr = await stderrTask;
 
         if (process.ExitCode != 0)
             throw new InvalidOperationException(
                 $"git {commandName} for {StripUserInfo(cloneUrl)} failed (exit {process.ExitCode}): {Redact(stderr, cloneUrl)}");
+        return stdout.Trim();
     }
 
-    /// <summary>Cache directory name: first 16 hex chars of the clone URL's SHA-256.</summary>
-    internal static string CacheKeyFor(string cloneUrl)
-        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(cloneUrl)))[..16].ToLowerInvariant();
+    /// <summary>
+    /// The per-command git configuration that injects a tokened URL's credential: a
+    /// <c>url.&lt;tokened&gt;.insteadOf=&lt;stripped&gt;</c> rewrite, applied only to that
+    /// invocation. Empty for a credential-less URL.
+    /// </summary>
+    internal static IReadOnlyList<string> CredentialConfigFor(string cloneUrl)
+    {
+        var stripped = StripUserInfo(cloneUrl);
+        return string.Equals(stripped, cloneUrl, StringComparison.Ordinal)
+            ? []
+            : ["-c", $"url.{cloneUrl}.insteadOf={stripped}"];
+    }
 
-    /// <summary>Strips userinfo (credentials) from a clone URL for logging.</summary>
+    /// <summary>
+    /// Cache directory name: first 16 hex chars of the credential-STRIPPED clone URL's SHA-256 —
+    /// a token rotation reuses the entry instead of adding a full clone.
+    /// </summary>
+    internal static string CacheKeyFor(string cloneUrl)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(StripUserInfo(cloneUrl))))[..16]
+            .ToLowerInvariant();
+
+    /// <summary>Strips userinfo (credentials) from a clone URL for logging and for git's origin.</summary>
     internal static string StripUserInfo(string cloneUrl)
         => Uri.TryCreate(cloneUrl, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.UserInfo)
-            ? uri.GetComponents(UriComponents.Scheme | UriComponents.HostAndPort | UriComponents.PathAndQuery,
+            // Host | Port (not HostAndPort): a default port stays implicit, so the stripped form
+            // equals the plain URL the dispatcher started from — same cache key, exact rewrite.
+            ? uri.GetComponents(
+                UriComponents.Scheme | UriComponents.Host | UriComponents.Port | UriComponents.PathAndQuery,
                 UriFormat.UriEscaped)
             : cloneUrl;
 
     private static string Redact(string text, string cloneUrl)
-        => text.Replace(cloneUrl, StripUserInfo(cloneUrl));
+    {
+        var redacted = text.Replace(cloneUrl, StripUserInfo(cloneUrl));
+        return Uri.TryCreate(cloneUrl, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.UserInfo)
+            ? redacted.Replace(uri.UserInfo, "***")
+            : redacted;
+    }
 
     private static void CopyDirectory(string sourceDirectory, string targetDirectory)
     {

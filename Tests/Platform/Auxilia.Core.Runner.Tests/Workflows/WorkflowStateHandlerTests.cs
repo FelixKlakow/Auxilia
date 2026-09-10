@@ -21,6 +21,7 @@ public class WorkflowStateHandlerTests
     private Func<WorkflowStateMessage, CancellationToken, Task>? _capturedHandler;
     private WorkflowInstanceRegistry _registry = null!;
     private WorkflowInstanceTokenRegistry _tokenRegistry = null!;
+    private CoreRunnerInfo _runnerInfo = null!;
     private string _tempRoot = null!;
     private WorkflowDispatcherSettings _settings = null!;
     private IArtifactStore _artifactStore = null!;
@@ -59,6 +60,7 @@ public class WorkflowStateHandlerTests
         _registry = TestStores.NewWorkflowInstanceRegistry();
         _tokenRegistry = new WorkflowInstanceTokenRegistry(
             Options.Create(new WorkflowDispatcherSettings()), TimeProvider.System);
+        _runnerInfo = TestStores.NewInstanceInfo();
         _tempRoot = Path.Combine(Path.GetTempPath(), $"auxilia-state-handler-{Guid.NewGuid():N}");
         _settings = new WorkflowDispatcherSettings
         {
@@ -71,6 +73,7 @@ public class WorkflowStateHandlerTests
             _mockBus.Object,
             _registry,
             _tokenRegistry,
+            _runnerInfo,
             TestStores.NewAuditLog(),
             TestStores.NewStatusPublisher(_mockBus.Object),
             TestStores.NewArtifactPersister(_mockBus.Object, _artifactStore, _settings),
@@ -83,6 +86,29 @@ public class WorkflowStateHandlerTests
 
         await _sut.StartAsync(CancellationToken.None);
     }
+
+    /// <summary>A run this runner launched: token issued for the type, record owned by us.</summary>
+    private async Task<IssuedInstanceToken> OwnedRunAsync(
+        string workflowType, string state = "Running", string? dispatchCommandJson = null,
+        Guid? ownerServiceId = null)
+    {
+        var issued = _tokenRegistry.Issue(workflowType);
+        await _registry.CreateAsync(
+            issued.WorkflowInstanceId, workflowType, state,
+            ownerServiceId ?? _runnerInfo.ServiceId, dispatchCommandJson);
+        return issued;
+    }
+
+    private static WorkflowStateMessage Terminal(
+        IssuedInstanceToken run, string workflowType, WorkflowState state = WorkflowState.Success,
+        string? error = null)
+        => new(run.WorkflowInstanceId, state, error, workflowType, run.Token);
+
+    private void VerifyNoStatusPublished()
+        => _mockBus.Verify(
+            b => b.PublishToTopicExchangeAsync(
+                "workflow.status", It.IsAny<string>(), It.IsAny<WorkflowStatusEvent>(), It.IsAny<CancellationToken>()),
+            Times.Never);
 
     [TearDown]
     public async Task TearDown()
@@ -140,15 +166,120 @@ public class WorkflowStateHandlerTests
     [Test]
     public async Task WhenStateReceived_ConsumesInstanceToken()
     {
-        var issued = _tokenRegistry.Issue("wf");
+        var issued = await OwnedRunAsync("wf");
         Assert.That(_tokenRegistry.Validate(issued.WorkflowInstanceId, issued.Token), Is.True);
 
-        await _capturedHandler!(
-            new WorkflowStateMessage(issued.WorkflowInstanceId, WorkflowState.Success, null),
-            CancellationToken.None);
+        await _capturedHandler!(Terminal(issued, "wf"), CancellationToken.None);
 
         Assert.That(_tokenRegistry.Validate(issued.WorkflowInstanceId, issued.Token), Is.False,
             "The instance credential must die with the run.");
+    }
+
+    // ------------------------------------------------------------------ Authentication + ownership
+
+    [Test]
+    public async Task WhenTokenMissing_IgnoresTheMessage()
+    {
+        var issued = await OwnedRunAsync("wf");
+        var runRoot = Path.Combine(_settings.WorkspaceRootDirectory, issued.WorkflowInstanceId.ToString("N"));
+        Directory.CreateDirectory(runRoot);
+
+        await _capturedHandler!(
+            new WorkflowStateMessage(issued.WorkflowInstanceId, WorkflowState.Success, null, "wf", InstanceToken: null),
+            CancellationToken.None);
+
+        Assert.Multiple(async () =>
+        {
+            Assert.That(_tokenRegistry.Validate(issued.WorkflowInstanceId, issued.Token), Is.True,
+                "An unauthenticated report must not consume the credential.");
+            Assert.That(Directory.Exists(runRoot), Is.True, "An unauthenticated report must not clean up.");
+            Assert.That((await _registry.GetAsync(issued.WorkflowInstanceId))!.State, Is.EqualTo("Running"));
+        });
+        VerifyNoStatusPublished();
+    }
+
+    [Test]
+    public async Task WhenAnotherRunsTokenIsPresented_IgnoresTheMessage()
+    {
+        // Every container holds the bus password: run B tries to end run A with B's own token.
+        var victim = await OwnedRunAsync("wf");
+        var attacker = await OwnedRunAsync("wf");
+        var runRoot = Path.Combine(_settings.WorkspaceRootDirectory, victim.WorkflowInstanceId.ToString("N"));
+        Directory.CreateDirectory(runRoot);
+
+        await _capturedHandler!(
+            new WorkflowStateMessage(victim.WorkflowInstanceId, WorkflowState.Success, null, "wf", attacker.Token),
+            CancellationToken.None);
+
+        Assert.Multiple(async () =>
+        {
+            Assert.That(_tokenRegistry.Validate(victim.WorkflowInstanceId, victim.Token), Is.True);
+            Assert.That(Directory.Exists(runRoot), Is.True);
+            Assert.That((await _registry.GetAsync(victim.WorkflowInstanceId))!.State, Is.EqualTo("Running"));
+        });
+        VerifyNoStatusPublished();
+    }
+
+    [Test]
+    public async Task WhenWorkflowNameDoesNotMatchTheIssuedType_IgnoresTheMessage()
+    {
+        var issued = await OwnedRunAsync("wf-a");
+
+        await _capturedHandler!(Terminal(issued, "wf-b"), CancellationToken.None);
+
+        Assert.That(_tokenRegistry.Validate(issued.WorkflowInstanceId, issued.Token), Is.True,
+            "A report under another type must be rejected, not consumed.");
+        VerifyNoStatusPublished();
+    }
+
+    [Test]
+    public async Task WhenNoRecordExists_PublishesNothing()
+    {
+        // A valid token without a lifecycle record is not ours to report on.
+        var issued = _tokenRegistry.Issue("wf");
+
+        await _capturedHandler!(Terminal(issued, "wf"), CancellationToken.None);
+
+        VerifyNoStatusPublished();
+    }
+
+    [Test]
+    public async Task WhenRecordIsOwnedByAnotherRunner_IgnoresTheMessage()
+    {
+        // The state exchange fans out to every runner: a non-owner must neither publish a
+        // status (it would corrupt the run's type to "unknown") nor tear anything down.
+        var issued = await OwnedRunAsync("wf", ownerServiceId: Guid.NewGuid());
+        var runRoot = Path.Combine(_settings.WorkspaceRootDirectory, issued.WorkflowInstanceId.ToString("N"));
+        Directory.CreateDirectory(runRoot);
+
+        await _capturedHandler!(Terminal(issued, "wf"), CancellationToken.None);
+
+        Assert.Multiple(async () =>
+        {
+            Assert.That(_tokenRegistry.Validate(issued.WorkflowInstanceId, issued.Token), Is.True);
+            Assert.That(Directory.Exists(runRoot), Is.True);
+            Assert.That((await _registry.GetAsync(issued.WorkflowInstanceId))!.State, Is.EqualTo("Running"));
+        });
+        VerifyNoStatusPublished();
+    }
+
+    [Test]
+    public async Task WhenOwnedAndAuthenticated_PublishesTerminalStatusWithTheRecordedType()
+    {
+        var issued = await OwnedRunAsync("wf");
+        WorkflowStatusEvent? published = null;
+        _mockBus
+            .Setup(b => b.PublishToTopicExchangeAsync(
+                "workflow.status", It.IsAny<string>(), It.IsAny<WorkflowStatusEvent>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, WorkflowStatusEvent, CancellationToken>((_, _, e, _) => published = e)
+            .Returns(Task.CompletedTask);
+
+        await _capturedHandler!(Terminal(issued, "wf", WorkflowState.Failed, "boom"), CancellationToken.None);
+
+        Assert.That(published, Is.Not.Null);
+        Assert.That(published!.WorkflowType, Is.EqualTo("wf"));
+        Assert.That(published.State, Is.EqualTo("Failed"));
+        Assert.That((await _registry.GetAsync(issued.WorkflowInstanceId))!.State, Is.EqualTo("Failed"));
     }
 
     // ------------------------------------------------------------------ Workspace cleanup
@@ -158,15 +289,31 @@ public class WorkflowStateHandlerTests
     [TestCase(WorkflowState.Cancelled)]
     public async Task WhenTerminalStateReceived_RemovesRunWorkspace(WorkflowState state)
     {
-        var instanceId = Guid.NewGuid();
-        var runRoot = Path.Combine(_settings.WorkspaceRootDirectory, instanceId.ToString("N"));
+        var issued = await OwnedRunAsync("wf");
+        var runRoot = Path.Combine(_settings.WorkspaceRootDirectory, issued.WorkflowInstanceId.ToString("N"));
         Directory.CreateDirectory(runRoot);
 
-        await _capturedHandler!(
-            new WorkflowStateMessage(instanceId, state, null), CancellationToken.None);
+        await _capturedHandler!(Terminal(issued, "wf", state), CancellationToken.None);
 
         Assert.That(Directory.Exists(runRoot), Is.False,
             "The run's workspace must die with the run.");
+    }
+
+    [TestCase(WorkflowState.Success)]
+    [TestCase(WorkflowState.Failed)]
+    [TestCase(WorkflowState.Cancelled)]
+    public async Task WhenTerminalStateReceived_RemovesTheRunOutputDirectory_EvenWithoutDeclaredOutputs(
+        WorkflowState state)
+    {
+        var issued = await OwnedRunAsync("wf");
+        var outputRoot = Path.Combine(_settings.RunOutputDirectory, issued.WorkflowInstanceId.ToString("N"));
+        Directory.CreateDirectory(outputRoot);
+        await File.WriteAllTextAsync(Path.Combine(outputRoot, "scratch.txt"), "left behind by the run");
+
+        await _capturedHandler!(Terminal(issued, "wf", state), CancellationToken.None);
+
+        Assert.That(Directory.Exists(outputRoot), Is.False,
+            "The per-run output directory must be swept on every terminal path, not only Success-with-outputs.");
     }
 
     // ------------------------------------------------------------------ Drain-and-replace
@@ -174,13 +321,11 @@ public class WorkflowStateHandlerTests
     [Test]
     public async Task WhenDrainingInstanceReachesTerminalState_RepublishesStoredCommandWithFreshCommandId()
     {
-        var instanceId = Guid.NewGuid();
         var original = new RunWorkflowCommand(
             Guid.NewGuid(), "service-workflow", "https://example.com/service-workflow.zip",
             new Dictionary<string, string> { ["KEY"] = "value" });
-        await _registry.CreateAsync(
-            instanceId, "service-workflow", "Draining",
-            dispatchCommandJson: JsonSerializer.Serialize(original));
+        var issued = await OwnedRunAsync(
+            "service-workflow", "Draining", JsonSerializer.Serialize(original));
 
         RunWorkflowCommand? replacement = null;
         _mockBus
@@ -188,8 +333,7 @@ public class WorkflowStateHandlerTests
             .Callback<string, RunWorkflowCommand, CancellationToken>((_, cmd, _) => replacement = cmd)
             .Returns(Task.CompletedTask);
 
-        await _capturedHandler!(
-            new WorkflowStateMessage(instanceId, WorkflowState.Success, null), CancellationToken.None);
+        await _capturedHandler!(Terminal(issued, "service-workflow"), CancellationToken.None);
 
         _mockBus.Verify(
             b => b.PublishAsync(CommandQueue, It.IsAny<RunWorkflowCommand>(), It.IsAny<CancellationToken>()),
@@ -208,7 +352,7 @@ public class WorkflowStateHandlerTests
         // must ride the bus with the plaintext, exactly like the original dispatch did.
         var protector = new TestStores.PrefixSettingsProtector();
         var handler = new WorkflowStateHandler(
-            _mockBus.Object, _registry, _tokenRegistry, TestStores.NewAuditLog(),
+            _mockBus.Object, _registry, _tokenRegistry, _runnerInfo, TestStores.NewAuditLog(),
             TestStores.NewStatusPublisher(_mockBus.Object),
             TestStores.NewArtifactPersister(_mockBus.Object, _artifactStore, _settings),
             TestStores.NewWorkspaceManager(_settings),
@@ -216,14 +360,12 @@ public class WorkflowStateHandlerTests
             Options.Create(_settings), protector, NullLogger<WorkflowStateHandler>.Instance);
         await handler.StartAsync(CancellationToken.None);
 
-        var instanceId = Guid.NewGuid();
         var stored = new RunWorkflowCommand(
             Guid.NewGuid(), "service-workflow", "docker://svc",
             new Dictionary<string, string>(),
             ResolutionToken: protector.Protect("plain-resolution-token"));
-        await _registry.CreateAsync(
-            instanceId, "service-workflow", "Draining",
-            dispatchCommandJson: JsonSerializer.Serialize(stored));
+        var issued = await OwnedRunAsync(
+            "service-workflow", "Draining", JsonSerializer.Serialize(stored));
 
         RunWorkflowCommand? replacement = null;
         _mockBus
@@ -231,8 +373,7 @@ public class WorkflowStateHandlerTests
             .Callback<string, RunWorkflowCommand, CancellationToken>((_, cmd, _) => replacement = cmd)
             .Returns(Task.CompletedTask);
 
-        await _capturedHandler!(
-            new WorkflowStateMessage(instanceId, WorkflowState.Success, null), CancellationToken.None);
+        await _capturedHandler!(Terminal(issued, "service-workflow"), CancellationToken.None);
         await handler.StopAsync();
 
         Assert.That(replacement, Is.Not.Null);
@@ -243,16 +384,13 @@ public class WorkflowStateHandlerTests
     [Test]
     public async Task WhenRunningInstanceReachesTerminalState_DoesNotRedispatch()
     {
-        var instanceId = Guid.NewGuid();
         var original = new RunWorkflowCommand(
             Guid.NewGuid(), "service-workflow", "https://example.com/service-workflow.zip",
             new Dictionary<string, string>());
-        await _registry.CreateAsync(
-            instanceId, "service-workflow", "Running",
-            dispatchCommandJson: JsonSerializer.Serialize(original));
+        var issued = await OwnedRunAsync(
+            "service-workflow", "Running", JsonSerializer.Serialize(original));
 
-        await _capturedHandler!(
-            new WorkflowStateMessage(instanceId, WorkflowState.Success, null), CancellationToken.None);
+        await _capturedHandler!(Terminal(issued, "service-workflow"), CancellationToken.None);
 
         _mockBus.Verify(
             b => b.PublishAsync(CommandQueue, It.IsAny<RunWorkflowCommand>(), It.IsAny<CancellationToken>()),
@@ -264,13 +402,12 @@ public class WorkflowStateHandlerTests
     [Test]
     public async Task WhenSuccessWithDeclaredOutputs_PersistsArtifactWithWorkItemIdFromDispatchContext()
     {
-        var instanceId = Guid.NewGuid();
         var command = new RunWorkflowCommand(
             Guid.NewGuid(), "review-workflow", "docker://review-workflow:test",
             new Dictionary<string, string> { ["WorkItemId"] = "WI-1" });
-        await _registry.CreateAsync(
-            instanceId, "review-workflow", "Running",
-            dispatchCommandJson: JsonSerializer.Serialize(command));
+        var issued = await OwnedRunAsync(
+            "review-workflow", "Running", JsonSerializer.Serialize(command));
+        var instanceId = issued.WorkflowInstanceId;
         await _registry.RegisterAsync(
             instanceId, "review-workflow",
             outputsJson: JsonSerializer.Serialize(new List<WorkflowOutputDescriptor>
@@ -292,8 +429,7 @@ public class WorkflowStateHandlerTests
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        await _capturedHandler!(
-            new WorkflowStateMessage(instanceId, WorkflowState.Success, null), CancellationToken.None);
+        await _capturedHandler!(Terminal(issued, "review-workflow"), CancellationToken.None);
 
         var lineage = await _artifactStore.GetLineageAsync("review-result", "WI-1");
         Assert.That(lineage, Has.Count.EqualTo(1), "The declared output must be persisted for the dispatch's work item.");

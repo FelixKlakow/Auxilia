@@ -12,14 +12,12 @@ public class WorkflowCancelDispatcherTests
 {
     private Mock<IMessageBusClient> _mockBus = null!;
     private Func<CancelWorkflowCommand, CancellationToken, Task>? _capturedHandler;
-    private WorkflowInstanceRegistry _registry = null!;
     private WorkflowCancelDispatcher _sut = null!;
 
     [SetUp]
     public async Task SetUp()
     {
         _mockBus = new Mock<IMessageBusClient>(MockBehavior.Strict);
-        _registry = TestStores.NewWorkflowInstanceRegistry();
 
         var disposable = new Mock<IAsyncDisposable>();
         disposable.Setup(d => d.DisposeAsync()).Returns(ValueTask.CompletedTask);
@@ -39,7 +37,6 @@ public class WorkflowCancelDispatcherTests
 
         _sut = new WorkflowCancelDispatcher(
             _mockBus.Object,
-            _registry,
             NullLogger<WorkflowCancelDispatcher>.Instance);
 
         await _sut.StartAsync(CancellationToken.None);
@@ -68,10 +65,9 @@ public class WorkflowCancelDispatcherTests
     }
 
     [Test]
-    public async Task WhenKnownInstanceReceived_PublishesCancelCommandToPerInstanceTopic()
+    public async Task WhenCancelReceived_PublishesCancelCommandToPerInstanceTopic()
     {
         var instanceId = Guid.NewGuid();
-        await _registry.RegisterAsync(instanceId, "test-workflow");
 
         var command = new CancelWorkflowCommand(instanceId);
         var expectedTopic = $"workflow-cancel-{instanceId}";
@@ -102,12 +98,24 @@ public class WorkflowCancelDispatcherTests
     }
 
     [Test]
-    public async Task WhenUnknownInstanceReceived_DoesNotPublishAnything()
+    public async Task WhenInstanceIsNotOwnedByThisRunner_StillForwardsToThePerInstanceQueue()
     {
-        var command = new CancelWorkflowCommand(Guid.NewGuid());
+        // The shared cancel queue hands the command to ONE runner of the pool — not necessarily
+        // the owner. Forwarding by id is what makes the per-instance queue the meeting point.
+        var instanceId = Guid.NewGuid();
+        var command = new CancelWorkflowCommand(instanceId);
+        var expectedTopic = $"workflow-cancel-{instanceId}";
+        _mockBus
+            .Setup(b => b.DeclareQueueAsync(expectedTopic, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _mockBus
+            .Setup(b => b.PublishAsync(expectedTopic, command, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
-        // Act + Assert: strict mock has no PublishAsync setup, so any call would throw MockException.
-        // Completing without exception proves PublishAsync was never invoked.
-        Assert.DoesNotThrowAsync(() => _capturedHandler!(command, CancellationToken.None));
+        await _capturedHandler!(command, CancellationToken.None);
+
+        _mockBus.Verify(
+            b => b.PublishAsync(expectedTopic, command, It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 }

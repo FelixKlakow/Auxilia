@@ -42,10 +42,20 @@ public sealed class WorkflowInstanceTokenRegistry(
 
     /// <summary>Valid token for an instance that has not yet registered or is registered.</summary>
     public bool Validate(Guid workflowInstanceId, string? token)
+        => Validate(workflowInstanceId, token, claimedWorkflowType: null);
+
+    /// <summary>
+    /// Valid token AND the claimed workflow type equals the type the token was issued for:
+    /// a run of type A can never speak (announce, register, report state) as type B.
+    /// </summary>
+    public bool Validate(Guid workflowInstanceId, string? token, string? claimedWorkflowType)
     {
         if (string.IsNullOrEmpty(token))
             return false;
         if (!_entries.TryGetValue(workflowInstanceId, out var entry))
+            return false;
+        if (claimedWorkflowType is not null &&
+            !string.Equals(claimedWorkflowType, entry.WorkflowType, StringComparison.Ordinal))
             return false;
 
         // The issuance lifetime bounds only the unregistered launch window; once
@@ -63,12 +73,12 @@ public sealed class WorkflowInstanceTokenRegistry(
     }
 
     /// <summary>
-    /// Validates the token and marks the instance registered — exactly once. A second
-    /// registration attempt with the same token is rejected.
+    /// Validates the token against the manifest's workflow type and marks the instance
+    /// registered — exactly once. A second registration attempt with the same token is rejected.
     /// </summary>
-    public bool TryBeginRegistration(Guid workflowInstanceId, string? token)
+    public bool TryBeginRegistration(Guid workflowInstanceId, string? token, string claimedWorkflowType)
     {
-        if (!Validate(workflowInstanceId, token))
+        if (!Validate(workflowInstanceId, token, claimedWorkflowType))
             return false;
         if (!_entries.TryGetValue(workflowInstanceId, out var entry))
             return false;

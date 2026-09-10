@@ -65,7 +65,7 @@ public class ArtifactPersisterTests
         => JsonSerializer.Serialize(outputs.ToList());
 
     [Test]
-    public async Task DeclaredOutputPresent_SavesAuditsPublishesAndDeletesOutputDirectory()
+    public async Task DeclaredOutputPresent_SavesAuditsAndPublishes_LeavingTheSweepToRunRootsCleanup()
     {
         var outputDir = CreateOutputDirectory();
         await File.WriteAllTextAsync(Path.Combine(outputDir, "result.json"), """{"verdict":"approve"}""");
@@ -110,8 +110,8 @@ public class ArtifactPersisterTests
         Assert.That(auditQuery.Any(a => a.Action == "artifact.persisted"), Is.True,
             "Persisting an artifact must be audited.");
 
-        Assert.That(Directory.Exists(outputDir), Is.False,
-            "The run's output directory must be cleaned up after persistence.");
+        Assert.That(Directory.Exists(outputDir), Is.True,
+            "Persistence must not sweep the output root itself — RunRootsCleanup does, on every terminal path.");
     }
 
     [Test]

@@ -224,6 +224,33 @@ public class WorkflowDispatcherWorkspaceTests
     }
 
     [Test]
+    public async Task WhenPreFlightFailsAfterWorkspacePreparation_TheRunRootsAreSwept()
+    {
+        // The launch is the last pre-flight step: the workspace (a real clone) and the output
+        // directory already exist when it fails.
+        await SeedSchemaAsync(new RepositoryDeclaration("main", _originRepo));
+        WorkflowLaunchRequest? captured = null;
+        _mockLauncher
+            .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
+            .ThrowsAsync(new InvalidOperationException("docker down"));
+
+        await _capturedHandler!(NewRunCommand(), CancellationToken.None);
+
+        Assert.That(captured, Is.Not.Null);
+        var instanceId = Guid.Parse(captured!.EnvironmentVariables[WorkflowEnvironmentVariables.InstanceId]);
+        Assert.Multiple(() =>
+        {
+            Assert.That(_statusEvents.Any(e => e.State == "PreFlightFailed"), Is.True);
+            Assert.That(Directory.Exists(captured.WorkspaceDirectoryBind!), Is.False,
+                "A failed pre-flight must not leave the prepared workspace (and its clone) on disk.");
+            Assert.That(
+                Directory.Exists(Path.Combine(_dispatcherSettings.RunOutputDirectory, instanceId.ToString("N"))),
+                Is.False, "A failed pre-flight must not leave the run's output directory on disk.");
+        });
+    }
+
+    [Test]
     public async Task WhenCommandCarriesAuthenticatedRepository_ResolvesCredentialJit_AndPreparesWorkspace()
     {
         WorkflowLaunchRequest? captured = null;

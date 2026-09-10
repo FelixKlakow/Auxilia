@@ -11,6 +11,7 @@ public sealed class WorkflowStateHandler(
     IMessageBusClient messageBus,
     WorkflowInstanceRegistry instanceRegistry,
     Storage.WorkflowInstanceTokenRegistry tokenRegistry,
+    CoreRunnerInfo runnerInfo,
     AuditLog auditLog,
     WorkflowStatusPublisher statusPublisher,
     ArtifactPersister artifactPersister,
@@ -34,6 +35,31 @@ public sealed class WorkflowStateHandler(
 
     private async Task HandleAsync(WorkflowStateMessage message, CancellationToken ct)
     {
+        // Every container holds the bus password: only the instance itself (its token, bound to
+        // its type) may report its terminal state — otherwise any run could end any other run.
+        if (dispatcherSettings.Value.RequireInstanceToken &&
+            !tokenRegistry.Validate(message.WorkflowInstanceId, message.InstanceToken, message.WorkflowName))
+        {
+            logger.LogWarning(
+                "Rejected WorkflowStateMessage with missing or invalid instance token. InstanceId={InstanceId} Workflow={WorkflowName} State={State}",
+                message.WorkflowInstanceId, message.WorkflowName, message.State);
+            await auditLog.AppendAsync(
+                "steering-instance", "workflow.state.rejected",
+                message.WorkflowInstanceId.ToString(), "invalid-instance-token", ct: ct);
+            return;
+        }
+
+        // The state exchange fans out to every runner; only the owner acts. A foreign or
+        // unknown instance is not ours to terminate, publish, or clean up.
+        var record = await instanceRegistry.GetAsync(message.WorkflowInstanceId, ct);
+        if (record is null || record.OwnerServiceId != runnerInfo.ServiceId)
+        {
+            logger.LogDebug(
+                "Ignoring WorkflowStateMessage for instance {InstanceId} — not owned by this runner.",
+                message.WorkflowInstanceId);
+            return;
+        }
+
         switch (message.State)
         {
             case WorkflowState.Success:
@@ -58,17 +84,15 @@ public sealed class WorkflowStateHandler(
                 break;
         }
 
-        var record = await instanceRegistry.GetAsync(message.WorkflowInstanceId, ct);
-
         // The instance credential dies with the run — no further slot activations.
         tokenRegistry.Consume(message.WorkflowInstanceId);
 
         await instanceRegistry.SetStateAsync(
             message.WorkflowInstanceId, message.State.ToString(), message.ErrorMessage, ct);
         await statusPublisher.PublishAsync(
-            message.WorkflowInstanceId, record?.WorkflowType ?? "unknown",
+            message.WorkflowInstanceId, record.WorkflowType,
             message.State.ToString(), message.ErrorMessage,
-            ownerServiceId: record?.OwnerServiceId, ct: ct);
+            ownerServiceId: record.OwnerServiceId, ct: ct);
         await auditLog.AppendAsync(
             "steering-instance", "workflow.state-changed",
             message.WorkflowInstanceId.ToString(), message.State.ToString(),
@@ -76,28 +100,32 @@ public sealed class WorkflowStateHandler(
             ct);
 
         var workItemId = string.Empty;
-        if (record?.DispatchCommandJson is not null)
+        if (record.DispatchCommandJson is not null)
         {
             var command = JsonSerializer.Deserialize<RunWorkflowCommand>(record.DispatchCommandJson);
             command?.Context.TryGetValue("WorkItemId", out workItemId!);
         }
 
         // Declared outputs of a successful run are persisted to the artifact store.
-        if (message.State == WorkflowState.Success && record is not null)
+        if (message.State == WorkflowState.Success)
             await artifactPersister.PersistOutputsAsync(
                 message.WorkflowInstanceId, record.WorkflowType, record.OutputsJson,
                 workItemId ?? string.Empty, ct);
 
-        // The run's repository workspace AND pod die with the run (ARCHITECTURE §9, run-pod
-        // design §A); every companion's log tail becomes a post-mortem artifact first.
+        // The run's repository workspace, pod AND output directory die with the run on every
+        // terminal state (ARCHITECTURE §9, run-pod design §A) — after the declared outputs were
+        // persisted; every companion's log tail becomes a post-mortem artifact. The extracted
+        // package is NOT swept here: the container may still be exiting, and the exit watcher
+        // deletes it once the bind is released.
         if (message.State is WorkflowState.Success or WorkflowState.Failed or WorkflowState.Cancelled)
         {
-            await workspaceManager.CleanupAsync(message.WorkflowInstanceId);
             podControlRegistry.Consume(message.WorkflowInstanceId);
-            var companionLogs = await podHost.TeardownAsync(message.WorkflowInstanceId, ct);
+            var companionLogs = await RunRootsCleanup.CleanupAsync(
+                workspaceManager, podHost, dispatcherSettings.Value, logger,
+                message.WorkflowInstanceId, includePackage: false, ct);
             if (companionLogs.Count > 0)
                 await artifactPersister.PersistCompanionLogsAsync(
-                    message.WorkflowInstanceId, record?.WorkflowType ?? "unknown",
+                    message.WorkflowInstanceId, record.WorkflowType,
                     companionLogs, workItemId ?? string.Empty, ct);
         }
 

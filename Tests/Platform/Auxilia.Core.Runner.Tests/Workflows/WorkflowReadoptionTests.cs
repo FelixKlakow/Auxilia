@@ -97,7 +97,7 @@ public sealed class WorkflowReadoptionTests
             Assert.That(registry.Validate(instanceId, "tok-123"), Is.True,
                 "the restored token must keep JIT slot activations working");
             Assert.That(registry.IsRegistered(instanceId), Is.True);
-            Assert.That(registry.TryBeginRegistration(instanceId, "tok-123"), Is.False,
+            Assert.That(registry.TryBeginRegistration(instanceId, "tok-123", "wf-type"), Is.False,
                 "a registered instance must not register a second time");
         });
     }
@@ -111,7 +111,7 @@ public sealed class WorkflowReadoptionTests
 
         registry.Restore(instanceId, "tok-456", "wf-type", registered: false);
 
-        Assert.That(registry.TryBeginRegistration(instanceId, "tok-456"), Is.True,
+        Assert.That(registry.TryBeginRegistration(instanceId, "tok-456", "wf-type"), Is.True,
             "a not-yet-registered instance may still complete its (single) registration");
     }
 

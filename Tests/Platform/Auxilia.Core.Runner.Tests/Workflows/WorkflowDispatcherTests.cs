@@ -96,7 +96,7 @@ public class WorkflowDispatcherTests
         _mockPendingPackages = new Mock<PendingWorkflowPackageStore>();
 
         _mockVerifier.Setup(v => v.Verify(It.IsAny<Stream>())).Returns(true);
-        _mockPendingPackages.Setup(p => p.Store(It.IsAny<string>(), It.IsAny<string>()));
+        _mockPendingPackages.Setup(p => p.Store(It.IsAny<Guid>(), It.IsAny<string>()));
 
         var disposable = new Mock<IAsyncDisposable>();
         disposable.Setup(d => d.DisposeAsync()).Returns(ValueTask.CompletedTask);
@@ -337,8 +337,58 @@ public class WorkflowDispatcherTests
         await _capturedHandler!(command, CancellationToken.None);
 
         _mockPendingPackages.Verify(
-            p => p.Store("my-workflow", It.Is<string>(s => s.Contains("auxilia-wf-"))),
+            p => p.Store(It.IsAny<Guid>(), It.Is<string>(s => s.Contains("auxilia-wf-"))),
             Times.Once);
+    }
+
+    [Test]
+    public async Task WhenRunCommandReceived_RegistersThePackageUnderTheRunsInstanceId()
+    {
+        Guid? storedFor = null;
+        _mockPendingPackages
+            .Setup(p => p.Store(It.IsAny<Guid>(), It.IsAny<string>()))
+            .Callback<Guid, string>((id, _) => storedFor = id);
+        WorkflowLaunchRequest? captured = null;
+        _mockLauncher
+            .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
+            .ReturnsAsync(new WorkflowLaunchResult());
+
+        await _capturedHandler!(
+            new RunWorkflowCommand(
+                Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
+                new Dictionary<string, string>()),
+            CancellationToken.None);
+
+        var instanceId = Guid.Parse(captured!.EnvironmentVariables[WorkflowEnvironmentVariables.InstanceId]);
+        Assert.Multiple(() =>
+        {
+            Assert.That(storedFor, Is.EqualTo(instanceId),
+                "two concurrent runs of one type must never overwrite each other's package");
+            Assert.That(captured.ExtractedContentDirectory,
+                Is.EqualTo(RunRootsCleanup.PackageDirectoryFor(instanceId)),
+                "the extraction directory is deterministic per run so every cleanup path finds it");
+        });
+    }
+
+    [Test]
+    public async Task WhenPackageLaunchFails_TheExtractedPackageIsDeleted()
+    {
+        WorkflowLaunchRequest? captured = null;
+        _mockLauncher
+            .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
+            .ThrowsAsync(new InvalidOperationException("docker down"));
+
+        await _capturedHandler!(
+            new RunWorkflowCommand(
+                Guid.NewGuid(), "my-workflow", "https://example.com/test.workflow.zip",
+                new Dictionary<string, string>()),
+            CancellationToken.None);
+
+        Assert.That(captured, Is.Not.Null);
+        Assert.That(Directory.Exists(captured!.ExtractedContentDirectory), Is.False,
+            "a pre-flight failure after extraction must not leak the extracted package");
     }
 
     // ------------------------------------------------------------------ SlotPluginFile enrichment
@@ -662,6 +712,22 @@ public class WorkflowDispatcherTests
 
         var record = await _instanceRegistry.GetAsync(instanceId);
         Assert.That(record!.State, Is.EqualTo("Success"), "a normal exit after completion is not a failure");
+    }
+
+    [TestCase("Success")]
+    [TestCase("Queued")]
+    public async Task ContainerExit_DeletesTheExtractedPackage_WhateverTheOutcome(string state)
+    {
+        var instanceId = Guid.NewGuid();
+        await _instanceRegistry.CreateAsync(instanceId, "my-workflow", state);
+        var packageDir = RunRootsCleanup.PackageDirectoryFor(instanceId);
+        Directory.CreateDirectory(packageDir);
+        await File.WriteAllTextAsync(Path.Combine(packageDir, "package-manifest.json"), "{}");
+
+        await _sut.HandleContainerExitAsync(instanceId, "my-workflow", new ContainerExit(0, null));
+
+        Assert.That(Directory.Exists(packageDir), Is.False,
+            "the extracted ZIP is released with the container's read-only bind — on every exit");
     }
 
     // ------------------------------------------------------------------ Resolution token at rest

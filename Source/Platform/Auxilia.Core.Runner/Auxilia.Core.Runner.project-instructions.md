@@ -7,7 +7,7 @@ In the Core-separation architecture the runner is driven by `Auxilia.Core.Api` o
 ## Architecture
 Durable runner state (workflow schemas, slot-handler provider registrations, signal handlers, run lifecycle records, audit log) lives in stores under `Workflows/Storage/` — async repositories over `IDataAccess<TEntity>` from `Auxilia.PlatformData` (backend per the `PlatformData` config section: Json default, MongoDb for replicated production, InMemory for tests). Only the package stores (`PendingWorkflowPackageStore` / `WorkflowPackageStore`, host-local paths) and `WorkflowInstanceTokenRegistry` (ephemeral one-time tokens) are in-memory by design — the instance record persists the **container id + protected instance token** precisely so a restarted runner can RE-ADOPT its containers (`WorkflowReadoptionService`, first startup step: re-claim under the fresh ServiceId, re-attach exit watchers, restore tokens, collect downtime exits, clean-kill the unmatchable). **The runner stores no slot configurations or connector secrets** — those belong to the Core.
 
-The registration handshake is **authenticated by default** (`WorkflowDispatcherSettings.RequireInstanceToken`): the dispatcher issues a one-time instance token per launch (`WorkflowInstanceTokenRegistry`), injects it via `Workflow__InstanceId` / `Workflow__InstanceToken` env vars, and pre-creates the per-instance response queue. Announcement and registration handlers validate the token and answer only on that canonical queue, ignoring the message's self-declared response topic. When several runners share a broker, `AnnouncementQueueName` / `RegistrationQueueName` must be unique per instance. `WorkflowRegistrationHandler` is started manually in `ApplicationStarted`, not as an `IHostedService`; it validates the environment, persists the manifest schema (`WorkflowSchemaStore`), and resolves signal handlers — it delivers **no** credentials (every slot activates just-in-time via the Core).
+The registration handshake is **authenticated by default** (`WorkflowDispatcherSettings.RequireInstanceToken`): the dispatcher issues a one-time instance token per launch (`WorkflowInstanceTokenRegistry`), injects it via `Workflow__InstanceId` / `Workflow__InstanceToken` env vars, and pre-creates the per-instance response queue. Announcement and registration handlers validate the token **and its workflow-type binding** (the announced / manifest name must equal the type the token was issued for — a run of type A can never rewrite type B's schema) and answer only on that canonical queue, ignoring the message's self-declared response topic. `WorkflowStateHandler` applies the same gate to terminal `WorkflowStateMessage`s (token + type) and then acts only on runs whose record this runner owns (`OwnerServiceId == CoreRunnerInfo.ServiceId`) — a missing or foreign record is ignored without a status event, audit entry, or cleanup, since the state exchange fans out to every runner. When several runners share a broker, `AnnouncementQueueName` / `RegistrationQueueName` must be unique per instance. `WorkflowRegistrationHandler` is started manually in `ApplicationStarted`, not as an `IHostedService`; it validates the environment, persists the manifest schema (`WorkflowSchemaStore`), and resolves signal handlers — it delivers **no** credentials (every slot activates just-in-time via the Core).
 
 ```mermaid
 sequenceDiagram
@@ -35,14 +35,17 @@ Source/Platform/Auxilia.Core.Runner/
 ├── Program.cs                        # Host wiring (messaging, OTEL, Serilog, RunnerProfile, dispatch + handlers)
 └── Workflows/
     ├── WorkflowDispatcher.cs         # Consumes RunWorkflowCommand; loads plugins for its provider types; launches; issues the one-time token
-    ├── WorkflowCancelDispatcher.cs   # Consumes CancelWorkflowCommand; terminates the owned instance via its cancel queue
+    ├── WorkflowCancelDispatcher.cs   # Consumes CancelWorkflowCommand from the shared queue; forwards it UNCONDITIONALLY to workflow-cancel-{id} (pool-safe — the consumer need not own the instance)
     ├── DockerWorkflowLauncher.cs / IWorkflowLauncher.cs / *DockerClientFactory.cs  # docker:// baked-image + package launch; labels + exit watchers
     ├── IWorkflowContainerHost.cs / WorkflowReadoptionService.cs  # Startup re-adoption: re-claim, watcher re-attach, token restore, clean-kill
     ├── WorkflowLaunchRequest.cs / WorkflowInstanceRegistry.cs  # Launch inputs; owned-instance registry (container id + protected token)
     ├── WorkflowAnnouncementHandler.cs / WorkflowRegistrationHandler.cs  # Authenticated announce + registration (env + schema + signal handlers)
     ├── SlotActivationHandler.cs / CoreCredentialClient.cs  # JIT slot activation: resolve + relay the Core-encrypted credential
     ├── EnvironmentValidator.cs / RunnerProfile.cs / ValidationResult.cs  # Manifest env requirements vs runner capabilities
-    ├── WorkspaceManager.cs           # Warm cache + per-run CoW repo snapshots and mounts; empty-workspace scratch dirs
+    ├── WorkspaceManager.cs           # Warm cache (keyed by the credential-STRIPPED URL; credential injected per git
+    │                                 #   command via -c url.<tokened>.insteadOf, never in .git/config; fetch + checkout
+    │                                 #   advanced to the requested branch's tip, stale cache only on fetch failure)
+    │                                 #   + per-run CoW repo snapshots and mounts; empty-workspace scratch dirs
     ├── NetworkPolicyResolver.cs      # Effective egress policy (manifest baseline + run config, clamped by platform ceiling)
     ├── Pods/                         # Run pods (test-fabric design §A): PodPlanner (pure count/placeholder/DAG resolution)
     │                                 #   + DockerPodHost (per-run --internal network, companions, volumes, teardown/orphan sweep)
@@ -54,9 +57,13 @@ Source/Platform/Auxilia.Core.Runner/
     ├── SignalDispatcher.cs / ViewDataHandler.cs / WorkflowStateHandler.cs  # Signals; live view data; WorkflowStateMessage
     ├── LongLivingDrainCoordinator.cs # Drain-and-replace for long-living workflows on config change / upgrade
     ├── DispatchCommandProtection.cs / DrainReplacement.cs / RunRootsCleanup.cs  # Shared: resolution-token at-rest protection;
-    │                                 #   drain-replace dispatch (graceful AND drain-crash paths); best-effort workspace/pod/output sweep
+    │                                 #   drain-replace dispatch (graceful AND drain-crash paths); best-effort sweep of
+    │                                 #   workspace/pod/output root/extracted package on EVERY terminal path (graceful
+    │                                 #   state, pre-flight failure, crash, re-adoption); the package (auxilia-wf-{id},
+    │                                 #   bind-mounted :ro) dies with the container exit, never while it may still run
     ├── RunnerHeartbeatService.cs     # Emits ownership heartbeats for failover detection; advertises the
     │                                 #   Docker daemon's host platform (RunnerHostPlatformProbe, cached probe)
     └── Storage/                      # Durable stores over IDataAccess: schemas, slot-provider (DLL) registry, signal handlers,
-                                      #   run instances, packages + in-memory WorkflowInstanceTokenRegistry (one-time tokens)
+                                      #   run instances, packages (PendingWorkflowPackageStore keyed by INSTANCE id — concurrent
+                                      #   runs of one type never share a package) + in-memory WorkflowInstanceTokenRegistry
 ```

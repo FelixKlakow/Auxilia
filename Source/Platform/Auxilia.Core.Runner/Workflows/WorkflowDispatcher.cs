@@ -564,8 +564,9 @@ public sealed class WorkflowDispatcher(
             return;
         }
 
-        // 3. Extract to a temp directory
-        var extractedPath = Path.Combine(Path.GetTempPath(), $"auxilia-wf-{Guid.NewGuid()}");
+        // 3. Extract to the run's deterministic temp directory (deleted by RunRootsCleanup on
+        //    every terminal path — the exit watcher, a pre-flight failure, or a re-adoption sweep).
+        var extractedPath = RunRootsCleanup.PackageDirectoryFor(instanceId);
         WorkflowLaunchResult launchResult;
         try
         {
@@ -577,8 +578,9 @@ public sealed class WorkflowDispatcher(
                 "Workflow package extracted. WorkflowType={WorkflowType} Path={Path}",
                 workflowType, extractedPath);
 
-            // 4. Register for the announcement handler
-            pendingPackages.Store(workflowType, extractedPath);
+            // 4. Register for the announcement handler (keyed by instance — concurrent runs of
+            //    one type each keep their own package)
+            pendingPackages.Store(instanceId, extractedPath);
 
             // 6. Launch
             launchResult = await launcher.LaunchAsync(new WorkflowLaunchRequest(extractedPath, env, pluginFiles)
@@ -693,6 +695,10 @@ public sealed class WorkflowDispatcher(
     {
         try
         {
+            // The container is gone, so its read-only package bind is released: the extracted
+            // ZIP dies here on EVERY exit (graceful or crash), before the outcome is judged.
+            RunRootsCleanup.DeletePackageDirectory(logger, instanceId);
+
             await Task.Delay(TimeSpan.FromSeconds(dispatcherSettings.Value.ContainerExitGraceSeconds));
 
             var record = await instanceRegistry.GetAsync(instanceId);
@@ -753,6 +759,11 @@ public sealed class WorkflowDispatcher(
         await statusPublisher.PublishAsync(instanceId, workflowType, "PreFlightFailed", reason, ct: ct);
         tokenRegistry.Consume(instanceId);
         podControlRegistry.Consume(instanceId);
+        pendingPackages.TryConsume(instanceId, out _);
+        // A check failing AFTER workspace/output/package preparation would otherwise leave those
+        // roots on disk — including a push-enabled clone with its credential in .git/config.
+        await RunRootsCleanup.CleanupAsync(
+            workspaceManager, podHost, dispatcherSettings.Value, logger, instanceId, ct: ct);
     }
 
     /// <summary>The command's configuration-pinned spawnable base map; empty on anything malformed.</summary>

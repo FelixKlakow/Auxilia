@@ -51,10 +51,27 @@ public sealed class WorkflowRegistrationHandler(
                 return;
             }
 
+            // The token is bound to the type it was issued for: a manifest naming another type
+            // would rewrite THAT type's schema (endpoints, repositories, pod limits).
+            if (!tokenRegistry.Validate(
+                    request.WorkflowInstanceId, request.InstanceToken, request.Manifest.WorkflowName))
+            {
+                logger.LogWarning(
+                    "Rejected WorkflowRegistrationRequest: manifest names {WorkflowName} but the instance token was issued for another type. InstanceId={InstanceId}",
+                    request.Manifest.WorkflowName, request.WorkflowInstanceId);
+                await auditLog.AppendAsync(
+                    "steering-instance", "workflow.registration.rejected",
+                    request.WorkflowInstanceId.ToString(), "workflow-type-mismatch",
+                    $$"""{"claimedWorkflowType":{{System.Text.Json.JsonSerializer.Serialize(request.Manifest.WorkflowName)}}}""",
+                    ct: cancellationToken);
+                return;
+            }
+
             // One registration per launch; the token then stays valid as the instance
             // credential for just-in-time slot activations until the run terminates.
             // The response goes only to the queue the platform pre-created at launch.
-            if (!tokenRegistry.TryBeginRegistration(request.WorkflowInstanceId, request.InstanceToken))
+            if (!tokenRegistry.TryBeginRegistration(
+                    request.WorkflowInstanceId, request.InstanceToken, request.Manifest.WorkflowName))
             {
                 logger.LogWarning(
                     "Rejected duplicate WorkflowRegistrationRequest. Workflow={WorkflowName} InstanceId={InstanceId}",

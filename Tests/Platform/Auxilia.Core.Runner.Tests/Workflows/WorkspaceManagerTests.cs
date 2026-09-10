@@ -95,6 +95,56 @@ public class WorkspaceManagerTests
             "The second run must be served from the warm cache when the origin is gone.");
     }
 
+    [Test]
+    public async Task Prepare_SecondInstance_StartsOnTheCommitAddedToOriginSinceTheFirstRun()
+    {
+        await _sut.PrepareAsync(
+            Guid.NewGuid(), [new RepositoryDeclaration("main", _originRepo)], ct: CancellationToken.None);
+
+        // The origin moves on: the cache must fetch AND advance its checkout, not stay on the
+        // commit of the first clone forever.
+        File.WriteAllText(Path.Combine(_originRepo, "second.txt"), "added after the first run");
+        RunGit(_originRepo, "add", "second.txt");
+        RunGit(_originRepo, "commit", "-m", "test: add second.txt");
+
+        var runRoot = await _sut.PrepareAsync(
+            Guid.NewGuid(), [new RepositoryDeclaration("main", _originRepo)], ct: CancellationToken.None);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(File.Exists(Path.Combine(runRoot!, "repos", "main", "second.txt")), Is.True,
+                "A run served from the warm cache must start on the origin's current commit.");
+            Assert.That(Directory.GetDirectories(_settings.WarmCacheDirectory), Has.Length.EqualTo(1),
+                "The refresh reuses the cache entry.");
+        });
+    }
+
+    [Test]
+    public async Task Prepare_RequestedBranch_IsCheckedOutFromTheSharedCacheEntry()
+    {
+        await _sut.PrepareAsync(
+            Guid.NewGuid(), [new RepositoryDeclaration("main", _originRepo)], ct: CancellationToken.None);
+
+        RunGit(_originRepo, "checkout", "-b", "feature");
+        File.WriteAllText(Path.Combine(_originRepo, "feature.txt"), "only on the feature branch");
+        RunGit(_originRepo, "add", "feature.txt");
+        RunGit(_originRepo, "commit", "-m", "test: add feature.txt");
+
+        var runRoot = await _sut.PrepareAsync(
+            Guid.NewGuid(), [new RepositoryDeclaration("main", _originRepo, Branch: "feature")],
+            ct: CancellationToken.None);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(File.Exists(Path.Combine(runRoot!, "repos", "main", "feature.txt")), Is.True,
+                "The run's requested branch is checked out from the shared cache entry.");
+            Assert.That(GitOutput(Path.Combine(runRoot!, "repos", "main"), "rev-parse", "--abbrev-ref", "HEAD"),
+                Is.EqualTo("feature"));
+            Assert.That(Directory.GetDirectories(_settings.WarmCacheDirectory), Has.Length.EqualTo(1),
+                "One cache entry per repository, whatever the branch.");
+        });
+    }
+
     // ------------------------------------------------------------------ no-cache path
 
     [Test]
