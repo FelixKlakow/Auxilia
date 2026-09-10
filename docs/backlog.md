@@ -3,6 +3,179 @@
 > Live tracker of known follow-ups (open items only). Delivered programs and their decision
 > records live in `docs/delivered/` and the git history.
 
+## Code review 2026-09-09 — open findings
+
+Full-repo review (six parallel reviewers, findings traced end to end before listing). Grouped by
+severity; each item names the file so the fix agent lands in the right place. Strike items
+through as they close, same as the other sections.
+
+### Critical — trust boundaries and secrets
+- ~~**Unauthenticated `WorkflowStateMessage` terminates any run** — the runner's
+  `WorkflowStateHandler` takes terminal messages off the `workflow.state` fanout with no instance
+  token; every container holds the bus password, so any run can publish `Success` for another
+  instance and the runner consumes its token, marks it terminal, deletes its bind-mounted
+  workspace and destroys its pod. Fix: carry the instance token on the message, gate with
+  `WorkflowInstanceTokenRegistry.Validate`, and ignore instances this runner does not own.~~ — DONE 2026-09-09: `WorkflowStateMessage` carries `WorkflowName` + `InstanceToken` (SDK fills both at every publish site); `WorkflowStateHandler` validates token + type first and returns before any side effect.
+- ~~**Instance token is not bound to the workflow type** — `WorkflowInstanceTokenRegistry` stores
+  `WorkflowType` but never compares it; a run of type A can register a manifest naming type B and
+  rewrite B's schema (endpoints → egress network, repos, pod limits) Core- and runner-side. Fix:
+  `Validate`/`TryBeginRegistration` must require the manifest's `WorkflowName` to equal the
+  issued type.~~ — DONE 2026-09-09: `Validate(id, token, claimedWorkflowType)` + `TryBeginRegistration(id, token, claimedWorkflowType)` reject a mismatch (ordinal); registration (audited `workflow-type-mismatch`), announcement, and state handlers pass the claimed name.
+- ~~**Approval pipeline approves the CURRENT package, not the reviewed one** —
+  `WorkflowTypeRegistryService.ApproveAsync` is keyed by type name only (no Pending check, no
+  package-hash/`UpdatedUtc` binding), so re-registering during the verdict run gets the
+  replacement auto-signed, and a late Approve overrides a human Deny. Fix: pass the reviewed
+  identity into approve/deny and refuse unless still Pending with that identity.~~ — DONE 2026-09-09: registrations carry `PackageHashBase64`; the pipeline uses `ApproveReviewedAsync`/`DenyReviewedAsync` (refused unless still Pending with the reviewed hash + `UpdatedUtc`), human approve/deny refuse non-Pending (409), and the approval download token is bound to type + package hash.
+- ~~**Step-up has no throttle** — `POST /auth/step-up` and MCP `step_up` verify the password with
+  neither the `auth-login` rate limiter nor `LoginAttemptThrottle`; a leaked bearer + brute force
+  = elevation. Fix: apply both, keyed by principal.~~ — DONE 2026-09-09: `/auth/step-up` carries the `auth-login` per-IP policy and both REST + MCP `step_up` run the per-principal `LoginAttemptThrottle` (refused before the secret check, audited `rate-limited`).
+- ~~**Inline Secret-kind binding settings stored and echoed in clear** — the editor offers
+  provider `Secret` descriptors as inline `SlotBinding.Settings`; `RunConfigurationService`
+  persists `SlotBindingsJson` verbatim (no `ISettingsProtector`), GET returns them, and
+  `SlotCredentialResolver` uses them as the run's JIT credential. Fix: protect at write, mask
+  in DTOs (names only), "leave empty to keep" in the editor — or refuse inline secrets.~~ — DONE 2026-09-09: new `SlotBindingSecrets` (catalog-driven Secret keys) protects on entry (configuration create/update + inline run), masks every read DTO (key present, empty value), keeps the stored value when an update sends it empty/omitted, and unprotects only in `SlotCredentialResolver`; the editor renders a "leave empty to keep" placeholder.
+- ~~**Resolution token resolves credentials for 30 days after the run ends** —
+  `SlotCredentialResolver.ResolveAsync` checks the digest and bindings but never the run's
+  terminal state (the stash is retained for rerun); caller-supplied RSA key → plaintext secrets.
+  Fix: reject when the `CoreRunRecord` is terminal (keep the stash for rerun).~~ — DONE 2026-09-09: `SlotCredentialResolver.AuthorizeAsync` (digest + non-terminal `CoreRunRecord`, audited `run-ended` rejection) gates resolve-slot AND the package / environment-layer downloads; stash retained.
+- ~~**AdminConsole silently downgrades to the service API key** — when the relayed user bearer
+  expires (30 min) `ConsoleCallerTokenProvider` returns null and `CoreCallerTokenHandler`
+  attaches `Core:ApiKey`; with the bootstrap admin key the operator gains admin reach and audit
+  attribution shifts to the service. Fix: no app-key fallback on user circuits — force
+  re-navigation/re-mint.~~ — DONE 2026-09-09: `CoreCallerTokenHandler` lost its app-key fallback (no token = no Authorization header; the console holds no `Core:ApiKey` any more); the prerender relays token + session cookie (server-side one-shot handle), so the circuit re-mints from the cookie on expiry, and a Core-rejected re-mint surfaces as the shell's "session expired — reload" banner (`ConsoleCallerTokenProvider.SessionExpired`).
+- ~~**Creating a principal with an existing username hijacks the login** — `PrincipalDirectory`
+  upserts `CredentialRecord.IdForPassword(username)` with no existence check. Fix: read first,
+  409 on conflict.~~ — DONE 2026-09-09: `CreateHumanAsync` reads the credential first and throws `PrincipalConflictException` (REST 409, MCP error result; the seeder logs and skips instead of hijacking).
+- ~~**Rerun skips workspace and configuration visibility gates** — `RunService.RerunAsync`
+  re-checks connectors + catalog but replays another principal's personal workspace mounts and
+  inline settings; the endpoint only checks `workflow.trigger`. Fix: persist workspace ids in the
+  stash and re-gate them; apply `IsVisibleAsync` for personal configurations.~~ — DONE 2026-09-09: the stash carries `WorkspaceIdsJson` + `ConfigurationId`; `RerunAsync` re-gates every workspace (`WorkspaceAccessDeniedException`) and the personal configuration's visibility (`seesAllConfigurations` from the caller's manage permission) against the rerunner.
+
+### High — correctness and resilience
+- ~~**Failover redispatch always fails for personal connectors** — `FailoverMonitor` calls
+  `RerunAsync(orphan, triggeredBy: null)` and `ConnectorAccessPolicy.CanUseAsync` refuses
+  personal connectors for a null principal. Fix: `triggeredBy ?? stash.TriggeredBy`.~~ — DONE 2026-09-09: `FailoverMonitor.RedispatchAsync` reads the stash's `TriggeredByPrincipalId` and reruns as that principal.
+- ~~**Dead-runner failover writes `Failed` with plain `SaveAsync`** — no CAS, so every Core node
+  fails over + re-dispatches the same orphans, and a run that completed after the scan snapshot
+  is overwritten and re-run. Fix: re-read + `TrySaveAsync(current.Version)`, winner re-dispatches
+  (the unclaimed sweep already does this).~~ — DONE 2026-09-09: `FailOverAsync` re-reads fresh, skips terminal, CAS via `TrySaveAsync(current.Version)`; only the winner cancels/audits/publishes/re-dispatches.
+- ~~**Cancel is lost three ways** — (a) cancelling a still-`Dispatched` run publishes to the
+  runner, which drops "unknown instance", so the run executes later; (b) in a runner pool the
+  shared `workflow.cancel-commands` queue hands the command to one runner that may not own the
+  instance (`WorkflowCancelDispatcher`); (c) MCP `cancel_run` skips the dispatch-id aliasing the
+  REST endpoint does. Fix: Core transitions a `Dispatched` record to Cancelled via CAS + drops the
+  stash; runner forwards to `workflow-cancel-{id}` unconditionally; MCP uses `run?.RunId ?? id`.~~ — DONE 2026-09-09: `RunService.CancelAsync` settles a `Dispatched` run Core-side (CAS → Cancelled, stash discarded, status event); runner `WorkflowCancelDispatcher` forwards unconditionally (registry dependency dropped); MCP `cancel_run` de-aliases like REST.
+- ~~**Late/re-ordered `Dispatched` event resurrects a ghost row** — after the `Received` rekey
+  deletes the command-keyed row, a reordered `Dispatched` in `RunTrackingService.TryApplyAsync`
+  re-inserts it; the claim sweep then fails the healthy run, dispatches a duplicate and deletes
+  the live stash. Fix: never insert `Dispatched` from the bus when an instance row already
+  carries that `CommandId`.~~ — DONE 2026-09-09: `RunTrackingService` never applies a `Dispatched` event from the bus (the Run API authors that row synchronously).
+- ~~**Non-owning runners corrupt the run type to "unknown"** — every runner receives every
+  terminal message (exclusive per-subscriber queue); a runner with no record still publishes a
+  status event with type "unknown", which `RunTrackingService` stores verbatim. Fix: return early
+  when the record is missing or not owned.~~ — DONE 2026-09-09: `WorkflowStateHandler` returns before publish/audit/cleanup unless the record exists and `OwnerServiceId == CoreRunnerInfo.ServiceId`.
+- ~~**Client unary timeout is treated as host shutdown** — `CoreClient` surfaces its
+  `UnaryTimeoutSeconds` watchdog as `TaskCanceledException`; `EmailTaskSourceAdapter`,
+  `ScheduledTriggerEngine`, `ArtifactChainingEngine` and `EventTriggerEngine` all filter
+  `OperationCanceledException` as "host shutdown", so one slow Core call stops the TriggerHost
+  (BackgroundService StopHost) or silently kills a scheduler for the process lifetime. Fix:
+  translate the watchdog to `TimeoutException` in the client; engines catch by
+  `ct.IsCancellationRequested`.~~ — DONE 2026-09-10: every unary helper runs through `CoreClient.UnaryAsync`, which rethrows a watchdog expiry as `TimeoutException` (inner OCE) unless the caller's token is cancelled; the email adapter and all three engines guard with `when (!ct.IsCancellationRequested)`, the scheduler's store read moved inside the per-tick guard, and stream consumers log-and-continue on a failed handle/dispatch.
+- ~~**Any cancellation ends a workflow as `Cancelled`, exit 0** — `WorkflowBuilder`'s catch does
+  not check its own token, so a provider HttpClient timeout reports as operator cancel. Inverse in
+  `SlotActivator`/`ResourceProxyClient`/`PodControlClient`: `WhenAny` with a cancelled delay task
+  throws `TimeoutException`, so operator cancel reports as `Failed`. Fix: `when
+  (cts.IsCancellationRequested)` in the builder; `ct.ThrowIfCancellationRequested()` after
+  `WhenAny` in the clients.~~ — DONE 2026-09-10: builder catch is `when (cts.IsCancellationRequested)` (a foreign OCE is `Failed`/exit 1); the three request clients drop the pending entry and `ThrowIfCancellationRequested()` before treating a completed delay as a timeout.
+- ~~**Secondary tmux sessions receive no environment** — `TerminalSessionHost` sets variables on
+  the `tmux new-session` client; only the first session (which forks the server) inherits them.
+  The reviewer console runs on the author's credential with an empty `-p ""` prompt → every
+  console review round is "no verdict file". Fix: `tmux new-session -e KEY=VALUE` per session.~~ — DONE 2026-09-10: `BuildTmuxStartInfo` emits `-e KEY=VALUE` per variable and no longer sets the client environment (the images' Debian base ships tmux 3.3+); failure messages redact `-e` values (`DescribeForLog`).
+- ~~**Implementation workflow pushes its exchange files** — with a mount working directory
+  `.git` is above `WorkspaceDirectory`, the `.git/info/exclude` is never written, and
+  `git add -A` commits `.auxilia/` (story, attachments, verdicts) and `.mcp.json`. Fix: resolve
+  the toplevel via `git rev-parse --show-toplevel`, or stage with an excluding pathspec.~~ — DONE 2026-09-10: the exclude lands at `git rev-parse --git-path info/exclude` (resolved against the workspace; covers a workspace below the root AND worktrees, hence `--git-path` over `--show-toplevel`), and staging is `add -A -- :/ :(exclude).auxilia :(exclude).mcp.json` so a missing exclude can never leak them.
+- ~~**Versioned Mongo save loops forever on non-concurrency write errors** —
+  `MongoDbEfDataAccess.SaveVersionedAsync` catches every `DbUpdateException` and retries with no
+  cap/delay/log. Fix: catch `DbUpdateConcurrencyException` only, cap retries. Also `RemoveAsync`
+  does not catch the concurrency exception on versioned entities (documented `false` becomes a
+  throw).~~ — DONE 2026-09-10: `SaveVersionedAsync` retries only `DbUpdateConcurrencyException` (and a
+  duplicate-key insert whose row now exists), max 8 attempts with jittered backoff, everything else
+  surfaces; `RemoveAsync` re-reads on a concurrency conflict and returns `false` when the row is gone.
+- ~~**`DeterministicGuid.For` joins key parts with no delimiter** — `("a","bc")` ≡ `("ab","c")`;
+  affects `CoreRunViewRecord` (view "log1"/seq 2 vs "log"/seq 12 → overwrite), slot configs,
+  access entries. Fix: delimiter or length-prefix inside `For`; drop the `""` pseudo-separators.
+  Changes every derived id (fine pre-production, invalidates existing stores).~~ — DONE 2026-09-10:
+  every part is length-prefixed inside `For` (the old join used an invisible U+001F separator);
+  pseudo-separator parts dropped from all `IdFor`s, `EnvironmentBaseRecord.IdFor` passes name and
+  version as parts; the committed dev `core-data` ids regenerated. Any other JSON store created before
+  this change (untracked runner/trigger-host state) must be wiped — its derived ids no longer match.
+
+### Medium — leaks, retention, lost data
+- ~~**Runner pre-flight failure after workspace prep never cleans run roots** — `FailPreFlightAsync`
+  leaves `{Workspace,Output}/{id}` on disk, including push-enabled clones with the token in
+  `.git/config`. Fix: call `RunRootsCleanup` from it.~~ — DONE 2026-09-10: `FailPreFlightAsync` drops the pending package entry and runs `RunRootsCleanup` (workspace, pod, output root, extracted package); component test `WhenPreFlightFailsAfterWorkspacePreparation_TheRunRootsAreSwept`.
+- ~~**Output directory leaks on every terminal path except Success-with-outputs**
+  (`WorkflowStateHandler` cleans workspace + pod only; `ArtifactPersister` deletes on success).~~ — DONE 2026-09-10: `WorkflowStateHandler` routes every terminal transition through `RunRootsCleanup` (after artifact persistence; it now returns the companion logs); `ArtifactPersister` no longer deletes anything.
+- ~~**ZIP-package extraction dir is never deleted; `PendingWorkflowPackageStore` is keyed by
+  type**, so two concurrent dispatches of one type overwrite each other.~~ — DONE 2026-09-10: the extraction dir is deterministic (`auxilia-wf-{instanceId:N}`, `RunRootsCleanup.PackageDirectoryFor`) and deleted by the exit watcher on every container exit, by pre-flight failure, and by the re-adoption sweep (not on the graceful state message — the container may still be exiting); `PendingWorkflowPackageStore` keyed by instance id, the announcement handler consumes by `WorkflowInstanceId`.
+- ~~**Warm cache** (`WorkspaceManager`): fetch runs credential-less after the URL strip (private
+  repos never refresh), the working tree is never advanced past the first clone, and the cache
+  key hashes the tokened URL so each token rotation adds a full clone.~~ — DONE 2026-09-10: cache keyed by the stripped URL; every clone/fetch names the stripped URL and injects the credential per command via `-c url.<tokened>.insteadOf=<stripped>` (no `.git/config` ever holds it; `StripUserInfo` no longer renders a default `:443`); after the fetch the cache checkout is advanced to `refs/remotes/origin/<requested-or-default branch>`; stale cache only on fetch failure (Warning). Component tests `Prepare_SecondInstance_StartsOnTheCommitAddedToOriginSinceTheFirstRun` / `Prepare_RequestedBranch_IsCheckedOutFromTheSharedCacheEntry`, unit `WorkspaceManagerCredentialTests`.
+- ~~**View mirror full-scans all view records per message; view rows have no retention**
+  (`RunViewTrackingService`).~~ — DONE 2026-09-10: per-run counter seeded once from the store on first sight (re-deliveries do not consume cap; with N nodes the cap is a soft guard), plus an hourly sweep deleting the rows of runs terminal for more than `CoreApi:ViewRetentionDays` (default 30, beside `ResolutionRecordRetentionDays`; live runs never touched). Unit `RunViewTrackingServiceTests`.
+- ~~**`/api/runs/{id}/stream` reads the snapshot before subscribing** — contrary to its own
+  comment; non-terminal transitions in the gap are lost.~~ — DONE 2026-09-10: the endpoint subscribes first, then resolves the alias + reads the record and emits the snapshot (artifact/event streams have no snapshot and were already subscribe-then-flush). Component `RunStreamSnapshotOrderingTests` injects a transition inside the window via a wrapped run store.
+- ~~**Subscribe cancelled during the bind-gate wait unbinds a sibling's keys** —
+  `RunStreamPublisher`/`ArtifactStreamPublisher`/`EventStreamPublisher` decrement an audience
+  count they never incremented. Fix: refcount before any await.~~ — DONE 2026-09-10: contract change — a subscribe that throws (incl. cancellation at the gate) has rolled back its own refcount/bindings and the three brokers DISCARD the failed subscription without an unsubscribe callback. Unit `RunStreamPublisherBindingTests.SubscribeCancelledWhileWaitingForTheGate_LeavesTheSiblingsKeysBound` + `FilteredStreamPublisherRollbackTests`.
+- ~~**RabbitMQ publishes have no publisher confirms**; **subscription dispose leaks the bind
+  channel** when `BasicCancelAsync` throws on a closed channel.~~ — DONE 2026-09-10: the publish channel is created with `CreateChannelOptions(publisherConfirmationsEnabled: true, publisherConfirmationTrackingEnabled: true)` (publish awaits the broker ack, `PublishException` on nack); both handles guard the courtesy cancel and release consumer channel / bind channel / gate in nested `finally`; new `Auxilia.Messaging.Tests` pins the dispose paths against Moq'd channels (confirmations need the Docker suite).
+- ~~**Chaining/event catch-up skips the gap before the first live event** (`lastSeenUtc` is only
+  set from a handled event); same-timestamp page boundaries can also be skipped.~~ — DONE 2026-09-10: the cursor is seeded from the host clock (`TimeProvider`, new engine ctor dependency) at consumer start; catch-up queries under ONE fixed bound `lastSeen − 1 s` (`CatchUpOverlap`) and pages with `Skip` (id dedupe absorbs the overlap).
+- ~~**Email trigger filters mark non-matching mail `\Seen`**, stealing it from other triggers on
+  the same mailbox.~~ — DONE 2026-09-10: the adapter polls per MAILBOX (triggers grouped by slot instance, one fetch per poll, due when any trigger is due) and evaluates every enabled trigger against each mail; `\Seen` is set once after all matching dispatches were accepted (or immediately when no trigger matches); health stays per trigger.
+- ~~**Coding-agent slot handlers kill the CLI only on cancellation** — any other exception (bus
+  publish failure) leaves `claude`/`codex`/`copilot` editing and pushing inside the container.~~ — DONE 2026-09-10: all three agents kill the child's process tree in a catch-all (`Kill` is a no-op once exited) and rethrow; Codex/Copilot now run behind the new `ICliProcessFactory` seam (`Auxilia.Workflows.AiAgent.CodingAgent/CliProcess.cs`) so the paths are unit-tested.
+- ~~**`ProcessGitRunner` never drains stderr** — push failures report empty text; large stderr
+  can deadlock.~~ — DONE 2026-09-10: both pipes are read concurrently; a failing command's `Output` is stdout + stderr (success stays stdout-only so `status`/`diff` parsing is unchanged).
+- ~~**Code review is fail-open** — a missing file verdict counts as Reviewed and a silent
+  secondary reviewer Approves (`PrimaryReviewOrchestrator`, `TwoEyesPassService`).~~ — DONE 2026-09-10: no file verdict → `Skipped` ("No verdict recorded by the primary reviewer"; `Failed` on a Critical file); no secondary verdict → the finding stays `NotReviewed` with no reviewer attribution (surfaced, never credited as approved — dropping it as Rejected would hide real findings on infrastructure failures). The fail-open was documented as a "conservative default" in the tests; treated as a defect, in line with the Implementation workflow's "a silent reviewer never approves".
+- ~~**Group-held roles are missing from claims-based checks** — `LocalIdentityProvider` /
+  `ExternalIdentityProvisioner` build `Roles` from direct assignments only, so a group-granted
+  admin gets an empty `/auth/me` and visibility-filtered lists.~~ — DONE 2026-09-10: both session producers union first-class-group roles via the new `EffectiveRoles` helper (`GroupRoleResolver`, cached through `PrincipalRoleCache.SetGroupRoles` like the Policy Engine). Unit tests in Governance; component `GroupRoleClaimsTests` (`/auth/me` + configuration listing with a group-held Operator role).
+- ~~**Concurrent OAuth refreshes on one connector race** on rotated refresh tokens
+  (`ConnectorTokenRefresher`, non-CAS `UpdateAsync`).~~ — DONE 2026-09-10: single-flight per connector (keyed `SemaphoreSlim`); the waiter re-reads after acquiring and skips the exchange when the winner already refreshed. Unit `ConcurrentResolves_OfOneStaleConnector_RefreshOnce_AndBothGetTheRotatedToken`.
+- ~~**`FileSystemArtifactStore` assigns lineage versions non-atomically** and orphans payload
+  files when the index write fails.~~ — DONE 2026-09-10: versions are assigned under a per-lineage
+  in-process gate (the store is one singleton over a local directory); the payload lands in a
+  `.pending` file, is moved into place only after the index row is written, and is deleted on any
+  failure (a failed move also removes the index row).
+- ~~**Rerun's workspace access denial maps to 400 not 403** (`InvalidOperationException` instead
+  of `RunAccessDeniedException`).~~ — DONE 2026-09-09: `WorkspaceAccessDeniedException : RunAccessDeniedException` at dispatch and rerun.
+
+### Low
+- `SteeringCodec.Decode` throws on a non-string `$type` (contract says never throws).
+- Email manifest ships GreenMail test ports 3143/3025 as `DefaultValue`; handler defaults are
+  993/587 and the editors persist the manifest values.
+- ~~TriggerHost documents `WorkflowClient:*` client options it never binds.~~ — DONE 2026-09-10: `Program.cs` binds the whole `Core:*` section onto `CoreClientOptions` (stream/unary knobs included); the project-instructions list the real keys; new `Auxilia.TriggerHost.Tests` component test observes the bound unary timeout.
+- ~~`ConsoleAuthenticationStateProvider` catches only `CoreApiException`; an
+  `HttpRequestException` during a Core restart tears the circuit down.~~ — DONE 2026-09-09: mirrors `CoreBackedAuthenticationHandler` — an unreachable Core logs a warning and yields anonymous.
+- ~~`/api/configurations/{id}/run?onBehalfOf=` evaluates visibility before the delegation policy
+  (visibility oracle).~~ — DONE 2026-09-10: delegation policy first, visibility (for the triggering principal) second. Component `CallerWithoutOnBehalfOf_IsRefusedBeforeVisibility_SoTheTargetsAccessIsNotRevealed`.
+- ~~MCP `run_workflow` lets `RunAccessDeniedException` escape as a protocol error.~~ — DONE 2026-09-09: `run_workflow` catches it and returns a tool error like `run_configuration`.
+- Push-policy gate is a regex over the shell text (quote-splitting or `$(echo push)` bypass to
+  the global mode); the scoped push token remains the real boundary.
+- `PluginManifestVerifier` verifies against the key inside the manifest (integrity only, no
+  publisher pinning); `WorkflowPackageVerifier` extracts zip entries absent from
+  `manifest.Files`.
+- ttyd runs `--writable` with no credential on the host loopback; the Core ticket is the only
+  auth.
+- ~~`Source/Platform/Auxilia.AdminConsole` has no `*.project-instructions.md` (Rule 0).~~ — DONE 2026-09-09: `Auxilia.AdminConsole.project-instructions.md` written (purpose, auth/token relay, invariants, file map).
+
+### Decisions needed
+- **Catch-up cursor seed + overlap (Workflows.Client engines).** The seed is the HOST clock at consumer start and the catch-up bound is `lastSeen − 1 s`; a host clock more than 1 s ahead of the Core skips gap items, a host clock behind only re-reads (deduped). Options: (a) keep as is (recommended — zero Core change, documented assumption); (b) change the Core's `createdAfterUtc` to `>=` and seed from a Core-side "server time" header; (c) widen `CatchUpOverlap`. Recommendation: (a).
+
 ## Core.Api — client-surface follow-ups
 - ~~Per-user bearer hardening~~ — DONE 2026-08-03: the raw bearer no longer rides the
   prerendered page. The relay stashes it server-side (`UserBearerHandleStore`, singleton) and
