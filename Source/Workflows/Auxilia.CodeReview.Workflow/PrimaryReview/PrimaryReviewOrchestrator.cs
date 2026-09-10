@@ -77,9 +77,13 @@ public sealed class PrimaryReviewOrchestrator(
 
         if (verdict is null)
         {
+            // A reviewer that never recorded a verdict did not review the file — it is Skipped
+            // (Failed for a Critical file), never silently counted as Reviewed.
             loggerFactory?.CreateLogger<PrimaryReviewOrchestrator>()
-                .LogWarning("No file verdict recorded via tool call for '{FilePath}'; defaulting to Reviewed.", file.FilePath);
-            verdict = FileVerdict.Reviewed;
+                .LogWarning("No file verdict recorded via tool call for '{FilePath}'; the file counts as not reviewed.", file.FilePath);
+            await ApplyVerdictAsync(file, FileVerdict.Skipped, findings, cancellationToken,
+                skipReason: "No verdict recorded by the primary reviewer");
+            return;
         }
 
         await ApplyVerdictAsync(file, verdict.Value, findings, cancellationToken);
@@ -87,19 +91,21 @@ public sealed class PrimaryReviewOrchestrator(
 
     private async Task ApplyVerdictAsync(
         ReviewableFile file, FileVerdict verdict, IReadOnlyList<StagedFinding> findings,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, string? skipReason = null)
     {
         if (verdict == FileVerdict.Skipped)
         {
             if (file.Criticality == FileCriticality.Critical)
             {
                 verdictMap.Record(file.FilePath, FileVerdict.Failed,
-                    new SkipReason("Skipped verdict on Critical file"));
+                    new SkipReason(skipReason is null
+                        ? "Skipped verdict on Critical file"
+                        : $"{skipReason} (Critical file)"));
             }
             else
             {
                 verdictMap.Record(file.FilePath, FileVerdict.Skipped,
-                    new SkipReason("File skipped by primary reviewer"));
+                    new SkipReason(skipReason ?? "File skipped by primary reviewer"));
             }
         }
         else

@@ -176,6 +176,20 @@ public sealed class ClaudeCodeCliAgentTests
     }
 
     [Test]
+    public void RunAsync_ChatCallbackThrows_KillsTheProcess_AndRethrows()
+    {
+        // A bus publish failing inside the chat callback must not leave the CLI running.
+        var factory = new FakeProcessFactory(
+            """{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Working."}]}}""",
+            exitCode: 0);
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        Assert.ThrowsAsync<InvalidOperationException>(() =>
+            agent.RunAsync(Request, (_, _) => throw new InvalidOperationException("bus down")));
+        Assert.That(factory.LastProcess!.Killed, Is.True);
+    }
+
+    [Test]
     public void BuildStartInfo_InteractiveSession_UsesStreamJsonInput_AndStdioPermissions()
     {
         var agent = new ClaudeCodeCliAgent(Options());

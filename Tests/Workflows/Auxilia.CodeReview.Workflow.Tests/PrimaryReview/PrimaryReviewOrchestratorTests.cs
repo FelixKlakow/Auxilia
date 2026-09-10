@@ -122,7 +122,7 @@ public sealed class PrimaryReviewOrchestratorTests
     }
 
     [Test]
-    public async Task RunAsync_NoToolCall_DefaultsToReviewedWithNoFindings()
+    public async Task RunAsync_NoToolCall_CountsTheFileAsSkipped_NeverAsReviewed()
     {
         var store = new StagedFindingsStore();
         var verdictMap = new VerdictMap();
@@ -134,11 +134,30 @@ public sealed class PrimaryReviewOrchestratorTests
         var context = BuildContext(MakeFile("a.cs"), MakeFile("b.cs"));
         await orchestrator.RunAsync(context);
 
-        Assert.That(verdictMap.AsReadOnly().Count, Is.EqualTo(2));
-        Assert.That(verdictMap.AsReadOnly().Values.All(v => v.Verdict == FileVerdict.Reviewed), Is.True,
-            "Absent tool calls default to FileVerdict.Reviewed");
-        Assert.That(store.Snapshot(), Is.Empty,
-            "No findings should be staged when tool call is absent");
+        var verdicts = verdictMap.AsReadOnly();
+        Assert.Multiple(() =>
+        {
+            Assert.That(verdicts.Count, Is.EqualTo(2));
+            Assert.That(verdicts.Values.All(v => v.Verdict == FileVerdict.Skipped), Is.True,
+                "a reviewer that recorded no verdict did not review the file — fail closed");
+            Assert.That(verdicts.Values.All(v => v.Reason?.Explanation.Contains("No verdict") == true), Is.True);
+            Assert.That(store.Snapshot(), Is.Empty,
+                "No findings should be staged when tool call is absent");
+        });
+    }
+
+    [Test]
+    public async Task RunAsync_NoToolCall_OnACriticalFile_Fails()
+    {
+        var verdictMap = new VerdictMap();
+        var orchestrator = BuildOrchestrator(
+            new FakeAiAgent(FileVerdict.Reviewed, skipSink: true),
+            verdictMap: verdictMap);
+
+        await orchestrator.RunAsync(BuildContext(MakeFile("secrets.cs", FileCriticality.Critical)));
+
+        Assert.That(verdictMap.AsReadOnly()["secrets.cs"].Verdict, Is.EqualTo(FileVerdict.Failed),
+            "a silent reviewer on a Critical file fails the file, like an explicit Skipped");
     }
 
     [Test]

@@ -22,15 +22,19 @@ flowchart LR
 **Primary Review** — `PrimaryReviewOrchestrator` holds a **single** `IAiSession` for the entire file
 loop. It registers `CodeReviewResultSinkMcpTools` (from `Mcp/`) in `AiSessionOptions.CapabilityTools`
 so the model calls typed tools to report findings and the file verdict. After each `ExecuteAsync` call,
-`DrainFindings()` and `TakeFileVerdict()` read the accumulated results. `ContextCompactionService` is
+`DrainFindings()` and `TakeFileVerdict()` read the accumulated results. A file whose verdict was never
+recorded is **not** reviewed: it is recorded as `Skipped` ("No verdict recorded by the primary
+reviewer"), which for a Critical file escalates to `Failed` exactly like an explicit skip — the review
+fails closed. `ContextCompactionService` is
 called between files when the session grows large; it compacts the session **in-place** via
 `CompactAsync(session, description, ct)` — `PrimaryReviewOrchestrator` does **not** reassign the
 session variable after compaction.
 
 **Two-Eyes Pass** — `TwoEyesPassService` opens **one** `IAiSession` per finding and registers a fresh
 `CodeReviewResultSinkMcpTools` each time. After `ExecuteAsync`, `TakeSecondaryVerdict()` reads the
-verdict. If the model makes no tool call, the finding is treated as `Approved` and a Warning is logged;
-no bare `catch` is used.
+verdict. If the model makes no tool call, the finding stays `NotReviewed` with no reviewer attribution
+(a silent second reviewer never approves; the finding survives unvetted, as without the pass) and a
+Warning is logged; no bare `catch` is used.
 
 **Aggregation** — `FindingsAggregator` filters staged findings by their `SecondaryVerdict`.
 

@@ -23,7 +23,10 @@ retired old-generation `Auxilia.ImplementationWorkflow`.
 - Operator gates ride `OperatorChannel.AskAsync` forms; `GateAsync` applies the
   **idle-compaction rule** (author `/compact` after `gate-idle-compaction` minutes).
 - Push: the WORKFLOW commits/pushes (`IGitRunner`) through the AllowPush repository binding —
-  the agent is told to commit nothing.
+  the agent is told to commit nothing. Staging is `ImplementationPipeline.StageArguments`
+  (`add -A -- :/ :(exclude).auxilia :(exclude).mcp.json`): the exchange files never reach a
+  commit, exclude file or not. The exclude itself goes where git says it lives
+  (`rev-parse --git-path info/exclude`) — the workspace may sit below the repository root.
 - Story state: `IWorkItemAccess.GetStatesAsync` feeds the closing choice gate;
   `SetStateAsync` + a comment close the loop.
 

@@ -56,9 +56,12 @@ public sealed class TwoEyesPassService(
                 var verdict = sink.TakeSecondaryVerdict();
                 if (verdict is null)
                 {
+                    // A silent second reviewer never approves: the finding survives exactly
+                    // as it would without the pass — unvetted and labelled so.
                     loggerFactory?.CreateLogger<TwoEyesPassService>()
-                        .LogWarning("No secondary verdict recorded via tool call for finding in '{FilePath}'; defaulting to Approved.", finding.FilePath);
-                    verdict = SecondaryVerdict.Approved;
+                        .LogWarning("No secondary verdict recorded via tool call for finding in '{FilePath}'; the finding stays NotReviewed.", finding.FilePath);
+                    results.Add(ReviewFinding.FromStaged(finding, SecondaryVerdict.NotReviewed, null));
+                    continue;
                 }
 
                 results.Add(ReviewFinding.FromStaged(finding, verdict.Value, "secondary-reviewer"));

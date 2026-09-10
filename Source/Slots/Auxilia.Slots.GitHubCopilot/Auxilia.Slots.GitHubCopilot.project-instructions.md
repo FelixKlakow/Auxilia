@@ -12,6 +12,10 @@ lower-case key so the shared git-credential resolvers match), `Model`, `CliPath`
 
 ## Special rules
 
+- The CLI child runs behind `ICliProcessFactory` (`Auxilia.Workflows.AiAgent.CodingAgent`; tests
+  inject a fake). ANY exception leaving `RunAsync` — cancellation, a chat callback whose bus
+  publish failed — kills the child's process tree before rethrowing; an exited child is never
+  killed twice.
 - The token reaches the CLI ONLY via the child process environment (`GH_TOKEN`) — never as
   a command-line argument, never in error messages, chat entries, or logs.
 - The Copilot CLI's headless mode offers no interactive control channel, so

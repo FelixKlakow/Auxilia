@@ -121,8 +121,11 @@ servers auto-approved), Copilot: `~/.copilot/mcp-config.json`. The agent reads w
 detail itself — `get_work_item`, `get_work_items`, `get_work_item_relations` (parents,
 children, related items, hyperlinks — `IWorkItemAccess.GetRelationsAsync`), and
 `get_work_item_states` — instead of only the materialized story file. `.auxilia/` and
-`.mcp.json` are excluded via `.git/info/exclude`, so review bundles stay clean and the final
-commit never includes run mechanics. Externally CONFIGURED MCP servers (operator-supplied)
+`.mcp.json` are excluded via the repository's own exclude file (its location comes from
+`git rev-parse --git-path info/exclude`, so a workspace BELOW the repository root or a worktree
+still gets it), so review bundles stay clean — and the final commit stages with an excluding
+pathspec (`add -A -- :/ :(exclude).auxilia :(exclude).mcp.json`), so run mechanics never reach a
+commit even where no exclude could be written. Externally CONFIGURED MCP servers (operator-supplied)
 are a separate, deferred topic.
 
 ## Gate rendering: markdown and mermaid
@@ -167,8 +170,9 @@ operator answers ("the next agent picks up without recaching").
 ## Commit / push / story state
 
 After the final gate the WORKFLOW (not the agent) commits (`ProcessGitRunner`, provisioned
-commit identity) and pushes through the AllowPush binding; `push-mode=prompt` raises a
-decision card first. Then the story-state gate asks the operator to pick from the
+commit identity; the whole tree minus the exchange files, see above) and pushes through the
+AllowPush binding; `push-mode=prompt` raises a decision card first. A failed push reports
+git's stderr (the runner drains both pipes and appends stderr to a failing command's output). Then the story-state gate asks the operator to pick from the
 source-reported vocabulary (pre-selecting `target-state` if set) and calls `SetStateAsync`.
 
 ## Relation to the OLD Auxilia.ImplementationWorkflow

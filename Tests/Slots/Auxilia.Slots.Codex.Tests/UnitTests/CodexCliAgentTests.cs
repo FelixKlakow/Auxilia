@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Auxilia.Slots.Codex;
 using Auxilia.Workflows.AiAgent.CodingAgent;
 using Auxilia.Workflows;
@@ -23,6 +24,49 @@ public sealed class CodexCliAgentTests
             Assert.That(startInfo.ArgumentList, Has.None.Contains("sk-super-secret"));
             Assert.That(startInfo.FileName, Does.Not.Contain("sk-super-secret"));
         });
+    }
+
+    [Test]
+    public async Task RunAsync_StreamsLines_AndReportsTheExitCode()
+    {
+        var factory = new FakeCliProcessFactory("thinking\n\ndone\n", exitCode: 0);
+        var agent = new CodexCliAgent(new CodexCliOptions { ApiKey = "k" }, factory);
+        var entries = new List<string>();
+
+        var result = await agent.RunAsync(Request, (e, _) => { entries.Add(e.Content); return Task.CompletedTask; });
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Success, Is.True);
+            Assert.That(entries, Is.EqualTo(new[] { "thinking", "done" }));
+            Assert.That(result.Summary, Is.EqualTo("done"));
+            Assert.That(factory.LastProcess!.Killed, Is.False, "an exited child is not killed");
+        });
+    }
+
+    [Test]
+    public void RunAsync_ChatCallbackThrows_KillsTheProcess_AndRethrows()
+    {
+        // A bus publish failing inside the chat callback must not leave the CLI running.
+        var factory = new FakeCliProcessFactory("working\n");
+        var agent = new CodexCliAgent(new CodexCliOptions { ApiKey = "k" }, factory);
+
+        Assert.ThrowsAsync<InvalidOperationException>(() =>
+            agent.RunAsync(Request, (_, _) => throw new InvalidOperationException("bus down")));
+        Assert.That(factory.LastProcess!.Killed, Is.True);
+    }
+
+    [Test]
+    public void RunAsync_Cancellation_KillsTheProcess()
+    {
+        var factory = new FakeCliProcessFactory("working\n");
+        var agent = new CodexCliAgent(new CodexCliOptions { ApiKey = "k" }, factory);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        Assert.CatchAsync<OperationCanceledException>(() =>
+            agent.RunAsync(Request, (_, _) => Task.CompletedTask, cts.Token));
+        Assert.That(factory.LastProcess!.Killed, Is.True);
     }
 
     [Test]
@@ -101,5 +145,23 @@ public sealed class CodexCliAgentTests
             Assert.That(scope.ServiceProvider.GetRequiredService<ICodingAgent>(),
                 Is.InstanceOf<CodexCliAgent>());
         });
+    }
+    /// <summary>A scripted CLI child: canned stdout/stderr, records whether it was killed.</summary>
+    private sealed class FakeCliProcessFactory(string stdout, int exitCode = 0, string stderr = "") : ICliProcessFactory
+    {
+        public FakeCliProcess? LastProcess { get; private set; }
+
+        public ICliProcess Start(ProcessStartInfo startInfo)
+            => LastProcess = new FakeCliProcess(stdout, stderr, exitCode);
+    }
+
+    private sealed class FakeCliProcess(string stdout, string stderr, int exitCode) : ICliProcess
+    {
+        public bool Killed { get; private set; }
+        public TextReader Output { get; } = new StringReader(stdout.ReplaceLineEndings("\n"));
+        public TextReader Error { get; } = new StringReader(stderr);
+        public Task<int> WaitForExitAsync(CancellationToken cancellationToken) => Task.FromResult(exitCode);
+        public void Kill() => Killed = true;
+        public void Dispose() { }
     }
 }

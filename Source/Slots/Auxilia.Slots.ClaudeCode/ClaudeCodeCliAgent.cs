@@ -144,8 +144,10 @@ public sealed class ClaudeCodeCliAgent(
                           : $"The Claude Code CLI reported '{result.Subtype}' (exit code {exitCode}).")
                       + StderrSuffix(stderr));
         }
-        catch (OperationCanceledException)
+        catch
         {
+            // ANY failure of the run (cancellation, a bus publish that threw from the chat
+            // callback, ...) must not leave the CLI editing and pushing inside the container.
             process.Kill();
             throw;
         }

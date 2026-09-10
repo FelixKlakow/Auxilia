@@ -52,12 +52,7 @@ public sealed class ImplementationPipeline(
             // The exchange directory and MCP registration are RUN mechanics, not story
             // content — repo-locally excluded so review bundles stay clean and the final
             // commit never picks them up.
-            if (Directory.Exists(Path.Combine(context.WorkspaceDirectory, ".git")))
-            {
-                var exclude = Path.Combine(context.WorkspaceDirectory, ".git", "info", "exclude");
-                Directory.CreateDirectory(Path.GetDirectoryName(exclude)!);
-                await File.AppendAllTextAsync(exclude, "\n.auxilia/\n.mcp.json\n", ct);
-            }
+            await ExcludeExchangeFilesAsync(ct);
             await PublishFlowAsync(activeStep: "workspace", ct);
             var branch = context.BranchNameFor(workItem.Title);
             await git.RunAsync(context.WorkspaceDirectory, $"checkout -b {branch}", ct);
@@ -405,7 +400,7 @@ public sealed class ImplementationPipeline(
             }
         }
 
-        await git.RunAsync(context.WorkspaceDirectory, "add -A", ct);
+        await git.RunAsync(context.WorkspaceDirectory, StageArguments, ct);
         await git.RunAsync(context.WorkspaceDirectory,
             $"commit -m \"Implement {context.WorkItemId}: {Sanitize(workItem.Title)}\"", ct);
         var (exit, output) = await git.RunAsync(
@@ -414,6 +409,31 @@ public sealed class ImplementationPipeline(
             throw new InvalidOperationException($"git push failed: {Truncate(output, 400)}");
         await ProgressAsync("push", $"branch '{branch}' pushed", ct);
         return true;
+    }
+
+    /// <summary>
+    /// Stages the WHOLE tree (<c>:/</c> — the workspace may be a directory below the repository
+    /// root) minus the exchange files, so they never reach a commit even when the exclude
+    /// could not be written.
+    /// </summary>
+    internal const string StageArguments = "add -A -- :/ :(exclude).auxilia :(exclude).mcp.json";
+
+    /// <summary>
+    /// Writes <c>.auxilia/</c> and <c>.mcp.json</c> into the repository's own exclude file. The
+    /// git dir is resolved through git itself (<c>rev-parse --git-path</c>): with a mount
+    /// working directory the <c>.git</c> lives ABOVE the workspace, and in a worktree it is a
+    /// file. Not a repository → nothing to exclude.
+    /// </summary>
+    private async Task ExcludeExchangeFilesAsync(CancellationToken ct)
+    {
+        var (exit, gitPath) = await git.RunAsync(
+            context.WorkspaceDirectory, "rev-parse --git-path info/exclude", ct);
+        var excludePath = gitPath.Trim();
+        if (exit != 0 || excludePath.Length == 0)
+            return;
+        var exclude = Path.GetFullPath(Path.Combine(context.WorkspaceDirectory, excludePath));
+        Directory.CreateDirectory(Path.GetDirectoryName(exclude)!);
+        await File.AppendAllTextAsync(exclude, "\n.auxilia/\n.mcp.json\n", ct);
     }
 
     private async Task SetStoryStateAsync(WorkItem workItem, string branch, bool pushed, CancellationToken ct)

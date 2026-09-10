@@ -24,6 +24,8 @@ when present in stored settings but deliberately not offered in the editor.
 
 ## Special rules
 
+- ANY exception leaving `RunAsync` — cancellation, a chat callback whose bus publish failed —
+  kills the CLI's process tree (`IClaudeCliProcess.Kill`, no-op once exited) before rethrowing.
 - The credential reaches the CLI ONLY via the child process environment
   (`CLAUDE_CODE_OAUTH_TOKEN` for a connected account, `ANTHROPIC_API_KEY` for the
   fallback key; only the one in use is exported) — never as a command-line argument

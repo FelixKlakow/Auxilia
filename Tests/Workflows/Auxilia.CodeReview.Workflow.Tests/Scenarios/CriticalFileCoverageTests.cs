@@ -21,7 +21,9 @@ public sealed class CriticalFileCoverageTests : ScenarioTestBase
                 ["src/Auth.critical.cs"] = [Hunk("src/Auth.critical.cs")],
             });
 
-        var primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn()]]));
+        // The verdict must be RECORDED through the sink: a silent reviewer never counts as Reviewed.
+        FakeAiAgent? primaryAi = null;
+        primaryAi = new FakeAiAgent(new Queue<IReadOnlyList<ScriptedTurn>>([[ReviewedTurn(() => primaryAi)]]));
 
         var registry = new CodeReviewFakeRegistry(
             new FakeSourceControlAccess(),

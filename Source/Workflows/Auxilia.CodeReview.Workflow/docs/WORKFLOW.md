@@ -26,7 +26,7 @@ Use this workflow when you want a consistent, configurable code-review process d
 
 | Property | Type | Default | Effect |
 |---|---|---|---|
-| `Enabled` | `bool` | `false` | When `true`, each staged finding is independently reviewed by the `secondary-reviewer` slot before inclusion in the result. When `false`, all staged findings are included with `SecondaryVerdict.NotReviewed`. |
+| `Enabled` | `bool` | `false` | When `true`, each staged finding is independently reviewed by the `secondary-reviewer` slot before inclusion in the result; a finding the reviewer never rules on stays `NotReviewed`. When `false`, all staged findings are included with `SecondaryVerdict.NotReviewed`. |
 
 ### `WriteBackConfiguration`
 

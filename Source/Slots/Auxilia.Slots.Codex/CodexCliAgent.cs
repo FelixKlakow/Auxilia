@@ -14,10 +14,12 @@ namespace Auxilia.Slots.Codex;
 /// </summary>
 public sealed class CodexCliAgent(
     CodexCliOptions options,
+    ICliProcessFactory? processFactory = null,
     TimeProvider? time = null) : ICodingAgent
 {
     private const int StderrTailLength = 1000;
 
+    private readonly ICliProcessFactory _processFactory = processFactory ?? ProcessCliProcessFactory.Instance;
     private readonly TimeProvider _time = time ?? TimeProvider.System;
 
     public async Task<CodingAgentResult> RunAsync(
@@ -31,17 +33,15 @@ public sealed class CodexCliAgent(
                 + "exec mode is one-shot.");
 
         var stopwatch = Stopwatch.StartNew();
-        using var process = Process.Start(BuildStartInfo(request))
-                            ?? throw new InvalidOperationException(
-                                $"Failed to start the Codex CLI ('{options.CliPath}').");
+        using var process = _processFactory.Start(BuildStartInfo(request));
         try
         {
             // Drain stderr concurrently so a chatty CLI can't dead-lock on a full pipe.
-            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            var stderrTask = process.Error.ReadToEndAsync(cancellationToken);
 
             string? lastLine = null;
             var lineCount = 0;
-            while (await process.StandardOutput.ReadLineAsync(cancellationToken) is { } line)
+            while (await process.Output.ReadLineAsync(cancellationToken) is { } line)
             {
                 if (string.IsNullOrWhiteSpace(line))
                     continue;
@@ -52,11 +52,11 @@ public sealed class CodexCliAgent(
                     cancellationToken);
             }
 
-            await process.WaitForExitAsync(cancellationToken);
+            var exitCode = await process.WaitForExitAsync(cancellationToken);
             var stderr = await stderrTask;
             stopwatch.Stop();
 
-            var success = process.ExitCode == 0;
+            var success = exitCode == 0;
             return new CodingAgentResult(
                 success,
                 lastLine,
@@ -64,19 +64,13 @@ public sealed class CodexCliAgent(
                 DurationMs: stopwatch.ElapsedMilliseconds,
                 ErrorMessage: success
                     ? null
-                    : $"The Codex CLI exited with code {process.ExitCode}." + StderrSuffix(stderr));
+                    : $"The Codex CLI exited with code {exitCode}." + StderrSuffix(stderr));
         }
-        catch (OperationCanceledException)
+        catch
         {
-            try
-            {
-                if (!process.HasExited)
-                    process.Kill(entireProcessTree: true);
-            }
-            catch (InvalidOperationException)
-            {
-                // Exited between the check and the kill.
-            }
+            // ANY failure of the run (cancellation, a bus publish that threw from the chat
+            // callback, ...) must not leave the CLI editing and pushing inside the container.
+            process.Kill();
             throw;
         }
     }

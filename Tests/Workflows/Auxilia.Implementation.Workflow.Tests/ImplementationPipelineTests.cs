@@ -99,10 +99,15 @@ public sealed class ImplementationPipelineTests
     {
         public List<string> Commands { get; } = [];
 
+        /// <summary>What <c>rev-parse --git-path info/exclude</c> answers (null = not a repository).</summary>
+        public string? ExcludePath { get; init; }
+
         public Task<(int ExitCode, string Output)> RunAsync(
             string workingDirectory, string arguments, CancellationToken ct)
         {
             Commands.Add(arguments);
+            if (arguments.StartsWith("rev-parse"))
+                return Task.FromResult(ExcludePath is null ? (128, "fatal: not a git repository") : (0, ExcludePath + "\n"));
             return Task.FromResult((0, arguments.StartsWith("diff") ? "+new line" : ""));
         }
     }
@@ -126,9 +131,89 @@ public sealed class ImplementationPipelineTests
         Directory.Delete(_output, recursive: true);
     }
 
-    private ImplementationContext Context() => ImplementationContext.FromValues(
-        "42", _workspace, _output,
+    private ImplementationContext Context(string? workspace = null) => ImplementationContext.FromValues(
+        "42", workspace ?? _workspace, _output,
         pushMode: PushModes.Auto, targetState: "Testing");
+
+    /// <summary>Runs the whole pipeline with an approving reviewer; the agent script writes the exchange files.</summary>
+    private async Task RunToPushAsync(FakeGit git, ImplementationContext context)
+    {
+        var console = new ScriptedConsole
+        {
+            OnDrive = prompt =>
+            {
+                if (prompt.Contains("questions", StringComparison.OrdinalIgnoreCase))
+                    File.WriteAllText(Path.Combine(context.ExchangeDirectory, "questions.md"), "NONE");
+                if (prompt.Contains("plan", StringComparison.OrdinalIgnoreCase))
+                    File.WriteAllText(Path.Combine(context.ExchangeDirectory, "plan.md"), "# Plan\n- step");
+            }
+        };
+        var workItems = new FakeWorkItems
+        {
+            Item = new WorkItem("42", "Add login page", "As a user…", "Active", null, []),
+            States = ["New", "Active", "Testing", "Done"],
+        };
+        await new ImplementationPipeline(
+                workItems, null, null, context, Pool(context, console), new ScriptedReviewer(), git, TimeProvider.System)
+            .RunAsync(CancellationToken.None);
+    }
+
+    [Test]
+    public async Task Push_StagesTheWholeTree_MinusTheExchangeFiles()
+    {
+        var git = new FakeGit { ExcludePath = Path.Combine(_workspace, ".git", "info", "exclude") };
+
+        await RunToPushAsync(git, Context());
+
+        var stage = git.Commands.Single(c => c.StartsWith("add "));
+        Assert.Multiple(() =>
+        {
+            Assert.That(stage, Is.EqualTo("add -A -- :/ :(exclude).auxilia :(exclude).mcp.json"),
+                "the exchange directory and the MCP registration never reach a commit, exclude file or not");
+            Assert.That(git.Commands.IndexOf(stage), Is.LessThan(git.Commands.FindIndex(c => c.StartsWith("commit "))));
+        });
+    }
+
+    [Test]
+    public async Task Exclude_IsWrittenIntoTheRepositoryGitDir_EvenAboveTheWorkspace()
+    {
+        // A mount working directory: the workspace is a directory BELOW the repository root.
+        var workspace = Path.Combine(_workspace, "src", "app");
+        Directory.CreateDirectory(workspace);
+        var excludePath = Path.Combine(_workspace, ".git", "info", "exclude");
+        var git = new FakeGit { ExcludePath = excludePath };
+
+        await RunToPushAsync(git, Context(workspace));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(git.Commands, Does.Contain("rev-parse --git-path info/exclude"),
+                "the exclude location comes from git, not from a .git directory lookup");
+            Assert.That(File.Exists(excludePath), Is.True, "the exclude lands in the repository's git dir");
+            Assert.That(File.ReadAllText(excludePath), Does.Contain(".auxilia/").And.Contain(".mcp.json"));
+        });
+    }
+
+    [Test]
+    public async Task Exclude_RelativeGitPath_ResolvesAgainstTheWorkspace()
+    {
+        // git answers a RELATIVE path when the workspace is the repository root.
+        var git = new FakeGit { ExcludePath = ".git/info/exclude" };
+
+        await RunToPushAsync(git, Context());
+
+        Assert.That(File.ReadAllText(Path.Combine(_workspace, ".git", "info", "exclude")), Does.Contain(".auxilia/"));
+    }
+
+    [Test]
+    public async Task Exclude_NotARepository_WritesNothing()
+    {
+        var git = new FakeGit { ExcludePath = null };
+
+        await RunToPushAsync(git, Context());
+
+        Assert.That(Directory.Exists(Path.Combine(_workspace, ".git")), Is.False);
+    }
 
     private static AgentConsolePool Pool(ImplementationContext context, ScriptedConsole console)
         => new(context, null, null, () => console, () => console, null);

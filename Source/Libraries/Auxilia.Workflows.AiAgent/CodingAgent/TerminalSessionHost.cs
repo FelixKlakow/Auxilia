@@ -4,8 +4,9 @@ namespace Auxilia.Workflows.AiAgent.CodingAgent;
 
 /// <summary>
 /// What one interactive terminal session needs: where it runs, the command it executes, the
-/// container port ttyd serves on, and the process environment (the JIT-delivered credential —
-/// environment-only by contract: never arguments, never logged).
+/// container port ttyd serves on, and the session environment (the JIT-delivered credential —
+/// delivered to the session with <c>tmux new-session -e</c>, never inside the command, never
+/// logged).
 /// </summary>
 public sealed record TerminalSessionInfo(
     string WorkspaceDirectory,
@@ -82,11 +83,14 @@ public sealed class TmuxSessionHost : ISessionHost
     }
 
     /// <summary>
-    /// The tmux server inherits this process's environment — the session credential rides in
-    /// via <see cref="TerminalSessionInfo.Environment"/>, never on the command line. The
-    /// command itself is ONE argv element (tmux runs it through the shell), so it may contain
-    /// quotes and shell expansions; '; tmux kill-server' makes the command's exit tear down
-    /// the server — the auto-exit contract.
+    /// Every variable in <see cref="TerminalSessionInfo.Environment"/> goes to THIS session
+    /// with <c>-e KEY=VALUE</c> (tmux ≥ 3.2; the workflow images ship 3.3+). Only the first
+    /// session forks the server and inherits the client's environment — a secondary session
+    /// (the reviewer console) would otherwise run on the author's credential — so the client
+    /// environment is deliberately not relied on. The command itself is ONE argv element
+    /// (tmux runs it through the shell), so it may contain quotes and shell expansions;
+    /// '; tmux kill-server' makes the command's exit tear down the server — the auto-exit
+    /// contract.
     /// </summary>
     public static ProcessStartInfo BuildTmuxStartInfo(TerminalSessionInfo session)
     {
@@ -97,16 +101,40 @@ public sealed class TmuxSessionHost : ISessionHost
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
-        foreach (var argument in new[]
-                 {
-                     "new-session", "-d", "-s", session.SessionName,
-                     "-c", session.WorkspaceDirectory,
-                     session.EndsServerOnExit ? $"{session.Command}; tmux kill-server" : session.Command
-                 })
-            startInfo.ArgumentList.Add(argument);
+        startInfo.ArgumentList.Add("new-session");
+        startInfo.ArgumentList.Add("-d");
+        startInfo.ArgumentList.Add("-s");
+        startInfo.ArgumentList.Add(session.SessionName);
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add(session.WorkspaceDirectory);
         foreach (var (key, value) in session.Environment)
-            startInfo.Environment[key] = value;
+        {
+            startInfo.ArgumentList.Add("-e");
+            startInfo.ArgumentList.Add($"{key}={value}");
+        }
+        startInfo.ArgumentList.Add(
+            session.EndsServerOnExit ? $"{session.Command}; tmux kill-server" : session.Command);
         return startInfo;
+    }
+
+    /// <summary>The argv for a failure message — every <c>-e KEY=VALUE</c> value redacted.</summary>
+    internal static string DescribeForLog(ProcessStartInfo startInfo)
+    {
+        var parts = new List<string>(startInfo.ArgumentList.Count);
+        for (var i = 0; i < startInfo.ArgumentList.Count; i++)
+        {
+            var argument = startInfo.ArgumentList[i];
+            if (argument == "-e" && i + 1 < startInfo.ArgumentList.Count)
+            {
+                var assignment = startInfo.ArgumentList[++i];
+                var name = assignment.Split('=', 2)[0];
+                parts.Add("-e");
+                parts.Add($"{name}=<redacted>");
+                continue;
+            }
+            parts.Add(argument);
+        }
+        return $"{startInfo.FileName} {string.Join(' ', parts)}";
     }
 
     public async Task SendTextAsync(string text, CancellationToken cancellationToken)
@@ -162,8 +190,7 @@ public sealed class TmuxSessionHost : ISessionHost
     private static async Task RunAsync(ProcessStartInfo startInfo, CancellationToken ct)
     {
         if (await TryRunAsync(startInfo, ct) is var exitCode && exitCode != 0)
-            throw new InvalidOperationException(
-                $"'{startInfo.FileName} {string.Join(' ', startInfo.ArgumentList)}' exited with {exitCode}.");
+            throw new InvalidOperationException($"'{DescribeForLog(startInfo)}' exited with {exitCode}.");
     }
 
     private static Task<int> TryRunAsync(string fileName, string[] arguments, CancellationToken ct)

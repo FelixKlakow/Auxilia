@@ -4,6 +4,13 @@ Slot-package that adds AI-agent vocabulary to the workflow SDK. Declares the mod
 
 Note: `IAiAgent` and `IAiSession` are intentionally independent of `Auxilia.AI` (the SDK). A provider package bridges them.
 
+`CodingAgent/TerminalSessionHost.cs` (`TmuxSessionHost`) delivers `TerminalSessionInfo.Environment` to ITS
+session with `tmux new-session -e KEY=VALUE` (tmux ≥ 3.2; the workflow images ship Debian's 3.3+). Only the
+first session forks the server and inherits the client environment, so a secondary session (the reviewer
+console) would otherwise run on the author's credential — the client environment is not a delivery path.
+Failure messages go through `DescribeForLog`, which redacts every `-e` value. `CodingAgent/CliProcess.cs`
+(`ICliProcessFactory`/`ICliProcess`) is the child-process seam the headless CLI slot agents run behind.
+
 ## Architecture
 
 Named AI slots are registered as keyed services by the provider's `ISlotHandler`:

@@ -13,6 +13,10 @@ The manifest's `Settings` drive the visual editor: `ApiKey` (Secret), `Model`, `
 
 ## Special rules
 
+- The CLI child runs behind `ICliProcessFactory` (`Auxilia.Workflows.AiAgent.CodingAgent`; tests
+  inject a fake). ANY exception leaving `RunAsync` — cancellation, a chat callback whose bus
+  publish failed — kills the child's process tree before rethrowing; an exited child is never
+  killed twice.
 - The API key reaches the CLI ONLY via the child process environment (`OPENAI_API_KEY`) —
   never as a command-line argument, never in error messages, chat entries, or logs.
 - The Codex CLI's exec mode offers no interactive control channel, so

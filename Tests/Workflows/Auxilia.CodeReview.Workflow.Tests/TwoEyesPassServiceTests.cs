@@ -92,7 +92,7 @@ public sealed class TwoEyesPassServiceTests
     }
 
     [Test]
-    public async Task Enabled_NoToolCall_DefaultsToApproved()
+    public async Task Enabled_NoToolCall_IsNotAnApproval_TheFindingStaysNotReviewed()
     {
         var svc = new TwoEyesPassService(
             new NoSinkFakeAiAgent(),
@@ -101,9 +101,11 @@ public sealed class TwoEyesPassServiceTests
         var staged = new[] { MakeFinding("a.cs"), MakeFinding("b.cs") };
         var result = await svc.RunAsync(staged, MakeContext());
 
-        Assert.That(result, Has.Count.EqualTo(2));
-        Assert.That(result, Has.All.Matches<ReviewFinding>(f => f.TwoEyesVerdict == SecondaryVerdict.Approved),
-            "Absent tool calls should fall back to Approved (documented conservative default)");
+        Assert.That(result, Has.Count.EqualTo(2), "an unvetted finding is never dropped");
+        Assert.That(result, Has.All.Matches<ReviewFinding>(f => f.TwoEyesVerdict == SecondaryVerdict.NotReviewed),
+            "a silent second reviewer never approves — the finding is labelled as not reviewed");
+        Assert.That(result, Has.All.Matches<ReviewFinding>(f => f.SecondaryReviewerAttribution is null),
+            "no reviewer is credited with a verdict it never gave");
     }
 
     // ---- Fake helpers ----

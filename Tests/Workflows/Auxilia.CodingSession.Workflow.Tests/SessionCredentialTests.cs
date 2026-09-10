@@ -24,7 +24,7 @@ public sealed class SessionCredentialTests
     }
 
     [Test]
-    public void TmuxStartInfo_CarriesTheCredentialOnlyInTheEnvironment()
+    public void TmuxStartInfo_CarriesTheCredentialAsASessionVariable_NeverInsideTheCommand()
     {
         var context = SessionRunContext.FromValues("/workspace", "/output", "claude", "60", "run-1") with
         {
@@ -40,13 +40,17 @@ public sealed class SessionCredentialTests
                 Environment = context.SessionEnvironment
             });
 
+        var arguments = startInfo.ArgumentList;
         Assert.Multiple(() =>
         {
-            Assert.That(startInfo.Environment["CLAUDE_CODE_OAUTH_TOKEN"], Is.EqualTo("sk-ant-oat-secret"));
-            Assert.That(startInfo.ArgumentList, Does.Not.Contain("sk-ant-oat-secret"),
-                "the credential must never appear on the command line");
-            Assert.That(startInfo.ArgumentList, Does.Contain("claude; tmux kill-server"),
-                "the CLI's exit still tears the session down");
+            var e = arguments.IndexOf("-e");
+            Assert.That(e, Is.GreaterThan(0), "the credential is a per-session tmux variable (-e)");
+            Assert.That(arguments[e + 1], Is.EqualTo("CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-secret"));
+            Assert.That(arguments[^1], Is.EqualTo("claude; tmux kill-server"),
+                "the CLI's exit still tears the session down; the command never carries the credential");
+            startInfo.Environment.TryGetValue("CLAUDE_CODE_OAUTH_TOKEN", out var inherited);
+            Assert.That(inherited, Is.Not.EqualTo("sk-ant-oat-secret"),
+                "the client environment is not the delivery path — only the first session would inherit it");
             Assert.That(startInfo.ArgumentList, Does.Contain("/workspace"),
                 "the session starts in the workspace");
         });
