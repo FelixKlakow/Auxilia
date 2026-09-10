@@ -11,5 +11,5 @@ public sealed record GroupMappingRecord : IEntity
     public required string RoleName { get; init; }
 
     public static Guid IdFor(string identityProvider, string groupClaim, string roleName)
-        => DeterministicGuid.For("group-mapping", identityProvider, "", groupClaim, "", roleName);
+        => DeterministicGuid.For("group-mapping", identityProvider, groupClaim, roleName);
 }

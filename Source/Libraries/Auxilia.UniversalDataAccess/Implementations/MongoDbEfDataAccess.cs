@@ -97,7 +97,7 @@ public sealed class MongoDbEfDataAccess<TEntity> : IDataAccess<TEntity>, IDispos
     private async Task<bool> SaveVersionedAsync(
         TEntity entity, IVersionedEntity versioned, CancellationToken cancellationToken)
     {
-        while (true)
+        for (var attempt = 1; ; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             await using var ctx = await _contextFactory.CreateDbContextAsync(cancellationToken);
@@ -122,10 +122,22 @@ public sealed class MongoDbEfDataAccess<TEntity> : IDataAccess<TEntity>, IDispos
 
                 await ctx.SaveChangesAsync(cancellationToken);
             }
-            catch (DbUpdateException)
+            catch (DbUpdateConcurrencyException) when (attempt < MaxWriteAttempts)
             {
-                // A concurrent writer moved the version (or inserted first) — last writer wins:
-                // re-read the fresh version and re-apply this entity's values.
+                // A concurrent writer moved the version — last writer wins: re-read the fresh
+                // version and re-apply this entity's values. Bounded, so a store that keeps
+                // rejecting the write surfaces the exception instead of spinning forever.
+                await BackoffAsync(attempt, cancellationToken);
+                continue;
+            }
+            catch (DbUpdateException ex) when (ex is not DbUpdateConcurrencyException && !updated && attempt < MaxWriteAttempts)
+            {
+                // Insert path: only a concurrent writer inserting the same id first is a race worth
+                // retrying (as an update). Every other write error is real and must surface.
+                await using var probe = await _contextFactory.CreateDbContextAsync(cancellationToken);
+                if (!await probe.Entities.AnyAsync(e => e.Id == entity.Id, cancellationToken))
+                    throw;
+                await BackoffAsync(attempt, cancellationToken);
                 continue;
             }
 
@@ -137,6 +149,12 @@ public sealed class MongoDbEfDataAccess<TEntity> : IDataAccess<TEntity>, IDispos
             return updated;
         }
     }
+
+    /// <summary>Upper bound on optimistic-write retries before the concurrency exception surfaces.</summary>
+    private const int MaxWriteAttempts = 8;
+
+    private static Task BackoffAsync(int attempt, CancellationToken cancellationToken)
+        => Task.Delay(TimeSpan.FromMilliseconds(Random.Shared.Next(1, 5 * attempt)), cancellationToken);
 
     public Task<bool> TrySaveAsync(TEntity entity, long expectedVersion) => TrySaveAsync(entity, expectedVersion, CancellationToken.None);
 
@@ -198,17 +216,30 @@ public sealed class MongoDbEfDataAccess<TEntity> : IDataAccess<TEntity>, IDispos
 
     public async Task<bool> RemoveAsync(Guid id, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        await using var ctx = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        for (var attempt = 1; ; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await using var ctx = await _contextFactory.CreateDbContextAsync(cancellationToken);
 
-        var existing = await ctx.Entities.FindAsync([id], cancellationToken);
-        if (existing is null) return false;
+            var existing = await ctx.Entities.FindAsync([id], cancellationToken);
+            if (existing is null) return false;
 
-        ctx.Entities.Remove(existing);
-        await ctx.SaveChangesAsync(cancellationToken);
+            ctx.Entities.Remove(existing);
+            try
+            {
+                await ctx.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < MaxWriteAttempts)
+            {
+                // Versioned entities delete through the Version token: a concurrent writer moved
+                // the version (re-read and delete again) or already removed it (report false).
+                await BackoffAsync(attempt, cancellationToken);
+                continue;
+            }
 
-        _entityRemoved.OnNext(existing);
-        return true;
+            _entityRemoved.OnNext(existing);
+            return true;
+        }
     }
 
     // ── Dispose ─────────────────────────────────────────────────────────────

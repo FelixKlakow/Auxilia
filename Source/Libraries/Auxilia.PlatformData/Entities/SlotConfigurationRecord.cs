@@ -17,5 +17,5 @@ public sealed record SlotConfigurationRecord : IEntity
     public required string Status { get; init; }
 
     public static Guid IdFor(string workflowType, string slotName)
-        => DeterministicGuid.For("slot-configuration", workflowType, "", slotName);
+        => DeterministicGuid.For("slot-configuration", workflowType, slotName);
 }

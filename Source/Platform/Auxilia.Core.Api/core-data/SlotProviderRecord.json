@@ -1,6 +1,6 @@
 [
   {
-    "Id": "9d97b3fc-74e7-58d5-93ed-7bcfe653a4b4",
+    "Id": "8c2411cb-db30-5743-90ef-308b0a3314f7",
     "ProviderType": "claude-code-cli",
     "DllPath": "claude-code-cli.slothandler.dll",
     "SettingDescriptorsJson": "[{\u0022Key\u0022:\u0022OAuthToken\u0022,\u0022Label\u0022:\u0022Claude account\u0022,\u0022Kind\u0022:\u0022Secret\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:\u0022The connected Claude account the CLI runs with.\u0022,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:\u0022anthropic-claude\u0022,\u0022Role\u0022:null,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null},{\u0022Key\u0022:\u0022OAuthRefreshToken\u0022,\u0022Label\u0022:\u0022Refresh token\u0022,\u0022Kind\u0022:\u0022Secret\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:\u0022Captured by Connect - lets the Core refresh the access token at delivery time.\u0022,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:null,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null},{\u0022Key\u0022:\u0022OAuthExpiresAt\u0022,\u0022Label\u0022:\u0022Token expiry (internal)\u0022,\u0022Kind\u0022:\u0022Text\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:\u0022Unix millis; maintained automatically by the Core on each refresh.\u0022,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:null,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null},{\u0022Key\u0022:\u0022ApiKey\u0022,\u0022Label\u0022:\u0022Anthropic API key (fallback)\u0022,\u0022Kind\u0022:\u0022Secret\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:\u0022Fallback when no Claude account is connected.\u0022,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:null,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null},{\u0022Key\u0022:\u0022Model\u0022,\u0022Label\u0022:\u0022Model\u0022,\u0022Kind\u0022:\u0022Text\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:\u0022Optional model override.\u0022,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:null,\u0022Browse\u0022:\u0022models\u0022,\u0022BrowseDependsOn\u0022:null},{\u0022Key\u0022:\u0022CliPath\u0022,\u0022Label\u0022:\u0022CLI path (advanced)\u0022,\u0022Kind\u0022:\u0022Text\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:null,\u0022DefaultValue\u0022:\u0022claude\u0022,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:null,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null}]",
@@ -16,7 +16,7 @@
     "Description": "Runs the Claude Code CLI as the coding agent of a workflow; credentials reach the agent container just-in-time."
   },
   {
-    "Id": "82c97d8c-fed3-510a-a9c4-a1c52a30e1a1",
+    "Id": "b53c075d-d988-5c7b-bf53-fe4ca248b4b2",
     "ProviderType": "github-account",
     "DllPath": "github-account.slothandler.dll",
     "SettingDescriptorsJson": "[{\u0022Key\u0022:\u0022token\u0022,\u0022Label\u0022:\u0022GitHub account\u0022,\u0022Kind\u0022:\u0022Secret\u0022,\u0022Required\u0022:true,\u0022HelpText\u0022:null,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:\u0022github\u0022,\u0022Role\u0022:null,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null}]",
@@ -33,7 +33,7 @@
     "Description": "Your GitHub account. One connection serves ALL its repositories: live repository/branch lists, just-in-time clone auth - the credential never enters a container."
   },
   {
-    "Id": "1a514c29-939a-51f6-bc06-4d7eadb1027f",
+    "Id": "5a3001de-64d9-5191-be6b-21092bd83829",
     "ProviderType": "tfs-account",
     "DllPath": "tfs-account.slothandler.dll",
     "SettingDescriptorsJson": "[{\u0022Key\u0022:\u0022token\u0022,\u0022Label\u0022:\u0022Personal access token\u0022,\u0022Kind\u0022:\u0022Secret\u0022,\u0022Required\u0022:true,\u0022HelpText\u0022:\u0022A TFS/Azure DevOps PAT with code-read (and code-write if the workflow pushes).\u0022,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:null,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null},{\u0022Key\u0022:\u0022OrgUrl\u0022,\u0022Label\u0022:\u0022Organization / collection URL\u0022,\u0022Kind\u0022:\u0022Text\u0022,\u0022Required\u0022:true,\u0022HelpText\u0022:\u0022e.g. https://dev.azure.com/my-org or https://tfs.company.com/tfs/DefaultCollection\u0022,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:null,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null},{\u0022Key\u0022:\u0022username\u0022,\u0022Label\u0022:\u0022Username (optional)\u0022,\u0022Kind\u0022:\u0022Text\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:null,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:null,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null}]",
@@ -50,7 +50,7 @@
     "Description": "A TFS / Azure DevOps account (personal access token). One connection serves all repositories the account can reach; resolved just-in-time, never inside a container."
   },
   {
-    "Id": "51d63cf9-f614-5b89-b3f3-fe78faeee1e0",
+    "Id": "a2da77f7-fdb2-54fa-95b7-e084752e9e38",
     "ProviderType": "git-repository",
     "DllPath": "git-repository.slothandler.dll",
     "SettingDescriptorsJson": "[{\u0022Key\u0022:\u0022CloneUrl\u0022,\u0022Label\u0022:\u0022Repository\u0022,\u0022Kind\u0022:\u0022Text\u0022,\u0022Required\u0022:true,\u0022HelpText\u0022:null,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:\u0022clone-url\u0022,\u0022Browse\u0022:\u0022repositories\u0022,\u0022BrowseDependsOn\u0022:null},{\u0022Key\u0022:\u0022Branch\u0022,\u0022Label\u0022:\u0022Branch\u0022,\u0022Kind\u0022:\u0022Text\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:null,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:\u0022branch\u0022,\u0022Browse\u0022:\u0022branches\u0022,\u0022BrowseDependsOn\u0022:\u0022CloneUrl\u0022},{\u0022Key\u0022:\u0022WorkingDirectory\u0022,\u0022Label\u0022:\u0022Working directory\u0022,\u0022Kind\u0022:\u0022Text\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:null,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:\u0022working-directory\u0022,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null},{\u0022Key\u0022:\u0022NoCache\u0022,\u0022Label\u0022:\u0022Fresh clone every run\u0022,\u0022Kind\u0022:\u0022Boolean\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:null,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:\u0022no-cache\u0022,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null},{\u0022Key\u0022:\u0022AllowPush\u0022,\u0022Label\u0022:\u0022Allow the agent to push\u0022,\u0022Kind\u0022:\u0022Boolean\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:null,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:\u0022allow-push\u0022,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null},{\u0022Key\u0022:\u0022CommitName\u0022,\u0022Label\u0022:\u0022Commit author name\u0022,\u0022Kind\u0022:\u0022Text\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:null,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:\u0022commit-name\u0022,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null},{\u0022Key\u0022:\u0022CommitEmail\u0022,\u0022Label\u0022:\u0022Commit author e-mail\u0022,\u0022Kind\u0022:\u0022Text\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:null,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:\u0022commit-email\u0022,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null}]",
@@ -66,7 +66,7 @@
     "Description": "A git repository the run works on: cloned into the workspace before launch, authenticated by a connected account, picked live from that account."
   },
   {
-    "Id": "bc1fd000-e1eb-5f1b-9f47-ad5349b6b193",
+    "Id": "9e3e4074-4216-5da9-90b2-45f179d04839",
     "ProviderType": "github-copilot-cli",
     "DllPath": "github-copilot-cli.slothandler.dll",
     "SettingDescriptorsJson": "[{\u0022Key\u0022:\u0022token\u0022,\u0022Label\u0022:\u0022GitHub account\u0022,\u0022Kind\u0022:\u0022Secret\u0022,\u0022Required\u0022:true,\u0022HelpText\u0022:\u0022A GitHub token with Copilot access.\u0022,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:\u0022github\u0022,\u0022Role\u0022:null,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null},{\u0022Key\u0022:\u0022UseSdkSession\u0022,\u0022Label\u0022:\u0022Interactive session (SDK)\u0022,\u0022Kind\u0022:\u0022Boolean\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:\u0022Full interactivity via the Copilot SDK. Off = plain headless mode.\u0022,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:null,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null},{\u0022Key\u0022:\u0022Model\u0022,\u0022Label\u0022:\u0022Model\u0022,\u0022Kind\u0022:\u0022Text\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:null,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:null,\u0022Browse\u0022:\u0022models\u0022,\u0022BrowseDependsOn\u0022:null},{\u0022Key\u0022:\u0022CliPath\u0022,\u0022Label\u0022:\u0022CLI path (advanced)\u0022,\u0022Kind\u0022:\u0022Text\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:null,\u0022DefaultValue\u0022:\u0022copilot\u0022,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:null,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null}]",
@@ -82,7 +82,7 @@
     "Description": "Runs the GitHub Copilot CLI as the coding agent of a workflow; the token reaches the agent container just-in-time."
   },
   {
-    "Id": "bf0547c1-9a00-58e2-bcf5-57b6ec36a4bb",
+    "Id": "c5a0cad2-2e1a-525d-b950-3d6ac7c09891",
     "ProviderType": "dotnet-10",
     "DllPath": "dotnet-10.slothandler.dll",
     "SettingDescriptorsJson": "[]",
@@ -98,7 +98,7 @@
     "Description": "The .NET 10 SDK preinstalled \u2014 build, test, and run .NET projects inside the session."
   },
   {
-    "Id": "18269985-5533-538e-b353-e46d00e0a770",
+    "Id": "768fb0d6-268a-57f5-922d-80fdb8ca0747",
     "ProviderType": "node-22",
     "DllPath": "node-22.slothandler.dll",
     "SettingDescriptorsJson": "[]",
@@ -114,7 +114,7 @@
     "Description": "Node.js 22 with npm preinstalled \u2014 build and run JavaScript/TypeScript projects inside the session."
   },
   {
-    "Id": "e2288a4a-dff4-52e0-8afe-c3414a954bc8",
+    "Id": "552f0986-6241-50b5-a3a2-19bfa8dc72c3",
     "ProviderType": "simulated-work-items",
     "DllPath": "simulated-work-items.slothandler.dll",
     "SettingDescriptorsJson": "[{\u0022Key\u0022:\u0022Title\u0022,\u0022Label\u0022:\u0022Story title\u0022,\u0022Kind\u0022:\u0022Text\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:null,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:null,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null},{\u0022Key\u0022:\u0022Description\u0022,\u0022Label\u0022:\u0022Story description\u0022,\u0022Kind\u0022:\u0022Text\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:null,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:null,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null},{\u0022Key\u0022:\u0022DelaySeconds\u0022,\u0022Label\u0022:\u0022Delay per operation (s)\u0022,\u0022Kind\u0022:\u0022Number\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:null,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:null,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null}]",
@@ -130,7 +130,7 @@
     "Description": "SIMULATION: scripted TFS stand-in with per-operation delay - live-view testing only."
   },
   {
-    "Id": "2751c202-d014-5f90-8031-1aa252ee6021",
+    "Id": "f1e0f156-85bd-5f2a-b2f2-d9f76553c1c6",
     "ProviderType": "coding-session-workspace",
     "DllPath": "coding-session-workspace.slothandler.dll",
     "SettingDescriptorsJson": "[{\u0022Key\u0022:\u0022WorkingPath\u0022,\u0022Label\u0022:\u0022Working path\u0022,\u0022Kind\u0022:\u0022Text\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:null,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:null,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null}]",
@@ -146,7 +146,7 @@
     "Description": "Backs a session with the mounted workspace directory."
   },
   {
-    "Id": "e2edbc5d-0654-5801-a02b-3fe839367814",
+    "Id": "e0a9c2ac-8516-57d6-9d7d-ca8a7555f96e",
     "ProviderType": "empty-workspace",
     "DllPath": "empty-workspace.slothandler.dll",
     "SettingDescriptorsJson": "[{\u0022Key\u0022:\u0022WorkingDirectory\u0022,\u0022Label\u0022:\u0022Working directory\u0022,\u0022Kind\u0022:\u0022Text\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:null,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:\u0022working-directory\u0022,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null},{\u0022Key\u0022:\u0022SetupScript\u0022,\u0022Label\u0022:\u0022Setup script\u0022,\u0022Kind\u0022:\u0022Text\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:null,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:\u0022setup-script\u0022,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null}]",
@@ -162,7 +162,7 @@
     "Description": "A fresh, empty scratch directory materialized into the run\u0027s workspace - no clone, no credential."
   },
   {
-    "Id": "7d18653d-8050-5030-ba4d-5362e34efb57",
+    "Id": "5adc9b1e-bf8a-535c-bd2f-6cc07deb2a4d",
     "ProviderType": "dotnet-9",
     "DllPath": "dotnet-9.slothandler.dll",
     "SettingDescriptorsJson": "[]",
@@ -178,7 +178,7 @@
     "Description": "The .NET 9 SDK preinstalled."
   },
   {
-    "Id": "d4c0b414-e99a-5ad8-8be3-a5b2446f064a",
+    "Id": "434823a1-ebf5-523f-9644-28c42db3754f",
     "ProviderType": "dotnet-8",
     "DllPath": "dotnet-8.slothandler.dll",
     "SettingDescriptorsJson": "[]",
@@ -194,7 +194,7 @@
     "Description": "The .NET 8 (LTS) SDK preinstalled."
   },
   {
-    "Id": "f24a187a-d1d5-5322-9b14-76d07a1d7183",
+    "Id": "72400d6a-3de2-585a-83d6-2fe8eddf3188",
     "ProviderType": "node-20",
     "DllPath": "node-20.slothandler.dll",
     "SettingDescriptorsJson": "[]",
@@ -210,7 +210,7 @@
     "Description": "Node.js 20 (LTS) with npm preinstalled."
   },
   {
-    "Id": "1626015e-d61e-5066-92df-1f38b912881f",
+    "Id": "6a48121c-fb0b-51f7-9d4b-b7b4ca91115c",
     "ProviderType": "python-3.12",
     "DllPath": "python-3.12.slothandler.dll",
     "SettingDescriptorsJson": "[]",
@@ -226,7 +226,7 @@
     "Description": "Python 3.12 with pip and venv preinstalled \u2014 run Python tooling and projects inside the session."
   },
   {
-    "Id": "a575dfe9-c4a1-5d6a-ac2c-2537e6af431b",
+    "Id": "9f562a47-0eee-5bb8-990d-652a44920531",
     "ProviderType": "java-21",
     "DllPath": "java-21.slothandler.dll",
     "SettingDescriptorsJson": "[]",
@@ -242,7 +242,7 @@
     "Description": "Eclipse Temurin JDK 21 preinstalled \u2014 build and run JVM projects inside the session."
   },
   {
-    "Id": "9e4c0eb2-c4f3-53cb-88de-5c9b9f3becb6",
+    "Id": "135cd71f-e827-5a00-9f45-0fa462ca1811",
     "ProviderType": "go-1.23",
     "DllPath": "go-1.23.slothandler.dll",
     "SettingDescriptorsJson": "[]",
@@ -258,7 +258,7 @@
     "Description": "Go 1.23 toolchain preinstalled."
   },
   {
-    "Id": "08073115-5f03-59f8-a1da-385a258fba5a",
+    "Id": "330cdfe9-b42e-54d7-89ba-207405aef99f",
     "ProviderType": "rust-stable",
     "DllPath": "rust-stable.slothandler.dll",
     "SettingDescriptorsJson": "[]",
@@ -274,7 +274,7 @@
     "Description": "Rust stable toolchain (rustup, cargo) preinstalled."
   },
   {
-    "Id": "bf945dec-8b05-5da1-987e-c12f8e92321a",
+    "Id": "50b977f3-f4af-5a67-af46-40315da25b1e",
     "ProviderType": "cpp-toolchain",
     "DllPath": "cpp-toolchain.slothandler.dll",
     "SettingDescriptorsJson": "[]",
@@ -290,7 +290,7 @@
     "Description": "C/C\u002B\u002B build toolchain: gcc, make, cmake, ninja."
   },
   {
-    "Id": "14215620-c38e-5ceb-bdcb-cea5a1441236",
+    "Id": "d1dcff6d-46c1-5945-adc5-be8c6ba4e2fb",
     "ProviderType": "codex-cli",
     "DllPath": "codex-cli.slothandler.dll",
     "SettingDescriptorsJson": "[{\u0022Key\u0022:\u0022ApiKey\u0022,\u0022Label\u0022:\u0022OpenAI API key\u0022,\u0022Kind\u0022:\u0022Secret\u0022,\u0022Required\u0022:true,\u0022HelpText\u0022:\u0022An OpenAI API key with Codex access.\u0022,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:null,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null},{\u0022Key\u0022:\u0022Model\u0022,\u0022Label\u0022:\u0022Model\u0022,\u0022Kind\u0022:\u0022Text\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:null,\u0022DefaultValue\u0022:null,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:null,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null},{\u0022Key\u0022:\u0022CliPath\u0022,\u0022Label\u0022:\u0022CLI path (advanced)\u0022,\u0022Kind\u0022:\u0022Text\u0022,\u0022Required\u0022:false,\u0022HelpText\u0022:null,\u0022DefaultValue\u0022:\u0022codex\u0022,\u0022Choices\u0022:null,\u0022InstanceCategory\u0022:null,\u0022ConnectFlow\u0022:null,\u0022Role\u0022:null,\u0022Browse\u0022:null,\u0022BrowseDependsOn\u0022:null}]",

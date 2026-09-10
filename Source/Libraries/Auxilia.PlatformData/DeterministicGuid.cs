@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -5,7 +6,9 @@ namespace Auxilia.PlatformData;
 
 /// <summary>
 /// Derives a stable <see cref="Guid"/> (UUIDv5-style, SHA-1 based) from natural-key strings so
-/// that upserts from any replica converge on the same record ID.
+/// that upserts from any replica converge on the same record ID. Every key part is length-prefixed
+/// before hashing, so part boundaries are part of the key: <c>("a","bc")</c> and <c>("ab","c")</c>
+/// never collide and callers need no separator parts.
 /// </summary>
 public static class DeterministicGuid
 {
@@ -17,7 +20,17 @@ public static class DeterministicGuid
         if (keyParts.Length == 0)
             throw new ArgumentException("At least one key part is required.", nameof(keyParts));
 
-        var name = Encoding.UTF8.GetBytes(string.Join("", keyParts));
+        var name = new List<byte>();
+        Span<byte> length = stackalloc byte[4];
+        foreach (var part in keyParts)
+        {
+            ArgumentNullException.ThrowIfNull(part, nameof(keyParts));
+            var bytes = Encoding.UTF8.GetBytes(part);
+            BinaryPrimitives.WriteInt32BigEndian(length, bytes.Length);
+            name.AddRange(length);
+            name.AddRange(bytes);
+        }
+
         var namespaceBytes = Namespace.ToByteArray();
         SwapGuidByteOrder(namespaceBytes);
 

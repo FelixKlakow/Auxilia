@@ -11,5 +11,5 @@ public sealed record SignalHandlerRecord : IEntity
     public required string HandlerDescriptorJson { get; init; }
 
     public static Guid IdFor(string workflowType, string signalName)
-        => DeterministicGuid.For("signal-handler", workflowType, "", signalName);
+        => DeterministicGuid.For("signal-handler", workflowType, signalName);
 }

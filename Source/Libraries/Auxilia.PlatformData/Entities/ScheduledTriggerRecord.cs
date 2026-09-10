@@ -20,5 +20,5 @@ public sealed record ScheduledTriggerRecord : IEntity
 
     /// <summary>Deterministic ID for the single schedule wired by a workflow configuration's editor.</summary>
     public static Guid IdForConfiguration(string configurationName)
-        => DeterministicGuid.For("scheduled-trigger", "workflow-configuration", "", configurationName);
+        => DeterministicGuid.For("scheduled-trigger", "workflow-configuration", configurationName);
 }

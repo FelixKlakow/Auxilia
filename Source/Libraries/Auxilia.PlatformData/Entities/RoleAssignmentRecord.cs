@@ -12,5 +12,5 @@ public sealed record RoleAssignmentRecord : IEntity
     public required string Source { get; init; }
 
     public static Guid IdFor(Guid principalId, string roleName)
-        => DeterministicGuid.For("role-assignment", principalId.ToString("D"), "", roleName);
+        => DeterministicGuid.For("role-assignment", principalId.ToString("D"), roleName);
 }

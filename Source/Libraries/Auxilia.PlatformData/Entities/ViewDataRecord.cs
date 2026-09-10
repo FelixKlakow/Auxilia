@@ -16,5 +16,5 @@ public sealed record ViewDataRecord : IEntity
     public DateTimeOffset TimestampUtc { get; init; }
 
     public static Guid IdFor(Guid instanceId, string viewName, long sequence)
-        => DeterministicGuid.For("view-data", instanceId.ToString("D"), "", viewName, "", sequence.ToString());
+        => DeterministicGuid.For("view-data", instanceId.ToString("D"), viewName, sequence.ToString());
 }

@@ -19,9 +19,9 @@ public sealed record ArtifactTriggerRecord : IEntity
     public Guid? WorkflowConfigurationId { get; init; }
 
     public static Guid IdFor(string artifactType, string workflowType)
-        => DeterministicGuid.For("artifact-trigger", artifactType, "", workflowType);
+        => DeterministicGuid.For("artifact-trigger", artifactType, workflowType);
 
     /// <summary>Deterministic ID for the single chaining rule wired by a workflow configuration's editor.</summary>
     public static Guid IdForConfiguration(string configurationName)
-        => DeterministicGuid.For("artifact-trigger", "workflow-configuration", "", configurationName);
+        => DeterministicGuid.For("artifact-trigger", "workflow-configuration", configurationName);
 }

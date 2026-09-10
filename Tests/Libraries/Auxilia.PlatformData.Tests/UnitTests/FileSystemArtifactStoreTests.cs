@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Auxilia.PlatformData.Artifacts;
 using Auxilia.PlatformData.Entities;
+using Auxilia.UniversalDataAccess;
 using Auxilia.UniversalDataAccess.Implementations;
 
 namespace Auxilia.PlatformData.Tests.UnitTests;
@@ -11,6 +12,7 @@ namespace Auxilia.PlatformData.Tests.UnitTests;
 public class FileSystemArtifactStoreTests
 {
     private string _dir = null!;
+    private string PayloadRoot => Path.Combine(_dir, "Artifacts");
     private InMemoryDataAccess<ArtifactRecord> _index = null!;
     private FileSystemArtifactStore _sut = null!;
 
@@ -124,5 +126,56 @@ public class FileSystemArtifactStoreTests
         var record = await SaveAsync("payload");
 
         Assert.That(await _sut.GetAsync(record.Id), Is.EqualTo(record));
+    }
+
+    [Test]
+    public async Task Save_LeavesOnlyTheFinalPayloadFile()
+    {
+        var record = await SaveAsync("payload");
+
+        var files = Directory.GetFiles(PayloadRoot).Select(Path.GetFileName).ToList();
+        Assert.That(files, Is.EqualTo(new[] { record.Id.ToString("N") }),
+            "The pending file must be moved to its final name, not copied or left behind.");
+    }
+
+    [Test]
+    public void Save_IndexWriteFails_SurfacesAndLeavesNoPayloadOnDisk()
+    {
+        var sut = new FileSystemArtifactStore(
+            new FailingWriteIndex(_index), TimeProvider.System, new PlatformDataSettings { JsonDirectory = _dir },
+            new ArtifactStoreSettings());
+
+        using var payload = new MemoryStream(Encoding.UTF8.GetBytes("orphan?"));
+        Assert.ThrowsAsync<IOException>(
+            () => sut.SaveAsync("review-result", "review-workflow", "WI-1", Guid.NewGuid(), payload));
+
+        Assert.That(Directory.GetFiles(PayloadRoot), Is.Empty, "A failed save must not orphan a payload file.");
+    }
+
+    [Test]
+    public async Task Save_ConcurrentSavesInOneLineage_AssignDistinctSequentialVersions()
+    {
+        const int writers = 16;
+        var saves = Enumerable.Range(1, writers).Select(i => SaveAsync($"v{i}")).ToList();
+
+        var records = await Task.WhenAll(saves);
+
+        Assert.That(records.Select(r => r.Version).OrderBy(v => v), Is.EqualTo(Enumerable.Range(1, writers)),
+            "Versions inside one lineage are assigned under a per-lineage gate, never duplicated.");
+        Assert.That((await _sut.ResolveLatestAsync("review-result", "WI-1"))!.Version, Is.EqualTo(writers));
+    }
+
+    /// <summary>An index whose writes fail — reads pass through to the real in-memory index.</summary>
+    private sealed class FailingWriteIndex(IDataAccess<ArtifactRecord> inner) : IDataAccess<ArtifactRecord>
+    {
+        public IObservable<ArtifactRecord> EntityAdded => inner.EntityAdded;
+        public IObservable<ArtifactRecord> EntityUpdated => inner.EntityUpdated;
+        public IObservable<ArtifactRecord> EntityRemoved => inner.EntityRemoved;
+        public Task<IQueryable<ArtifactRecord>> ReadAsync(CancellationToken cancellationToken) => inner.ReadAsync(cancellationToken);
+        public Task<ArtifactRecord?> ReadAsync(Guid id, CancellationToken cancellationToken) => inner.ReadAsync(id, cancellationToken);
+        public Task<bool> SaveAsync(ArtifactRecord entity, CancellationToken cancellationToken) => throw new IOException("index unavailable");
+        public Task<bool> TrySaveAsync(ArtifactRecord entity, long expectedVersion, CancellationToken cancellationToken) => throw new IOException("index unavailable");
+        public Task<bool> RemoveAsync(Guid id) => inner.RemoveAsync(id);
+        public Task<bool> RemoveAsync(Guid id, CancellationToken cancellationToken) => inner.RemoveAsync(id, cancellationToken);
     }
 }

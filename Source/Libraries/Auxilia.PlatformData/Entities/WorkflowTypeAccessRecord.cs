@@ -18,5 +18,5 @@ public sealed record WorkflowTypeAccessRecord : IEntity
     public Guid? GroupId { get; init; }
 
     public static Guid IdFor(string workflowType, string action, string subject)
-        => DeterministicGuid.For("workflow-type-access", workflowType, "", action, "", subject);
+        => DeterministicGuid.For("workflow-type-access", workflowType, action, subject);
 }

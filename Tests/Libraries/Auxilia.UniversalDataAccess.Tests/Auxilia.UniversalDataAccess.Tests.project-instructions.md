@@ -10,5 +10,6 @@ Tests/Libraries/Auxilia.UniversalDataAccess.Tests/
     ├── JsonFileDataAccessTests.cs      # File persist/load, OnlySaveOnDispose, events; writes to temp dir
     ├── MongoDbEfDataAccessTests.cs     # CRUD via the EF InMemory provider (mocked IDbContextFactory)
     ├── ConditionalSaveTests.cs         # TrySaveAsync (CAS) contract per backend + version bumping
+    ├── MongoDbEfDataAccessWriteRaceTests.cs # versioned save/remove races via a SaveChanges interceptor: bounded retries, real errors surface
     └── TestEntity.cs                   # Sample IEntity (scalars, collections, nested object)
 ```

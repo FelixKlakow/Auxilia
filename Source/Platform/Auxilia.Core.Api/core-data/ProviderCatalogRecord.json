@@ -1,6 +1,6 @@
 [
   {
-    "Id": "42897e12-64bf-5490-b61d-6327bb04d7a2",
+    "Id": "631c00ea-a90d-5529-88f6-04978d0c9d85",
     "ProviderType": "claude-code-cli",
     "Available": true,
     "Category": "",
@@ -8,7 +8,7 @@
     "GrantsJson": "[]"
   },
   {
-    "Id": "3329c794-3da5-5503-8b05-00b4ac0bd599",
+    "Id": "824d7e83-cb7e-575f-848c-0061ea0749dd",
     "ProviderType": "github-account",
     "Available": true,
     "Category": "",
@@ -16,7 +16,7 @@
     "GrantsJson": "[]"
   },
   {
-    "Id": "929bb761-5368-5397-a92c-fdd93ed55dbd",
+    "Id": "56a5d754-d0e3-5bcb-b2ad-6adf2ec0fe0d",
     "ProviderType": "tfs-account",
     "Available": true,
     "Category": "",
@@ -24,7 +24,7 @@
     "GrantsJson": "[]"
   },
   {
-    "Id": "e5887d5f-28c5-5c43-b1b4-0718e3df82ed",
+    "Id": "3212f11c-1c7e-569e-87e8-7d139f569ebf",
     "ProviderType": "git-repository",
     "Available": true,
     "Category": "",
@@ -32,7 +32,7 @@
     "GrantsJson": "[]"
   },
   {
-    "Id": "e835d07b-2470-508e-9827-fb451fe8433f",
+    "Id": "57c7b790-30f3-5ed2-a826-f4c271e5e27b",
     "ProviderType": "github-copilot-cli",
     "Available": true,
     "Category": "",
@@ -40,7 +40,7 @@
     "GrantsJson": "[]"
   },
   {
-    "Id": "6b8d1fae-0a7f-52c0-b7c3-81de530670c4",
+    "Id": "08002da3-5700-56ae-bae3-96c261ed5618",
     "ProviderType": "dotnet-10",
     "Available": true,
     "Category": "",
@@ -48,7 +48,7 @@
     "GrantsJson": "[]"
   },
   {
-    "Id": "72bb1c35-3ab4-5501-ab11-cd034fccdf2c",
+    "Id": "fd49a3b2-aac3-5fa6-b0ab-7a5177320136",
     "ProviderType": "node-22",
     "Available": true,
     "Category": "",
@@ -56,7 +56,7 @@
     "GrantsJson": "[]"
   },
   {
-    "Id": "be1e1a7f-5796-5e92-8762-253c2a5c7113",
+    "Id": "b597213f-ca25-5f57-b57c-d61ad358dda8",
     "ProviderType": "simulated-work-items",
     "Available": true,
     "Category": "",
@@ -64,7 +64,7 @@
     "GrantsJson": "[]"
   },
   {
-    "Id": "93abab56-d755-5ee5-b60e-7b0a3d9df6f4",
+    "Id": "a11ee7d7-2894-5ee0-80c5-6c4fffae8cc9",
     "ProviderType": "coding-session-workspace",
     "Available": true,
     "Category": "",
@@ -72,7 +72,7 @@
     "GrantsJson": "[]"
   },
   {
-    "Id": "d675ac13-05b9-5e89-8011-018a3e35a3ab",
+    "Id": "b7b9aa4e-2f45-580d-ae60-2aed6db8a138",
     "ProviderType": "empty-workspace",
     "Available": true,
     "Category": "",
@@ -80,7 +80,7 @@
     "GrantsJson": "[]"
   },
   {
-    "Id": "e1de1667-1d5e-5a1b-a00e-45693ba4a319",
+    "Id": "35dc05eb-6380-5108-9277-ab05a7157bd6",
     "ProviderType": "dotnet-9",
     "Available": true,
     "Category": "",
@@ -88,7 +88,7 @@
     "GrantsJson": "[]"
   },
   {
-    "Id": "348b69bd-3cac-5391-a661-6b32edc9b6a2",
+    "Id": "4677e2fd-f691-5f6e-9458-b5365c71a4f6",
     "ProviderType": "dotnet-8",
     "Available": true,
     "Category": "",
@@ -96,7 +96,7 @@
     "GrantsJson": "[]"
   },
   {
-    "Id": "55db6be1-ed76-56ef-acfc-5f45612d6cde",
+    "Id": "dff16eb1-a40c-5652-8916-272fd6031c44",
     "ProviderType": "node-20",
     "Available": true,
     "Category": "",
@@ -104,7 +104,7 @@
     "GrantsJson": "[]"
   },
   {
-    "Id": "83e10175-d57f-5be7-a8f5-f0f94a9798fd",
+    "Id": "10a72bfd-1791-5261-a431-2141ef8f221f",
     "ProviderType": "python-3.12",
     "Available": true,
     "Category": "",
@@ -112,7 +112,7 @@
     "GrantsJson": "[]"
   },
   {
-    "Id": "5bf31d55-cab4-5ece-aed7-794deec20570",
+    "Id": "e101f7d8-23f8-552b-a22a-96b75998798d",
     "ProviderType": "java-21",
     "Available": true,
     "Category": "",
@@ -120,7 +120,7 @@
     "GrantsJson": "[]"
   },
   {
-    "Id": "6aa7281f-62d0-5c73-92c6-5a72accf46fe",
+    "Id": "1d57f4e7-4f49-5174-aaf9-9ace63d96907",
     "ProviderType": "go-1.23",
     "Available": true,
     "Category": "",
@@ -128,7 +128,7 @@
     "GrantsJson": "[]"
   },
   {
-    "Id": "88abd82b-385a-54cb-9eb4-612895413565",
+    "Id": "7f97c2b3-f3c1-59af-88b9-2cf80b9cca79",
     "ProviderType": "rust-stable",
     "Available": true,
     "Category": "",
@@ -136,7 +136,7 @@
     "GrantsJson": "[]"
   },
   {
-    "Id": "2f0128f0-872a-5b0f-99f0-f3f6fea73a2b",
+    "Id": "518257b7-803f-568b-be9b-91a67aa1946f",
     "ProviderType": "cpp-toolchain",
     "Available": true,
     "Category": "",
@@ -144,7 +144,7 @@
     "GrantsJson": "[]"
   },
   {
-    "Id": "c273b9d5-2c8f-5e0f-9f5c-e33a5df2d6f9",
+    "Id": "fa274a31-c37d-5ae1-8333-5e714d0e9c92",
     "ProviderType": "codex-cli",
     "Available": true,
     "Category": "",

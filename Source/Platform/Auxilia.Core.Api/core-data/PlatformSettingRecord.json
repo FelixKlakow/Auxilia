@@ -1,6 +1,6 @@
 [
   {
-    "Id": "7d0fca2c-01c4-536f-bf16-1b3e970766ea",
+    "Id": "d7f88e8e-c969-50e2-9e8b-9e817f40917a",
     "Key": "auth.login-token-lifetime-minutes",
     "Value": "10080",
     "UpdatedUtc": "2026-08-03T09:40:16.3792459+00:00",

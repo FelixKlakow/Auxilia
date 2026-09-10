@@ -21,10 +21,39 @@ public class DeterministicGuidTests
     [Test]
     public void For_PartBoundariesMatter()
     {
-        // ("ab","c") must not collide with ("a","bc") when callers separate parts properly.
+        // ("ab","c") must not collide with ("a","bc"): parts are length-prefixed inside For, so
+        // callers never need separator parts.
+        Assert.That(DeterministicGuid.For("a", "bc"), Is.Not.EqualTo(DeterministicGuid.For("ab", "c")));
         Assert.That(
-            DeterministicGuid.For("slot-configuration", "ab", "", "c"),
-            Is.Not.EqualTo(DeterministicGuid.For("slot-configuration", "a", "", "bc")));
+            DeterministicGuid.For("slot-configuration", "ab", "c"),
+            Is.Not.EqualTo(DeterministicGuid.For("slot-configuration", "a", "bc")));
+    }
+
+    [Test]
+    public void For_EmptyPartIsNotAJoinArtifact()
+    {
+        // An empty part is a real part: ("a","","b") differs from ("a","b") and from ("a","b","").
+        Assert.That(DeterministicGuid.For("a", "", "b"), Is.Not.EqualTo(DeterministicGuid.For("a", "b")));
+        Assert.That(DeterministicGuid.For("a", "b", ""), Is.Not.EqualTo(DeterministicGuid.For("a", "b")));
+    }
+
+    [Test]
+    public void For_NullPart_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => DeterministicGuid.For("a", null!));
+    }
+
+    [Test]
+    public void CompositeIds_DoNotCollideAcrossPartBoundaries()
+    {
+        // The view-data id is the worst case: view "log1"/seq 2 vs view "log"/seq 12.
+        var run = Guid.NewGuid();
+        Assert.That(
+            Entities.ViewDataRecord.IdFor(run, "log1", 2),
+            Is.Not.EqualTo(Entities.ViewDataRecord.IdFor(run, "log", 12)));
+        Assert.That(
+            Entities.SlotConfigurationRecord.IdFor("ab", "c"),
+            Is.Not.EqualTo(Entities.SlotConfigurationRecord.IdFor("a", "bc")));
     }
 
     [Test]
