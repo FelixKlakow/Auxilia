@@ -8,7 +8,7 @@
 
     <PropertyGroup Label="Packaging">
         <PackageId>Auxilia.Core.Client</PackageId>
-        <Version>0.4.0</Version>
+        <Version>0.5.0</Version>
         <Authors>Felix Klakow</Authors>
         <Description>Typed HTTP client for the entire Auxilia Core API: dispatch and observe runs (SSE), manage configurations and connectors, consume artifacts (query, download, filtered event stream), administer identity — the supported way for any application to drive the Core.</Description>
         <RepositoryUrl>https://github.com/FelixKlakow/Auxilia</RepositoryUrl>

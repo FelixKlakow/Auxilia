@@ -8,7 +8,7 @@
 
   <PropertyGroup Label="Packaging">
     <PackageId>Auxilia.AI</PackageId>
-    <Version>0.4.0</Version>
+    <Version>0.5.0</Version>
     <Authors>Felix Klakow</Authors>
     <Description>The Auxilia AI session abstraction workflows build agentic steps on: provider-agnostic sessions, typed tool-call capability sinks (ICapabilityMcpTools) for structured results, and MCP plumbing. Referenced by the workflow SDK.</Description>
     <RepositoryUrl>https://github.com/FelixKlakow/Auxilia</RepositoryUrl>

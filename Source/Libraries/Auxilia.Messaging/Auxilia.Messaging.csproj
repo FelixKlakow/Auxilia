@@ -8,7 +8,7 @@
 
     <PropertyGroup Label="Packaging">
         <PackageId>Auxilia.Messaging</PackageId>
-        <Version>0.4.0</Version>
+        <Version>0.5.0</Version>
         <Authors>Felix Klakow</Authors>
         <Description>The Auxilia message-bus abstraction (IMessageBusClient) with its RabbitMQ implementation and an injectable fake for tests — the single path every Auxilia component uses to talk to the broker. Referenced by the workflow SDK; not needed by pure Core clients.</Description>
         <RepositoryUrl>https://github.com/FelixKlakow/Auxilia</RepositoryUrl>

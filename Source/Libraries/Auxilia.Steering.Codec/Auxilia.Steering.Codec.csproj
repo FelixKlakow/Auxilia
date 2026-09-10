@@ -8,7 +8,7 @@
 
     <PropertyGroup Label="Packaging">
         <PackageId>Auxilia.Steering.Codec</PackageId>
-        <Version>0.4.0</Version>
+        <Version>0.5.0</Version>
         <Authors>Felix Klakow</Authors>
         <Description>The steering wire protocol shared by Auxilia workflows and steering clients: typed frames of the run's steering view (questions, turn boundaries, session vocabulary) and of the operator's opaque inputs (guidance, answers, halt). Dependency-free — desktop clients decode steering payloads without the full contracts surface.</Description>
         <RepositoryUrl>https://github.com/FelixKlakow/Auxilia</RepositoryUrl>

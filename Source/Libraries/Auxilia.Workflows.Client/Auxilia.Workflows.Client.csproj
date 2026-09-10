@@ -8,7 +8,7 @@
 
     <PropertyGroup Label="Packaging">
         <PackageId>Auxilia.Workflows.Client</PackageId>
-        <Version>0.4.0</Version>
+        <Version>0.5.0</Version>
         <Authors>Felix Klakow</Authors>
         <Description>The Auxilia workflow-domain library on top of Auxilia.Core.Client: schema-validated authoring, interval triggers, and artifact chaining over the Core's filtered artifact event stream. Embed it in a server service or a desktop app — triggers fire while your host runs.</Description>
         <RepositoryUrl>https://github.com/FelixKlakow/Auxilia</RepositoryUrl>

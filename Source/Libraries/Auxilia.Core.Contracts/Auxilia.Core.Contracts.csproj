@@ -8,7 +8,7 @@
 
     <PropertyGroup Label="Packaging">
         <PackageId>Auxilia.Core.Contracts</PackageId>
-        <Version>0.4.0</Version>
+        <Version>0.5.0</Version>
         <Authors>Felix Klakow</Authors>
         <Description>Wire contracts (DTOs) of the Auxilia Core API — runs, configurations, connectors, artifacts, workflow types, identity, audit. Shared by the server and every client so the contract cannot drift.</Description>
         <RepositoryUrl>https://github.com/FelixKlakow/Auxilia</RepositoryUrl>
