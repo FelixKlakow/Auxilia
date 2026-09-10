@@ -71,7 +71,15 @@ public sealed record WorkflowTypeRegistrationDto(
     bool HasStoredPackage,
     Guid? RegisteredBy,
     DateTimeOffset RegisteredUtc,
-    DateTimeOffset UpdatedUtc);
+    DateTimeOffset UpdatedUtc)
+{
+    /// <summary>
+    /// SHA-256 (base64) of the registered submission (package bytes or docker coordinate, plus the
+    /// declared schema). Together with <see cref="UpdatedUtc"/> it identifies WHICH submission a
+    /// reviewer evaluated: the approval pipeline's verdict lands only on that exact one.
+    /// </summary>
+    public string? PackageHashBase64 { get; init; }
+}
 
 /// <summary>
 /// One entry of a workflow type's Policy-Engine access list: <see cref="Action"/> (e.g.

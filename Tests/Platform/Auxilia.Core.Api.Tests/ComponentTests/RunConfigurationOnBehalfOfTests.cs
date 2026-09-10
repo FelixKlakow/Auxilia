@@ -91,6 +91,25 @@ public sealed class RunConfigurationOnBehalfOfTests : CoreApiComponentTestBase
     }
 
     [Test]
+    public async Task CallerWithoutOnBehalfOf_IsRefusedBeforeVisibility_SoTheTargetsAccessIsNotRevealed()
+    {
+        // A personal configuration the target cannot see: the delegation gate must answer first
+        // (403), otherwise the 404-vs-403 difference tells a non-delegating caller whether the
+        // target may see the configuration — a visibility oracle.
+        var (caller, _) = await PrincipalWithRolesAsync(BuiltInRoles.User);
+        var target = await NewPrincipalAsync(BuiltInRoles.User);
+        var configurations = Factory.Services.GetRequiredService<RunConfigurationService>();
+        var personal = await configurations.CreateAsync(new CreateRunConfiguration(
+                "cfg-" + Guid.NewGuid().ToString("N"), DummyType, Scope: ResourceScope.Personal),
+            ownerPrincipalId: Guid.NewGuid(), CancellationToken.None);
+
+        var response = await caller.PostAsync($"/api/configurations/{personal.Id}/run?onBehalfOf={target}", null);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden),
+            "the delegation policy is evaluated before the configuration's visibility");
+    }
+
+    [Test]
     public async Task TargetThatCannotTrigger_IsForbidden_EvenWhenCallerCanDelegate()
     {
         var (caller, _) = await PrincipalWithRolesAsync(BuiltInRoles.Administrator);

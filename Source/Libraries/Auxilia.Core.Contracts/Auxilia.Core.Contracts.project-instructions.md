@@ -11,6 +11,6 @@ The dependency-free contract surface of the Core: the request/response DTOs shar
 ```
 Source/Libraries/Auxilia.Core.Contracts/
 ├── RunContracts.cs           # RunRequest, RunAccepted, RunStatus, RunQuery, PagedResult<T>
-├── ConfigurationContracts.cs # SlotBinding, CreateRunConfiguration, RunConfiguration, ConfigurationQuery
+├── ConfigurationContracts.cs # SlotBinding (Secret-kind inline settings read back EMPTY; empty on update = keep), CreateRunConfiguration, RunConfiguration, ConfigurationQuery
 └── ConnectorContracts.cs     # CreateConnector, Connector (keys only), ConnectorQuery
 ```

@@ -223,6 +223,70 @@ public sealed class WorkflowTypeRegistryServiceTests
     }
 
     [Test]
+    public async Task Approve_RefusesANonPendingRegistration()
+    {
+        var service = NewService(new CoreApiSettings { TrustedPublisherKeys = { PublisherKeyBase64 } });
+        var package = BuildSignedPackage("active-wf");
+        await service.RegisterAsync(
+            new RegisterWorkflowTypeRequest("active-wf", PackageBase64: Convert.ToBase64String(package)),
+            null, CancellationToken.None);
+        await service.RegisterAsync(
+            new RegisterWorkflowTypeRequest("denied-wf", "docker://bad:1"), null, CancellationToken.None);
+        await service.DenyAsync("denied-wf", "unsafe", "signer", CancellationToken.None);
+
+        var approveActive = await service.ApproveAsync("active-wf", "signer", CancellationToken.None);
+        var approveDenied = await service.ApproveAsync("denied-wf", "signer", CancellationToken.None);
+        var denyActive = await service.DenyAsync("active-wf", "late", "signer", CancellationToken.None);
+        var missing = await service.ApproveAsync("nope-wf", "signer", CancellationToken.None);
+
+        Assert.Multiple(async () =>
+        {
+            Assert.That(approveActive.Registration, Is.Null);
+            Assert.That(approveActive.Error, Does.Contain("only a pending registration"));
+            Assert.That(approveActive.NotFound, Is.False);
+            Assert.That(approveDenied.Registration, Is.Null,
+                "a human denial is final — a later approve must not override it");
+            Assert.That(denyActive.Registration, Is.Null);
+            Assert.That(missing.NotFound, Is.True);
+            Assert.That((await service.GetRegistrationAsync("denied-wf", CancellationToken.None))!.Status,
+                Is.EqualTo(WorkflowTypeStatus.Denied));
+            Assert.That((await service.GetRegistrationAsync("active-wf", CancellationToken.None))!.Status,
+                Is.EqualTo(WorkflowTypeStatus.Active));
+        });
+    }
+
+    [Test]
+    public async Task ApproveReviewed_RefusesWhenThePackageWasReplacedSinceTheReview()
+    {
+        var service = NewService();
+        var reviewed = (await service.RegisterAsync(
+            new RegisterWorkflowTypeRequest("swap-wf", "docker://img:1"), null, CancellationToken.None)).Registration!;
+        Assert.That(reviewed.PackageHashBase64, Is.Not.Null.And.Not.Empty);
+
+        // A replacement package lands while the reviewer evaluates the first one.
+        var replaced = (await service.RegisterAsync(
+            new RegisterWorkflowTypeRequest("swap-wf", "docker://img:2"), null, CancellationToken.None)).Registration!;
+        Assert.That(replaced.PackageHashBase64, Is.Not.EqualTo(reviewed.PackageHashBase64));
+
+        var staleApprove = await service.ApproveReviewedAsync(reviewed, "approval-pipeline:x", CancellationToken.None);
+        var staleDeny = await service.DenyReviewedAsync(reviewed, "bad", "approval-pipeline:x", CancellationToken.None);
+        var current = await service.GetRegistrationAsync("swap-wf", CancellationToken.None);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(staleApprove.Registration, Is.Null);
+            Assert.That(staleApprove.Error, Does.Contain("changed since it was reviewed"));
+            Assert.That(staleDeny.Registration, Is.Null);
+            Assert.That(current!.Status, Is.EqualTo(WorkflowTypeStatus.Pending),
+                "the replacement never inherits the reviewed one's verdict");
+        });
+
+        var freshApprove = await service.ApproveReviewedAsync(replaced, "approval-pipeline:x", CancellationToken.None);
+        Assert.That(freshApprove.Registration!.Status, Is.EqualTo(WorkflowTypeStatus.Active),
+            "a verdict over the CURRENT submission still lands");
+    }
+
+    [Test]
     public async Task ResolvePackageUri_RewritesCoreScheme_ToATokenAuthorizedUrl()
     {
         var service = NewService(new CoreApiSettings

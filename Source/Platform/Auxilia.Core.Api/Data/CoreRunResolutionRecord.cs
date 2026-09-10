@@ -35,5 +35,14 @@ public sealed record CoreRunResolutionRecord : IEntity
     /// </summary>
     public string? DispatchCommandJson { get; init; }
 
+    /// <summary>
+    /// Ids of the stored workspaces the run's bindings expanded from (JSON array) — a rerun
+    /// re-gates each against the rerunning principal, like the connectors.
+    /// </summary>
+    public string WorkspaceIdsJson { get; init; } = "[]";
+
+    /// <summary>The stored configuration the run was dispatched from, if any — a rerun re-applies its visibility.</summary>
+    public Guid? ConfigurationId { get; init; }
+
     public DateTimeOffset CreatedUtc { get; init; }
 }

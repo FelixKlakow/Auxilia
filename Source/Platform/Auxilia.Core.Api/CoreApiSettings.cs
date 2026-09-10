@@ -40,6 +40,12 @@ public sealed class CoreApiSettings
     public int ResolutionRecordRetentionDays { get; set; } = 30;
 
     /// <summary>
+    /// Days a TERMINAL run's persisted view items are retained after it ended; 0 keeps forever.
+    /// Views of live runs are never swept.
+    /// </summary>
+    public int ViewRetentionDays { get; set; } = 30;
+
+    /// <summary>
     /// When false (default), a dispatch is rejected with a clear error while no live Core.Runner
     /// heartbeat is known — a run nobody can execute would otherwise queue silently. True restores
     /// pure queue-until-a-runner-arrives semantics (test rigs, deliberate buffering deployments).

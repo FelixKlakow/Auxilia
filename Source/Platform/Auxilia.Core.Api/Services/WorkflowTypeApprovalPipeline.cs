@@ -32,9 +32,12 @@ public interface IWorkflowTypeApprovalHandler
 /// <summary>
 /// Runs the configured approval handlers over a pending registration. The first Approve or Deny
 /// verdict is applied through the registry (as the signing authority, actor
-/// <c>approval-pipeline:{handler}</c>); if every handler defers, the registration stays Pending
-/// for a human operator. Kicked off in the background after a Pending registration — the
-/// register call itself never waits on the pipeline (async approval by design).
+/// <c>approval-pipeline:{handler}</c>) BOUND to the exact submission the handlers evaluated: the
+/// registry refuses the verdict if the type was re-registered or decided by a human in the
+/// meantime, so a replacement package never inherits the reviewed one's verdict. If every
+/// handler defers, the registration stays Pending for a human operator. Kicked off in the
+/// background after a Pending registration — the register call itself never waits on the
+/// pipeline (async approval by design).
 /// </summary>
 public sealed class WorkflowTypeApprovalPipeline(
     WorkflowTypeRegistryService registry,
@@ -78,17 +81,21 @@ public sealed class WorkflowTypeApprovalPipeline(
                 name, workflowType, result.Decision,
                 result.Reason is { Length: > 0 } r ? $" ({r})" : "");
 
-            switch (result.Decision)
+            var actor = $"approval-pipeline:{name}";
+            RegistryOutcome? outcome = result.Decision switch
             {
-                case ApprovalHandlerResult.Approve:
-                    await registry.ApproveAsync(workflowType, $"approval-pipeline:{name}", ct);
-                    return;
-                case ApprovalHandlerResult.Deny:
-                    await registry.DenyAsync(
-                        workflowType, result.Reason ?? $"denied by approval handler '{name}'",
-                        $"approval-pipeline:{name}", ct);
-                    return;
-            }
+                ApprovalHandlerResult.Approve => await registry.ApproveReviewedAsync(registration, actor, ct),
+                ApprovalHandlerResult.Deny => await registry.DenyReviewedAsync(
+                    registration, result.Reason ?? $"denied by approval handler '{name}'", actor, ct),
+                _ => null,
+            };
+            if (outcome is null)
+                continue;
+            if (outcome.Registration is null)
+                logger.LogWarning(
+                    "Approval handler '{Handler}' verdict {Decision} on {WorkflowType} was NOT applied: {Error}",
+                    name, result.Decision, workflowType, outcome.Error);
+            return;
         }
         // Every handler deferred — the registration awaits a human signing decision.
     }

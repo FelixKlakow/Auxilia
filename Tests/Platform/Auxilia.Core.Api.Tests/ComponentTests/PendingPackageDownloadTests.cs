@@ -90,8 +90,14 @@ public sealed class PendingPackageDownloadTests : CoreApiComponentTestBase
         return client;
     }
 
-    private string IssueToken(string type)
-        => Factory.Services.GetRequiredService<PendingPackageDownloadTokenService>().Issue(type);
+    /// <summary>A token for the CURRENT submission of <paramref name="type"/> (as the pipeline mints it).</summary>
+    private async Task<string> IssueTokenAsync(string type)
+    {
+        var record = await Factory.Services.GetRequiredService<WorkflowTypeRegistryService>()
+            .GetRecordAsync(type, CancellationToken.None);
+        return Factory.Services.GetRequiredService<PendingPackageDownloadTokenService>()
+            .Issue(type, record?.PackageHashBase64);
+    }
 
     [Test]
     public async Task ApprovalToken_DownloadsThePendingPackage()
@@ -99,7 +105,7 @@ public sealed class PendingPackageDownloadTests : CoreApiComponentTestBase
         await RegisterPendingUploadAsync("under-review");
 
         var response = await CreateAnonymousClient().GetAsync(
-            $"/api/workflow-types/under-review/package?approvalToken={Uri.EscapeDataString(IssueToken("under-review"))}");
+            $"/api/workflow-types/under-review/package?approvalToken={Uri.EscapeDataString(await IssueTokenAsync("under-review"))}");
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         Assert.That(response.Content.Headers.ContentType?.MediaType, Is.EqualTo("application/zip"));
@@ -112,7 +118,7 @@ public sealed class PendingPackageDownloadTests : CoreApiComponentTestBase
         await RegisterPendingUploadAsync("under-review");
 
         var response = await CreateAnonymousClient().GetAsync(
-            $"/api/workflow-types/under-review/package?approvalToken={Uri.EscapeDataString(IssueToken("other-type"))}");
+            $"/api/workflow-types/under-review/package?approvalToken={Uri.EscapeDataString(await IssueTokenAsync("other-type"))}");
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden),
             "the token is scoped to exactly one pending package");
@@ -122,7 +128,7 @@ public sealed class PendingPackageDownloadTests : CoreApiComponentTestBase
     public async Task ApprovalToken_AfterApproval_IsRefused()
     {
         var client = await RegisterPendingUploadAsync("under-review");
-        var token = IssueToken("under-review");
+        var token = await IssueTokenAsync("under-review");
         var approve = await client.PostAsync("/api/workflow-types/under-review/approve", null);
         Assert.That(approve.IsSuccessStatusCode, Is.True);
 
@@ -131,6 +137,25 @@ public sealed class PendingPackageDownloadTests : CoreApiComponentTestBase
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden),
             "the token is time-limited to the approval evaluation — once decided, it is dead");
+    }
+
+    [Test]
+    public async Task ApprovalToken_AfterTheTypeWasReRegistered_IsRefused()
+    {
+        var client = await RegisterPendingUploadAsync("under-review");
+        var reviewedToken = await IssueTokenAsync("under-review");
+
+        // A replacement package lands while the review is running (still Pending, new bytes).
+        var replace = await client.PostAsJsonAsync("/api/workflow-types",
+            new RegisterWorkflowTypeRequest("under-review",
+                PackageBase64: Convert.ToBase64String(BuildSignedPackage("under-review"))));
+        Assert.That(replace.IsSuccessStatusCode, Is.True, await replace.Content.ReadAsStringAsync());
+
+        var response = await CreateAnonymousClient().GetAsync(
+            $"/api/workflow-types/under-review/package?approvalToken={Uri.EscapeDataString(reviewedToken)}");
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden),
+            "the token is bound to the reviewed submission — it must not fetch the replacement");
     }
 
     [Test]

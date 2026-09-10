@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Auxilia.Core.Api.Data;
 using Auxilia.Core.Contracts;
@@ -10,11 +11,15 @@ using Microsoft.Extensions.Options;
 
 namespace Auxilia.Core.Api.Services;
 
-/// <summary>Outcome of a registry mutation: the registration view, or a caller error.</summary>
-public sealed record RegistryOutcome(WorkflowTypeRegistrationDto? Registration, string? Error)
+/// <summary>
+/// Outcome of a registry mutation: the registration view, or a caller error. <see cref="NotFound"/>
+/// separates "no such type" from a refused state transition (e.g. approving a non-pending type).
+/// </summary>
+public sealed record RegistryOutcome(WorkflowTypeRegistrationDto? Registration, string? Error, bool NotFound = false)
 {
     public static RegistryOutcome Ok(WorkflowTypeRegistrationDto dto) => new(dto, null);
     public static RegistryOutcome Fail(string error) => new(null, error);
+    public static RegistryOutcome Missing() => new(null, "workflow type is not registered.", NotFound: true);
 }
 
 /// <summary>
@@ -163,6 +168,7 @@ public sealed class WorkflowTypeRegistryService(
         }
 
         var now = clock.GetUtcNow();
+        var packageHash = ComputePackageHash(packageBytes, packageUri!, schemaJson ?? existing?.SchemaJson);
         var record = new CoreWorkflowTypeRecord
         {
             Id = CoreWorkflowTypeRecord.IdFor(type),
@@ -173,6 +179,7 @@ public sealed class WorkflowTypeRegistryService(
             StatusReason = statusReason,
             PublisherKeyBase64 = publisherKey,
             StoredPackagePath = storedPath,
+            PackageHashBase64 = packageHash,
             RegisteredBy = registeredBy,
             RegisteredUtc = existing?.RegisteredUtc ?? now,
             UpdatedUtc = now
@@ -201,17 +208,33 @@ public sealed class WorkflowTypeRegistryService(
     }
 
     /// <summary>
-    /// The signing authority accepts a pending registration. A Core-stored package is re-signed
+    /// The signing authority accepts a PENDING registration. A Core-stored package is re-signed
     /// with the platform signing key (when configured) so the platform key becomes the publisher
     /// of record; external packages are activated as-signed — the approval itself is the trust act.
+    /// Anything not Pending is refused: a decision already made (Active/Denied/Disabled) is never
+    /// silently overridden.
     /// </summary>
-    public async Task<RegistryOutcome> ApproveAsync(string workflowType, string actor, CancellationToken ct)
+    public Task<RegistryOutcome> ApproveAsync(string workflowType, string actor, CancellationToken ct)
+        => ApproveAsync(workflowType, reviewed: null, actor, ct);
+
+    /// <summary>
+    /// Approval bound to the submission a reviewer evaluated: lands only while the record is still
+    /// Pending AND unchanged since <paramref name="reviewed"/> was read (same package hash and
+    /// <c>UpdatedUtc</c>). A re-registration during the review, or a human verdict in the
+    /// meantime, makes the reviewed verdict stale — it is refused, never applied to the newcomer.
+    /// </summary>
+    public Task<RegistryOutcome> ApproveReviewedAsync(
+        WorkflowTypeRegistrationDto reviewed, string actor, CancellationToken ct)
+        => ApproveAsync(reviewed.WorkflowType, reviewed, actor, ct);
+
+    private async Task<RegistryOutcome> ApproveAsync(
+        string workflowType, WorkflowTypeRegistrationDto? reviewed, string actor, CancellationToken ct)
     {
         var record = await store.ReadAsync(CoreWorkflowTypeRecord.IdFor(workflowType), ct);
         if (record is null)
-            return RegistryOutcome.Fail("workflow type is not registered.");
-        if (record.Status == WorkflowTypeStatus.Active)
-            return RegistryOutcome.Ok(ToDto(record));
+            return RegistryOutcome.Missing();
+        if (RefuseUnlessPendingAndReviewed(record, reviewed, "approved") is { } refusal)
+            return refusal;
 
         var publisherKey = record.PublisherKeyBase64;
         var reason = $"approved by {actor}";
@@ -235,13 +258,23 @@ public sealed class WorkflowTypeRegistryService(
         return RegistryOutcome.Ok(ToDto(updated));
     }
 
-    /// <summary>The signing authority refuses a registration; the reason is recorded and surfaced.</summary>
-    public async Task<RegistryOutcome> DenyAsync(
-        string workflowType, string reason, string actor, CancellationToken ct)
+    /// <summary>The signing authority refuses a PENDING registration; the reason is recorded and surfaced.</summary>
+    public Task<RegistryOutcome> DenyAsync(string workflowType, string reason, string actor, CancellationToken ct)
+        => DenyAsync(workflowType, reviewed: null, reason, actor, ct);
+
+    /// <summary>Denial bound to the reviewed submission — same staleness rule as <see cref="ApproveReviewedAsync"/>.</summary>
+    public Task<RegistryOutcome> DenyReviewedAsync(
+        WorkflowTypeRegistrationDto reviewed, string reason, string actor, CancellationToken ct)
+        => DenyAsync(reviewed.WorkflowType, reviewed, reason, actor, ct);
+
+    private async Task<RegistryOutcome> DenyAsync(
+        string workflowType, WorkflowTypeRegistrationDto? reviewed, string reason, string actor, CancellationToken ct)
     {
         var record = await store.ReadAsync(CoreWorkflowTypeRecord.IdFor(workflowType), ct);
         if (record is null)
-            return RegistryOutcome.Fail("workflow type is not registered.");
+            return RegistryOutcome.Missing();
+        if (RefuseUnlessPendingAndReviewed(record, reviewed, "denied") is { } refusal)
+            return refusal;
         var updated = record with
         {
             Status = WorkflowTypeStatus.Denied,
@@ -251,6 +284,29 @@ public sealed class WorkflowTypeRegistryService(
         await store.SaveAsync(updated, ct);
         await auditLog.AppendAsync(actor, "workflow-type.sign", workflowType, "denied", reason, ct);
         return RegistryOutcome.Ok(ToDto(updated));
+    }
+
+    /// <summary>
+    /// The signing gate's precondition: only a Pending record takes a verdict, and a verdict
+    /// reached over a reviewed submission only lands on THAT submission.
+    /// </summary>
+    private RegistryOutcome? RefuseUnlessPendingAndReviewed(
+        CoreWorkflowTypeRecord record, WorkflowTypeRegistrationDto? reviewed, string verb)
+    {
+        if (record.Status != WorkflowTypeStatus.Pending)
+            return RegistryOutcome.Fail($"only a pending registration can be {verb} (status: {record.Status}).");
+        if (reviewed is null)
+            return null;
+        if (!string.Equals(record.PackageHashBase64, reviewed.PackageHashBase64, StringComparison.Ordinal)
+            || record.UpdatedUtc != reviewed.UpdatedUtc)
+        {
+            logger.LogWarning(
+                "Workflow type {WorkflowType} was re-registered while under review — the reviewed verdict is stale and NOT applied.",
+                record.WorkflowType);
+            return RegistryOutcome.Fail(
+                "the registration changed since it was reviewed — the verdict is stale and was not applied.");
+        }
+        return null;
     }
 
     /// <summary>
@@ -367,6 +423,16 @@ public sealed class WorkflowTypeRegistryService(
         return LoadSigningKey() is { } signer && signer.PublicKeyBase64 == publisherKeyBase64;
     }
 
+    /// <summary>The submission identity: package bytes (or the docker coordinate) plus the declared schema.</summary>
+    private static string ComputePackageHash(byte[]? packageBytes, string packageUri, string? schemaJson)
+    {
+        using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        sha.AppendData(packageBytes ?? Encoding.UTF8.GetBytes(packageUri));
+        sha.AppendData("\n"u8);
+        sha.AppendData(Encoding.UTF8.GetBytes(schemaJson ?? ""));
+        return Convert.ToBase64String(sha.GetHashAndReset());
+    }
+
     private string StorePackage(string workflowType, byte[] packageBytes)
     {
         var directory = Path.GetFullPath(settings.Value.PackageStoreDirectory);
@@ -443,7 +509,10 @@ public sealed class WorkflowTypeRegistryService(
         record.StoredPackagePath is { Length: > 0 },
         record.RegisteredBy,
         record.RegisteredUtc,
-        record.UpdatedUtc);
+        record.UpdatedUtc)
+    {
+        PackageHashBase64 = record.PackageHashBase64
+    };
 
     /// <summary>The platform signing keypair loaded from PEM (hash-in / signature-out, disposed after use).</summary>
     private sealed class SigningKey(RSA rsa) : IDisposable

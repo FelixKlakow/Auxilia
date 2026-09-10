@@ -6,7 +6,9 @@ namespace Auxilia.Core.Api.Services;
 /// <summary>
 /// Receives run-audience transitions from the <see cref="RunStreamBroker"/> so bus bindings can
 /// follow the audience (selective routing). Subscribe is awaited — the binding exists before the
-/// SSE response is flushed; unsubscribe is best-effort and must not throw.
+/// SSE response is flushed; a subscribe that throws (incl. cancellation) must have rolled back its
+/// own bookkeeping, because it gets no unsubscribe callback. Unsubscribe is best-effort and must
+/// not throw.
 /// </summary>
 public interface IRunStreamBindingListener
 {
@@ -55,7 +57,10 @@ public sealed class RunStreamBroker
             }
             catch
             {
-                subscription.Dispose();
+                // A failed (or cancelled) subscribe has rolled back its own audience bookkeeping
+                // — it gets NO unsubscribe callback, which would decrement a count it never
+                // incremented and unbind a sibling stream's keys.
+                Discard(runId, channel);
                 throw;
             }
         }
@@ -78,18 +83,26 @@ public sealed class RunStreamBroker
 
     private void Unsubscribe(Guid runId, Channel<RunStreamEvent> channel)
     {
+        if (!Discard(runId, channel))
+            return;
+        // Best-effort unbind; listeners never throw here — a stale binding only over-delivers.
+        _ = _listener?.RunUnsubscribedAsync(runId);
+    }
+
+    /// <summary>Removes the subscriber and completes its channel WITHOUT notifying the listener.</summary>
+    private bool Discard(Guid runId, Channel<RunStreamEvent> channel)
+    {
         lock (_gate)
         {
             if (!_subscribers.TryGetValue(runId, out var list))
-                return;
+                return false;
             if (!list.Remove(channel))
-                return;
+                return false;
             if (list.Count == 0)
                 _subscribers.Remove(runId);
         }
         channel.Writer.TryComplete();
-        // Best-effort unbind; listeners never throw here — a stale binding only over-delivers.
-        _ = _listener?.RunUnsubscribedAsync(runId);
+        return true;
     }
 
     /// <summary>A single subscriber's read side; dispose to unregister and complete the channel.</summary>

@@ -23,17 +23,15 @@ public sealed class RunServiceTests
     private WorkspaceResourceService _repositories = null!;
     private ConnectorService _connectors = null!;
     private InMemoryDataAccess<CoreRunRecord> _runs = null!;
+    private InMemoryDataAccess<CoreRunResolutionRecord> _resolutions = null!;
+    private SlotCredentialResolver _resolver = null!;
+    private AesGcmSettingsProtector _protector = null!;
 
     private (RunService Service, FakeMessageBusClient Bus, RunConfigurationService Configs,
         WorkflowTypeRegistryService Registry, RunnerLivenessTracker Liveness) New(bool allowDispatchWithoutRunner = true)
     {
         var bus = new FakeMessageBusClient();
-        var configs = new RunConfigurationService(
-            new InMemoryDataAccess<CoreRunConfigurationRecord>(),
-            new AccessGrantEvaluator(
-                new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>()),
-            TimeProvider.System);
-        var protector = new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32));
+        var protector = _protector = new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32));
         var connectorStore = new InMemoryDataAccess<CoreConnectorRecord>();
         var connectors = _connectors = new ConnectorService(
             connectorStore, protector,
@@ -42,20 +40,33 @@ public sealed class RunServiceTests
             TimeProvider.System);
         var delegatedTokens = new DelegatedTokenStore(
             new InMemoryDataAccess<DelegatedUserTokenRecord>(), protector, TimeProvider.System);
-        var resolver = new SlotCredentialResolver(
-            new InMemoryDataAccess<CoreRunResolutionRecord>(), connectors,
+        var providerCatalog = _providerCatalog = new ProviderCatalogService(
+            new InMemoryDataAccess<SlotProviderRecord>(),
+            new InMemoryDataAccess<ProviderCatalogRecord>(),
+            new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System));
+        var repositories = _repositories = new WorkspaceResourceService(
+            new InMemoryDataAccess<CoreWorkspaceRecord>(),
+            new AccessGrantEvaluator(
+                new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>()),
+            TimeProvider.System);
+        var bindingSecrets = new SlotBindingSecrets(providerCatalog, connectors, repositories, protector);
+        var configs = new RunConfigurationService(
+            new InMemoryDataAccess<CoreRunConfigurationRecord>(),
+            new AccessGrantEvaluator(
+                new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>()),
+            bindingSecrets, TimeProvider.System);
+        _runs = new InMemoryDataAccess<CoreRunRecord>();
+        var resolver = _resolver = new SlotCredentialResolver(
+            _resolutions = new InMemoryDataAccess<CoreRunResolutionRecord>(), _runs, connectors,
             new ConnectorTokenRefresher(
-                connectors,
-                new ProviderCatalogService(
-                    new InMemoryDataAccess<SlotProviderRecord>(),
-                    new InMemoryDataAccess<ProviderCatalogRecord>(),
-                    new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System)),
+                connectors, providerCatalog,
                 new StubHttpClientFactory(new StubHttpMessageHandler(
                     _ => new HttpResponseMessage(HttpStatusCode.NotFound))),
                 TimeProvider.System,
                 NullLogger<ConnectorTokenRefresher>.Instance),
             delegatedTokens,
             new NullDelegatedTokenExchange(),
+            bindingSecrets,
             new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System),
             TimeProvider.System, Options.Create(new CoreApiSettings()));
         var accessPolicy = new ConnectorAccessPolicy(connectorStore,
@@ -69,18 +80,9 @@ public sealed class RunServiceTests
             Options.Create(new CoreApiSettings()),
             new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System),
             TimeProvider.System, NullLogger<WorkflowTypeRegistryService>.Instance);
-        var providerCatalog = _providerCatalog = new ProviderCatalogService(
-            new InMemoryDataAccess<SlotProviderRecord>(),
-            new InMemoryDataAccess<ProviderCatalogRecord>(),
-            new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System));
-        var repositories = _repositories = new WorkspaceResourceService(
-            new InMemoryDataAccess<CoreWorkspaceRecord>(),
-            new AccessGrantEvaluator(
-                new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>()),
-            TimeProvider.System);
         var service = new RunService(
             bus, configs, registry, new WorkflowSchemaReadService(typeStore),
-            providerCatalog, resolver, accessPolicy, connectors, repositories,
+            providerCatalog, resolver, bindingSecrets, accessPolicy, connectors, repositories,
             new AccessGrantEvaluator(
                 new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>()),
             TestResourceAccess.EmptyPrincipalDirectory(),
@@ -90,7 +92,7 @@ public sealed class RunServiceTests
                 new InMemoryDataAccess<EnvironmentBaseRecord>(),
                 new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System),
                 TimeProvider.System),
-            _runs = new InMemoryDataAccess<CoreRunRecord>(),
+            _runs,
             new Auxilia.Workflows.Messaging.WorkflowStatusPublisher(bus, TimeProvider.System),
             TimeProvider.System,
             Options.Create(new CoreApiSettings { AllowDispatchWithoutRunner = allowDispatchWithoutRunner }),
@@ -399,12 +401,14 @@ public sealed class RunServiceTests
                 new Dictionary<string, string> { ["CloneUrl"] = "https://example.test/private.git" }),
             ownerPrincipalId: Guid.NewGuid(), CancellationToken.None);
 
-        var ex = Assert.ThrowsAsync<InvalidOperationException>(() => service.RunInlineAsync(
+        var ex = Assert.ThrowsAsync<WorkspaceAccessDeniedException>(() => service.RunInlineAsync(
             new RunRequest("wt", SlotBindings: [new SlotBinding("repo", WorkspaceId: repository.Id)]),
             triggeredBy: Guid.NewGuid(), CancellationToken.None));
 
         Assert.That(ex!.Message, Does.Contain("not permitted").And.Contain("Private repo"),
             "a personal repository admits only its owner and granted subjects — like connectors");
+        Assert.That(ex, Is.InstanceOf<RunAccessDeniedException>(),
+            "an access denial maps to 403 like every other dispatch gate, never to 400");
     }
 
     [Test]
@@ -486,6 +490,53 @@ public sealed class RunServiceTests
     }
 
     [Test]
+    public async Task Cancel_OfAnUnclaimedDispatch_IsSettledByTheCore_NotForwardedToARunner()
+    {
+        var (service, bus, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        var accepted = await service.RunInlineAsync(new RunRequest("wt"), triggeredBy: null, CancellationToken.None);
+
+        await service.CancelAsync(accepted.RunId, CancellationToken.None);
+
+        var record = await _runs.ReadAsync(accepted.RunId);
+        Assert.Multiple(async () =>
+        {
+            Assert.That(record!.State, Is.EqualTo(RunStates.Cancelled),
+                "No runner owns a Dispatched run — forwarding the cancel would be dropped as "
+                + "'unknown instance' and the run would execute later.");
+            Assert.That(record.CompletedUtc, Is.Not.Null);
+            Assert.That(bus.PublishedMessages.Select(m => m.Message).OfType<CancelWorkflowCommand>(), Is.Empty,
+                "Nothing to forward: the Core settled the cancel itself.");
+            Assert.That(bus.PublishedMessages.Select(m => m.Message).OfType<WorkflowStatusEvent>()
+                    .Any(e => e.State == RunStates.Cancelled && e.WorkflowInstanceId == accepted.RunId),
+                Is.True, "The verdict is surfaced as a status event.");
+            Assert.That(await _resolutions.ReadAsync(accepted.CommandId), Is.Not.Null,
+                "The stash is kept for rerun; the resolver's terminal-run gate stops a late launch.");
+        });
+    }
+
+    [Test]
+    public async Task Cancel_OfAClaimedRun_IsForwardedOverTheCancelQueue()
+    {
+        var (service, bus, _, _, _) = New();
+        var instanceId = Guid.NewGuid();
+        await _runs.SaveAsync(new Auxilia.Core.Api.Data.CoreRunRecord
+        {
+            Id = instanceId, WorkflowType = "wt", State = RunStates.Running,
+            CreatedUtc = DateTimeOffset.UtcNow, UpdatedUtc = DateTimeOffset.UtcNow
+        });
+
+        await service.CancelAsync(instanceId, CancellationToken.None);
+
+        var command = bus.PublishedMessages
+            .Where(m => m.Topic == new CoreApiSettings().CancelCommandQueue)
+            .Select(m => m.Message).OfType<CancelWorkflowCommand>().Single();
+        Assert.That(command.WorkflowInstanceId, Is.EqualTo(instanceId));
+        Assert.That((await _runs.ReadAsync(instanceId))!.State, Is.EqualTo(RunStates.Running),
+            "The runner owns the verdict of a claimed run.");
+    }
+
+    [Test]
     public async Task Rerun_RedispatchesWithFreshIdAndToken_AndRestashesTheBindings()
     {
         var (service, bus, _, registry, _) = New();
@@ -513,6 +564,83 @@ public sealed class RunServiceTests
                 "reusing the old token against a new command id could never resolve credentials");
             Assert.That(rerun.Context["K"], Is.EqualTo("V"), "the original context is preserved");
         });
+    }
+
+    [Test]
+    public async Task RunInline_InlineSecretSetting_IsStashedProtected()
+    {
+        var (service, _, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
+            "local-agent", "coding-agent", null, ["ICodingAgent"],
+            [new RegisterProviderSetting("apiKey", "API key", "Secret", Required: true)]), CancellationToken.None);
+
+        var accepted = await service.RunInlineAsync(
+            new RunRequest("wt", SlotBindings:
+            [
+                new SlotBinding("coding-agent", "local-agent",
+                    Settings: new Dictionary<string, string> { ["apiKey"] = "sk-plain" })
+            ]),
+            triggeredBy: null, CancellationToken.None);
+
+        var stash = (await _resolutions.ReadAsync(accepted.RunId))!;
+        Assert.That(stash.SlotBindingsJson, Does.Not.Contain("sk-plain"),
+            "an inline secret is protected the moment it enters the Core — the stash never holds it in the clear");
+        var stashedValue = System.Text.Json.JsonSerializer
+            .Deserialize<List<SlotBinding>>(stash.SlotBindingsJson)![0].Settings!["apiKey"];
+        Assert.That(_protector.Unprotect(stashedValue), Is.EqualTo("sk-plain"));
+    }
+
+    [Test]
+    public async Task Rerun_PersonalWorkspaceOfAnotherUser_IsDenied()
+    {
+        var (service, bus, _, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
+            "git-repository", "workspace", null, ["src-ctl"],
+            [new RegisterProviderSetting("CloneUrl", "Repository", "Text", Required: true, Role: "clone-url")],
+            MountsIntoWorkspace: true), CancellationToken.None);
+        var owner = Guid.NewGuid();
+        var repository = await _repositories.CreateAsync(new CreateWorkspaceResource(
+                "Private repo", "git-repository",
+                new Dictionary<string, string> { ["CloneUrl"] = "https://example.test/private.git" }),
+            ownerPrincipalId: owner, CancellationToken.None);
+        await service.RunInlineAsync(
+            new RunRequest("wt", SlotBindings: [new SlotBinding("repo", WorkspaceId: repository.Id)]),
+            triggeredBy: owner, CancellationToken.None);
+        var original = bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>().Single();
+
+        var ex = Assert.ThrowsAsync<WorkspaceAccessDeniedException>(() => service.RerunAsync(
+            RunRecordFor(original), triggeredBy: Guid.NewGuid(), CancellationToken.None));
+        Assert.That(ex!.Message, Does.Contain("Private repo"),
+            "a rerun re-gates every workspace the original mounts expanded from against the rerunner");
+
+        Assert.DoesNotThrowAsync(() => service.RerunAsync(
+            RunRecordFor(original), triggeredBy: owner, CancellationToken.None),
+            "the owner may rerun");
+    }
+
+    [Test]
+    public async Task Rerun_OfAPersonalConfigurationsRun_RequiresTheConfigurationsVisibility()
+    {
+        var (service, bus, configs, registry, _) = New();
+        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        var owner = Guid.NewGuid();
+        var config = await configs.CreateAsync(
+            new CreateRunConfiguration("mine", "wt", Scope: ResourceScope.Personal), owner, CancellationToken.None);
+        await service.RunConfigurationAsync(config.Id, owner, null, CancellationToken.None);
+        var original = bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>().Single();
+
+        Assert.ThrowsAsync<RunAccessDeniedException>(() => service.RerunAsync(
+            RunRecordFor(original), triggeredBy: Guid.NewGuid(), CancellationToken.None),
+            "a stranger cannot replay the owner's personal configuration (its inline settings included)");
+        Assert.DoesNotThrowAsync(() => service.RerunAsync(
+            RunRecordFor(original), triggeredBy: owner, CancellationToken.None),
+            "the owner may rerun");
+        Assert.DoesNotThrowAsync(() => service.RerunAsync(
+            RunRecordFor(original), triggeredBy: Guid.NewGuid(), CancellationToken.None,
+            seesAllConfigurations: true),
+            "a configuration manager sees every configuration — like POST /api/configurations/{id}/run");
     }
 
     /// <summary>The stored run row a rerun starts from, as RunTrackingService would have left it.</summary>

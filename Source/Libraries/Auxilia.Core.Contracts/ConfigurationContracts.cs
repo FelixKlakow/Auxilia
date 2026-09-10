@@ -2,7 +2,9 @@ namespace Auxilia.Core.Contracts;
 
 /// <summary>
 /// A workflow slot bound the ONE generic way every binding works: to a stored connector (by id —
-/// secrets stay in the Core), to a provider type with inline non-secret settings, to BOTH (the
+/// secrets stay in the Core), to a provider type with inline settings — a setting the provider
+/// descriptor declares <c>Secret</c>-kind is protected by the Core on entry, read back with an
+/// EMPTY value (key present), and kept unchanged when an update sends it empty or omits it — to BOTH (the
 /// settings parameterize the binding, the connector supplies its credential — e.g. a workspace
 /// mount whose provider declares a required credential contract), or — when
 /// <see cref="DelegatedResource"/> is set — to a token obtained on-behalf-of the triggering user

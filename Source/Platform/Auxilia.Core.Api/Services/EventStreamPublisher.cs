@@ -37,15 +37,39 @@ public sealed class EventStreamPublisher(
     public async Task EventInterestAddedAsync(string? eventType, CancellationToken ct)
     {
         var key = BindingKeyFor(eventType);
+        // A cancellation while waiting for the gate has registered NOTHING — the broker discards
+        // the failed subscription without an unsubscribe callback, so there is nothing to undo.
         await _bindGate.WaitAsync(ct);
         try
         {
             var count = _audience.GetValueOrDefault(key) + 1;
             _audience[key] = count;
             if (count == 1)
-                await _subscription!.AddBindingAsync(key, ct);
+            {
+                try
+                {
+                    await _subscription!.AddBindingAsync(key, ct);
+                }
+                catch
+                {
+                    // ROLL BACK under the gate: the first audience of this key failed to bind, and
+                    // the broker will not call the removed-callback for a failed subscribe.
+                    _audience.Remove(key);
+                    await TryRemoveBindingLockedAsync(key);
+                    throw;
+                }
+            }
         }
         finally { _bindGate.Release(); }
+    }
+
+    private async Task TryRemoveBindingLockedAsync(string key)
+    {
+        try { await _subscription!.RemoveBindingAsync(key); }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to roll back the '{Key}' event binding after a failed subscribe.", key);
+        }
     }
 
     public async Task EventInterestRemovedAsync(string? eventType)

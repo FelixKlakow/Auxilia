@@ -6,8 +6,9 @@ namespace Auxilia.Core.Api.Services;
 /// <summary>
 /// Receives artifact-audience transitions from the <see cref="ArtifactStreamBroker"/> so bus
 /// bindings can follow the audience (selective routing). A null <c>artifactType</c> is an
-/// unfiltered subscriber (match-all binding). Subscribe is awaited; unsubscribe is
-/// best-effort and must not throw.
+/// unfiltered subscriber (match-all binding). Subscribe is awaited; a subscribe that throws
+/// (incl. cancellation) must have rolled back its own bookkeeping, because it gets no
+/// unsubscribe callback. Unsubscribe is best-effort and must not throw.
 /// </summary>
 public interface IArtifactStreamBindingListener
 {
@@ -61,7 +62,9 @@ public sealed class ArtifactStreamBroker
             }
             catch
             {
-                subscription.Dispose();
+                // A failed (or cancelled) subscribe has rolled back its own audience bookkeeping
+                // — no unsubscribe callback, which would decrement a count it never incremented.
+                Discard(entry);
                 throw;
             }
         }
@@ -89,14 +92,22 @@ public sealed class ArtifactStreamBroker
 
     private void Unsubscribe(Entry entry)
     {
+        if (!Discard(entry))
+            return;
+        // Best-effort unbind; listeners never throw here — a stale binding only over-delivers.
+        _ = _listener?.ArtifactInterestRemovedAsync(entry.ArtifactType);
+    }
+
+    /// <summary>Removes the subscriber and completes its channel WITHOUT notifying the listener.</summary>
+    private bool Discard(Entry entry)
+    {
         lock (_gate)
         {
             if (!_subscribers.Remove(entry))
-                return;
+                return false;
         }
         entry.Channel.Writer.TryComplete();
-        // Best-effort unbind; listeners never throw here — a stale binding only over-delivers.
-        _ = _listener?.ArtifactInterestRemovedAsync(entry.ArtifactType);
+        return true;
     }
 
     /// <summary>A single subscriber's read side; dispose to unregister and complete the channel.</summary>

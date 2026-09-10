@@ -76,6 +76,28 @@ public sealed class PrincipalApiTests : CoreApiComponentTestBase
     }
 
     [Test]
+    public async Task CreateHuman_WithAnExistingUsername_Returns409_AndKeepsTheOriginalLogin()
+    {
+        var core = Core;
+        var username = $"ada-{Guid.NewGuid():N}";
+        var original = await core.CreateHumanPrincipalAsync(new CreateHumanPrincipalRequest("Ada", username, "ada-pw"));
+
+        var conflict = Assert.ThrowsAsync<CoreApiException>(() => core.CreateHumanPrincipalAsync(
+            new CreateHumanPrincipalRequest("Impostor", username, "impostor-pw")));
+
+        Assert.That(conflict!.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
+        var login = await CreateAnonymousClient().PostAsJsonAsync("/auth/login", new PasswordLoginRequest(username, "ada-pw"));
+        var hijacked = await CreateAnonymousClient().PostAsJsonAsync("/auth/login", new PasswordLoginRequest(username, "impostor-pw"));
+        Assert.Multiple(() =>
+        {
+            Assert.That(login.StatusCode, Is.EqualTo(HttpStatusCode.OK), "the original login still works");
+            Assert.That(hijacked.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized),
+                "the second create must not re-point the username's credential");
+        });
+        Assert.That((await core.GetPrincipalAsync(original.Id))!.Id, Is.EqualTo(original.Id));
+    }
+
+    [Test]
     public async Task CreateAiPrincipal_ReturnsApiKeyOnce_AndTheKeyAuthenticates()
     {
         var core = Core;

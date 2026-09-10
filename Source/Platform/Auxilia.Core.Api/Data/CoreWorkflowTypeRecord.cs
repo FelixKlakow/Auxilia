@@ -33,6 +33,14 @@ public sealed record CoreWorkflowTypeRecord : IEntity
     /// <summary>Absolute path of the package stored Core-side (the transfer-to-sign path); null when external.</summary>
     public string? StoredPackagePath { get; init; }
 
+    /// <summary>
+    /// SHA-256 (base64) of the registered submission — the package bytes (or the docker image
+    /// coordinate) plus the declared schema. The identity an approval verdict is bound to: a
+    /// re-registration changes it, so a verdict reached over the old submission cannot land on
+    /// the new one.
+    /// </summary>
+    public string? PackageHashBase64 { get; init; }
+
     public Guid? RegisteredBy { get; init; }
     public DateTimeOffset RegisteredUtc { get; init; }
     public DateTimeOffset UpdatedUtc { get; init; }

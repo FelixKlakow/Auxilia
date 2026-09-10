@@ -37,6 +37,8 @@ public sealed class CoreMcpTools(
     PrincipalDirectory principals,
     PrincipalAdminService principalAdmin,
     ElevationTicketService elevation,
+    LoginAttemptThrottle stepUpThrottle,
+    Auxilia.PlatformData.AuditLog auditLog,
     PlatformSettingsService platformSettings,
     EnvironmentBaseService environmentBases,
     RunnerLivenessTracker runnerLiveness,
@@ -66,6 +68,10 @@ public sealed class CoreMcpTools(
             var accepted = await runs.RunInlineAsync(
                 new RunRequest(workflowType, ParseObject(contextJson)), principalId, cancellationToken);
             return JsonResult(new { runId = accepted.RunId, commandId = accepted.CommandId });
+        }
+        catch (RunAccessDeniedException ex)
+        {
+            return Error(ex.Message);
         }
         catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException)
         {
@@ -366,8 +372,9 @@ public sealed class CoreMcpTools(
         var run = await runView.GetAsync(id, cancellationToken);
         if (await DenyAsync(principalId, PermissionActions.WorkflowCancel, run?.WorkflowType, cancellationToken) is { } denial)
             return denial;
-        await runs.CancelAsync(id, cancellationToken);
-        return JsonResult(new { runId = id, cancelRequested = true });
+        // Callers may hold the DISPATCH id; cancel by the resolved run's id like the REST endpoint.
+        await runs.CancelAsync(run?.RunId ?? id, cancellationToken);
+        return JsonResult(new { runId = run?.RunId ?? id, cancelRequested = true });
     }
 
     [McpServerTool(Name = "list_artifacts")]
@@ -845,8 +852,15 @@ public sealed class CoreMcpTools(
             return NoPrincipal();
         if (await DenyAsync(actor, PermissionActions.PrincipalAdminister, null, cancellationToken) is { } denial)
             return denial;
-        var principal = await principals.CreateHumanAsync(displayName, username, password, cancellationToken);
-        return JsonResult(PrincipalAdminService.ToDto(principal, []));
+        try
+        {
+            var principal = await principals.CreateHumanAsync(displayName, username, password, cancellationToken);
+            return JsonResult(PrincipalAdminService.ToDto(principal, []));
+        }
+        catch (PrincipalConflictException ex)
+        {
+            return Error(ex.Message);
+        }
     }
 
     [McpServerTool(Name = "create_ai_principal")]
@@ -878,9 +892,22 @@ public sealed class CoreMcpTools(
     {
         if (CoreClaims.PrincipalIdOf(context.User) is not { } actor)
             return NoPrincipal();
+        // Same per-principal failure throttle as POST /auth/step-up: a leaked bearer must not be
+        // brute-forced into an elevation over MCP either. Refused before the secret is checked.
+        if (stepUpThrottle.IsBlocked(actor))
+        {
+            await auditLog.AppendAsync(actor.ToString(), "auth.step-up", actor.ToString(), "rate-limited", ct: cancellationToken);
+            return Error("too many failed attempts; try again later.");
+        }
         if (!await principals.VerifySecretAsync(actor, secret, cancellationToken))
+        {
+            stepUpThrottle.RecordFailure(actor);
+            await auditLog.AppendAsync(actor.ToString(), "auth.step-up", actor.ToString(), "denied", ct: cancellationToken);
             return Error("the credential was not accepted.");
+        }
+        stepUpThrottle.RecordSuccess(actor);
         var (token, expiresUtc) = elevation.Issue(actor);
+        await auditLog.AppendAsync(actor.ToString(), "auth.step-up", actor.ToString(), "granted", ct: cancellationToken);
         return JsonResult(new ElevationTicket(token, expiresUtc));
     }
 

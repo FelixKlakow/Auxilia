@@ -110,6 +110,14 @@ builder.Services.AddRateLimiter(options =>
             await audit.AppendAsync(ip, "auth.login", ip, "rate-limited", ct: ct);
             return;
         }
+        if (context.HttpContext.Request.Path.StartsWithSegments("/auth/step-up"))
+        {
+            // Authenticated by now (the limiter runs after authentication): attribute to the principal.
+            var actor = CoreClaims.PrincipalIdOf(context.HttpContext.User)?.ToString()
+                        ?? context.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            await audit.AppendAsync(actor, "auth.step-up", actor, "rate-limited", ct: ct);
+            return;
+        }
         var runId = context.HttpContext.Request.RouteValues.TryGetValue("runId", out var r) ? r?.ToString() : null;
         await audit.AppendAsync(
             "core-api", "workflow.slot-credential.rate-limited", runId ?? "unknown", "rate-limit-exceeded", ct: ct);
@@ -136,6 +144,7 @@ builder.Services.AddSingleton<PlatformSettingsService>();
 builder.Services.AddSingleton<Auxilia.Governance.Policy.IDefaultResourceAccessPolicy,
     PlatformDefaultResourceAccessPolicy>();
 builder.Services.AddSingleton<DelegatedTokenStore>();
+builder.Services.AddSingleton<SlotBindingSecrets>();
 builder.Services.AddSingleton<RunConfigurationService>();
 builder.Services.AddSingleton<RunQuotaService>();
 builder.Services.AddSingleton<RunService>();
@@ -323,22 +332,33 @@ app.MapPost("/auth/login", async (
 }).AllowAnonymous().RequireRateLimiting("auth-login");
 
 // Step-up: re-prove the caller's OWN credential (password / API key) to obtain a short-lived
-// elevation for security-sensitive administration. Both outcomes are audited.
+// elevation for security-sensitive administration. Throttled exactly like the login — the per-IP
+// "auth-login" window plus the per-account failure throttle keyed by PRINCIPAL — so a leaked
+// bearer cannot be brute-forced into an elevation. Every outcome is audited.
 app.MapPost("/auth/step-up", async (
         StepUpRequest request, HttpContext http, PrincipalDirectory directory,
-        ElevationTicketService elevation, AuditLog audit, CancellationToken ct) =>
+        ElevationTicketService elevation, LoginAttemptThrottle throttle, AuditLog audit, CancellationToken ct) =>
 {
     if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
         return Results.Unauthorized();
+    var actor = principalId.ToString();
+    if (throttle.IsBlocked(principalId))
+    {
+        await audit.AppendAsync(actor, "auth.step-up", actor, "rate-limited", ct: ct);
+        return Results.Json(new { error = "too many failed attempts; try again later" },
+            statusCode: StatusCodes.Status429TooManyRequests);
+    }
     if (!await directory.VerifySecretAsync(principalId, request.Secret, ct))
     {
-        await audit.AppendAsync(principalId.ToString(), "auth.step-up", principalId.ToString(), "denied", ct: ct);
+        throttle.RecordFailure(principalId);
+        await audit.AppendAsync(actor, "auth.step-up", actor, "denied", ct: ct);
         return Results.Json(new { error = "the credential was not accepted" }, statusCode: StatusCodes.Status403Forbidden);
     }
+    throttle.RecordSuccess(principalId);
     var (token, expiresUtc) = elevation.Issue(principalId);
-    await audit.AppendAsync(principalId.ToString(), "auth.step-up", principalId.ToString(), "granted", ct: ct);
+    await audit.AppendAsync(actor, "auth.step-up", actor, "granted", ct: ct);
     return Results.Ok(new ElevationTicket(token, expiresUtc));
-}).RequireAuthorization();
+}).RequireAuthorization().RequireRateLimiting("auth-login");
 
 app.MapGet("/auth/me", (HttpContext http) =>
 {
@@ -492,7 +512,8 @@ app.MapPost("/api/runs/{id:guid}/cancel", async (
     if (!decision.Allowed)
         return Results.Json(new { error = decision.Reason }, statusCode: StatusCodes.Status403Forbidden);
     // Callers may hold the DISPATCH id; the runner stops containers by INSTANCE id — cancel
-    // with the resolved run's id (the read service already de-aliased it).
+    // with the resolved run's id (the read service already de-aliased it). A still-Dispatched
+    // run is cancelled by the Core itself inside CancelAsync (no runner owns it yet).
     await runs.CancelAsync(run?.RunId ?? id, ct);
     return Results.Accepted($"/api/runs/{id}");
 }).RequireAuthorization();
@@ -514,7 +535,10 @@ app.MapPost("/api/runs/{id:guid}/rerun", async (
         return Results.Json(new { error = decision.Reason }, statusCode: StatusCodes.Status403Forbidden);
     try
     {
-        var accepted = await runs.RerunAsync(record, principalId, ct);
+        // A rerun of a personal configuration's run is gated by the configuration's visibility
+        // exactly like POST /api/configurations/{id}/run — managers see every configuration.
+        var accepted = await runs.RerunAsync(record, principalId, ct,
+            seesAllConfigurations: CoreClaims.HasRolePermission(http.User, PermissionActions.WorkflowConfigurationManage));
         await audit.AppendAsync(principalId.ToString(), "workflow.rerun",
             record.Id.ToString(), accepted.RunId.ToString(), ct: ct);
         return Results.Ok(accepted);
@@ -551,6 +575,12 @@ app.MapGet("/api/runs/{id:guid}/stream", async (
     http.Response.Headers.CacheControl = "no-cache";
     http.Response.Headers["X-Accel-Buffering"] = "no";
 
+    // SUBSCRIBE FIRST, then read the snapshot: a transition landing between the two is delivered
+    // live (duplicated at worst — the client dedupes by (view, sequence) and status frames are
+    // idempotent), never lost. Reading before subscribing would drop every non-terminal
+    // transition in the gap.
+    using var subscription = await broker.SubscribeAsync(id, ct);
+
     // The id may be the dispatch COMMAND id rather than the runner's instance id. Selective
     // routing binds by key, so resolve the pairing from the tracked runs and prime the alias —
     // a late subscriber cannot rely on observing the claim transition on the bus.
@@ -565,7 +595,6 @@ app.MapGet("/api/runs/{id:guid}/stream", async (
         }
     }
 
-    using var subscription = await broker.SubscribeAsync(id, ct);
     // Flush headers so the client's SendAsync completes with the subscription already registered —
     // no live event published after this point is lost.
     await http.Response.Body.FlushAsync(ct);
@@ -574,9 +603,8 @@ app.MapGet("/api/runs/{id:guid}/stream", async (
     {
         // SNAPSHOT first frame: the tracked record's current state, so a (re)subscriber never
         // depends on a future transition to learn where the run stands — after a Core restart a
-        // reconnecting client is current immediately. Subscribe-before-snapshot ordering means a
-        // transition racing the read is duplicated at worst, never lost. No record (subscribe
-        // before dispatch) → no snapshot, the stream just stays open.
+        // reconnecting client is current immediately. No record (subscribe before dispatch) → no
+        // snapshot, the stream just stays open.
         if (record is not null)
         {
             // TerminalEndpoint stays Core-internal — presence rides RunStatus.HasTerminal.
@@ -978,7 +1006,9 @@ app.MapPost("/internal/runs/{runId:guid}/resolve-slot", async (
     return success
         ? Results.Ok(credential)
         : Results.Json(new { error }, statusCode:
-            error == "invalid resolution token" ? StatusCodes.Status403Forbidden : StatusCodes.Status404NotFound);
+            error is SlotCredentialResolver.InvalidTokenError or SlotCredentialResolver.RunEndedError
+                ? StatusCodes.Status403Forbidden
+                : StatusCodes.Status404NotFound);
 }).RequireRateLimiting("resolve-slot");
 
 // --- Configurations ---
@@ -1080,18 +1110,12 @@ app.MapPost("/api/configurations/{id:guid}/run", async (
     if (config is null)
         return Results.NotFound();
 
-    // A personal configuration is runnable only by whoever may SEE it: the triggering principal
-    // (owner/granted), or a caller holding the configuration-management permission.
-    var runViewer = new ConfigurationViewer(
-        onBehalfOf ?? principalId,
-        CoreClaims.HasRolePermission(http.User, PermissionActions.WorkflowConfigurationManage));
-    if (!await configurations.IsVisibleAsync(id, runViewer, ct))
-        return Results.NotFound();
-
     // On-behalf-of: a service/automation caller (a trigger host's engines) may dispatch a stored
     // configuration AS a target principal. The caller must hold run.on-behalf-of, and the target must
     // itself pass workflow.trigger — the delegation grants no capability the target lacks. Absent a
     // distinct target the caller is both subject and triggering principal, exactly as a manual run.
+    // The delegation gate runs BEFORE the visibility check: a caller who may not delegate must not
+    // learn (via 404 vs. the later 403) whether the target can see the configuration.
     var delegated = onBehalfOf is { } requestedBy && requestedBy != principalId;
     var triggeringPrincipal = delegated ? onBehalfOf!.Value : principalId;
 
@@ -1106,6 +1130,14 @@ app.MapPost("/api/configurations/{id:guid}/run", async (
             return Results.Json(new { error = delegation.Reason }, statusCode: StatusCodes.Status403Forbidden);
         }
     }
+
+    // A personal configuration is runnable only by whoever may SEE it: the triggering principal
+    // (owner/granted), or a caller holding the configuration-management permission.
+    var runViewer = new ConfigurationViewer(
+        triggeringPrincipal,
+        CoreClaims.HasRolePermission(http.User, PermissionActions.WorkflowConfigurationManage));
+    if (!await configurations.IsVisibleAsync(id, runViewer, ct))
+        return Results.NotFound();
 
     var decision = await policy.EvaluateAsync(
         new PolicyContext(triggeringPrincipal, PermissionActions.WorkflowTrigger, config.WorkflowType)
@@ -1385,12 +1417,11 @@ app.MapGet("/api/runners", async (
 // package download): only runs the Core dispatched can read layer content.
 app.MapGet("/api/environment-layers/{providerType}/content", async (
         string providerType, Guid runId, string token, HttpContext http, EnvironmentLayerService svc,
-        Auxilia.UniversalDataAccess.IDataAccess<CoreRunResolutionRecord> resolutions,
-        CancellationToken ct, string? @base = null) =>
+        SlotCredentialResolver resolver, CancellationToken ct, string? @base = null) =>
 {
-    var resolution = await resolutions.ReadAsync(runId, ct);
-    if (resolution is null || !Auxilia.Core.Api.Services.ResolutionTokens.Matches(resolution.ResolutionTokenHash, token))
-        return Results.Json(new { error = "invalid resolution token" }, statusCode: StatusCodes.Status403Forbidden);
+    // Same gate as resolve-slot: digest match AND a run that has not ended (audited on refusal).
+    if (await resolver.AuthorizeAsync(runId, token, ct) is { Ok: false } refused)
+        return Results.Json(new { error = refused.Error }, statusCode: StatusCodes.Status403Forbidden);
     // The runner states the base it hosts; an omitted base keeps the linux default.
     var signed = await svc.ReadFragmentAsync(providerType, @base ?? EnvironmentBases.Linux, ct);
     if (signed is null)
@@ -1546,7 +1577,9 @@ app.MapPost("/api/workflow-types/{type}/approve", async (
         type, CoreClaims.PrincipalIdOf(http.User)!.Value.ToString("D"), ct);
     return outcome.Registration is { } registration
         ? Results.Ok(registration)
-        : Results.NotFound(new { error = outcome.Error });
+        : outcome.NotFound
+            ? Results.NotFound(new { error = outcome.Error })
+            : Results.Conflict(new { error = outcome.Error });
 }).RequireAuthorization();
 
 app.MapPost("/api/workflow-types/{type}/deny", async (
@@ -1559,32 +1592,36 @@ app.MapPost("/api/workflow-types/{type}/deny", async (
         type, request.Reason, CoreClaims.PrincipalIdOf(http.User)!.Value.ToString("D"), ct);
     return outcome.Registration is { } registration
         ? Results.Ok(registration)
-        : Results.NotFound(new { error = outcome.Error });
+        : outcome.NotFound
+            ? Results.NotFound(new { error = outcome.Error })
+            : Results.Conflict(new { error = outcome.Error });
 }).RequireAuthorization();
 
 // Core-stored package download for the runner. Authorized by the run-scoped resolution token
 // (same trust as resolve-slot), NOT a principal — the runner can fetch only packages of runs the
 // Core dispatched to it, and the URL is minted per dispatch by the registry. Alternatively, an
 // approval-scoped token (minted by the approval pipeline, passed into the verdict run's context)
-// admits ONLY that PENDING package for the evaluation window — the review can fetch what it reviews.
+// admits ONLY that PENDING package — bound to the reviewed submission's package hash, so a
+// re-registration kills it — for the evaluation window: the review can fetch what it reviews.
 app.MapGet("/api/workflow-types/{type}/package", async (
         string type, WorkflowTypeRegistryService registry,
-        PendingPackageDownloadTokenService approvalTokens,
-        Auxilia.UniversalDataAccess.IDataAccess<CoreRunResolutionRecord> resolutions,
+        PendingPackageDownloadTokenService approvalTokens, SlotCredentialResolver resolver,
         CancellationToken ct, Guid? runId = null, string? token = null, string? approvalToken = null) =>
 {
     if (approvalToken is { Length: > 0 })
     {
-        if (!approvalTokens.Validate(approvalToken, type)
-            || (await registry.GetRecordAsync(type, ct))?.Status != WorkflowTypeStatus.Pending)
+        var record = await registry.GetRecordAsync(type, ct);
+        if (record?.Status != WorkflowTypeStatus.Pending
+            || !approvalTokens.Validate(approvalToken, type, record.PackageHashBase64))
             return Results.Json(new { error = "invalid approval token" }, statusCode: StatusCodes.Status403Forbidden);
     }
     else
     {
-        var resolution = runId is { } run ? await resolutions.ReadAsync(run, ct) : null;
-        if (resolution is null || string.IsNullOrEmpty(token)
-            || !Auxilia.Core.Api.Services.ResolutionTokens.Matches(resolution.ResolutionTokenHash, token))
-            return Results.Json(new { error = "invalid resolution token" }, statusCode: StatusCodes.Status403Forbidden);
+        // Same gate as resolve-slot: digest match AND a run that has not ended (audited on refusal).
+        if (runId is not { } run || string.IsNullOrEmpty(token))
+            return Results.Json(new { error = SlotCredentialResolver.InvalidTokenError }, statusCode: StatusCodes.Status403Forbidden);
+        if (await resolver.AuthorizeAsync(run, token, ct) is { Ok: false } refused)
+            return Results.Json(new { error = refused.Error }, statusCode: StatusCodes.Status403Forbidden);
     }
     var package = await registry.ReadStoredPackageAsync(type, ct);
     return package is null
@@ -1910,8 +1947,15 @@ app.MapPost("/api/principals", async (
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.PrincipalAdminister, ct) is { } fail)
         return fail;
-    var principal = await directory.CreateHumanAsync(request.DisplayName, request.Username, request.Password, ct);
-    return Results.Ok(PrincipalAdminService.ToDto(principal, []));
+    try
+    {
+        var principal = await directory.CreateHumanAsync(request.DisplayName, request.Username, request.Password, ct);
+        return Results.Ok(PrincipalAdminService.ToDto(principal, []));
+    }
+    catch (PrincipalConflictException ex)
+    {
+        return Results.Conflict(new { error = ex.Message });
+    }
 }).RequireAuthorization();
 
 // Create a service principal; the generated API key is returned exactly once (write-only after).

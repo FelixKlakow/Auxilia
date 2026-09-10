@@ -106,3 +106,7 @@ public sealed class WorkspaceResourceService(
             record.ConnectorId, record.UpdatedUtc, record.Scope, record.OwnerPrincipalId,
             JsonSerializer.Deserialize<List<AccessGrant>>(record.GrantsJson) ?? []);
 }
+
+/// <summary>Thrown at dispatch/rerun when the triggering principal may not use a workspace a binding references.</summary>
+public sealed class WorkspaceAccessDeniedException(string workspaceName)
+    : RunAccessDeniedException($"not permitted to use workspace '{workspaceName}'");

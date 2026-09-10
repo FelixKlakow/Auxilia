@@ -126,6 +126,47 @@ public sealed class RunStreamPublisherBindingTests
         Assert.That(ViewKeys, Does.Contain(instanceId.ToString()));
     }
 
+    [Test]
+    public async Task SubscribeCancelledWhileWaitingForTheGate_LeavesTheSiblingsKeysBound()
+    {
+        // The first subscriber holds the bind gate mid-RPC; a second subscriber of the same run
+        // is cancelled while queued at the gate. Its rollback must not decrement an audience it
+        // never joined — that would unbind the first subscriber's keys under it.
+        var runId = Guid.NewGuid();
+        var bindEntered = new TaskCompletionSource();
+        var releaseBind = new TaskCompletionSource();
+        _bus.BeforeBind = _ =>
+        {
+            bindEntered.TrySetResult();
+            return releaseBind.Task;
+        };
+
+        var first = _broker.SubscribeAsync(runId);
+        await bindEntered.Task;
+
+        using var cts = new CancellationTokenSource();
+        var second = _broker.SubscribeAsync(runId, cts.Token);
+        cts.Cancel();
+        Assert.ThrowsAsync<OperationCanceledException>(() => second);
+
+        _bus.BeforeBind = null;
+        releaseBind.SetResult();
+        using var subscription = await first;
+        // Let a rogue fire-and-forget unbind land before asserting.
+        await Task.Delay(200);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(StatusKeys, Is.EquivalentTo(new[] { $"{runId}.#", $"*.{runId}" }),
+                "the surviving subscriber's status keys must stay bound");
+            Assert.That(ViewKeys, Is.EquivalentTo(new[] { runId.ToString() }));
+        });
+
+        subscription.Dispose();
+        await Task.Delay(50);
+        Assert.That(StatusKeys, Is.Empty, "the real unsubscribe still releases the keys");
+    }
+
     /// <summary>
     /// Fake bus that records topic bindings per exchange and lets tests deliver events to the
     /// registered handlers regardless of bindings (the broker filters; routing is the broker's
@@ -135,6 +176,9 @@ public sealed class RunStreamPublisherBindingTests
     {
         private readonly Dictionary<string, HashSet<string>> _bindings = new();
         private readonly Dictionary<string, Func<object, CancellationToken, Task>> _handlers = new();
+
+        /// <summary>Awaited before every AddBinding — lets a test hold the publisher's bind gate open.</summary>
+        public Func<string, Task>? BeforeBind { get; set; }
 
         public IReadOnlySet<string> BoundKeys(string exchangeName)
         {
@@ -157,11 +201,12 @@ public sealed class RunStreamPublisherBindingTests
 
         private sealed class RecordingSubscription(BindingRecordingBus bus, string exchangeName) : ITopicSubscription
         {
-            public Task AddBindingAsync(string routingKey, CancellationToken cancellationToken = default)
+            public async Task AddBindingAsync(string routingKey, CancellationToken cancellationToken = default)
             {
+                if (bus.BeforeBind is { } gate)
+                    await gate(routingKey);
                 lock (bus._bindings)
                     bus._bindings[exchangeName].Add(routingKey);
-                return Task.CompletedTask;
             }
 
             public Task RemoveBindingAsync(string routingKey, CancellationToken cancellationToken = default)

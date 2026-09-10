@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Auxilia.Core.Client;
 using Auxilia.Core.Contracts;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.DependencyInjection;
@@ -115,6 +116,71 @@ public sealed class SlotResolutionTests : CoreApiComponentTestBase
             Assert.That(run!.DispatchCommandJson, Does.Not.Contain(token),
                 "the run record's command copy must be redacted");
         });
+    }
+
+    [Test]
+    public async Task ResolveSlot_AfterTheRunEnded_Returns403_AndTheLayerDownloadGateAgrees()
+    {
+        var (runId, token) = await DispatchCredentialedRunAsync(CreateClient());
+        var runs = Factory.Services
+            .GetRequiredService<Auxilia.UniversalDataAccess.IDataAccess<Auxilia.Core.Api.Data.CoreRunRecord>>();
+        var dispatched = (await runs.ReadAsync(runId))!;
+        await runs.SaveAsync(dispatched with { State = RunStates.Success });
+
+        using var rsa = RSA.Create(2048);
+        var publicKey = Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
+        var anonymous = CreateAnonymousClient();
+
+        var resolve = await ResolveAsync(anonymous, runId, token, "sc", publicKey);
+        Assert.That(resolve.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden),
+            "the stash is kept for rerun, but the token stops authorizing once the run ended");
+
+        // The runner-facing layer download shares the gate: forbidden, not "no such layer" (404).
+        var layer = await anonymous.GetAsync(
+            $"/api/environment-layers/some-layer/content?runId={runId}&token={token}");
+        Assert.That(layer.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+
+        Assert.That((await Factory.Services.GetRequiredService<Auxilia.Core.Api.Services.AuditReadService>()
+                .QueryAsync(new AuditQuery(Action: "workflow.slot-credential.rejected"), CancellationToken.None))
+            .Items.Any(a => a.Outcome == "run-ended"), Is.True, "refusals are audited");
+    }
+
+    [Test]
+    public async Task Configuration_InlineSecretSetting_IsMaskedOnRead_AndDeliveredInPlaintextToTheRun()
+    {
+        var authed = CreateClient();
+        ICoreClient core = new CoreClient(authed);
+        await core.RegisterProviderAsync(new RegisterSlotProvider(
+            "local-agent", "coding-agent", null, Contracts: ["ICodingAgent"],
+            Settings: [new RegisterProviderSetting("apiKey", "API key", "Secret", Required: true)]));
+
+        var created = await core.CreateConfigurationAsync(new CreateRunConfiguration(
+            Name: "cfg-" + Guid.NewGuid().ToString("N"),
+            WorkflowType: "credentialed-wf",
+            SlotBindings: [new SlotBinding("sc", "local-agent", Settings: new Dictionary<string, string> { ["apiKey"] = Secret })]));
+        var read = (await core.GetConfigurationAsync(created.Id))!;
+        Assert.Multiple(() =>
+        {
+            Assert.That(created.SlotBindings[0].Settings!["apiKey"], Is.Empty, "the create response masks the secret");
+            Assert.That(read.SlotBindings[0].Settings!.ContainsKey("apiKey"), Is.True, "the key stays present");
+            Assert.That(read.SlotBindings[0].Settings!["apiKey"], Is.Empty, "GET never returns the value");
+        });
+
+        var runResp = await authed.PostAsync($"/api/configurations/{created.Id}/run", null);
+        Assert.That(runResp.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var command = MessageBus.PublishedMessages
+            .Where(m => m.Topic == "workflow.run-commands")
+            .Select(m => m.Message).OfType<RunWorkflowCommand>().Single();
+
+        using var rsa = RSA.Create(2048);
+        var publicKey = Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo());
+        var resolve = await ResolveAsync(CreateAnonymousClient(), command.CommandId, command.ResolutionToken!, "sc", publicKey);
+        Assert.That(resolve.StatusCode, Is.EqualTo(HttpStatusCode.OK), await resolve.Content.ReadAsStringAsync());
+        var credential = (await resolve.Content.ReadFromJsonAsync<ResolvedSlotCredential>())!;
+        var plain = rsa.Decrypt(Convert.FromBase64String(credential.EncryptedSettings), RSAEncryptionPadding.OaepSHA256);
+        var delivered = JsonSerializer.Deserialize<Dictionary<string, string>>(Encoding.UTF8.GetString(plain))!;
+        Assert.That(delivered["apiKey"], Is.EqualTo(Secret),
+            "the run receives the real secret — decrypted only inside the Core, into the RSA envelope");
     }
 
     [Test]

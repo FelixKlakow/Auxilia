@@ -19,6 +19,7 @@ public sealed class RunService(
     WorkflowSchemaReadService schemaReader,
     ProviderCatalogService providerCatalog,
     SlotCredentialResolver credentialResolver,
+    SlotBindingSecrets bindingSecrets,
     ConnectorAccessPolicy connectorAccess,
     ConnectorService connectors,
     WorkspaceResourceService workspaceResources,
@@ -37,16 +38,18 @@ public sealed class RunService(
     /// <summary>Prefix of the synthetic slot a workspace mount's auth connector is stashed under.</summary>
     internal const string MountAuthSlotPrefix = "mount-auth:";
 
-    public Task<RunAccepted> RunInlineAsync(RunRequest request, Guid? triggeredBy, CancellationToken ct)
-        => DispatchAsync(
+    public async Task<RunAccepted> RunInlineAsync(RunRequest request, Guid? triggeredBy, CancellationToken ct)
+        => await DispatchAsync(
             request.WorkflowType,
             new Dictionary<string, string>(request.Context ?? new Dictionary<string, string>()),
-            request.SlotBindings ?? [], triggeredBy, ct);
+            // Inline Secret-kind settings are protected the moment they enter the Core — the
+            // stash never holds them in the clear; the resolver decrypts just-in-time.
+            await bindingSecrets.ProtectAsync(request.SlotBindings ?? [], ct), triggeredBy, ct);
 
     public async Task<RunAccepted> RunConfigurationAsync(
         Guid configurationId, Guid? triggeredBy, IReadOnlyDictionary<string, string>? context, CancellationToken ct)
     {
-        var config = await configurations.GetAsync(configurationId, ct)
+        var config = await configurations.GetForDispatchAsync(configurationId, ct)
                      ?? throw new KeyNotFoundException($"configuration '{configurationId}' not found");
         if (!config.Enabled)
             throw new InvalidOperationException($"configuration '{config.Name}' is disabled");
@@ -59,7 +62,7 @@ public sealed class RunService(
                 merged[key] = value;
 
         return await DispatchAsync(
-            config.WorkflowType, merged, config.SlotBindings, triggeredBy, ct);
+            config.WorkflowType, merged, config.SlotBindings, triggeredBy, ct, configurationId);
     }
 
     /// <summary>
@@ -72,7 +75,8 @@ public sealed class RunService(
     /// </summary>
     public async Task<RunAccepted> RerunAsync(
         Data.CoreRunRecord run, Guid? triggeredBy, CancellationToken ct,
-        IReadOnlyDictionary<string, string>? contextOverlay = null)
+        IReadOnlyDictionary<string, string>? contextOverlay = null,
+        bool seesAllConfigurations = false)
     {
         if (quotas is not null)
             await quotas.EnsureCanDispatchAsync(triggeredBy, ct);
@@ -90,6 +94,19 @@ public sealed class RunService(
                      .Distinct())
             if (!await connectorAccess.CanUseAsync(connectorId, triggeredBy, ct))
                 throw new ConnectorAccessDeniedException(connectorId);
+
+        // The same gates the original dispatch applied to what the bindings EXPANDED from: every
+        // workspace the mounts came from, and — for a run of a personal configuration — the
+        // configuration's visibility (its inline settings are the owner's, not the rerunner's).
+        foreach (var workspaceId in stash.WorkspaceIds.Distinct())
+            if (!await workspaceResources.CanUseAsync(workspaceId, triggeredBy, ct))
+                throw new WorkspaceAccessDeniedException(
+                    (await workspaceResources.GetAsync(workspaceId, ct))?.Name ?? workspaceId.ToString("D"));
+        if (stash.ConfigurationId is { } configurationId && triggeredBy is not null
+            && !await configurations.IsVisibleAsync(
+                configurationId, new ConfigurationViewer(triggeredBy, seesAllConfigurations), ct))
+            throw new RunAccessDeniedException(
+                $"not permitted to rerun configuration '{configurationId:D}' — it is not visible to you or no longer exists");
 
         // The stashed bindings must ALSO still pass today's tool matching and catalog grant gate
         // against the freshly resolved schema — the same per-binding gate as a first dispatch.
@@ -127,7 +144,7 @@ public sealed class RunService(
         var rerunCommandJson = System.Text.Json.JsonSerializer.Serialize(ResolutionTokens.Redacted(command));
         await credentialResolver.StashAsync(
             commandId, resolutionToken, stash.Bindings, triggeredBy ?? stash.TriggeredBy,
-            rerunCommandJson, ct);
+            rerunCommandJson, stash.WorkspaceIds, stash.ConfigurationId, ct);
         await RecordDispatchedAsync(commandId, command.WorkflowType ?? run.WorkflowType, rerunCommandJson, ct);
         await bus.PublishAsync(settings.Value.RunCommandQueue, command, ct);
         logger.LogInformation(
@@ -139,8 +156,9 @@ public sealed class RunService(
     /// <summary>
     /// Catalog-entry access gate: an entry with grants admits only the listed subjects; an entry
     /// WITHOUT grants follows the platform default (restricted = administrators only, open =
-    /// everyone). Administrators always pass, and system dispatches without a principal (failover
-    /// redispatch, the approval pipeline) are exempt — the Core itself is the actor there.
+    /// everyone). Administrators always pass, and system dispatches without a principal (the
+    /// approval pipeline) are exempt — the Core itself is the actor there; a failover re-dispatch
+    /// acts as the original triggering principal and is gated like them.
     /// </summary>
     private async Task EnsureMayUseCatalogEntryAsync(
         ProviderCatalogEntry entry, Guid? triggeredBy, CancellationToken ct)
@@ -163,16 +181,47 @@ public sealed class RunService(
                 $"not permitted to use provider '{entry.ProviderType}'");
     }
 
-    /// <summary>Requests cancellation of a run; the runner consumes the command and stops the container.</summary>
+    /// <summary>
+    /// Requests cancellation of a run. A run no runner has claimed yet (still <c>Dispatched</c>)
+    /// is cancelled by the Core itself — the terminal transition as a versioned compare-and-swap,
+    /// the resolution stash deleted so a late launch cannot resolve credentials (the same
+    /// anti-execution measure as the claim-timeout sweep), and a <c>Cancelled</c> status event;
+    /// forwarding to the runner pool would only be dropped there. Any other run is forwarded
+    /// over the cancel queue; the owning container consumes it and stops.
+    /// </summary>
     public async Task CancelAsync(Guid runId, CancellationToken ct)
     {
+        if (await runs.ReadAsync(runId, ct) is { State: RunStates.Dispatched } dispatched)
+        {
+            var won = await runs.TrySaveAsync(dispatched with
+            {
+                State = RunStates.Cancelled,
+                ErrorMessage = "cancelled-before-claim",
+                UpdatedUtc = clock.GetUtcNow(),
+                CompletedUtc = clock.GetUtcNow()
+            }, dispatched.Version, ct);
+            if (won)
+            {
+                await statusPublisher.PublishAsync(
+                    dispatched.Id, dispatched.WorkflowType, RunStates.Cancelled,
+                    "cancelled-before-claim", commandId: dispatched.CommandId, ct: ct);
+                // The stash stays: the resolver refuses every resolution for a terminal run, so
+                // a late launch of this command cannot resolve credentials, while a rerun of
+                // the cancelled run remains possible.
+                logger.LogInformation("Cancelled unclaimed dispatch. RunId={RunId}", runId);
+                return;
+            }
+            // Lost the swap: a claim (or another verdict) landed meanwhile — fall through and
+            // forward, the per-instance cancel queue is now the right place.
+        }
         await bus.PublishAsync(settings.Value.CancelCommandQueue, new CancelWorkflowCommand(runId), ct);
         logger.LogInformation("Requested cancel. RunId={RunId}", runId);
     }
 
     private async Task<RunAccepted> DispatchAsync(
         string workflowType, Dictionary<string, string> context,
-        IReadOnlyList<SlotBinding> slotBindings, Guid? triggeredBy, CancellationToken ct)
+        IReadOnlyList<SlotBinding> slotBindings, Guid? triggeredBy, CancellationToken ct,
+        Guid? configurationId = null)
     {
         if (quotas is not null)
             await quotas.EnsureCanDispatchAsync(triggeredBy, ct);
@@ -203,6 +252,7 @@ public sealed class RunService(
             new Dictionary<string, IReadOnlyList<EnvironmentBaseRef>>(StringComparer.OrdinalIgnoreCase);
         var pluginBindings = new List<SlotBinding>();
         var stashedBindings = new List<SlotBinding>();
+        var workspaceIds = new List<Guid>();
         foreach (var boundSlot in slotBindings)
         {
             var binding = boundSlot;
@@ -215,8 +265,8 @@ public sealed class RunService(
                 var workspace = await workspaceResources.GetAsync(workspaceId, ct)
                     ?? throw new KeyNotFoundException($"workspace '{workspaceId:D}' does not exist");
                 if (!await workspaceResources.CanUseAsync(workspaceId, triggeredBy, ct))
-                    throw new InvalidOperationException(
-                        $"not permitted to use workspace '{workspace.Name}'");
+                    throw new WorkspaceAccessDeniedException(workspace.Name);
+                workspaceIds.Add(workspaceId);
                 var mergedSettings = new Dictionary<string, string>(workspace.Settings);
                 foreach (var (key, value) in binding.Settings ?? new Dictionary<string, string>())
                     mergedSettings[key] = value;
@@ -354,7 +404,8 @@ public sealed class RunService(
         // only the bus copy the runner receives carries the plaintext capability.
         var storedCommandJson = System.Text.Json.JsonSerializer.Serialize(ResolutionTokens.Redacted(command));
         await credentialResolver.StashAsync(
-            commandId, resolutionToken, stashedBindings, triggeredBy, storedCommandJson, ct);
+            commandId, resolutionToken, stashedBindings, triggeredBy, storedCommandJson,
+            workspaceIds, configurationId, ct);
         await RecordDispatchedAsync(commandId, workflowType, storedCommandJson, ct);
 
         await bus.PublishAsync(settings.Value.RunCommandQueue, command, ct);

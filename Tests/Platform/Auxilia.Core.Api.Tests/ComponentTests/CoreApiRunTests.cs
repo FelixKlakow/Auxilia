@@ -108,6 +108,28 @@ public sealed class CoreApiRunTests : CoreApiComponentTestBase
     }
 
     [Test]
+    public async Task CancelRun_OfAnUnclaimedDispatch_IsCancelledByTheCore()
+    {
+        var client = CreateClient();
+        var response = await client.PostAsJsonAsync("/api/runs", new RunRequest(DummyType));
+        var accepted = await response.Content.ReadFromJsonAsync<RunAccepted>();
+
+        var cancel = await client.PostAsync($"/api/runs/{accepted!.RunId}/cancel", null);
+        Assert.That(cancel.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
+
+        var status = await client.GetFromJsonAsync<RunStatus>($"/api/runs/{accepted.RunId}");
+        Assert.Multiple(() =>
+        {
+            Assert.That(status!.State, Is.EqualTo(RunStates.Cancelled),
+                "No runner has claimed the run — the Core settles the cancel itself.");
+            Assert.That(MessageBus.PublishedMessages
+                    .Where(m => m.Topic == "workflow.cancel-commands").Select(m => m.Message)
+                    .OfType<CancelWorkflowCommand>(), Is.Empty,
+                "A cancel forwarded to the runner pool would be dropped as 'unknown instance'.");
+        });
+    }
+
+    [Test]
     public async Task CreateConnector_ReadReturnsKeysNotSecretValues()
     {
         var client = CreateClient();

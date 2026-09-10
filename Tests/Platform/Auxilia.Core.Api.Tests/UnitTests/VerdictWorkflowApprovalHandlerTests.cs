@@ -45,7 +45,10 @@ public sealed class VerdictWorkflowApprovalHandlerTests
 
     private static readonly WorkflowTypeRegistrationDto Registration = new(
         "under-review", "docker://img:1", WorkflowTypeStatus.Pending, null,
-        "publisher-key", false, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        "publisher-key", false, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+    {
+        PackageHashBase64 = "reviewed-package-hash"
+    };
 
     private FakeDispatcher _dispatcher = null!;
     private InMemoryDataAccess<CoreRunRecord> _runs = null!;
@@ -231,10 +234,12 @@ public sealed class VerdictWorkflowApprovalHandlerTests
             Assert.That(url, Does.StartWith(
                 "https://core.example.com/api/workflow-types/under-review/package?approvalToken="));
             var token = System.Web.HttpUtility.ParseQueryString(uri.Query)["approvalToken"];
-            Assert.That(_downloadTokens.Validate(token, "under-review"), Is.True,
+            Assert.That(_downloadTokens.Validate(token, "under-review", "reviewed-package-hash"), Is.True,
                 "the passed token must authorize downloading THE pending package");
-            Assert.That(_downloadTokens.Validate(token, "some-other-type"), Is.False,
+            Assert.That(_downloadTokens.Validate(token, "some-other-type", "reviewed-package-hash"), Is.False,
                 "the token is scoped to exactly the type under review");
+            Assert.That(_downloadTokens.Validate(token, "under-review", "another-package-hash"), Is.False,
+                "the token is scoped to exactly the submission under review");
         });
     }
 

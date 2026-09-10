@@ -65,6 +65,8 @@ public sealed class RunStreamPublisher(
 
     public async Task RunSubscribedAsync(Guid runId, CancellationToken ct)
     {
+        // A cancellation while waiting for the gate has registered NOTHING — the broker discards
+        // the failed subscription without an unsubscribe callback, so there is nothing to undo.
         await _bindGate.WaitAsync(ct);
         try
         {
@@ -73,13 +75,42 @@ public sealed class RunStreamPublisher(
             if (count > 1)
                 return;
 
-            await BindLockedAsync(runId, ct);
-            // The audience may have subscribed under the dispatch command id — when its instance
-            // id is already known, bind that too so view items (instance-keyed only) arrive.
-            if (_instanceByCommandId.TryGetValue(runId, out var instanceId))
-                await BindAliasLockedAsync(instanceId, ct);
+            try
+            {
+                await BindLockedAsync(runId, ct);
+                // The audience may have subscribed under the dispatch command id — when its instance
+                // id is already known, bind that too so view items (instance-keyed only) arrive.
+                if (_instanceByCommandId.TryGetValue(runId, out var instanceId))
+                    await BindAliasLockedAsync(instanceId, ct);
+            }
+            catch
+            {
+                // ROLL BACK under the gate: this subscription was the run's first and only
+                // audience, so the count and any half-applied bindings are ours to undo here —
+                // the broker will not call RunUnsubscribedAsync for a failed subscribe.
+                await RollBackFirstSubscribeLockedAsync(runId);
+                throw;
+            }
         }
         finally { _bindGate.Release(); }
+    }
+
+    private async Task RollBackFirstSubscribeLockedAsync(Guid runId)
+    {
+        _audience.Remove(runId);
+        try
+        {
+            if (!_aliasBound.Contains(runId))
+                await UnbindLockedAsync(runId);
+            if (_instanceByCommandId.TryGetValue(runId, out var instanceId)
+                && _aliasBound.Remove(instanceId) && !_audience.ContainsKey(instanceId))
+                await UnbindLockedAsync(instanceId);
+        }
+        catch (Exception ex)
+        {
+            // A stale binding only over-delivers; the subscribe failure itself is what propagates.
+            logger.LogWarning(ex, "Failed to roll back the bus bindings of run {RunId} after a failed subscribe.", runId);
+        }
     }
 
     public async Task RunUnsubscribedAsync(Guid runId)

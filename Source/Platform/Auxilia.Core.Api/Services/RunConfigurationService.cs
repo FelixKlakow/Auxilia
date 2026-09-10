@@ -11,11 +11,14 @@ public readonly record struct ConfigurationViewer(Guid? PrincipalId, bool SeesAl
 /// <summary>
 /// CRUD over Core-owned run configurations. A Personal configuration belongs to its owner and is
 /// visible/runnable only to the owner, granted subjects (<see cref="AccessGrantEvaluator"/>), and
-/// configuration managers; Company configurations are shared platform-wide.
+/// configuration managers; Company configurations are shared platform-wide. Inline Secret-kind
+/// binding settings are protected on write and masked on every read (<see cref="SlotBindingSecrets"/>);
+/// only <see cref="GetForDispatchAsync"/> hands out the stored (still protected) values.
 /// </summary>
 public sealed class RunConfigurationService(
     IDataAccess<CoreRunConfigurationRecord> store,
     AccessGrantEvaluator grants,
+    SlotBindingSecrets secrets,
     TimeProvider clock)
 {
     public async Task<RunConfiguration> CreateAsync(
@@ -30,7 +33,7 @@ public sealed class RunConfigurationService(
             ContextJson = JsonSerializer.Serialize(
                 request.Context ?? new Dictionary<string, string>()),
             SlotBindingsJson = JsonSerializer.Serialize(
-                request.SlotBindings ?? new List<SlotBinding>()),
+                await secrets.ProtectAsync(request.SlotBindings ?? [], ct)),
             Enabled = request.Enabled,
             TagsJson = JsonSerializer.Serialize(request.Tags ?? []),
             Scope = personal ? ResourceScope.Personal : ResourceScope.Company,
@@ -38,12 +41,14 @@ public sealed class RunConfigurationService(
             UpdatedUtc = clock.GetUtcNow()
         };
         await store.SaveAsync(record, ct);
-        return ToDto(record);
+        return await ToDtoAsync(record, ct);
     }
 
     /// <summary>
     /// Updates a stored configuration: null request fields stay unchanged, provided ones replace
-    /// the stored value wholesale. The workflow type, scope, and owner are immutable.
+    /// the stored value wholesale — except that a Secret-kind binding setting sent empty (or
+    /// omitted) keeps its stored value, since reads never return it. The workflow type, scope,
+    /// and owner are immutable.
     /// </summary>
     public async Task<RunConfiguration?> UpdateAsync(Guid id, UpdateRunConfiguration request, CancellationToken ct)
     {
@@ -55,13 +60,14 @@ public sealed class RunConfigurationService(
             ContextJson = request.Context is null ? record.ContextJson : JsonSerializer.Serialize(request.Context),
             SlotBindingsJson = request.SlotBindings is null
                 ? record.SlotBindingsJson
-                : JsonSerializer.Serialize(request.SlotBindings),
+                : JsonSerializer.Serialize(
+                    await secrets.ProtectAsync(request.SlotBindings, BindingsOf(record), ct)),
             Enabled = request.Enabled ?? record.Enabled,
             TagsJson = request.Tags is null ? record.TagsJson : JsonSerializer.Serialize(request.Tags),
             UpdatedUtc = clock.GetUtcNow()
         };
         await store.SaveAsync(updated, ct);
-        return ToDto(updated);
+        return await ToDtoAsync(updated, ct);
     }
 
     /// <summary>Replaces a personal configuration's access grants; company configurations have none.</summary>
@@ -78,7 +84,7 @@ public sealed class RunConfigurationService(
             UpdatedUtc = clock.GetUtcNow()
         };
         await store.SaveAsync(updated, ct);
-        return ToDto(updated);
+        return await ToDtoAsync(updated, ct);
     }
 
     /// <summary>Deletes a stored configuration permanently.</summary>
@@ -87,14 +93,21 @@ public sealed class RunConfigurationService(
 
     /// <summary>Unfiltered read — for Core-internal paths that already authorized the caller.</summary>
     public async Task<RunConfiguration?> GetAsync(Guid id, CancellationToken ct)
-        => await store.ReadAsync(id, ct) is { } r ? ToDto(r) : null;
+        => await store.ReadAsync(id, ct) is { } r ? await ToDtoAsync(r, ct) : null;
+
+    /// <summary>
+    /// The dispatch read: bindings carry their stored (protected) Secret-kind values instead of
+    /// the mask, so the run's stash resolves them just-in-time. Never leaves the Core.
+    /// </summary>
+    internal async Task<RunConfiguration?> GetForDispatchAsync(Guid id, CancellationToken ct)
+        => await store.ReadAsync(id, ct) is { } r ? ToDto(r, BindingsOf(r)) : null;
 
     /// <summary>Visibility-filtered read: an invisible configuration reads as not found.</summary>
     public async Task<RunConfiguration?> GetAsync(Guid id, ConfigurationViewer viewer, CancellationToken ct)
     {
         if (await store.ReadAsync(id, ct) is not { } record)
             return null;
-        return await IsVisibleAsync(record, viewer, ct) ? ToDto(record) : null;
+        return await IsVisibleAsync(record, viewer, ct) ? await ToDtoAsync(record, ct) : null;
     }
 
     public async Task<PagedResult<RunConfiguration>> QueryAsync(
@@ -112,7 +125,9 @@ public sealed class RunConfigurationService(
                 visible.Add(record);
 
         var ordered = visible.OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToList();
-        var page = ordered.Skip(query.Skip).Take(query.Take).Select(ToDto).ToList();
+        var page = new List<RunConfiguration>();
+        foreach (var record in ordered.Skip(query.Skip).Take(query.Take))
+            page.Add(await ToDtoAsync(record, ct));
         return new PagedResult<RunConfiguration>(page, ordered.Count, query.Skip, query.Take);
     }
 
@@ -149,12 +164,18 @@ public sealed class RunConfigurationService(
             ownerPrincipalId: null, ct);
     }
 
-    internal static RunConfiguration ToDto(CoreRunConfigurationRecord r) => new(
+    private static IReadOnlyList<SlotBinding> BindingsOf(CoreRunConfigurationRecord r)
+        => JsonSerializer.Deserialize<List<SlotBinding>>(r.SlotBindingsJson) ?? [];
+
+    /// <summary>The read shape: Secret-kind binding settings masked (key present, value empty).</summary>
+    private async Task<RunConfiguration> ToDtoAsync(CoreRunConfigurationRecord r, CancellationToken ct)
+        => ToDto(r, await secrets.MaskAsync(BindingsOf(r), ct));
+
+    private static RunConfiguration ToDto(CoreRunConfigurationRecord r, IReadOnlyList<SlotBinding> bindings) => new(
         r.Id, r.Name, r.WorkflowType,
         JsonSerializer.Deserialize<Dictionary<string, string>>(r.ContextJson)
             ?? new Dictionary<string, string>(),
-        JsonSerializer.Deserialize<List<SlotBinding>>(r.SlotBindingsJson)
-            ?? new List<SlotBinding>(),
+        bindings,
         r.Enabled, r.UpdatedUtc,
         JsonSerializer.Deserialize<List<string>>(r.TagsJson ?? "[]") ?? [],
         r.Scope,

@@ -21,6 +21,12 @@ public sealed class ConnectorTokenRefresher(
     /// <summary>Access tokens this close to expiry are refreshed proactively.</summary>
     private static readonly TimeSpan ExpirySkew = TimeSpan.FromMinutes(2);
 
+    // SINGLE-FLIGHT per connector: providers ROTATE refresh tokens, so two concurrent refreshes
+    // of one connector (several runs resolving the same slot at once) would each spend the same
+    // refresh token — the loser's rotated token then overwrites the winner's and the connector is
+    // dead until re-connected. The second caller waits, re-reads, and finds the token fresh.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, SemaphoreSlim> _refreshFlights = new();
+
     /// <summary>The connector's decrypted settings, refreshed first when the spec says so.</summary>
     public async Task<IReadOnlyDictionary<string, string>?> ResolveFreshSettingsAsync(
         Guid connectorId, CancellationToken ct)
@@ -30,17 +36,43 @@ public sealed class ConnectorTokenRefresher(
             return null;
         if (await connectors.GetAsync(connectorId, ct) is not { } connector
             || (await catalog.FindAsync(connector.ProviderType, ct))?.OAuthRefresh is not { } spec
-            || !settings.TryGetValue(spec.RefreshTokenKey, out var refreshToken)
-            || string.IsNullOrWhiteSpace(refreshToken))
+            || !HasRefreshToken(settings, spec))
+            return settings;
+        if (IsFresh(settings, spec))
             return settings;
 
-        // Fresh enough? An unknown expiry counts as stale — better one refresh too many than a
-        // revoked-token failure mid-run.
-        if (settings.TryGetValue(spec.ExpiresAtKey, out var expiresAtRaw)
-            && long.TryParse(expiresAtRaw, out var expiresAtMs)
-            && DateTimeOffset.FromUnixTimeMilliseconds(expiresAtMs) - clock.GetUtcNow() > ExpirySkew)
-            return settings;
+        var flight = _refreshFlights.GetOrAdd(connectorId, _ => new SemaphoreSlim(1, 1));
+        await flight.WaitAsync(ct);
+        try
+        {
+            // Re-read after acquiring: a concurrent caller may have refreshed (and rotated the
+            // refresh token) while we waited — its result is what we must deliver, not a second
+            // exchange of the now-spent token.
+            settings = await connectors.ResolveSettingsAsync(connectorId, ct);
+            if (settings is null)
+                return null;
+            if (!HasRefreshToken(settings, spec) || IsFresh(settings, spec))
+                return settings;
+            return await RefreshAsync(connectorId, connector.ProviderType, spec, settings, ct);
+        }
+        finally { flight.Release(); }
+    }
 
+    private static bool HasRefreshToken(IReadOnlyDictionary<string, string> settings, ProviderOAuthRefresh spec)
+        => settings.TryGetValue(spec.RefreshTokenKey, out var refreshToken)
+           && !string.IsNullOrWhiteSpace(refreshToken);
+
+    /// <summary>An unknown expiry counts as stale — better one refresh too many than a revoked-token failure mid-run.</summary>
+    private bool IsFresh(IReadOnlyDictionary<string, string> settings, ProviderOAuthRefresh spec)
+        => settings.TryGetValue(spec.ExpiresAtKey, out var expiresAtRaw)
+           && long.TryParse(expiresAtRaw, out var expiresAtMs)
+           && DateTimeOffset.FromUnixTimeMilliseconds(expiresAtMs) - clock.GetUtcNow() > ExpirySkew;
+
+    private async Task<IReadOnlyDictionary<string, string>> RefreshAsync(
+        Guid connectorId, string providerType, ProviderOAuthRefresh spec,
+        IReadOnlyDictionary<string, string> settings, CancellationToken ct)
+    {
+        var refreshToken = settings[spec.RefreshTokenKey];
         try
         {
             var http = httpClientFactory.CreateClient("oauth-refresh");
@@ -76,7 +108,7 @@ public sealed class ConnectorTokenRefresher(
             await connectors.UpdateAsync(connectorId, new UpdateConnector(Settings: updated), ct);
             logger.LogInformation(
                 "OAuth token refreshed for connector {ConnectorId} ({ProviderType}).",
-                connectorId, connector.ProviderType);
+                connectorId, providerType);
 
             var fresh = new Dictionary<string, string>(settings);
             foreach (var (key, value) in updated)

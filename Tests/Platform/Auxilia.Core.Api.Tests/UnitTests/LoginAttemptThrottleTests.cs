@@ -27,6 +27,29 @@ public sealed class LoginAttemptThrottleTests
         }));
 
     [Test]
+    public void PrincipalKeys_ThrottleStepUp_IndependentlyOfUsernames()
+    {
+        var clock = new FakeTimeProvider();
+        var throttle = Throttle(clock, limit: 2);
+        var principal = Guid.NewGuid();
+
+        throttle.RecordFailure(principal);
+        Assert.That(throttle.IsBlocked(principal), Is.False, "one failure is still allowed");
+        throttle.RecordFailure(principal);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(throttle.IsBlocked(principal), Is.True, "step-up guessing is throttled per principal");
+            Assert.That(throttle.IsBlocked(Guid.NewGuid()), Is.False, "another principal is not collaterally locked");
+            Assert.That(throttle.IsBlocked(principal.ToString("D")), Is.False,
+                "a username that happens to spell the guid lives in a different key space");
+        });
+
+        throttle.RecordSuccess(principal);
+        Assert.That(throttle.IsBlocked(principal), Is.False, "a successful proof clears the slate");
+    }
+
+    [Test]
     public void Blocks_AfterTheConfiguredFailures_WithinTheWindow()
     {
         var clock = new FakeTimeProvider();

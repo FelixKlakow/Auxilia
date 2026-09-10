@@ -48,6 +48,12 @@ public sealed class RunTrackingService(
     /// <summary>One read-check-CAS attempt; false = the conditional save lost a race, retry.</summary>
     private async Task<bool> TryApplyAsync(WorkflowStatusEvent statusEvent, CancellationToken ct)
     {
+        // Dispatched is CORE-AUTHORED: the Run API writes the command-keyed row synchronously
+        // before it publishes, so the bus copy is for subscribers only — applying it here could
+        // only ever resurrect a row the claim rekey already deleted (a late/re-ordered delivery).
+        if (statusEvent.State == Auxilia.Core.Contracts.RunStates.Dispatched)
+            return true;
+
         var existing = await runs.ReadAsync(statusEvent.WorkflowInstanceId, ct);
 
         // TERMINAL SINK: a terminal record never becomes non-terminal again. A late event from a

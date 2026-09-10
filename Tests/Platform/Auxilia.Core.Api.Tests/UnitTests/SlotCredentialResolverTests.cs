@@ -22,24 +22,49 @@ public sealed class SlotCredentialResolverTests
             => Task.FromResult(downstream);
     }
 
+    private sealed record Fixture(
+        SlotCredentialResolver Resolver,
+        ConnectorService Connectors,
+        DelegatedTokenStore Tokens,
+        InMemoryDataAccess<CoreRunRecord> Runs,
+        InMemoryDataAccess<AuditRecord> Audit,
+        ProviderCatalogService Catalog,
+        SlotBindingSecrets Secrets);
+
     private static (SlotCredentialResolver Resolver, ConnectorService Connectors, DelegatedTokenStore Tokens) New(
         IDelegatedTokenExchange? exchange = null)
     {
+        var fixture = NewFixture(exchange);
+        return (fixture.Resolver, fixture.Connectors, fixture.Tokens);
+    }
+
+    private static Fixture NewFixture(IDelegatedTokenExchange? exchange = null)
+    {
         var protector = new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32));
+        var grants = new AccessGrantEvaluator(
+            new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>());
         var connectors = new ConnectorService(
-            new InMemoryDataAccess<CoreConnectorRecord>(), protector,
-            new AccessGrantEvaluator(
-                new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>()),
-            TimeProvider.System);
+            new InMemoryDataAccess<CoreConnectorRecord>(), protector, grants, TimeProvider.System);
         var tokens = new DelegatedTokenStore(
             new InMemoryDataAccess<DelegatedUserTokenRecord>(), protector, TimeProvider.System);
+        var audit = new InMemoryDataAccess<AuditRecord>();
+        var catalog = new ProviderCatalogService(
+            new InMemoryDataAccess<SlotProviderRecord>(),
+            new InMemoryDataAccess<ProviderCatalogRecord>(),
+            new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System));
+        var secrets = new SlotBindingSecrets(
+            catalog, connectors,
+            new WorkspaceResourceService(new InMemoryDataAccess<CoreWorkspaceRecord>(), grants, TimeProvider.System),
+            protector);
+        var runs = new InMemoryDataAccess<CoreRunRecord>();
         var resolver = new SlotCredentialResolver(
-            new InMemoryDataAccess<CoreRunResolutionRecord>(), connectors,
-            NewPassthroughRefresher(connectors), tokens,
+            new InMemoryDataAccess<CoreRunResolutionRecord>(), runs, connectors,
+            NewPassthroughRefresher(connectors, catalog), tokens,
             exchange ?? new NullDelegatedTokenExchange(),
-            new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System),
+            secrets,
+            new AuditLog(audit, TimeProvider.System),
             TimeProvider.System, Options.Create(new CoreApiSettings()));
-        return (resolver, connectors, tokens);
+        return new Fixture(resolver, connectors, tokens, runs, audit, catalog, secrets);
     }
 
     private static (string PublicKey, RSA Rsa) NewKeyPair()
@@ -135,20 +160,9 @@ public sealed class SlotCredentialResolverTests
     [Test]
     public async Task Resolve_Rejection_IsAudited()
     {
-        var auditStore = new InMemoryDataAccess<AuditRecord>();
-        var protector = new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32));
-        var connectors = new ConnectorService(
-            new InMemoryDataAccess<CoreConnectorRecord>(), protector,
-            new AccessGrantEvaluator(
-                new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>()),
-            TimeProvider.System);
-        var tokens = new DelegatedTokenStore(
-            new InMemoryDataAccess<DelegatedUserTokenRecord>(), protector, TimeProvider.System);
-        var resolver = new SlotCredentialResolver(
-            new InMemoryDataAccess<CoreRunResolutionRecord>(), connectors,
-            NewPassthroughRefresher(connectors), tokens, new NullDelegatedTokenExchange(),
-            new AuditLog(auditStore, TimeProvider.System), TimeProvider.System,
-            Options.Create(new CoreApiSettings()));
+        var fixture = NewFixture();
+        var resolver = fixture.Resolver;
+        var auditStore = fixture.Audit;
 
         var (publicKey, rsa) = NewKeyPair();
         using (rsa)
@@ -232,13 +246,102 @@ public sealed class SlotCredentialResolverTests
         }
     }
 
-    private static ConnectorTokenRefresher NewPassthroughRefresher(ConnectorService connectors)
+    private static Task RegisterSecretProviderAsync(ProviderCatalogService catalog)
+        => catalog.RegisterAsync("test", new RegisterSlotProvider(
+            "local-agent", "coding-agent", null, ["ICodingAgent"],
+            [
+                new RegisterProviderSetting("apiKey", "API key", "Secret", Required: true),
+                new RegisterProviderSetting("model", "Model", "Text"),
+            ]), CancellationToken.None);
+
+    [Test]
+    public async Task Resolve_AfterTheRunEnded_IsRefused_AndAudited()
+    {
+        var fixture = NewFixture();
+        var runId = Guid.NewGuid();
+        var token = Guid.NewGuid().ToString("N");
+        await fixture.Resolver.StashAsync(runId, token,
+            new List<SlotBinding> { new("sc", "local", Settings: new Dictionary<string, string> { ["path"] = "/x" }) },
+            triggeredBy: null, ct: CancellationToken.None);
+        // The runner's claim rekeyed the row to its instance id; the dispatch id survives as the alias.
+        await fixture.Runs.SaveAsync(new CoreRunRecord
+        {
+            Id = Guid.NewGuid(), WorkflowType = "wt", State = RunStates.Success, CommandId = runId
+        });
+
+        var (publicKey, rsa) = NewKeyPair();
+        using (rsa)
+        {
+            var (success, error, _) = await fixture.Resolver.ResolveAsync(
+                runId, token, "sc", publicKey, CancellationToken.None);
+
+            Assert.That(success, Is.False,
+                "the stash is retained for rerun, but the token authorizes a LIVE run only");
+            Assert.That(error, Is.EqualTo(SlotCredentialResolver.RunEndedError));
+        }
+        Assert.That((await fixture.Audit.ReadAsync()).Any(r =>
+                r.Action == "workflow.slot-credential.rejected" && r.Outcome == "run-ended"),
+            Is.True, "the refusal is audited like every other rejection");
+        Assert.That((await fixture.Resolver.AuthorizeAsync(runId, token, CancellationToken.None)).Ok, Is.False,
+            "the shared gate (package / layer downloads) refuses the same token");
+    }
+
+    [Test]
+    public async Task Resolve_WhileTheRunIsActive_StillResolves()
+    {
+        var fixture = NewFixture();
+        var runId = Guid.NewGuid();
+        var token = Guid.NewGuid().ToString("N");
+        await fixture.Resolver.StashAsync(runId, token,
+            new List<SlotBinding> { new("sc", "local", Settings: new Dictionary<string, string> { ["path"] = "/x" }) },
+            triggeredBy: null, ct: CancellationToken.None);
+        await fixture.Runs.SaveAsync(new CoreRunRecord
+        {
+            Id = runId, WorkflowType = "wt", State = RunStates.Running, CommandId = runId
+        });
+
+        var (publicKey, rsa) = NewKeyPair();
+        using (rsa)
+        {
+            var (success, error, _) = await fixture.Resolver.ResolveAsync(
+                runId, token, "sc", publicKey, CancellationToken.None);
+            Assert.That(success, Is.True, error);
+        }
+    }
+
+    [Test]
+    public async Task Resolve_InlineSecretSetting_IsDecryptedOnlyIntoTheEnvelope()
+    {
+        var fixture = NewFixture();
+        await RegisterSecretProviderAsync(fixture.Catalog);
+        var runId = Guid.NewGuid();
+        var token = Guid.NewGuid().ToString("N");
+        // The binding enters the Core protected (as a configuration write / inline run does it).
+        var stashed = await fixture.Secrets.ProtectAsync(
+            [new SlotBinding("sc", "local-agent", Settings: new Dictionary<string, string>
+            {
+                ["apiKey"] = "sk-plain", ["model"] = "m1"
+            })], CancellationToken.None);
+        Assert.That(stashed[0].Settings!["apiKey"], Is.Not.EqualTo("sk-plain"), "protected at rest");
+        await fixture.Resolver.StashAsync(runId, token, stashed, triggeredBy: null, ct: CancellationToken.None);
+
+        var (publicKey, rsa) = NewKeyPair();
+        using (rsa)
+        {
+            var (success, error, credential) = await fixture.Resolver.ResolveAsync(
+                runId, token, "sc", publicKey, CancellationToken.None);
+
+            Assert.That(success, Is.True, error);
+            var delivered = Decrypt(rsa, credential!.EncryptedSettings);
+            Assert.That(delivered["apiKey"], Is.EqualTo("sk-plain"), "the resolver is the one place a secret is unprotected");
+            Assert.That(delivered["model"], Is.EqualTo("m1"), "non-secret settings pass through");
+        }
+    }
+
+    private static ConnectorTokenRefresher NewPassthroughRefresher(
+        ConnectorService connectors, ProviderCatalogService catalog)
         => new(
-            connectors,
-            new ProviderCatalogService(
-                new InMemoryDataAccess<SlotProviderRecord>(),
-                new InMemoryDataAccess<ProviderCatalogRecord>(),
-                new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System)),
+            connectors, catalog,
             new StubHttpClientFactory(new StubHttpMessageHandler(
                 _ => throw new InvalidOperationException("no refresh expected"))),
             TimeProvider.System,

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Auxilia.Core.Api;
 using Auxilia.Core.Api.Data;
 using Auxilia.Core.Api.Services;
+using Auxilia.Core.Contracts;
 using Auxilia.PlatformData;
 using Auxilia.PlatformData.Entities;
 using Auxilia.UniversalDataAccess;
@@ -53,7 +54,19 @@ public sealed class FailoverMonitorTests
             return snapshot;
         }
 
-        public Task<CoreRunRecord?> ReadAsync(Guid id, CancellationToken ct) => inner.ReadAsync(id, ct);
+        public Func<Guid, Task>? AfterReadById { get; set; }
+
+        public async Task<CoreRunRecord?> ReadAsync(Guid id, CancellationToken ct)
+        {
+            var result = await inner.ReadAsync(id, ct);
+            if (AfterReadById is { } hook)
+            {
+                AfterReadById = null; // one-shot
+                await hook(id);
+            }
+            return result;
+        }
+
         public Task<bool> SaveAsync(CoreRunRecord entity, CancellationToken ct) => inner.SaveAsync(entity, ct);
 
         public Task<bool> TrySaveAsync(CoreRunRecord entity, long expectedVersion, CancellationToken ct)
@@ -71,6 +84,7 @@ public sealed class FailoverMonitorTests
     private IDataAccess<CoreRunRecord> _runs = null!;
     private IDataAccess<CoreRunResolutionRecord> _resolutions = null!;
     private IDataAccess<AuditRecord> _audit = null!;
+    private InMemoryDataAccess<CoreConnectorRecord> _connectorStore = null!;
     private CoreApiSettings _settings = null!;
     private SlotCredentialResolver _resolver = null!;
     private WorkflowTypeRegistryService _registry = null!;
@@ -92,25 +106,32 @@ public sealed class FailoverMonitorTests
         // The re-dispatch path IS RunService.RerunAsync — wire a real one over in-memory stores.
         var protector = new Auxilia.PlatformData.Protection.AesGcmSettingsProtector(
             System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
-        var connectorStore = new InMemoryDataAccess<CoreConnectorRecord>();
+        var connectorStore = _connectorStore = new InMemoryDataAccess<CoreConnectorRecord>();
         var connectors = new ConnectorService(
             connectorStore, protector,
             new AccessGrantEvaluator(
                 new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>()),
             _time);
+        var providerCatalog = new ProviderCatalogService(
+            new InMemoryDataAccess<Auxilia.PlatformData.Entities.SlotProviderRecord>(),
+            new InMemoryDataAccess<Auxilia.PlatformData.Entities.ProviderCatalogRecord>(),
+            new AuditLog(_audit, _time));
+        var workspaces = new WorkspaceResourceService(
+            new InMemoryDataAccess<CoreWorkspaceRecord>(),
+            new AccessGrantEvaluator(
+                new InMemoryDataAccess<Auxilia.PlatformData.Entities.PrincipalRecord>(),
+                new InMemoryDataAccess<Auxilia.PlatformData.Entities.GroupMembershipRecord>()),
+            _time);
+        var bindingSecrets = new SlotBindingSecrets(providerCatalog, connectors, workspaces, protector);
         _resolver = new SlotCredentialResolver(
-            _resolutions, connectors,
+            _resolutions, _runs, connectors,
             new ConnectorTokenRefresher(
-                connectors,
-                new ProviderCatalogService(
-                    new InMemoryDataAccess<Auxilia.PlatformData.Entities.SlotProviderRecord>(),
-                    new InMemoryDataAccess<Auxilia.PlatformData.Entities.ProviderCatalogRecord>(),
-                    new AuditLog(_audit, _time)),
+                connectors, providerCatalog,
                 new StubHttpClientFactory(new StubHttpMessageHandler(
                     _ => new HttpResponseMessage(System.Net.HttpStatusCode.NotFound))),
                 _time, NullLogger<ConnectorTokenRefresher>.Instance),
             new DelegatedTokenStore(new InMemoryDataAccess<Auxilia.Core.Api.Data.DelegatedUserTokenRecord>(), protector, _time),
-            new NullDelegatedTokenExchange(), new AuditLog(_audit, _time), _time, Options.Create(_settings));
+            new NullDelegatedTokenExchange(), bindingSecrets, new AuditLog(_audit, _time), _time, Options.Create(_settings));
         var typeStore = new InMemoryDataAccess<CoreWorkflowTypeRecord>();
         _registry = new WorkflowTypeRegistryService(
             typeStore,
@@ -118,10 +139,6 @@ public sealed class FailoverMonitorTests
                 _ => new HttpResponseMessage(System.Net.HttpStatusCode.NotFound))),
             Options.Create(_settings), new AuditLog(_audit, _time), _time,
             NullLogger<WorkflowTypeRegistryService>.Instance);
-        var providerCatalog = new ProviderCatalogService(
-            new InMemoryDataAccess<Auxilia.PlatformData.Entities.SlotProviderRecord>(),
-            new InMemoryDataAccess<Auxilia.PlatformData.Entities.ProviderCatalogRecord>(),
-            new AuditLog(_audit, _time));
         var runService = new RunService(
             _bus,
             new RunConfigurationService(
@@ -129,19 +146,14 @@ public sealed class FailoverMonitorTests
                 new AccessGrantEvaluator(
                     new InMemoryDataAccess<Auxilia.PlatformData.Entities.PrincipalRecord>(),
                     new InMemoryDataAccess<Auxilia.PlatformData.Entities.GroupMembershipRecord>()),
-                _time),
-            _registry, new WorkflowSchemaReadService(typeStore), providerCatalog, _resolver,
+                bindingSecrets, _time),
+            _registry, new WorkflowSchemaReadService(typeStore), providerCatalog, _resolver, bindingSecrets,
             new ConnectorAccessPolicy(connectorStore,
                 new AccessGrantEvaluator(
                     new InMemoryDataAccess<Auxilia.PlatformData.Entities.PrincipalRecord>(),
                     new InMemoryDataAccess<Auxilia.PlatformData.Entities.GroupMembershipRecord>())),
             connectors,
-            new WorkspaceResourceService(
-                new InMemoryDataAccess<CoreWorkspaceRecord>(),
-                new AccessGrantEvaluator(
-                    new InMemoryDataAccess<Auxilia.PlatformData.Entities.PrincipalRecord>(),
-                    new InMemoryDataAccess<Auxilia.PlatformData.Entities.GroupMembershipRecord>()),
-                _time),
+            workspaces,
             new AccessGrantEvaluator(
                 new InMemoryDataAccess<Auxilia.PlatformData.Entities.PrincipalRecord>(),
                 new InMemoryDataAccess<Auxilia.PlatformData.Entities.GroupMembershipRecord>()),
@@ -166,12 +178,14 @@ public sealed class FailoverMonitorTests
     public void TearDown()
     {
         _innerRuns.Dispose();
+        _connectorStore.Dispose();
         (_resolutions as IDisposable)?.Dispose();
         (_audit as IDisposable)?.Dispose();
     }
 
     private async Task<(Guid ServiceId, CoreRunRecord Run)> SeedDeadRunnerWithRunAsync(
-        string state = "Running", IReadOnlyDictionary<string, string>? commandContext = null)
+        string state = "Running", IReadOnlyDictionary<string, string>? commandContext = null,
+        IReadOnlyList<SlotBinding>? bindings = null, Guid? triggeredBy = null)
     {
         var serviceId = Guid.NewGuid();
         // Last beat is stale relative to the 30s timeout at 'Now'.
@@ -187,7 +201,7 @@ public sealed class FailoverMonitorTests
         await _registry.EnsureSeededAsync(
             new StaticWorkflowType { WorkflowType = "wf-type", PackageUri = "docker://wf:test" },
             CancellationToken.None);
-        await _resolver.StashAsync(commandId, "token-1", [], triggeredBy: null);
+        await _resolver.StashAsync(commandId, "token-1", bindings ?? [], triggeredBy);
         var run = new CoreRunRecord
         {
             Id = runId,
@@ -232,6 +246,90 @@ public sealed class FailoverMonitorTests
         var auditQuery = await _audit.ReadAsync();
         Assert.That(auditQuery.Any(a => a.Action == "workflow.failover"), Is.True);
         Assert.That(auditQuery.Any(a => a.Action == "workflow.redispatched"), Is.True);
+    }
+
+    [Test]
+    public async Task StaleRunner_OrphanOverAPersonalConnector_IsRedispatchedAsTheOriginalPrincipal()
+    {
+        var owner = Guid.NewGuid();
+        var connectorId = Guid.NewGuid();
+        await _connectorStore.SaveAsync(new CoreConnectorRecord
+        {
+            Id = connectorId,
+            Name = "personal-github",
+            ProviderType = "github",
+            Scope = Auxilia.Core.Contracts.ResourceScope.Personal,
+            OwnerPrincipalId = owner,
+            GrantsJson = "[]"
+        });
+        var (_, run) = await SeedDeadRunnerWithRunAsync(
+            bindings: [new SlotBinding("repo", ConnectorId: connectorId)], triggeredBy: owner);
+
+        await _sut.ScanOnceAsync(CancellationToken.None);
+
+        var redispatch = _bus.PublishedMessages
+            .Where(p => p.Topic == _settings.RunCommandQueue)
+            .Select(p => p.Message).OfType<RunWorkflowCommand>().SingleOrDefault();
+        Assert.That(redispatch, Is.Not.Null,
+            "The re-dispatch must act as the ORIGINAL triggering principal — a null principal is "
+            + "refused every personal connector, so the failover could never re-dispatch such a run.");
+        Assert.That((await _resolutions.ReadAsync(redispatch!.CommandId))!.TriggeredByPrincipalId,
+            Is.EqualTo(owner), "The re-stash carries the original principal for the JIT resolution.");
+        Assert.That((await _audit.ReadAsync()).Any(a => a.Action == "workflow.redispatched"), Is.True);
+        Assert.That((await _runs.ReadAsync(run.Id))!.State, Is.EqualTo("Failed"));
+    }
+
+    [Test]
+    public async Task StaleRunner_RunCompletedAfterTheSnapshot_IsNeitherOverwrittenNorRedispatched()
+    {
+        var (_, run) = await SeedDeadRunnerWithRunAsync();
+        // Between the sweep's snapshot and the per-run failover, the run's terminal verdict lands
+        // (a late runner event on another node, or another Core.Api node's failover).
+        _runsInterceptor.AfterSnapshotRead = async () =>
+        {
+            var current = (await _runs.ReadAsync(run.Id))!;
+            await _runs.SaveAsync(current with { State = "Success", UpdatedUtc = _time.Now });
+        };
+
+        await _sut.ScanOnceAsync(CancellationToken.None);
+
+        Assert.Multiple(async () =>
+        {
+            Assert.That((await _runs.ReadAsync(run.Id))!.State, Is.EqualTo("Success"),
+                "A run that is already terminal must not be overwritten with Failed.");
+            Assert.That(_bus.PublishedMessages.Where(p => p.Topic == _settings.RunCommandQueue), Is.Empty,
+                "A completed run must not be re-dispatched.");
+            Assert.That(_bus.PublishedMessages.Any(p => p.Topic == $"workflow-cancel-{run.Id}"), Is.False,
+                "No cancel for a run that already ended.");
+            Assert.That(_bus.PublishedMessages.Any(p =>
+                p.Message is WorkflowStatusEvent e && e.State == "Failed"), Is.False,
+                "No Failed verdict may be published over a terminal run.");
+        });
+    }
+
+    [Test]
+    public async Task StaleRunner_LostTerminalSwap_DoesNotActOnTheRun()
+    {
+        var (_, run) = await SeedDeadRunnerWithRunAsync();
+        // The record's version moves on between the failover's fresh re-read and its conditional
+        // save — the way another Core.Api node's concurrent failover looks from here.
+        _runsInterceptor.AfterReadById = async id =>
+        {
+            var current = (await _innerRuns.ReadAsync(id))!;
+            await _innerRuns.SaveAsync(current with
+            {
+                State = "Failed", ErrorMessage = "steering-instance-lost", UpdatedUtc = _time.Now
+            });
+        };
+
+        await _sut.ScanOnceAsync(CancellationToken.None);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(_bus.PublishedMessages.Where(p => p.Topic == _settings.RunCommandQueue), Is.Empty,
+                "Only the winner of the terminal swap re-dispatches — never both nodes.");
+            Assert.That(_bus.PublishedMessages.Any(p => p.Topic == $"workflow-cancel-{run.Id}"), Is.False);
+        });
     }
 
     [Test]

@@ -100,6 +100,61 @@ public sealed class WorkflowTypeApprovalPipelineTests
         Assert.That(email.Calls, Is.EqualTo(1));
     }
 
+    /// <summary>A handler whose evaluation has a side effect on the registry (a race stand-in).</summary>
+    private sealed class RacingHandler(string name, Func<Task> duringEvaluation, ApprovalHandlerResult result)
+        : IWorkflowTypeApprovalHandler
+    {
+        public string Name => name;
+
+        public async Task<ApprovalHandlerResult> EvaluateAsync(WorkflowTypeRegistrationDto registration, CancellationToken ct)
+        {
+            await duringEvaluation();
+            return result;
+        }
+    }
+
+    [Test]
+    public async Task ReRegistrationDuringTheReview_KeepsTheReplacementPending()
+    {
+        var settings = new CoreApiSettings { ApprovalHandlers = { "checker" } };
+        var registry = await RegistryWithPendingAsync(settings, "wf");
+        var checker = new RacingHandler("checker",
+            async () => await registry.RegisterAsync(
+                new RegisterWorkflowTypeRequest("wf", "docker://img:2"), null, CancellationToken.None),
+            new ApprovalHandlerResult(ApprovalHandlerResult.Approve, "the OLD package looked safe"));
+        var pipeline = NewPipeline(registry, settings, checker);
+
+        await pipeline.ProcessPendingAsync("wf", CancellationToken.None);
+
+        var registration = await registry.GetRegistrationAsync("wf", CancellationToken.None);
+        Assert.Multiple(() =>
+        {
+            Assert.That(registration!.Status, Is.EqualTo(WorkflowTypeStatus.Pending),
+                "the verdict was reached over a package that is no longer the registered one");
+            Assert.That(registration.PackageUri, Is.EqualTo("docker://img:2"));
+        });
+    }
+
+    [Test]
+    public async Task HumanDenialDuringTheReview_IsNotOverriddenByALateApprove()
+    {
+        var settings = new CoreApiSettings { ApprovalHandlers = { "checker" } };
+        var registry = await RegistryWithPendingAsync(settings, "wf");
+        var checker = new RacingHandler("checker",
+            async () => await registry.DenyAsync("wf", "operator said no", "human", CancellationToken.None),
+            new ApprovalHandlerResult(ApprovalHandlerResult.Approve, "safe"));
+        var pipeline = NewPipeline(registry, settings, checker);
+
+        await pipeline.ProcessPendingAsync("wf", CancellationToken.None);
+
+        var registration = await registry.GetRegistrationAsync("wf", CancellationToken.None);
+        Assert.Multiple(() =>
+        {
+            Assert.That(registration!.Status, Is.EqualTo(WorkflowTypeStatus.Denied));
+            Assert.That(registration.StatusReason, Is.EqualTo("operator said no"));
+        });
+    }
+
     [Test]
     public async Task NonPendingRegistrations_AreNeverProcessed()
     {

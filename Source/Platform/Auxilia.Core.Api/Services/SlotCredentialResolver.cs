@@ -13,25 +13,36 @@ namespace Auxilia.Core.Api.Services;
 /// Resolves a run's slot credentials from Core connectors and RSA-encrypts them for the
 /// requesting instance — the Core-side of just-in-time credential delivery. The encryption
 /// happens here so plaintext connector settings never enter the runner process; the runner only
-/// relays the ciphertext. Every resolution is authorized by the run-scoped token and audited.
+/// relays the ciphertext. Every resolution is authorized by the run-scoped token — which stops
+/// authorizing the moment the run reaches a terminal state, although the stash itself is kept
+/// for rerun — and audited.
 /// </summary>
 public sealed class SlotCredentialResolver(
     IDataAccess<CoreRunResolutionRecord> store,
+    IDataAccess<CoreRunRecord> runs,
     ConnectorService connectors,
     ConnectorTokenRefresher tokenRefresher,
     DelegatedTokenStore delegatedTokens,
     IDelegatedTokenExchange delegatedExchange,
+    SlotBindingSecrets bindingSecrets,
     AuditLog audit,
     TimeProvider clock,
     IOptions<CoreApiSettings> settings)
 {
+    public const string InvalidTokenError = "invalid resolution token";
+    public const string RunEndedError = "the run has ended — its resolution token no longer authorizes";
+
     /// <summary>
-    /// Records the run's resolution context at dispatch time (references only, never secrets —
-    /// the token itself is stored only as its digest).
+    /// Records the run's resolution context at dispatch time (references only, never plaintext
+    /// secrets — inline Secret-kind settings arrive already protected, and the token itself is
+    /// stored only as its digest). The workspace and configuration references let a rerun
+    /// re-apply the access gates of the original dispatch.
     /// </summary>
     public Task StashAsync(
         Guid runId, string resolutionToken, IReadOnlyList<SlotBinding> bindings,
-        Guid? triggeredBy, string? dispatchCommandJson = null, CancellationToken ct = default)
+        Guid? triggeredBy, string? dispatchCommandJson = null,
+        IReadOnlyList<Guid>? workspaceIds = null, Guid? configurationId = null,
+        CancellationToken ct = default)
         => store.SaveAsync(new CoreRunResolutionRecord
         {
             Id = runId,
@@ -39,15 +50,57 @@ public sealed class SlotCredentialResolver(
             SlotBindingsJson = JsonSerializer.Serialize(bindings),
             TriggeredByPrincipalId = triggeredBy,
             DispatchCommandJson = dispatchCommandJson,
+            WorkspaceIdsJson = JsonSerializer.Serialize(workspaceIds ?? []),
+            ConfigurationId = configurationId,
             CreatedUtc = clock.GetUtcNow()
         }, ct);
 
-    /// <summary>The stash of a past dispatch (bindings + triggering principal) — for rerun.</summary>
-    internal async Task<(IReadOnlyList<SlotBinding> Bindings, Guid? TriggeredBy)?> GetStashAsync(
-        Guid runId, CancellationToken ct)
+    /// <summary>
+    /// Whether <paramref name="resolutionToken"/> currently authorizes run-scoped reads for
+    /// <paramref name="runId"/>: the digest must match the stash AND the run must not have
+    /// ended — the token is a capability of a live run, not of its retained stash. Every
+    /// refusal is audited; shared by slot resolution and the runner's package / layer downloads.
+    /// </summary>
+    public async Task<(bool Ok, string? Error)> AuthorizeAsync(
+        Guid runId, string resolutionToken, CancellationToken ct)
+    {
+        var (record, error) = await AuthorizedStashAsync(runId, resolutionToken, ct);
+        return (record is not null, error);
+    }
+
+    private async Task<(CoreRunResolutionRecord? Record, string? Error)> AuthorizedStashAsync(
+        Guid runId, string resolutionToken, CancellationToken ct)
+    {
+        var record = await store.ReadAsync(runId, ct);
+        if (record is null)
+            return await RefuseAsync(runId, "unknown-run", "unknown run", ct);
+        if (!ResolutionTokens.Matches(record.ResolutionTokenHash, resolutionToken))
+            return await RefuseAsync(runId, "invalid-resolution-token", InvalidTokenError, ct);
+        // The run row lives under the command id until the runner's claim rekeys it to the
+        // instance id (CommandId alias) — check whichever exists.
+        var run = await runs.ReadAsync(runId, ct)
+                  ?? (await runs.ReadAsync(ct)).FirstOrDefault(r => r.CommandId == runId);
+        if (run is not null && CoreRunStates.IsTerminal(run.State))
+            return await RefuseAsync(runId, "run-ended", RunEndedError, ct);
+        return (record, null);
+    }
+
+    private async Task<(CoreRunResolutionRecord? Record, string? Error)> RefuseAsync(
+        Guid runId, string reason, string error, CancellationToken ct)
+    {
+        await audit.AppendAsync("core-api", "workflow.slot-credential.rejected", runId.ToString(), reason, ct: ct);
+        return (null, error);
+    }
+
+
+    /// <summary>The stash of a past dispatch (bindings, principal, gated references) — for rerun.</summary>
+    internal async Task<RunResolutionStash?> GetStashAsync(Guid runId, CancellationToken ct)
         => await store.ReadAsync(runId, ct) is { } record
-            ? (JsonSerializer.Deserialize<List<SlotBinding>>(record.SlotBindingsJson) ?? [],
-               record.TriggeredByPrincipalId)
+            ? new RunResolutionStash(
+                JsonSerializer.Deserialize<List<SlotBinding>>(record.SlotBindingsJson) ?? [],
+                record.TriggeredByPrincipalId,
+                JsonSerializer.Deserialize<List<Guid>>(record.WorkspaceIdsJson) ?? [],
+                record.ConfigurationId)
             : null;
 
     /// <summary>
@@ -58,12 +111,9 @@ public sealed class SlotCredentialResolver(
     public async Task<(bool Success, string? Error, ResolvedSlotCredential? Credential)> ResolveAsync(
         Guid runId, string resolutionToken, string slotName, string publicKeyBase64, CancellationToken ct)
     {
-        var record = await store.ReadAsync(runId, ct);
+        var (record, authorizationError) = await AuthorizedStashAsync(runId, resolutionToken, ct);
         if (record is null)
-            return await RejectAsync(runId, "unknown-run", "unknown run", ct);
-
-        if (!ResolutionTokens.Matches(record.ResolutionTokenHash, resolutionToken))
-            return await RejectAsync(runId, "invalid-resolution-token", "invalid resolution token", ct);
+            return (false, authorizationError, null);
 
         var bindings = JsonSerializer.Deserialize<List<SlotBinding>>(record.SlotBindingsJson) ?? [];
         var binding = bindings.FirstOrDefault(b => b.SlotName == slotName);
@@ -100,8 +150,18 @@ public sealed class SlotCredentialResolver(
         }
         else
         {
+            // Inline settings: Secret-kind values were protected when the binding entered the
+            // Core — this is the one place they are decrypted, straight into the RSA envelope.
             providerType = binding.ProviderType ?? string.Empty;
-            resolvedSettings = binding.Settings ?? new Dictionary<string, string>();
+            try
+            {
+                resolvedSettings = await bindingSecrets.UnprotectAsync(binding, ct);
+            }
+            catch (Exception ex) when (ex is CryptographicException or FormatException)
+            {
+                return await RejectAsync(runId, "inline-secret-unreadable",
+                    $"an inline secret of slot '{slotName}' cannot be decrypted", ct);
+            }
         }
 
         if (string.IsNullOrEmpty(providerType))
@@ -152,3 +212,10 @@ public sealed class SlotCredentialResolver(
         return (true, null, Convert.ToBase64String(cipher));
     }
 }
+
+/// <summary>A past dispatch's resolution context, as re-gated and re-stashed by a rerun.</summary>
+internal sealed record RunResolutionStash(
+    IReadOnlyList<SlotBinding> Bindings,
+    Guid? TriggeredBy,
+    IReadOnlyList<Guid> WorkspaceIds,
+    Guid? ConfigurationId);

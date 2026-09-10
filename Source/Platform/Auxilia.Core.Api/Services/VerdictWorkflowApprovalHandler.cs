@@ -67,7 +67,8 @@ public sealed class VerdictWorkflowApprovalHandler(
             && settings.Value.PublicBaseAddress?.TrimEnd('/') is { Length: > 0 } baseAddress)
             context["approval-package-download-url"] =
                 $"{baseAddress}/api/workflow-types/{Uri.EscapeDataString(registration.WorkflowType)}/package"
-                + $"?approvalToken={Uri.EscapeDataString(downloadTokens.Issue(registration.WorkflowType))}";
+                + "?approvalToken=" + Uri.EscapeDataString(
+                    downloadTokens.Issue(registration.WorkflowType, registration.PackageHashBase64));
 
         RunAccepted accepted;
         try

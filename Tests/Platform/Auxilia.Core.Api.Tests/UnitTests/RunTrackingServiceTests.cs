@@ -146,6 +146,38 @@ public sealed class RunTrackingServiceTests
     }
 
     [Test]
+    public async Task LateDispatchedEvent_AfterTheClaimRekey_DoesNotResurrectTheCommandRow()
+    {
+        var commandId = Guid.NewGuid();
+        var instanceId = Guid.NewGuid();
+        await SeedDispatchedAsync(commandId);
+        await _publisher.PublishAsync(instanceId, "wf-type", "Received", commandId: commandId);
+        Assert.That(await _runs.ReadAsync(commandId), Is.Null, "precondition: the claim rekeyed the row away");
+
+        // The Core-authored Dispatched event arrives AFTER the claim (shared-queue re-ordering).
+        await _publisher.PublishAsync(commandId, "wf-type", RunStates.Dispatched, commandId: commandId);
+
+        Assert.Multiple(async () =>
+        {
+            Assert.That(await _runs.ReadAsync(commandId), Is.Null,
+                "A re-ordered Dispatched must not re-insert the command row — the claim sweep would "
+                + "later fail it, dispatch a duplicate and delete the live run's stash.");
+            Assert.That((await _runs.ReadAsync(instanceId))!.State, Is.EqualTo("Received"));
+        });
+    }
+
+    [Test]
+    public async Task DispatchedEvent_IsNeverAppliedFromTheBus()
+    {
+        // The Run API writes the Dispatched row itself before publishing; the bus copy is for
+        // subscribers only.
+        var commandId = Guid.NewGuid();
+        await _publisher.PublishAsync(commandId, "wf-type", RunStates.Dispatched, commandId: commandId);
+
+        Assert.That(await _runs.ReadAsync(commandId), Is.Null);
+    }
+
+    [Test]
     public async Task DuplicateClaim_IsIdempotent()
     {
         var commandId = Guid.NewGuid();

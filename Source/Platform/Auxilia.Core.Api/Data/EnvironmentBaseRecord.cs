@@ -29,5 +29,5 @@ public sealed record EnvironmentBaseRecord : IEntity
     public Guid? UpdatedBy { get; init; }
 
     public static Guid IdFor(string name, string version)
-        => DeterministicGuid.For("environment-base", $"{name}\n{version}");
+        => DeterministicGuid.For("environment-base", name, version);
 }

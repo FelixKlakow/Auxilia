@@ -13,9 +13,13 @@ Tests/Platform/Auxilia.Core.Api.Tests/
 ├── UnitTests/
 │   ├── RunServiceTests.cs              # Dispatch shape (RequestedBy=null, inline command), cancel
 │   ├── RunConfigurationServiceTests.cs # CRUD + idempotent EnsureAsync seeding
-│   └── ConnectorServiceTests.cs        # Secrets encrypted on write, never returned by reads
+│   ├── ConnectorServiceTests.cs        # Secrets encrypted on write, never returned by reads
+│   ├── RunViewTrackingServiceTests.cs  # View cap from a once-seeded counter (no per-message scan); terminal-run retention sweep
+│   └── FilteredStreamPublisherRollbackTests.cs # A subscribe cancelled at the bind gate never unbinds a sibling's key
 └── ComponentTests/
     ├── CoreApiRunTests.cs              # POST /api/runs + configured run -> recorded in the run view
+    ├── RunStreamSnapshotOrderingTests.cs # Run store wrapped to inject a transition between subscribe and snapshot
+    ├── GroupRoleClaimsTests.cs         # Group-held role reaches /auth/me and the configuration visibility filter
     ├── StaticConfigurationTests.cs     # Startup static-config seed is runnable
     ├── AuthTests.cs                    # Missing / unauthorized -> 401 / 403 on REST and MCP
     ├── GroupApiTests.cs                # create -> add-member -> assign-role reflected in list; unknown role 400

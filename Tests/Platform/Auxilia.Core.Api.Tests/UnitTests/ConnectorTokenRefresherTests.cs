@@ -148,4 +148,55 @@ public sealed class ConnectorTokenRefresherTests
             Assert.That(_refreshCalls, Is.Zero);
         });
     }
+
+    [Test]
+    public async Task ConcurrentResolves_OfOneStaleConnector_RefreshOnce_AndBothGetTheRotatedToken()
+    {
+        // Providers rotate refresh tokens: two concurrent exchanges of the same refresh token
+        // would leave the connector with whichever rotated token landed last — one of them
+        // already revoked. The refresh is single-flight per connector; the waiter re-reads.
+        var id = await SeedConnectorAsync(new Dictionary<string, string>
+        {
+            ["OAuthToken"] = "stale-access",
+            ["OAuthRefreshToken"] = "refresh-1",
+            ["OAuthExpiresAt"] = _time.Now.AddMinutes(-5).ToUnixTimeMilliseconds().ToString(),
+        });
+
+        var calls = 0;
+        var firstCallEntered = new TaskCompletionSource();
+        var release = new ManualResetEventSlim(false);
+        var handler = new StubHttpMessageHandler(_ =>
+        {
+            Interlocked.Increment(ref calls);
+            firstCallEntered.TrySetResult();
+            release.Wait(TimeSpan.FromSeconds(10));
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(new
+                {
+                    access_token = "fresh-access",
+                    refresh_token = "rotated-refresh",
+                    expires_in = 3600,
+                })),
+            };
+        });
+        var sut = new ConnectorTokenRefresher(
+            _connectors, _catalog, new StubHttpClientFactory(handler), _time,
+            NullLogger<ConnectorTokenRefresher>.Instance);
+
+        var first = Task.Run(() => sut.ResolveFreshSettingsAsync(id, CancellationToken.None));
+        await firstCallEntered.Task;
+        var second = Task.Run(() => sut.ResolveFreshSettingsAsync(id, CancellationToken.None));
+        // Give the second caller time to reach the token endpoint if nothing holds it back.
+        await Task.Delay(300);
+        release.Set();
+        var delivered = await Task.WhenAll(first, second);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(calls, Is.EqualTo(1), "exactly one exchange of the refresh token");
+            Assert.That(delivered.Select(d => d!["OAuthToken"]), Is.All.EqualTo("fresh-access"));
+            Assert.That(delivered.Select(d => d!["OAuthRefreshToken"]), Is.All.EqualTo("rotated-refresh"));
+        });
+    }
 }

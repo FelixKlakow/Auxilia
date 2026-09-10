@@ -125,14 +125,14 @@ public sealed class UserBearerAuthTests : CoreApiComponentTestBase
     }
 
     [Test]
-    public async Task CoreClient_WithCallerTokenProvider_ActsAsTheUser_AndFallsBackToApiKey()
+    public async Task CoreClient_WithCallerTokenProvider_ActsAsTheUser_AndNeverAsTheService()
     {
         var (cookieClient, principalId) = await SignInAsync();
         var token = await MintTokenAsync(cookieClient);
 
         // A per-request provider: yields the user token → the client acts AS the user.
         var provider = new StubCallerTokenProvider(token.Token);
-        var handler = new CoreCallerTokenHandler(provider, fallbackApiKey: TestApiKey)
+        var handler = new CoreCallerTokenHandler(provider)
         {
             InnerHandler = Factory.Server.CreateHandler()
         };
@@ -142,11 +142,12 @@ public sealed class UserBearerAuthTests : CoreApiComponentTestBase
         var asUser = await core.GetCurrentPrincipalAsync();
         Assert.That(asUser.PrincipalId, Is.EqualTo(principalId));
 
-        // With no user token, it falls back to the static API key (the bootstrap Administrator).
+        // With no user token the request goes out unauthenticated: a delegated client has no
+        // service-key fallback, so a lapsed user session can never widen into the bootstrap Administrator.
         provider.Token = null;
-        var asService = await core.GetCurrentPrincipalAsync();
-        Assert.That(asService.Roles, Does.Contain("Administrator"),
-            "With no per-user token the client falls back to the app API key (unchanged service path).");
+        var refused = Assert.ThrowsAsync<CoreApiException>(() => core.GetCurrentPrincipalAsync());
+        Assert.That(refused!.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized),
+            "With no per-user token the Core sees an anonymous caller — never the app API key.");
     }
 
     private sealed class StubCallerTokenProvider(string? token) : ICoreCallerTokenProvider

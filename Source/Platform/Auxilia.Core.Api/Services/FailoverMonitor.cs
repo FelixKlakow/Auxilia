@@ -12,11 +12,13 @@ namespace Auxilia.Core.Api.Services;
 /// <summary>
 /// Core.Api failover monitor. Tracks Core.Runner liveness purely over the bus (via
 /// <see cref="RunnerHeartbeat"/>) and, when a runner's beat goes stale, fails over each of its
-/// non-terminal runs from the Core's OWN store: cancels via the run's cancel queue, marks the run
-/// <c>Failed</c> (<c>steering-instance-lost</c>), audits, publishes a <c>Failed</c> status event, and
-/// re-dispatches the stored dispatch command once — guarded by <c>FAILOVER_REDISPATCH</c> so a run
-/// that dies again is never re-dispatched a second time. It never reads the runner's database,
-/// preserving the Core/Runner DB split.
+/// non-terminal runs from the Core's OWN store: marks the run <c>Failed</c>
+/// (<c>steering-instance-lost</c>) via a versioned compare-and-swap (only the winning node acts;
+/// a run that completed meanwhile is untouched), cancels via the run's cancel queue, audits,
+/// publishes a <c>Failed</c> status event, and re-dispatches the stored dispatch command once as the
+/// original triggering principal — guarded by <c>FAILOVER_REDISPATCH</c> so a run that dies again is
+/// never re-dispatched a second time. It never reads the runner's database, preserving the
+/// Core/Runner DB split.
 /// </summary>
 public sealed class FailoverMonitor(
     IMessageBusClient bus,
@@ -236,22 +238,31 @@ public sealed class FailoverMonitor(
 
     private async Task FailOverAsync(CoreRunRecord orphan, CancellationToken ct)
     {
-        // Graceful termination via the run's cancel queue — a dead workflow simply never reads it.
-        await bus.PublishAsync($"workflow-cancel-{orphan.Id}", new CancelWorkflowCommand(orphan.Id), ct);
-
-        await runs.SaveAsync(orphan with
+        // FRESH RE-READ + CAS, like the claim-timeout sweep: the allRuns snapshot can be stale —
+        // the run may have completed (or another Core.Api node may have failed it over) since.
+        // Only the winner of the terminal swap cancels, audits, publishes and re-dispatches;
+        // a run that is already terminal is left exactly as it is.
+        var current = await runs.ReadAsync(orphan.Id, ct);
+        if (current is null || CoreRunStates.IsTerminal(current.State))
+            return;
+        var won = await runs.TrySaveAsync(current with
         {
             State = "Failed",
             ErrorMessage = "steering-instance-lost",
             UpdatedUtc = clock.GetUtcNow()
-        }, ct);
+        }, current.Version, ct);
+        if (!won)
+            return;
+
+        // Graceful termination via the run's cancel queue — a dead workflow simply never reads it.
+        await bus.PublishAsync($"workflow-cancel-{current.Id}", new CancelWorkflowCommand(current.Id), ct);
 
         await auditLog.AppendAsync("core-api", "workflow.failover",
-            orphan.Id.ToString(), "steering-instance-lost", ct: ct);
-        await statusPublisher.PublishAsync(orphan.Id, orphan.WorkflowType, "Failed",
+            current.Id.ToString(), "steering-instance-lost", ct: ct);
+        await statusPublisher.PublishAsync(current.Id, current.WorkflowType, "Failed",
             "steering-instance-lost", ct: ct);
 
-        await RedispatchAsync(orphan, ct);
+        await RedispatchAsync(current, ct);
     }
 
     /// <summary>
@@ -277,8 +288,14 @@ public sealed class FailoverMonitor(
 
         try
         {
+            // The re-dispatch acts AS the original triggering principal (from the resolution
+            // stash): the connector eligibility and catalog gates re-check against them, so a
+            // run over a personal connector fails over exactly as it was first authorized.
+            var triggeredBy = orphan.CommandId is { } commandId
+                ? (await resolutions.ReadAsync(commandId, ct))?.TriggeredByPrincipalId
+                : null;
             var accepted = await runService.RerunAsync(
-                orphan, triggeredBy: null, ct,
+                orphan, triggeredBy, ct,
                 contextOverlay: new Dictionary<string, string>
                 {
                     [FailoverContextKey] = orphan.Id.ToString("D")
