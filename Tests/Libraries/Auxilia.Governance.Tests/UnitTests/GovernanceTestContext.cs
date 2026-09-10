@@ -37,14 +37,17 @@ internal sealed class GovernanceTestContext
         AuditLog = new AuditLog(AuditRecords, TimeProvider.System);
         Directory = new PrincipalDirectory(Principals, RoleAssignments, Credentials, AuditLog);
         AccessStore = new WorkflowTypeAccessStore(AccessRecords);
+        var groupRoleResolver = new GroupRoleResolver(GroupMemberships, GroupRoles);
         PolicyEngine = new PolicyEngine(
             Principals, RoleAssignments, AccessStore, AuditLog,
-            new GroupRoleResolver(GroupMemberships, GroupRoles),
+            groupRoleResolver,
             defaultAccess: DefaultAccess);
-        IdentityProvider = new LocalIdentityProvider(Credentials, Principals, RoleAssignments);
+        IdentityProvider = new LocalIdentityProvider(
+            Credentials, Principals, RoleAssignments, groupRoles: groupRoleResolver);
         GroupMappingResolver = new GroupMappingResolver(GroupMappings);
         GroupMappingDirectory = new GroupMappingDirectory(GroupMappings, AuditLog);
-        Provisioner = new ExternalIdentityProvisioner(Principals, RoleAssignments, GroupMappingResolver, AuditLog);
+        Provisioner = new ExternalIdentityProvisioner(
+            Principals, RoleAssignments, GroupMappingResolver, AuditLog, groupRoles: groupRoleResolver);
     }
 
     public async Task<Guid> NewPrincipalWithRoleAsync(string role)

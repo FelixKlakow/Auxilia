@@ -30,6 +30,26 @@ public class ExternalIdentityProvisionerTests
             .SingleOrDefault(a => a.PrincipalId == principalId && a.RoleName == roleName)?.Source;
 
     [Test]
+    public async Task SignIn_SessionCarriesGroupHeldRoles()
+    {
+        // Same effective-role rule as the local provider: a first-class-group role reaches the
+        // session even though no direct assignment exists.
+        var first = await _ctx.Provisioner.ProvisionAsync(Entra("sub-g"));
+        var groupId = Guid.NewGuid();
+        await _ctx.AddGroupMemberAsync(groupId, first!.PrincipalId);
+        await _ctx.GroupRoles.SaveAsync(new GroupRoleRecord
+        {
+            Id = GroupRoleRecord.IdFor(groupId, BuiltInRoles.Operator),
+            GroupId = groupId,
+            RoleName = BuiltInRoles.Operator
+        });
+
+        var session = await _ctx.Provisioner.ProvisionAsync(Entra("sub-g"));
+
+        Assert.That(session!.Roles, Is.EquivalentTo(new[] { BuiltInRoles.Operator }));
+    }
+
+    [Test]
     public async Task FirstSignIn_ProvisionsHumanPrincipal_WithExternalSubjectAndNoCredential()
     {
         var session = await _ctx.Provisioner.ProvisionAsync(Entra("sub-1"));

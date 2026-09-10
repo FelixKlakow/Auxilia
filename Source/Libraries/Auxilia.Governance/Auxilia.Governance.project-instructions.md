@@ -4,7 +4,7 @@ Identity, accounts, and authorization for the platform (docs/ARCHITECTURE.md §1
 
 ## Architecture
 
-- **Principals** (`PrincipalDirectory`): humans, AI agents, and services share one model. Local principals authenticate via `LocalIdentityProvider` (PBKDF2 passwords for humans, hashed API keys for AI/service principals); external IdPs are later `IIdentityProvider` drop-ins.
+- **Principals** (`PrincipalDirectory`): humans, AI agents, and services share one model. Local principals authenticate via `LocalIdentityProvider` (PBKDF2 passwords for humans, hashed API keys for AI/service principals); external IdPs are later `IIdentityProvider` drop-ins. Every `IdentitySession` (local provider and `ExternalIdentityProvisioner`) carries the principal's **effective** roles — direct assignments unioned with first-class-group roles via `EffectiveRoles`/`GroupRoleResolver`, cached in `PrincipalRoleCache` beside the principal entry exactly as the Policy Engine caches them — so claims-based checks in hosts never disagree with policy. The password credential is keyed by username, so `CreateHumanAsync` refuses a username already in use with `PrincipalConflictException` (REST 409) instead of re-pointing the existing login; the seeder logs and skips when the bootstrap username is taken.
 - **Roles are fixed in code** (`BuiltInRoles`: Administrator, Operator, User, Auditor — permission sets over `PermissionActions` constants). Assignments are stored per principal (`Direct` or `GroupMapping` source). Custom roles are a later, schema-compatible step.
 - **`PolicyEngine.EvaluateAsync(PolicyContext)`** is the single authorization entry point: resolves the principal and its roles, checks workflow-type access lists first (when entries exist for the workflow type + action they are exclusive — administrators always pass), applies the default-access posture for `workflow.trigger` on a list-less type (`IDefaultResourceAccessPolicy`: restricted = administrators only; no implementation registered = restricted; the Core.Api binds it to the `security.default-resource-access` platform setting, the runner deliberately binds the open posture), falls back to role permissions, and **always appends an audit record** — allow and deny.
 - **`GovernanceSeeder`** bootstraps the default tenant's initial administrator from configuration on first start; it never overwrites existing principals.
@@ -28,7 +28,8 @@ Source/Libraries/Auxilia.Governance/
 ├── Identity/
 │   ├── IIdentityProvider.cs      # AuthenticatePassword / AuthenticateApiKey → IdentitySession
 │   ├── IdentitySession.cs        # PrincipalId, Kind, resolved role names
-│   ├── LocalIdentityProvider.cs  # PBKDF2 passwords, SHA-256 API keys
+│   ├── LocalIdentityProvider.cs  # PBKDF2 passwords, SHA-256 API keys; sessions carry effective roles
+│   ├── EffectiveRoles.cs         # Direct ∪ group roles for a session (cached like the Policy Engine)
 │   ├── PasswordHasher.cs         # pbkdf2:{iterations}:{salt}:{hash} envelope
 │   └── GroupMappingResolver.cs   # IdP group claims → role names
 └── IdentityImport/               # Admin-run user import from external systems (#23)

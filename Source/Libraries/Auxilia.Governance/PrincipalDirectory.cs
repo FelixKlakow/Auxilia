@@ -6,6 +6,9 @@ using Auxilia.UniversalDataAccess;
 
 namespace Auxilia.Governance;
 
+/// <summary>A principal mutation collides with an existing account (e.g. a username already in use).</summary>
+public sealed class PrincipalConflictException(string message) : InvalidOperationException(message);
+
 /// <summary>
 /// Administration of principals, their role assignments, and local credentials.
 /// Every mutating operation is audited.
@@ -18,9 +21,19 @@ public sealed class PrincipalDirectory(
     PrincipalRoleCache? cache = null,
     GroupRoleResolver? groupRoles = null)
 {
+    /// <summary>
+    /// Creates a local human principal. The username is the password credential's identity: a
+    /// username already in use is refused (<see cref="PrincipalConflictException"/>) — the
+    /// credential store is keyed by it, so a blind upsert would re-point the existing login at
+    /// the new principal.
+    /// </summary>
     public async Task<PrincipalRecord> CreateHumanAsync(
         string displayName, string username, string password, CancellationToken ct = default)
     {
+        var credentialId = CredentialRecord.IdForPassword(username);
+        if (await credentials.ReadAsync(credentialId, ct) is not null)
+            throw new PrincipalConflictException($"the username '{username}' is already in use.");
+
         var principal = new PrincipalRecord
         {
             TenantId = Tenants.DefaultTenantId,
@@ -31,7 +44,7 @@ public sealed class PrincipalDirectory(
         await principals.SaveAsync(principal, ct);
         await credentials.SaveAsync(new CredentialRecord
         {
-            Id = CredentialRecord.IdForPassword(username),
+            Id = credentialId,
             PrincipalId = principal.Id,
             Kind = "Password",
             Identifier = username,

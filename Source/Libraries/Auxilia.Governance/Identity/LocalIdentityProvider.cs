@@ -5,11 +5,17 @@ using Auxilia.UniversalDataAccess;
 
 namespace Auxilia.Governance.Identity;
 
+/// <summary>
+/// Local authentication (PBKDF2 passwords, SHA-256 API keys). The session's <see cref="IdentitySession.Roles"/>
+/// are the principal's EFFECTIVE roles — direct assignments unioned with first-class-group roles
+/// (<see cref="GroupRoleResolver"/>) — so claims-based checks see what the Policy Engine sees.
+/// </summary>
 public sealed class LocalIdentityProvider(
     IDataAccess<CredentialRecord> credentials,
     IDataAccess<PrincipalRecord> principals,
     IDataAccess<RoleAssignmentRecord> roleAssignments,
-    PrincipalRoleCache? cache = null) : IIdentityProvider
+    PrincipalRoleCache? cache = null,
+    GroupRoleResolver? groupRoles = null) : IIdentityProvider
 {
     public async Task<IdentitySession?> AuthenticatePasswordAsync(
         string username, string password, CancellationToken ct = default)
@@ -52,7 +58,8 @@ public sealed class LocalIdentityProvider(
         if (principal is null || principal.Status != "Active")
             return null;
 
-        return new IdentitySession(principal.Id, principal.Kind, principal.DisplayName, roles.ToList());
+        var effectiveRoles = await EffectiveRoles.ResolveAsync(principalId, roles, groupRoles, cache, ct);
+        return new IdentitySession(principal.Id, principal.Kind, principal.DisplayName, effectiveRoles);
     }
 
     public static string HashApiKey(string apiKey)

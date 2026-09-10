@@ -18,7 +18,8 @@ public sealed class ExternalIdentityProvisioner(
     IDataAccess<RoleAssignmentRecord> roleAssignments,
     GroupMappingResolver groupMappingResolver,
     AuditLog auditLog,
-    PrincipalRoleCache? cache = null)
+    PrincipalRoleCache? cache = null,
+    GroupRoleResolver? groupRoles = null)
 {
     /// <summary>Source tag for role assignments derived from IdP group claims (see <see cref="RoleAssignmentRecord.Source"/>).</summary>
     private const string DirectorySource = "GroupMapping";
@@ -72,11 +73,14 @@ public sealed class ExternalIdentityProvisioner(
         cache?.Invalidate(principal.Id);
 
         var assignments = await roleAssignments.ReadAsync(ct);
-        var roles = assignments
+        var directRoles = assignments
             .Where(a => a.PrincipalId == principal.Id)
             .Select(a => a.RoleName)
             .ToList();
 
+        // The session carries the EFFECTIVE role set (direct + first-class-group roles), like the
+        // local provider — claims-based checks must see what the Policy Engine sees.
+        var roles = await EffectiveRoles.ResolveAsync(principal.Id, directRoles, groupRoles, cache, ct);
         return new IdentitySession(principal.Id, principal.Kind, principal.DisplayName, roles);
     }
 

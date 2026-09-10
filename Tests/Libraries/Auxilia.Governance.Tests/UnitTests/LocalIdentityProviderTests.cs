@@ -29,6 +29,24 @@ public class LocalIdentityProviderTests
     }
 
     [Test]
+    public async Task CreateHuman_WithAnExistingUsername_IsRefused_AndTheOriginalLoginSurvives()
+    {
+        var alice = await _ctx.Directory.CreateHumanAsync("Alice", "alice", "s3cret");
+
+        Assert.ThrowsAsync<PrincipalConflictException>(
+            () => _ctx.Directory.CreateHumanAsync("Impostor", "alice", "hijack"));
+
+        var session = await _ctx.IdentityProvider.AuthenticatePasswordAsync("alice", "s3cret");
+        Assert.Multiple(async () =>
+        {
+            Assert.That(session?.PrincipalId, Is.EqualTo(alice.Id), "the credential still belongs to Alice");
+            Assert.That(await _ctx.IdentityProvider.AuthenticatePasswordAsync("alice", "hijack"), Is.Null);
+            Assert.That((await _ctx.Principals.ReadAsync(CancellationToken.None)).Count(p => p.DisplayName == "Impostor"),
+                Is.Zero, "no orphan principal is left behind");
+        });
+    }
+
+    [Test]
     public async Task PasswordAuthentication_WithWrongPassword_ReturnsNull()
     {
         await _ctx.Directory.CreateHumanAsync("Alice", "alice", "s3cret");
@@ -64,6 +82,28 @@ public class LocalIdentityProviderTests
             Assert.That(session!.PrincipalId, Is.EqualTo(principal.Id));
             Assert.That(session.Kind, Is.EqualTo("Service"));
         });
+    }
+
+    [Test]
+    public async Task ApiKeyAuthentication_SessionCarriesGroupHeldRoles()
+    {
+        // A role granted through a first-class group is part of the EFFECTIVE role set the
+        // session carries — claims-based checks (/auth/me, visibility filters) must agree with
+        // the Policy Engine, which unions group roles at every decision.
+        var (principal, apiKey) = await _ctx.Directory.CreateApiKeyPrincipalAsync("Review Agent");
+        await _ctx.Directory.AssignRoleAsync(principal.Id, BuiltInRoles.User);
+        var groupId = Guid.NewGuid();
+        await _ctx.AddGroupMemberAsync(groupId, principal.Id);
+        await _ctx.GroupRoles.SaveAsync(new PlatformData.Entities.GroupRoleRecord
+        {
+            Id = PlatformData.Entities.GroupRoleRecord.IdFor(groupId, BuiltInRoles.Operator),
+            GroupId = groupId,
+            RoleName = BuiltInRoles.Operator
+        });
+
+        var session = await _ctx.IdentityProvider.AuthenticateApiKeyAsync(apiKey);
+
+        Assert.That(session!.Roles, Is.EquivalentTo(new[] { BuiltInRoles.User, BuiltInRoles.Operator }));
     }
 
     [Test]

@@ -37,6 +37,23 @@ public class GovernanceSeederTests
     }
 
     [Test]
+    public async Task BootstrapUsernameAlreadyTaken_DoesNotHijackThatLogin()
+    {
+        var existing = await _ctx.Directory.CreateHumanAsync("Plain User", "admin", "user-pw");
+
+        await MakeSeeder("admin", "initial-pw").SeedAsync();
+
+        Assert.Multiple(async () =>
+        {
+            Assert.That(await _ctx.Directory.AnyAdministratorExistsAsync(), Is.False,
+                "the seeder must not promote (or re-point) an existing login");
+            Assert.That((await _ctx.IdentityProvider.AuthenticatePasswordAsync("admin", "user-pw"))?.PrincipalId,
+                Is.EqualTo(existing.Id));
+            Assert.That(await _ctx.IdentityProvider.AuthenticatePasswordAsync("admin", "initial-pw"), Is.Null);
+        });
+    }
+
+    [Test]
     public async Task WithoutBootstrapConfig_SeedsNothing()
     {
         await MakeSeeder(null, null).SeedAsync();

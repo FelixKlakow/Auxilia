@@ -1,3 +1,4 @@
+using Auxilia.PlatformData.Entities;
 using Microsoft.Extensions.Logging;
 
 namespace Auxilia.Governance;
@@ -25,8 +26,20 @@ public sealed class GovernanceSeeder(
             return;
         }
 
-        var admin = await directory.CreateHumanAsync(
-            "Bootstrap Administrator", settings.BootstrapAdminUsername, settings.BootstrapAdminPassword, ct);
+        PrincipalRecord admin;
+        try
+        {
+            admin = await directory.CreateHumanAsync(
+                "Bootstrap Administrator", settings.BootstrapAdminUsername, settings.BootstrapAdminPassword, ct);
+        }
+        catch (PrincipalConflictException ex)
+        {
+            // Never hijack an existing (non-administrator) login into the bootstrap admin.
+            logger.LogError(ex,
+                "Bootstrap administrator '{Username}' was not created — administration is unavailable.",
+                settings.BootstrapAdminUsername);
+            return;
+        }
         await directory.AssignRoleAsync(admin.Id, BuiltInRoles.Administrator, ct);
 
         logger.LogWarning(
