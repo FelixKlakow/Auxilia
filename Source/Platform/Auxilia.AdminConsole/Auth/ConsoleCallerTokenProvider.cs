@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Auxilia.Core.Client;
@@ -10,16 +11,20 @@ namespace Auxilia.AdminConsole.Auth;
 /// behalf of the signed-in operator. Same-origin bearer handoff (see the retirement plan's Deployment
 /// note): the console and Core.Api sit behind one gateway, so the browser carries Core's
 /// <c>auxilia.core.session</c> cookie to the console. This provider captures that cookie at circuit
-/// start (via <see cref="IHttpContextAccessor"/>), exchanges it once at Core <c>POST /auth/token</c> for
-/// a short-lived <see cref="UserBearerToken"/>, caches it, and re-mints before expiry.
+/// start (via <see cref="IHttpContextAccessor"/>), exchanges it at Core <c>POST /auth/token</c> for a
+/// short-lived <see cref="UserBearerToken"/>, caches it, and re-mints before expiry.
 /// <para>
-/// Circuit hardening (3b-ii): the cookie is only visible during prerender, and the interactive circuit
-/// runs in a different DI scope with no <c>HttpContext</c>. To keep acting as the user during interactive
-/// rendering — rather than falling back to the app key — the minted bearer is relayed across the
-/// prerender → circuit boundary through <see cref="IUserBearerRelay"/>. This provider must therefore be
-/// resolved from the <b>circuit</b> scope (see <c>Program.cs</c>, which composes the Core client per scope
-/// rather than through the pooled <c>HttpMessageHandler</c> scope). When neither a cookie nor a relayed
-/// token is present it yields null, so the Core client falls back to the static app key.
+/// Circuit hardening: the cookie is only visible during prerender, and the interactive circuit runs in
+/// a different DI scope with no <c>HttpContext</c>. The prerender therefore relays BOTH the minted
+/// bearer and the cookie it was minted from through <see cref="IUserBearerRelay"/> (server-side, one-shot
+/// handle), so the circuit keeps re-minting as the user for as long as the Core session lives. This
+/// provider must be resolved from the <b>circuit</b> scope (see <c>Program.cs</c>).
+/// </para>
+/// <para>
+/// There is NO service-key fallback on a user circuit: when the provider has no usable session it
+/// yields null and the request goes out unauthenticated (the Core answers 401 → anonymous → sign-in).
+/// A session the Core stops accepting mid-circuit is surfaced as <see cref="SessionExpired"/> so the
+/// shell can tell the operator to reload — the console never quietly acts as the service principal.
 /// </para>
 /// </summary>
 public sealed class ConsoleCallerTokenProvider : ICoreCallerTokenProvider
@@ -31,11 +36,13 @@ public sealed class ConsoleCallerTokenProvider : ICoreCallerTokenProvider
     private readonly IUserBearerRelay _relay;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
-    // Captured once at circuit start, while the HttpContext (and thus the browser's cookies) is live.
-    private readonly string? _sessionCookieHeader;
+    // Captured at prerender while the HttpContext (and thus the browser's cookies) is live, or taken
+    // from the relay on the circuit side.
+    private string? _sessionCookieHeader;
 
     private UserBearerToken? _cached;
     private bool _relayChecked;
+    private bool _sessionExpired;
 
     public ConsoleCallerTokenProvider(
         IHttpContextAccessor httpContextAccessor,
@@ -44,20 +51,39 @@ public sealed class ConsoleCallerTokenProvider : ICoreCallerTokenProvider
     {
         _httpClientFactory = httpClientFactory;
         _relay = relay;
-        _sessionCookieHeader = httpContextAccessor.HttpContext?.Request.Headers.Cookie.ToString();
+        var cookie = httpContextAccessor.HttpContext?.Request.Headers.Cookie.ToString();
+        _sessionCookieHeader = string.IsNullOrEmpty(cookie) ? null : cookie;
 
-        // Prerender side: hand whatever we mint to the circuit side before this scope ends.
-        _relay.OnPersist(() => _cached);
+        // Prerender side: hand whatever we minted (plus its cookie) to the circuit side before this scope ends.
+        _relay.OnPersist(() => _cached is { } token && _sessionCookieHeader is { } header
+            ? new RelayedUserSession(token, header)
+            : null);
     }
+
+    /// <summary>
+    /// True once the operator HAD a session on this circuit and the Core stopped accepting it (the
+    /// cookie session ended). Clears again if a later mint succeeds. Never true for a circuit that
+    /// never had a session — that is the plain anonymous case, handled by the sign-in redirect.
+    /// </summary>
+    public bool SessionExpired
+    {
+        get => _sessionExpired;
+        private set
+        {
+            if (_sessionExpired == value)
+                return;
+            _sessionExpired = value;
+            SessionChanged?.Invoke();
+        }
+    }
+
+    /// <summary>Raised when <see cref="SessionExpired"/> flips, so the shell can re-render its banner.</summary>
+    public event Action? SessionChanged;
 
     public async ValueTask<string?> GetTokenAsync(CancellationToken ct = default)
     {
         if (Fresh(_cached))
             return _cached!.Token;
-
-        // Circuit side: no cookie to mint from, but the prerender may have relayed a live token.
-        if (string.IsNullOrEmpty(_sessionCookieHeader))
-            return TakeRelayed()?.Token;
 
         await _gate.WaitAsync(ct);
         try
@@ -65,7 +91,17 @@ public sealed class ConsoleCallerTokenProvider : ICoreCallerTokenProvider
             if (Fresh(_cached))
                 return _cached!.Token;
 
+            // Circuit side: adopt the prerender's session (token + cookie) exactly once.
+            TakeRelayed();
+            if (Fresh(_cached))
+                return _cached!.Token;
+
+            // No session at all → anonymous; never an app key.
+            if (_sessionCookieHeader is null)
+                return null;
+
             _cached = await MintAsync(ct);
+            SessionExpired = _cached is null;
             return _cached?.Token;
         }
         finally
@@ -74,15 +110,17 @@ public sealed class ConsoleCallerTokenProvider : ICoreCallerTokenProvider
         }
     }
 
-    private UserBearerToken? TakeRelayed()
+    private void TakeRelayed()
     {
         if (_relayChecked)
-            return Fresh(_cached) ? _cached : null;
-
+            return;
         _relayChecked = true;
-        if (_relay.TryTake() is { } relayed && Fresh(relayed))
-            _cached = relayed;
-        return _cached;
+
+        if (_relay.TryTake() is not { } relayed)
+            return;
+        _sessionCookieHeader ??= relayed.SessionCookieHeader;
+        if (Fresh(relayed.Token))
+            _cached = relayed.Token;
     }
 
     private static bool Fresh(UserBearerToken? token)
@@ -98,8 +136,10 @@ public sealed class ConsoleCallerTokenProvider : ICoreCallerTokenProvider
 
         var http = _httpClientFactory.CreateClient(CoreAuthHttpClientName);
         using var response = await http.SendAsync(request, ct);
+        if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            return null; // The cookie session is gone (expired / signed out / disabled): no user token.
         if (!response.IsSuccessStatusCode)
-            return null; // No live session (or not permitted): fall back to the static app key / anonymous.
+            throw new CoreApiException(response.StatusCode, null, "The Core refused to mint a user bearer.");
 
         return await response.Content.ReadFromJsonAsync<UserBearerToken>(ct);
     }

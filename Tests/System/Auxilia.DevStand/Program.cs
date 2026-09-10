@@ -47,7 +47,7 @@ try
     Console.WriteLine($"  GreenMail : IMAP localhost:{EndToEndEnvironment.MappedImap}, " +
                       $"SMTP localhost:{EndToEndEnvironment.MappedSmtp}  (auth disabled — any address logs in)");
     Console.WriteLine($"  MongoDB   : {EndToEndEnvironment.MongoConnectionString}  (database 'Auxilia')");
-    Console.WriteLine($"  Console   : {EndToEndEnvironment.AdminConsoleUrl}   (Auxilia.AdminConsole, signed in via its Administrator app key)");
+    Console.WriteLine($"  Console   : {EndToEndEnvironment.AdminConsoleUrl}   (Auxilia.AdminConsole — no service key; pages need a Core browser sign-in on the same origin)");
     Console.WriteLine($"  Data      : {(EndToEndEnvironment.DataVolumeName is null
         ? "ephemeral (start with --keep-data to keep seeded triggers across restarts)"
         : $"durable in Docker volumes '{EndToEndEnvironment.DataVolumeName}-*'")}");

@@ -225,9 +225,18 @@ else
                                                    checked="@(SettingOf(edit, descriptor) == "true")"
                                                    @onchange="e => edit.Settings[descriptor.Key] = Bool(e.Value)"/>
                                         }
+                                        else if (descriptor.Kind is "Secret")
+                                        {
+                                            @* The Core never returns a stored secret (reads mask it) — an
+                                               empty value on save keeps the stored one, mirroring connectors. *@
+                                            <input type="password" autocomplete="new-password"
+                                                   value="@SettingOf(edit, descriptor)"
+                                                   placeholder="@(edit.StoredSecretKeys.Contains(descriptor.Key) ? "set — leave empty to keep unchanged" : "")"
+                                                   @onchange="e => edit.Settings[descriptor.Key] = Str(e.Value)"/>
+                                        }
                                         else
                                         {
-                                            <input type="@(descriptor.Kind is "Secret" ? "password" : "text")"
+                                            <input type="text"
                                                    value="@SettingOf(edit, descriptor)"
                                                    @onchange="e => edit.Settings[descriptor.Key] = Str(e.Value)"/>
                                         }
@@ -396,6 +405,9 @@ else
         public string ConnectorId = "";
         public Dictionary<string, string> Settings { get; } = new(StringComparer.Ordinal);
         public HashSet<string> MultiProviders { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Secret-kind keys the stored configuration holds a value for (read back masked).</summary>
+        public HashSet<string> StoredSecretKeys { get; } = new(StringComparer.Ordinal);
     }
 
     private readonly Dictionary<string, SlotEdit> _slotEdits = new(StringComparer.Ordinal);
@@ -477,7 +489,13 @@ else
             edit.Provider = single.ProviderType ?? "";
             edit.ConnectorId = single.ConnectorId?.ToString() ?? "";
             foreach (var (key, value) in single.Settings ?? new Dictionary<string, string>())
+            {
                 edit.Settings[key] = value;
+                // A stored secret reads back as an empty value (the Core masks it); the key's
+                // presence is what tells the editor there is one to keep.
+                if (value.Length == 0)
+                    edit.StoredSecretKeys.Add(key);
+            }
         }
     }
 
@@ -564,6 +582,7 @@ else
         edit.Provider = providerType ?? "";
         edit.ConnectorId = "";
         edit.Settings.Clear();
+        edit.StoredSecretKeys.Clear();
         // Seed the provider's declared defaults so the plan reflects what will dispatch.
         if (ProviderOf(edit.Provider) is { } provider)
         {

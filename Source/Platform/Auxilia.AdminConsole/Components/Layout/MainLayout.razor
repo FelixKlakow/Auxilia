@@ -5,6 +5,8 @@
 @using Auxilia.AdminConsole.Support
 @using Auxilia.Core.Contracts
 @inject LiveRunMonitor Live
+@inject ConsoleCallerTokenProvider Session
+@inject NavigationManager Navigation
 
 <div class="app-shell">
     <aside class="sidebar">
@@ -197,6 +199,17 @@
     </aside>
 
     <main class="content">
+        @* Sibling of the per-page Core-connection banner: the Core is reachable but no longer accepts
+           this circuit's session, and the console never downgrades to a service key — the only way
+           forward is a full reload, which re-establishes (or re-requests) the sign-in. *@
+        @if (Session.SessionExpired)
+        {
+            <div class="connection-banner session-expired" role="alert">
+                <span class="connection-banner-dot"></span>
+                <span>Your sign-in session has expired — reload the page to sign in again.</span>
+                <button type="button" class="btn btn-secondary connection-banner-action" @onclick="Reload">Reload</button>
+            </div>
+        }
         @Body
     </main>
 </div>
@@ -209,12 +222,21 @@
             return;
         // Started after the first render so prerender never waits on the Core.
         Live.Changed += OnLiveChanged;
+        Session.SessionChanged += OnLiveChanged;
         Live.Start();
     }
 
     private void OnLiveChanged() => _ = InvokeAsync(StateHasChanged);
 
-    public void Dispose() => Live.Changed -= OnLiveChanged;
+    // A full navigation (not an enhanced one): the prerender re-reads the browser's Core session
+    // cookie and either mints a fresh bearer or redirects to the Core's sign-in.
+    private void Reload() => Navigation.NavigateTo(Navigation.Uri, forceLoad: true);
+
+    public void Dispose()
+    {
+        Live.Changed -= OnLiveChanged;
+        Session.SessionChanged -= OnLiveChanged;
+    }
 
     private static string InitialOf(ClaimsPrincipal user)
         => user.Identity?.Name is { Length: > 0 } name ? name[..1].ToUpperInvariant() : "?";

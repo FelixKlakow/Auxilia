@@ -14,16 +14,19 @@ var builder = WebApplication.CreateBuilder(args);
 // (see docs/backend-service-retirement-plan.md): the console and Core.Api are served SAME-ORIGIN
 // behind one gateway, so the browser's "auxilia.core.session" cookie reaches the console and the
 // console mints a per-user bearer via Core POST /auth/token. BaseAddress therefore normally points
-// at the gateway/Core origin; ApiKey (optional) is the service fallback for non-delegated calls.
+// at the gateway/Core origin. The console holds NO service key: every Core call is made as the
+// signed-in operator or not at all (an unauthenticated call is a 401 → sign-in), so the operator's
+// reach and the audit attribution can never silently widen to a service principal.
 var coreOptions = new CoreClientOptions();
 builder.Configuration.GetSection("Core").Bind(coreOptions);
 
 builder.Services.AddHttpContextAccessor();
 
 // Per-user bearer handoff: capture the operator's Core session cookie during prerender, exchange it for
-// a short-lived user token, and relay that token across the prerender → interactive-circuit boundary so
-// the delegated identity survives the whole circuit (see ConsoleCallerTokenProvider / IUserBearerRelay).
-// The token itself stays server-side (singleton handle store); the page only carries a one-shot handle.
+// a short-lived user token, and relay token + cookie across the prerender → interactive-circuit boundary
+// so the delegated identity survives the whole circuit — the circuit re-mints from the relayed cookie
+// when the bearer expires (see ConsoleCallerTokenProvider / IUserBearerRelay). Token and cookie stay
+// server-side (singleton handle store); the page only carries a one-shot handle.
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<UserBearerHandleStore>();
 builder.Services.AddScoped<IUserBearerRelay, PersistentUserBearerRelay>();
@@ -49,12 +52,12 @@ builder.Services.AddHttpClient(corePrimaryClientName, http =>
 // ICoreClient is composed PER SCOPE (not via AddCoreClient's pooled HttpMessageHandler scope, which is
 // long-lived and shared across circuits): the CoreCallerTokenHandler resolves THIS circuit's token
 // provider, chained in front of the pooled primary handler. So every ICoreClient call carries the
-// signed-in user's bearer during interactive rendering, falling back to the static app key when there is
-// no live session (e.g. background/health checks).
+// signed-in user's bearer during interactive rendering; without a live session the call goes out
+// unauthenticated (the Core answers 401) — there is no service-key fallback on a user circuit.
 builder.Services.AddScoped<ICoreClient>(sp =>
 {
     var primary = sp.GetRequiredService<IHttpMessageHandlerFactory>().CreateHandler(corePrimaryClientName);
-    var handler = new CoreCallerTokenHandler(sp.GetRequiredService<ICoreCallerTokenProvider>(), coreOptions.ApiKey)
+    var handler = new CoreCallerTokenHandler(sp.GetRequiredService<ICoreCallerTokenProvider>())
     {
         InnerHandler = primary
     };

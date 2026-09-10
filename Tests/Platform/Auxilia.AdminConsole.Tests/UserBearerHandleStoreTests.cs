@@ -4,7 +4,7 @@ using Auxilia.Core.Contracts;
 namespace Auxilia.AdminConsole.Tests;
 
 /// <summary>
-/// The server-side one-shot handle store behind the prerender → circuit bearer relay: a stash
+/// The server-side one-shot handle store behind the prerender → circuit session relay: a stash
 /// yields a random single-use handle, redeem is exactly-once, unknown handles yield nothing, and
 /// an unredeemed entry expires quickly — never outliving the token it protects.
 /// </summary>
@@ -19,22 +19,22 @@ public sealed class UserBearerHandleStoreTests
         public void Advance(TimeSpan by) => _now += by;
     }
 
-    private static UserBearerToken Token(FakeTimeProvider clock, TimeSpan? lifetime = null)
-        => new("auxu_secret", clock.GetUtcNow() + (lifetime ?? TimeSpan.FromMinutes(30)));
+    private static RelayedUserSession Session(FakeTimeProvider clock, TimeSpan? lifetime = null)
+        => new(new UserBearerToken("auxu_secret", clock.GetUtcNow() + (lifetime ?? TimeSpan.FromMinutes(30))), "auxilia.core.session=cookie-secret");
 
     [Test]
     public void Redeem_ReturnsTheStashedToken_ExactlyOnce()
     {
         var clock = new FakeTimeProvider();
         var store = new UserBearerHandleStore(clock);
-        var token = Token(clock);
+        var session = Session(clock);
 
-        var handle = store.Stash(token);
+        var handle = store.Stash(session);
 
         Assert.Multiple(() =>
         {
-            Assert.That(handle, Does.Not.Contain("auxu_"), "the handle carries no token material");
-            Assert.That(store.Redeem(handle), Is.EqualTo(token), "the first redeem recovers the token");
+            Assert.That(handle, Does.Not.Contain("auxu_").And.Not.Contain("cookie-secret"), "the handle carries neither token nor cookie material");
+            Assert.That(store.Redeem(handle), Is.EqualTo(session), "the first redeem recovers the session (token + cookie)");
             Assert.That(store.Redeem(handle), Is.Null, "a handle is single-use — the second redeem gets nothing");
         });
     }
@@ -57,7 +57,7 @@ public sealed class UserBearerHandleStoreTests
     {
         var clock = new FakeTimeProvider();
         var store = new UserBearerHandleStore(clock);
-        var handle = store.Stash(Token(clock));
+        var handle = store.Stash(Session(clock));
 
         clock.Advance(UserBearerHandleStore.HandleLifetime + TimeSpan.FromSeconds(1));
 
@@ -70,7 +70,7 @@ public sealed class UserBearerHandleStoreTests
         var clock = new FakeTimeProvider();
         var store = new UserBearerHandleStore(clock);
         // Token expires BEFORE the usual handle lifetime — the shorter expiry must win.
-        var handle = store.Stash(Token(clock, lifetime: TimeSpan.FromSeconds(30)));
+        var handle = store.Stash(Session(clock, lifetime: TimeSpan.FromSeconds(30)));
 
         clock.Advance(TimeSpan.FromSeconds(31));
 
@@ -82,10 +82,10 @@ public sealed class UserBearerHandleStoreTests
     {
         var clock = new FakeTimeProvider();
         var store = new UserBearerHandleStore(clock);
-        var token = Token(clock);
+        var session = Session(clock);
 
-        var first = store.Stash(token);
-        var second = store.Stash(token);
+        var first = store.Stash(session);
+        var second = store.Stash(session);
 
         Assert.That(first, Is.Not.EqualTo(second), "every stash mints a fresh random handle");
     }

@@ -103,6 +103,34 @@ public sealed class WorkflowEditorTests
     }
 
     [Test]
+    public void Editor_StoredSecretSetting_RendersEmptyWithAKeepPlaceholder()
+    {
+        var core = CoreWithSchema();
+        core.ProviderCatalog.Add(new ProviderCatalogEntry(
+            "local-agent", true, "capability",
+            [new ProviderSettingDescriptor("apiKey", "API key", "Secret", true, null, null, null, false)],
+            [Contract], null));
+        var configurationId = Guid.NewGuid();
+        // The Core masks a stored secret: the key is present, the value empty.
+        core.Configurations.Add(new RunConfiguration(
+            configurationId, "cfg", Type, new Dictionary<string, string>(),
+            [new SlotBinding("agent", "local-agent", Settings: new Dictionary<string, string> { ["apiKey"] = "" })],
+            true, DateTimeOffset.UtcNow));
+        using var ctx = NewContext(core);
+
+        var cut = ctx.Render<WorkflowEditor>(p => p.Add(e => e.ConfigurationId, configurationId));
+
+        var secretInput = cut.Find("input[type=password]");
+        Assert.Multiple(() =>
+        {
+            Assert.That(secretInput.GetAttribute("value") ?? "", Is.Empty,
+                "no secret value is ever rendered into the page");
+            Assert.That(secretInput.GetAttribute("placeholder"), Does.Contain("leave empty to keep"),
+                "an empty save keeps the stored secret — the editor says so");
+        });
+    }
+
+    [Test]
     public void Editor_ProviderWithNoRequiredTools_IsOffered_EvenWhenTheSchemaProvidesNone()
     {
         var core = CoreWithSchema(); // no ProvidedTools at all

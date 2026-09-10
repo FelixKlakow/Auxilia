@@ -260,7 +260,6 @@ public class EndToEndEnvironment
             new WorkflowTypeAccessChange(PermissionActions.WorkflowTrigger, PrincipalId: RunAsPrincipalId)))
             .EnsureSuccessStatusCode();
         var triggerHostApiKey = await CreateCoreServiceKeyAsync("E2E Trigger Host", "Operator");
-        var adminConsoleApiKey = await CreateCoreServiceKeyAsync("E2E Admin Console", "Administrator");
         MailReviewConfigurationId = await CreateMailReviewConfigurationAsync();
 
         // --- Runner: Mongo-backed execution plane. Resolves every slot JIT from the Core. ---
@@ -330,16 +329,15 @@ public class EndToEndEnvironment
             .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("Email task source started"));
         TriggerHost = triggerHostBuilder.Build();
 
-        // --- AdminConsole: the operator/admin Blazor UI, a pure Core client. The dev/screenshot
-        // stand runs it with a static Administrator app key (Core__ApiKey): with no browser
-        // session cookie, the console's per-user bearer provider yields null and every Core call
-        // (including the auth handler's who-am-I) falls back to that key — pages render fully
-        // authenticated without the same-origin gateway the production deployment uses.
+        // --- AdminConsole: the operator/admin Blazor UI, a pure Core client. It holds no service
+        // key: every Core call is made as the browser's signed-in operator (Core session cookie →
+        // per-user bearer) or not at all, so without the same-origin gateway the production
+        // deployment uses, its pages answer with the Core sign-in redirect rather than rendering
+        // as a service principal.
         AdminConsole = new ContainerBuilder(AdminConsoleImageName)
             .WithNetwork(_network)
             .WithEnvironment("ASPNETCORE_URLS", "http://+:8080")
             .WithEnvironment("Core__BaseAddress", $"http://{CoreApiAlias}:8080")
-            .WithEnvironment("Core__ApiKey",      adminConsoleApiKey)
             .WithPortBinding(8080, assignRandomHostPort: true)
             .WithWaitStrategy(
                 Wait.ForUnixContainer().UntilHttpRequestIsSucceeded(r => r.ForPort(8080).ForPath("/health")))

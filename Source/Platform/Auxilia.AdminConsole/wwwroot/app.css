@@ -1010,6 +1010,18 @@ select { cursor: pointer; }
     opacity: 0.75;
 }
 
+/* Shell-level sibling: the Core is up but this circuit's sign-in session is gone. Error-toned —
+   nothing recovers on its own, the operator has to reload. */
+.connection-banner.session-expired {
+    border-color: var(--error-border);
+    background: var(--error-bg);
+    color: var(--error-text);
+}
+
+.connection-banner.session-expired .connection-banner-dot { animation: none; }
+
+.connection-banner-action { margin-left: auto; }
+
 /* ============ Views (logs / tables / markdown) ============ */
 
 .view-empty { margin: 0; }
