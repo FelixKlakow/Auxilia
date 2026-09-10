@@ -66,6 +66,8 @@ public sealed class PodControlClient(
         if (completed != tcs.Task)
         {
             _pending.TryRemove(requestId, out _);
+            // A cancelled delay task completes too; the caller's cancellation is not a timeout.
+            ct.ThrowIfCancellationRequested();
             throw new TimeoutException(
                 $"Pod-control '{action}' received no response within {CallTimeout.TotalSeconds:0}s.");
         }

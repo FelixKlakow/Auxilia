@@ -96,6 +96,16 @@ public class PodControlClientTests
     }
 
     [Test]
+    public void SpawnAsync_CallerCancelledWhileWaiting_ThrowsOperationCanceled_NotTimeout()
+    {
+        _client.CallTimeout = TimeSpan.FromSeconds(30);
+        using var cts = new CancellationTokenSource(50);
+
+        Assert.ThrowsAsync<OperationCanceledException>(
+            () => _client.SpawnAsync(new CompanionSpec("m", "base"), cts.Token));
+    }
+
+    [Test]
     public void SpawnAsync_LateResponseAfterTimeout_IsIgnored_PendingEntryWasCleanedUp()
     {
         _client.CallTimeout = TimeSpan.FromMilliseconds(200);

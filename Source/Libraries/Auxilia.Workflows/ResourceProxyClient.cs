@@ -54,6 +54,8 @@ public sealed class ResourceProxyClient(
         if (completed != tcs.Task)
         {
             _pending.TryRemove(requestId, out _);
+            // A cancelled delay task completes too; the caller's cancellation is not a timeout.
+            ct.ThrowIfCancellationRequested();
             throw new TimeoutException(
                 $"Resource call '{resourceName}:{operation}' received no response within {CallTimeout.TotalSeconds:0}s.");
         }

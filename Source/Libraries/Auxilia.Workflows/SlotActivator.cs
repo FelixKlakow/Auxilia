@@ -53,6 +53,8 @@ public sealed class SlotActivator(
         if (completed != tcs.Task)
         {
             _pending.TryRemove(slotName, out _);
+            // A cancelled delay task completes too; the caller's cancellation is not a timeout.
+            ct.ThrowIfCancellationRequested();
             throw new TimeoutException(
                 $"Slot activation for '{slotName}' received no response within {ActivationTimeout.TotalSeconds:0}s.");
         }

@@ -488,13 +488,16 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                     }
 
                     await context.MessageBus.PublishToExchangeAsync(StateExchangeName,
-                        new WorkflowStateMessage(instanceId, WorkflowState.Success, null));
+                        new WorkflowStateMessage(instanceId, WorkflowState.Success, null, _workflowName, instanceToken));
                     context.ExitService.Exit(0);
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (cts.IsCancellationRequested)
                 {
+                    // Only the operator's cancel command ends the run as Cancelled; any other
+                    // OperationCanceledException (a provider HttpClient timeout, a child's
+                    // own token) is a failure of the run and falls through to Failed.
                     await context.MessageBus.PublishToExchangeAsync(StateExchangeName,
-                        new WorkflowStateMessage(instanceId, WorkflowState.Cancelled, null));
+                        new WorkflowStateMessage(instanceId, WorkflowState.Cancelled, null, _workflowName, instanceToken));
                     context.ExitService.Exit(0);
                     return;
                 }
@@ -502,7 +505,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 {
                     context.Logger.LogError(ex, "Workflow run failed: {Message}", ex.Message);
                     await context.MessageBus.PublishToExchangeAsync(StateExchangeName,
-                        new WorkflowStateMessage(instanceId, WorkflowState.Failed, ex.Message));
+                        new WorkflowStateMessage(instanceId, WorkflowState.Failed, ex.Message, _workflowName, instanceToken));
                     context.ExitService.Exit(1);
                 }
                 finally

@@ -132,6 +132,15 @@ public class SlotActivatorTests
         Assert.ThrowsAsync<TimeoutException>(() => _activator.FetchAsync("slot1"));
     }
 
+    [Test]
+    public void FetchAsync_CallerCancelledWhileWaiting_ThrowsOperationCanceled_NotTimeout()
+    {
+        _activator.ActivationTimeout = TimeSpan.FromSeconds(30);
+        using var cts = new CancellationTokenSource(50);
+
+        Assert.ThrowsAsync<OperationCanceledException>(() => _activator.FetchAsync("slot1", cts.Token));
+    }
+
     // ── Fakes ──────────────────────────────────────────────────────────────────
 
     private sealed class RecordingBus : IMessageBusClient

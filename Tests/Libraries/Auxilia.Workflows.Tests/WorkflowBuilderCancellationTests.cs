@@ -125,6 +125,41 @@ public class WorkflowBuilderCancellationTests
         mockExit.Verify(e => e.Exit(1), Times.Never);
     }
 
+    [Test]
+    public async Task Run_WhenApplicationThrowsForeignCancellation_PublishesFailedAndExitsWithError()
+    {
+        var bus = new RecordingBus();
+        var mockExit = new Mock<IProcessExitService>();
+        var context = new FakeWorkflowRunContext(bus, mockExit.Object);
+
+        bus.OnPublish = (topic, message) =>
+        {
+            if (topic == "workflow.announcements" && message is WorkflowAnnouncementMessage ann)
+                bus.DeliverAsync(ann.ResponseTopic,
+                    new WorkflowDirective(ann.WorkflowInstanceId, WorkflowDirectiveKind.Run));
+            else if (topic == "workflow-registration" && message is WorkflowRegistrationRequest req)
+                bus.DeliverAsync(req.ResponseTopic,
+                    new WorkflowConfigurationResponse(req.WorkflowInstanceId, true, null,
+                        new Dictionary<string, EncryptedSlotConfiguration>()));
+        };
+
+        // A provider HttpClient timeout surfaces as an OperationCanceledException on a token
+        // that is NOT the run's cancel token — nobody asked for the run to be cancelled.
+        var builder = (WorkflowBuilder)WorkflowBuilder.Create("test-workflow")
+            .WithApplication((_, _) => throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout"));
+        builder._directiveTimeout = TimeSpan.FromSeconds(5);
+
+        await builder.Run([], context);
+
+        var stateMessages = bus.Published("workflow.state");
+        Assert.That(stateMessages, Has.Count.EqualTo(1));
+        var stateMsg = (WorkflowStateMessage)stateMessages[0];
+        Assert.That(stateMsg.State, Is.EqualTo(WorkflowState.Failed));
+        Assert.That(stateMsg.ErrorMessage, Does.Contain("HttpClient.Timeout"));
+        mockExit.Verify(e => e.Exit(1), Times.Once);
+        mockExit.Verify(e => e.Exit(0), Times.Never);
+    }
+
     // ── Shared fake infrastructure ─────────────────────────────────────────────
 
     private sealed class FakeWorkflowRunContext(

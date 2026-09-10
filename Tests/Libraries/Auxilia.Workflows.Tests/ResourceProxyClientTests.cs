@@ -94,6 +94,15 @@ public class ResourceProxyClientTests
     }
 
     [Test]
+    public void CallAsync_CallerCancelledWhileWaiting_ThrowsOperationCanceled_NotTimeout()
+    {
+        _client.CallTimeout = TimeSpan.FromSeconds(30);
+        using var cts = new CancellationTokenSource(50);
+
+        Assert.ThrowsAsync<OperationCanceledException>(() => _client.CallAsync("task-source", "op", "{}", cts.Token));
+    }
+
+    [Test]
     public void CallAsync_FailureResponse_ThrowsWithResourceOperationAndReason()
     {
         RespondToRequests(req => new ResourceResponse(req.RequestId, false, "backend unavailable", null));

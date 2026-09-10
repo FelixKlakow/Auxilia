@@ -46,6 +46,46 @@ public class WorkflowBuilderRunStateTests
     }
 
     [Test]
+    [NonParallelizable] // process environment variables are global state
+    public async Task Run_StateMessageCarriesTheWorkflowNameAndTheLaunchInstanceToken()
+    {
+        // The runner authenticates terminal reports exactly like announcements: the instance
+        // token proves the sender, the workflow name binds it to the issued type.
+        var original = global::System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.InstanceToken);
+        global::System.Environment.SetEnvironmentVariable(WorkflowEnvironmentVariables.InstanceToken, "launch-token");
+        try
+        {
+            var bus = new RecordingBus();
+            var context = new FakeWorkflowRunContext(bus, Mock.Of<IProcessExitService>());
+            bus.OnPublish = (topic, message) =>
+            {
+                if (topic == "workflow.announcements" && message is WorkflowAnnouncementMessage ann)
+                    bus.DeliverAsync(ann.ResponseTopic,
+                        new WorkflowDirective(ann.WorkflowInstanceId, WorkflowDirectiveKind.Run));
+                else if (topic == "workflow-registration" && message is WorkflowRegistrationRequest req)
+                    bus.DeliverAsync(req.ResponseTopic,
+                        new WorkflowConfigurationResponse(req.WorkflowInstanceId, true, null,
+                            new Dictionary<string, EncryptedSlotConfiguration>()));
+            };
+            var builder = (WorkflowBuilder)WorkflowBuilder.Create("test-workflow");
+            builder._directiveTimeout = TimeSpan.FromSeconds(5);
+
+            await builder.Run([], context);
+
+            var stateMsg = (WorkflowStateMessage)bus.Published("workflow.state").Single();
+            Assert.Multiple(() =>
+            {
+                Assert.That(stateMsg.WorkflowName, Is.EqualTo("test-workflow"));
+                Assert.That(stateMsg.InstanceToken, Is.EqualTo("launch-token"));
+            });
+        }
+        finally
+        {
+            global::System.Environment.SetEnvironmentVariable(WorkflowEnvironmentVariables.InstanceToken, original);
+        }
+    }
+
+    [Test]
     public async Task Run_WhenRunThrows_PublishesFailedStateMessageAndExits1()
     {
         var bus = new RecordingBus();
