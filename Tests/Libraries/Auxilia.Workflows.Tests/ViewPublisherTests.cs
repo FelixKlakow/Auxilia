@@ -87,12 +87,13 @@ public class ViewPublisherTests
     }
 
     [Test]
-    public async Task PublishAsync_MultiplePublishes_DeclaresExchangeOnce()
+    public async Task PublishAsync_NeverDeclaresPlatformTopology()
     {
         await _sut.PublishAsync("progress", new ProgressItem("clone", 10));
         await _sut.PublishAsync("progress", new ProgressItem("build", 50));
 
-        Assert.That(_bus.DeclaredExchanges, Is.EqualTo(new[] { ViewDataMessage.ExchangeName }));
+        // The runner declares workflow.views before any launch; a workload identity cannot.
+        Assert.That(_bus.DeclaredExchanges, Is.Empty);
     }
 
     private sealed class RecordingBus : IMessageBusClient

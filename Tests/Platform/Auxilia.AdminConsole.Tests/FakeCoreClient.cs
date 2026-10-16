@@ -22,6 +22,9 @@ internal sealed class FakeCoreClient : ICoreClient
     public bool Healthy { get; set; } = true;
     public CoreApiException? AuditError { get; set; }
 
+    public Task<AuditIntegrityReport> VerifyAuditAsync(CancellationToken ct = default)
+        => Task.FromResult(new AuditIntegrityReport(true, true, 0, 0, 0, []));
+
     public Task<PagedResult<AuditEntry>> QueryAuditAsync(AuditQuery query, CancellationToken ct = default)
     {
         QueryAuditCallCount++;

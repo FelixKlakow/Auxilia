@@ -20,11 +20,13 @@ public abstract class CoreApiComponentTestBase
 
     protected WebApplicationFactory<Program> Factory = null!;
     protected FakeMessageBusClient MessageBus = null!;
+    private string _anchorPath = null!;
 
     [SetUp]
     public void CreateFactory()
     {
         MessageBus = new FakeMessageBusClient();
+        _anchorPath = Path.Combine(Path.GetTempPath(), $"auxilia-test-anchor-{Guid.NewGuid():N}.jsonl");
         Factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             // UseSetting (not ConfigureAppConfiguration) so values are visible while Program.cs
@@ -36,6 +38,8 @@ public abstract class CoreApiComponentTestBase
             // Component tests run against a fake bus with no runner heartbeats — queue freely.
             // Fixtures covering the no-runner guard flip this back to false.
             builder.UseSetting("CoreApi:AllowDispatchWithoutRunner", "true");
+            // Each host anchors its audit chain in its own file — never the machine-wide default.
+            builder.UseSetting("CoreApi:AuditCheckpointPath", _anchorPath);
             ConfigureHost(builder);
             builder.ConfigureServices(services =>
             {
@@ -52,7 +56,11 @@ public abstract class CoreApiComponentTestBase
     protected virtual void ConfigureHost(IWebHostBuilder builder) { }
 
     [TearDown]
-    public void DisposeFactory() => Factory.Dispose();
+    public void DisposeFactory()
+    {
+        Factory.Dispose();
+        File.Delete(_anchorPath);
+    }
 
     /// <summary>An HTTP client authenticated as the bootstrap Administrator.</summary>
     protected HttpClient CreateClient()

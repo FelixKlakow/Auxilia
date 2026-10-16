@@ -7,7 +7,8 @@ namespace Auxilia.Workflows.Views;
 
 /// <summary>
 /// Bus-backed view publisher: validates the view is declared, assigns the per-view
-/// monotonic sequence, and publishes to the <see cref="ViewDataMessage.ExchangeName"/> exchange.
+/// monotonic sequence, and publishes to the <see cref="ViewDataMessage.ExchangeName"/> exchange
+/// (platform topology, declared by the runner — a workload identity cannot declare exchanges).
 /// </summary>
 public sealed class DefaultViewPublisher(
     IMessageBusClient messageBus,
@@ -15,19 +16,12 @@ public sealed class DefaultViewPublisher(
     IReadOnlyList<ViewDescriptor> declaredViews) : IViewPublisher
 {
     private readonly ConcurrentDictionary<string, long> _sequences = new();
-    private bool _exchangeDeclared;
 
     public async Task PublishAsync<TItem>(string viewName, TItem item, CancellationToken ct = default)
     {
         if (!declaredViews.Any(v => v.Name == viewName))
             throw new InvalidOperationException(
                 $"View '{viewName}' is not declared by this workflow. Declare it via DeclaresView.");
-
-        if (!_exchangeDeclared)
-        {
-            await messageBus.DeclareTopicExchangeAsync(ViewDataMessage.ExchangeName, ct);
-            _exchangeDeclared = true;
-        }
 
         var sequence = _sequences.AddOrUpdate(viewName, 1, (_, current) => current + 1);
         await messageBus.PublishToTopicExchangeAsync(ViewDataMessage.ExchangeName,

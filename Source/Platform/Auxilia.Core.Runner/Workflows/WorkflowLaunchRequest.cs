@@ -78,10 +78,24 @@ public sealed record WorkflowLaunchRequest(
     /// <c>/workspace/pod</c>.
     /// </summary>
     public Pods.PodPlan? Pod { get; init; }
+
+    /// <summary>
+    /// The run's egress topology (Linux daemons): the workflow container joins ONLY the run's
+    /// internal network, whose gateway alone reaches outside — enforcing the run's allowlist
+    /// and relaying the broker and the terminal. Null = the container is attached to the
+    /// operator's network directly (allow-all runs on a daemon without egress enforcement).
+    /// </summary>
+    public Egress.EgressPlan? Egress { get; init; }
+
+    /// <summary>Receives every egress gateway event live (the run's egress audit).</summary>
+    public Func<Egress.EgressEvent, Task>? OnEgressEvent { get; init; }
 }
 
-/// <summary>How a workflow container ended: the exit code and the last lines it wrote.</summary>
-public sealed record ContainerExit(long ExitCode, string? LogTail);
+/// <summary>
+/// How a workflow container ended: the exit code, the last lines it wrote (for the failure
+/// message), and its bounded full output (persisted as run evidence).
+/// </summary>
+public sealed record ContainerExit(long ExitCode, string? LogTail, string? Log = null);
 
 /// <summary>What a launch produced: the container-network "name:port" of the web terminal, when any.</summary>
 public sealed record WorkflowLaunchResult(string? TerminalEndpoint = null);

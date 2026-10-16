@@ -37,8 +37,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     private int? _interactiveTerminalPort;
     private InteractiveTerminalGate? _interactiveTerminalGate;
 
-    private const string StateQueueName = "workflow.state";
-    private const string StateExchangeName = "workflow.state";
+    private const string StateExchangeName = WorkflowQueues.StateExchangeName;
 
     public static IWorkflowRunContext? TestContext { get; set; }
     public static SlotHandlerResolver? TestSlotHandlerResolver { get; set; }
@@ -357,10 +356,9 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                     return;
                 }
 
-                await context.MessageBus.DeclareExchangeAsync(StateExchangeName);
-                await context.MessageBus.DeclareQueueAsync("workflow.signals");
-
-                var cancelQueueName = $"workflow-cancel-{instanceId}";
+                // The state exchange and the signals queue are platform topology (declared by the
+                // runner before any launch): a workload identity may declare only its own queues.
+                var cancelQueueName = WorkflowQueues.CancelQueueFor(instanceId);
                 await context.MessageBus.DeclareQueueAsync(cancelQueueName);
                 using var cts = new CancellationTokenSource();
                 var cancelSub = await context.MessageBus.SubscribeAsync<CancelWorkflowCommand>(
@@ -378,7 +376,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 IAsyncDisposable? drainSub = null;
                 if (_lifetime == WorkflowLifetime.LongLiving)
                 {
-                    var drainQueueName = $"workflow-drain-{instanceId}";
+                    var drainQueueName = WorkflowQueues.DrainQueueFor(instanceId);
                     await context.MessageBus.DeclareQueueAsync(drainQueueName);
                     drainSub = await context.MessageBus.SubscribeAsync<DrainWorkflowCommand>(
                         drainQueueName, (_, _) => { drainSignal.SignalDrain(); return Task.CompletedTask; });
@@ -387,8 +385,24 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 SlotActivator? slotActivator = null;
                 ResourceProxyClient? resourceProxyClient = null;
                 Companions.PodControlClient? podControlClient = null;
+                Workspace.GitPushGateway? pushGateway = null;
                 try
                 {
+                    // Containment before ANY workload-controlled code (ARCHITECTURE §7): the
+                    // unprivileged agent user owns the workspace and the output directory; push
+                    // remotes are served only by the local push gateway (the credential stays in
+                    // this process); and the platform secrets leave this process's environment so
+                    // no child process — whoever starts it — can inherit them.
+                    Sandbox.AgentSandbox.Initialize(
+                    [
+                        System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.WorkspaceDirectory),
+                        System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.OutputDirectory),
+                        WorkflowEnvironmentVariables.PodVolumeRoot,
+                    ], context.Logger);
+                    pushGateway = await Workspace.GitPushGateway.StartForAnnouncedRemotesAsync(context.Logger, cts.Token);
+                    if (context is DefaultWorkflowRunContext)
+                        Sandbox.AgentSandbox.ScrubPlatformSecrets();
+
                     // Post-binding workspace setup (ARCHITECTURE §9): declared repository setup
                     // scripts and mount-announced 'setup-script' roles run here, inside the
                     // container, before anything of the application — fail-fast on a non-zero exit.
@@ -520,6 +534,10 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                         await resourceProxyClient.DisposeAsync();
                     if (podControlClient is not null)
                         await podControlClient.DisposeAsync();
+                    if (pushGateway is not null)
+                        await pushGateway.DisposeAsync();
+                    // Nothing the agent started outlives the run's own code.
+                    Sandbox.AgentSandbox.TerminateAgentProcesses();
                 }
                 return;
             }

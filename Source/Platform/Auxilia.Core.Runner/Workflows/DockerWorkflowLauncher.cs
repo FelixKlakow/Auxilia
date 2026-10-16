@@ -19,6 +19,7 @@ public sealed class DockerWorkflowLauncher(
     IOptions<DockerWorkflowLauncherSettings> settingsOptions,
     IDockerClientFactory clientFactory,
     Pods.IPodHost podHost,
+    Egress.IEgressHost egressHost,
     ILogger<DockerWorkflowLauncher> logger) : IWorkflowLauncher, IWorkflowContainerHost
 {
 
@@ -46,13 +47,27 @@ public sealed class DockerWorkflowLauncher(
         // it is tolerant of arbitrary partial materialization.
         try
         {
+            // The run's egress topology comes up first: the workflow container's ONLY network is
+            // the run's internal one, and its gateway must already listen (broker relay, proxy).
+            if (request.Egress is { } egress)
+            {
+                var gatewayAddress = await egressHost.MaterializeAsync(client, egress,
+                    request.OnEgressEvent ?? (_ => Task.CompletedTask), ct);
+                if (egress.TcpHosts.Count > 0 && string.IsNullOrEmpty(gatewayAddress))
+                    throw new InvalidOperationException(
+                        "the run's egress gateway has no address on the run network — its TCP relays are unreachable");
+                request = request with { Egress = egress with { GatewayAddress = gatewayAddress } };
+            }
             if (request.Pod is { } pod)
                 await podHost.MaterializeAsync(client, pod, ct);
             return await LaunchWorkflowContainerAsync(client, request, settings, ct);
         }
-        catch when (request.Pod is { } failedPod)
+        catch
         {
-            await podHost.TeardownAsync(failedPod.InstanceId, CancellationToken.None);
+            if (request.Pod is { } failedPod)
+                await podHost.TeardownAsync(failedPod.InstanceId, CancellationToken.None);
+            if (request.Egress is { } failedEgress)
+                await egressHost.TeardownAsync(failedEgress.InstanceId, CancellationToken.None);
             throw;
         }
     }
@@ -64,6 +79,10 @@ public sealed class DockerWorkflowLauncher(
         var createParams = request.DockerImageUri is not null
             ? BuildBakedImageContainerParameters(request, settings)
             : BuildCreateContainerParameters(request, settings);
+        // Linux confinement (capabilities, no-new-privileges, pids) is meaningless, and rejected,
+        // for Windows containers; resource ceilings and the runtime class apply everywhere.
+        ApplyConfinement(createParams.HostConfig, settings, linux: await IsLinuxDaemonAsync(client, ct));
+        createParams.HostConfig.Runtime = await SandboxRuntime.ResolveAsync(client, settings, ct);
 
         logger.LogInformation(
             "Creating workflow container. RuntimeImage={RuntimeImage} ExtractedDir={ExtractedDir} Network={Network}",
@@ -157,7 +176,9 @@ public sealed class DockerWorkflowLauncher(
         // Terminal reachability per publish mode (loopback host port, or container name on the
         // shared network). The browser only ever talks to the Core's authenticated proxy,
         // never to the workflow container directly.
-        var terminalEndpoint = await ResolveTerminalEndpointAsync(client, created.ID, request, settings, ct);
+        var terminalEndpoint = request.Egress is { } plan
+            ? await egressHost.ResolveTerminalEndpointAsync(client, plan, ct)
+            : await ResolveTerminalEndpointAsync(client, created.ID, request, settings, ct);
         if (terminalEndpoint is not null)
             logger.LogInformation("Workflow terminal available. Endpoint={Endpoint}", terminalEndpoint);
         return new WorkflowLaunchResult(terminalEndpoint);
@@ -177,17 +198,25 @@ public sealed class DockerWorkflowLauncher(
             var wait = await client.Containers.WaitContainerAsync(containerId, CancellationToken.None);
 
             string? logTail = null;
+            string? fullLog = null;
             try
             {
+                // The container's own output is run evidence: captured (bounded) before the
+                // container is removed, persisted with the run. The tail goes into the message.
                 using var logs = await client.Containers.GetContainerLogsAsync(
                     containerId, tty: false,
-                    new ContainerLogsParameters { ShowStdout = true, ShowStderr = true, Tail = "40" },
+                    new ContainerLogsParameters
+                    {
+                        ShowStdout = true, ShowStderr = true, Timestamps = true,
+                        Tail = settings.ContainerLogLines.ToString()
+                    },
                     CancellationToken.None);
                 using var stdout = new MemoryStream();
                 using var stderr = new MemoryStream();
                 await logs.CopyOutputToAsync(Stream.Null, stdout, stderr, CancellationToken.None);
-                logTail = (System.Text.Encoding.UTF8.GetString(stdout.ToArray()) + "\n"
+                fullLog = (System.Text.Encoding.UTF8.GetString(stdout.ToArray()) + "\n"
                            + System.Text.Encoding.UTF8.GetString(stderr.ToArray())).Trim();
+                logTail = string.Join("\n", fullLog.Split('\n').TakeLast(40).Select(WithoutTimestamp));
             }
             catch (Exception ex)
             {
@@ -209,12 +238,19 @@ public sealed class DockerWorkflowLauncher(
                 containerId[..Math.Min(12, containerId.Length)], wait.StatusCode);
 
             if (onExited is not null)
-                await onExited(new ContainerExit(wait.StatusCode, logTail));
+                await onExited(new ContainerExit(wait.StatusCode, logTail, fullLog));
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Container exit watcher failed for {ContainerId}.", containerId);
         }
+    }
+
+    /// <summary>A docker log line without its leading RFC 3339 timestamp (for the failure message).</summary>
+    internal static string WithoutTimestamp(string line)
+    {
+        var space = line.IndexOf(' ');
+        return space > 0 && DateTimeOffset.TryParse(line[..space], out _) ? line[(space + 1)..] : line;
     }
 
     /// <summary>
@@ -449,12 +485,13 @@ public sealed class DockerWorkflowLauncher(
     /// each one back to its run via <see cref="InstanceIdLabel"/>. Single-runner-per-host
     /// assumption; a shared host would need per-runner ownership labels with stable ids.
     /// </summary>
-    internal static Dictionary<string, string> BuildContainerLabels(WorkflowLaunchRequest request)
+    internal static Dictionary<string, string> BuildContainerLabels(
+        WorkflowLaunchRequest request, DockerWorkflowLauncherSettings? settings = null)
     {
         var labels = new Dictionary<string, string> { [WorkflowLabel] = "1" };
         if (request.InstanceId is { } instanceId)
             labels[InstanceIdLabel] = instanceId.ToString("D");
-        return labels;
+        return settings?.Stamp(labels) ?? labels;
     }
 
     /// <summary>All workflow containers on this host (running AND exited), for re-adoption.</summary>
@@ -503,18 +540,13 @@ public sealed class DockerWorkflowLauncher(
     }
 
     /// <summary>
-    /// Selects the Docker network for a launch. A default-deny policy with no allowed
-    /// endpoints is attached to <see cref="DockerWorkflowLauncherSettings.InternalNetworkName"/>
-    /// (an operator-created <c>--internal</c> network without internet egress) when configured.
-    /// Endpoint-granular enforcement requires the future egress proxy; this realizes only the
-    /// no-egress case at the Docker level.
+    /// The workflow container's network: its run's internal network behind the egress gateway
+    /// (alias <c>workflow</c>, the gateway's terminal relay target) — or, only for a run
+    /// launched without an egress plan, the operator's network.
     /// </summary>
     internal static string? SelectNetworkName(
         WorkflowLaunchRequest request, DockerWorkflowLauncherSettings settings)
-        => request.NetworkPolicy is { Mode: NetworkPolicyMode.DefaultDeny, AllowedEndpoints.Count: 0 }
-           && !string.IsNullOrWhiteSpace(settings.InternalNetworkName)
-            ? settings.InternalNetworkName
-            : settings.NetworkName;
+        => request.Egress?.NetworkName ?? settings.NetworkName;
 
     /// <summary>
     /// Builds the Docker <see cref="CreateContainerParameters"/> for the given request and settings.
@@ -547,13 +579,13 @@ public sealed class DockerWorkflowLauncher(
             Image = settings.RuntimeImage,
             Cmd = [executablePath],
             Env = env,
-            Labels = BuildContainerLabels(request),
+            Labels = BuildContainerLabels(request, settings),
             HostConfig = new HostConfig
             {
                 // No AutoRemove: the exit watcher collects the exit code + log tail first,
                 // then removes the container — a crash must leave evidence, not vanish.
                 Binds = binds,
-                ExtraHosts = settings.MapHostGateway ? ["host.docker.internal:host-gateway"] : null
+                ExtraHosts = WorkloadExtraHosts(request, settings)
             }
         };
 
@@ -564,13 +596,31 @@ public sealed class DockerWorkflowLauncher(
             {
                 EndpointsConfig = new Dictionary<string, EndpointSettings>
                 {
-                    [networkName] = new EndpointSettings()
+                    [networkName] = request.Egress is null
+                        ? new EndpointSettings()
+                        : new EndpointSettings { Aliases = [Egress.EgressPlan.WorkflowAlias] }
                 }
             };
         }
 
         ApplyTerminalPort(parameters, request, settings);
+        ApplyConfinement(parameters.HostConfig, settings, linux: true);
         return parameters;
+    }
+
+    /// <summary>
+    /// The workload's host-file entries: the host gateway when mapped, and every relayed TCP
+    /// endpoint's name pointing at the run's egress gateway — the workload dials the configured
+    /// server by its own name (TLS names stay valid), the gateway alone carries the connection on.
+    /// </summary>
+    internal static IList<string>? WorkloadExtraHosts(WorkflowLaunchRequest request, DockerWorkflowLauncherSettings settings)
+    {
+        var hosts = new List<string>();
+        if (settings.MapHostGateway)
+            hosts.Add("host.docker.internal:host-gateway");
+        if (request.Egress is { GatewayAddress: { Length: > 0 } gateway } egress)
+            hosts.AddRange(egress.TcpHosts.Select(host => $"{host}:{gateway}"));
+        return hosts.Count > 0 ? hosts : null;
     }
 
     /// <summary>
@@ -599,13 +649,13 @@ public sealed class DockerWorkflowLauncher(
             Image = request.DockerImageUri,
             Cmd   = null,
             Env   = env,
-            Labels = BuildContainerLabels(request),
+            Labels = BuildContainerLabels(request, settings),
             HostConfig = new HostConfig
             {
                 // No AutoRemove: the exit watcher collects the exit code + log tail first,
                 // then removes the container — a crash must leave evidence, not vanish.
                 Binds      = binds,
-                ExtraHosts = settings.MapHostGateway ? ["host.docker.internal:host-gateway"] : null
+                ExtraHosts = WorkloadExtraHosts(request, settings)
             }
         };
 
@@ -616,13 +666,79 @@ public sealed class DockerWorkflowLauncher(
             {
                 EndpointsConfig = new Dictionary<string, EndpointSettings>
                 {
-                    [networkName] = new EndpointSettings()
+                    [networkName] = request.Egress is null
+                        ? new EndpointSettings()
+                        : new EndpointSettings { Aliases = [Egress.EgressPlan.WorkflowAlias] }
                 }
             };
         }
 
         ApplyTerminalPort(parameters, request, settings);
+        ApplyConfinement(parameters.HostConfig, settings, linux: true);
         return parameters;
+    }
+
+    /// <summary>
+    /// The capabilities a workflow container keeps after <c>--cap-drop ALL</c>: file ownership and
+    /// permission management over its bind-mounted workspace (CHOWN, DAC_OVERRIDE, FOWNER), dropping
+    /// to the unprivileged agent user and apt's sandbox user (SETUID, SETGID), and signalling its
+    /// own child processes (KILL). Gone: raw sockets, mknod, chroot, file-capability and
+    /// capability-bounding changes, audit writes, privileged ports.
+    /// </summary>
+    internal static readonly IReadOnlyList<string> RetainedCapabilities =
+        ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID", "KILL"];
+
+    /// <summary>
+    /// Applies the runner's confinement to a workflow container: every capability dropped except
+    /// <see cref="RetainedCapabilities"/>, <c>no-new-privileges</c> (no setuid/file-capability
+    /// escalation), a pids ceiling, memory/CPU ceilings and the configured OCI runtime. Docker's
+    /// default seccomp and AppArmor profiles stay in force (never <c>unconfined</c>).
+    /// </summary>
+    internal static void ApplyConfinement(HostConfig? hostConfig, DockerWorkflowLauncherSettings settings, bool linux)
+    {
+        if (hostConfig is null)
+            return;
+        hostConfig.Privileged = false;
+        if (linux)
+        {
+            hostConfig.CapDrop = ["ALL"];
+            hostConfig.CapAdd = (settings.ContainerCapabilities ?? RetainedCapabilities).ToList();
+            hostConfig.SecurityOpt = ["no-new-privileges:true"];
+            if (settings.ContainerPidsLimit > 0)
+                hostConfig.PidsLimit = settings.ContainerPidsLimit;
+        }
+        else
+        {
+            hostConfig.CapDrop = null;
+            hostConfig.CapAdd = null;
+            hostConfig.SecurityOpt = null;
+            hostConfig.PidsLimit = null;
+        }
+        if (settings.ContainerMemoryMb > 0)
+            hostConfig.Memory = settings.ContainerMemoryMb * 1024L * 1024L;
+        if (settings.ContainerCpus > 0)
+            hostConfig.NanoCPUs = (long)(settings.ContainerCpus * 1_000_000_000);
+        if (!string.IsNullOrWhiteSpace(settings.ContainerRuntime))
+            hostConfig.Runtime = settings.ContainerRuntime;
+    }
+
+    private bool? _linuxDaemon;
+
+    /// <summary>The daemon's container OS (cached); an unanswerable probe assumes Linux, the strict side.</summary>
+    private async Task<bool> IsLinuxDaemonAsync(IDockerClient client, CancellationToken ct)
+    {
+        if (_linuxDaemon is { } known)
+            return known;
+        try
+        {
+            var info = await client.System.GetSystemInfoAsync(ct);
+            _linuxDaemon = !string.Equals(info?.OSType, "windows", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return true;
+        }
+        return _linuxDaemon.Value;
     }
 
     /// <summary>
@@ -638,6 +754,13 @@ public sealed class DockerWorkflowLauncher(
     {
         if (request.PublishTerminalPort is not { } port)
             return;
+        if (request.Egress is not null)
+        {
+            // The container sits on its run's internal network only: the terminal is relayed
+            // and published by the run's egress gateway.
+            parameters.ExposedPorts = new Dictionary<string, EmptyStruct> { [$"{port}/tcp"] = default };
+            return;
+        }
         parameters.ExposedPorts = new Dictionary<string, EmptyStruct> { [$"{port}/tcp"] = default };
         if (request.TerminalContainerName is { Length: > 0 } name)
             parameters.Name = name;

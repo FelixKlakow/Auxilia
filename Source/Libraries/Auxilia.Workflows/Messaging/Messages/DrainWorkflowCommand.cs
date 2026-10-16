@@ -5,4 +5,4 @@ namespace Auxilia.Workflows.Messaging.Messages;
 /// triggers, and shut down. Sent to <c>workflow-drain-{instanceId}</c> when its stored
 /// configuration changes or a new version replaces it (drain-and-replace).
 /// </summary>
-public sealed record DrainWorkflowCommand(Guid WorkflowInstanceId);
+public sealed record DrainWorkflowCommand(Guid WorkflowInstanceId) : Auxilia.Messaging.IPlatformOnlyMessage;

@@ -9,7 +9,7 @@ public sealed record PodControlRequest(
     string Action,
     string SpecJson,
     Guid RequestId,
-    string? InstanceToken = null)
+    string? InstanceToken = null) : Auxilia.Messaging.IWorkloadScopedMessage
 {
     public const string Spawn = "spawn";
     public const string Stop = "stop";
@@ -19,4 +19,4 @@ public sealed record PodControlResponse(
     Guid RequestId,
     bool Success,
     string? ErrorMessage,
-    string? ResultJson);
+    string? ResultJson) : Auxilia.Messaging.IPlatformOnlyMessage;

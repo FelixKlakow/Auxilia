@@ -17,7 +17,7 @@ namespace Auxilia.SystemTestSuite.Messaging;
 [Category("System")]
 public class MessageBusFanoutSystemTests
 {
-    private const string RabbitMqImage = "rabbitmq:3.13-management";
+    private const string RabbitMqImage = "rabbitmq:4-management";
 
     private RabbitMqContainer _rabbitMq = null!;
     private RabbitMqClient _client = null!;

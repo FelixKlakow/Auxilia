@@ -7,7 +7,8 @@ namespace Auxilia.Workflows.Crypto;
 
 public sealed class WorkflowPackageVerifier(
     IDeveloperModeProvider developerMode,
-    ILogger<WorkflowPackageVerifier> logger) : IWorkflowPackageVerifier
+    ILogger<WorkflowPackageVerifier> logger,
+    IReadOnlyCollection<string>? trustedPublisherKeys = null) : IWorkflowPackageVerifier
 {
     internal static readonly JsonSerializerOptions DeserializeOptions = new()
     {
@@ -32,6 +33,31 @@ public sealed class WorkflowPackageVerifier(
         {
             manifest = JsonSerializer.Deserialize<WorkflowPackageManifest>(manifestStream, DeserializeOptions)
                 ?? throw new InvalidOperationException("Failed to deserialise package-manifest.json.");
+        }
+
+        // Only what the signed manifest lists may ride in the package: an unlisted entry would be
+        // extracted next to the signed files and executed or read as if it were part of them.
+        var listed = new HashSet<string>(manifest.Files.Select(f => f.FileName), StringComparer.Ordinal)
+        {
+            "package-manifest.json"
+        };
+        var unlisted = archive.Entries
+            .Where(e => !e.FullName.EndsWith('/') && !listed.Contains(e.FullName))
+            .Select(e => e.FullName)
+            .ToList();
+        if (unlisted.Count > 0)
+        {
+            logger.LogWarning("Workflow package rejected: entries not covered by the signed manifest: {Entries}",
+                string.Join(", ", unlisted.Take(5)));
+            return false;
+        }
+
+        // With trusted publisher keys configured, a self-consistent signature is not enough —
+        // it must be by one of them (the platform signing key or an approved publisher).
+        if (trustedPublisherKeys is { Count: > 0 } && !trustedPublisherKeys.Contains(manifest.PublicKeyBase64))
+        {
+            logger.LogWarning("Workflow package rejected: its publisher key is not trusted by this runner.");
+            return false;
         }
 
         foreach (var fileEntry in manifest.Files)

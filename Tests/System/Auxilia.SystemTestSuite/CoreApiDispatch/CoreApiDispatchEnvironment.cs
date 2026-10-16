@@ -48,7 +48,7 @@ public class CoreApiDispatchEnvironment
     internal const string GitPassword              = "the-pat";
 
     private const string RabbitMqAlias = "rabbitmq";
-    private const string RabbitMqImage = "rabbitmq:3.13-management";
+    private const string RabbitMqImage = "rabbitmq:4-management";
     private const string CoreApiAlias = "core-api";
     // Shared run-output + workspace roots: the runner writes to its container view; the Docker
     // daemon (and thus workflow containers) bind-mount the same physical directory by its host path.
@@ -61,6 +61,16 @@ public class CoreApiDispatchEnvironment
     private static readonly string RepoRoot = RepoPaths.Root;
 
     private IContainer _runner = null!;
+    private static IContainer? _runnerForLogs;
+
+    /// <summary>The runner container's log tail, for failure diagnostics.</summary>
+    internal static async Task<string> RunnerLogTailAsync()
+    {
+        if (_runnerForLogs is null)
+            return "<no runner>";
+        var (stdout, stderr) = await _runnerForLogs.GetLogsAsync(timestampsEnabled: false);
+        return string.Join("\n", (stdout + "\n" + stderr).Split('\n').TakeLast(120));
+    }
     private IContainer _coreApi = null!;
     private IContainer _gitServer = null!;
     private string _runOutputDir = null!;
@@ -74,6 +84,7 @@ public class CoreApiDispatchEnvironment
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
     {
+        await TestImages.BuildEgressGatewayAsync();
         await Task.WhenAll(
             BuildImageAsync(RunnerImageName, "Source/Platform/Auxilia.Core.Runner/Dockerfile"),
             BuildImageAsync(DummyWorkflowsImageName, "Tests/System/Auxilia.Workflows.Testing/Dockerfile"),
@@ -119,8 +130,9 @@ public class CoreApiDispatchEnvironment
             .WithEnvironment("WorkflowLauncher__NetworkName", NetworkName)
             .WithEnvironment("WorkflowLauncher__RabbitMqHost", RabbitMqAlias)
             .WithEnvironment("WorkflowLauncher__RabbitMqPort", "5672")
-            .WithEnvironment("WorkflowLauncher__RabbitMqUserName", "guest")
-            .WithEnvironment("WorkflowLauncher__RabbitMqPassword", "guest")
+            .WithEnvironment("WorkflowLauncher__EgressGatewayImage", TestImages.EgressGatewayImageName)
+            // Everything this runner creates carries the session label the teardown sweeps.
+            .WithEnvironment(TestSession.RunnerVariable, TestSession.Id)
             // The credential-probe slot handler is baked onto the runner image at /app/slots.
             // Its DLL is copied into the workflow container at launch; the test-fake plugin is
             // unsigned, so it loads only when the workflow container runs in developer mode.
@@ -138,6 +150,7 @@ public class CoreApiDispatchEnvironment
                 Wait.ForUnixContainer().UntilMessageIsLogged("WorkflowDispatcher started"))
             .Build();
         await _runner.StartAsync();
+        _runnerForLogs = _runner;
 
         _coreApi = new ContainerBuilder(CoreApiImageName)
             .WithNetwork(_network)
@@ -151,6 +164,8 @@ public class CoreApiDispatchEnvironment
             .WithEnvironment("PlatformData__ProtectionKeyBase64", Convert.ToBase64String(new byte[32]))
             .WithEnvironment("CoreSecurity__BootstrapApiKey", BootstrapApiKey)
             .WithEnvironment("CoreApi__AllowDispatchWithoutRunner", "true")
+            // The audit chain's external anchor (one signed checkpoint per stored record).
+            .WithEnvironment("CoreApi__AuditCheckpointPath", "/tmp/auxilia-audit/checkpoints.jsonl")
             .WithEnvironment("CoreApi__StaticConfigurations__0__Name", StaticConfigurationName)
             .WithEnvironment("CoreApi__StaticConfigurations__0__WorkflowType", DummyWorkflowType)
             .WithEnvironment("CoreApi__StaticConfigurations__0__Context__WORKFLOW_NAME", DummyWorkflowType)
@@ -182,6 +197,8 @@ public class CoreApiDispatchEnvironment
     [OneTimeTearDown]
     public async Task OneTimeTearDown()
     {
+        // Session objects first: a leftover gateway would pin the test network.
+        await TestSession.SweepAsync();
         CoreApiClient?.Dispose();
         if (MessageBusClient is IAsyncDisposable disposable) await disposable.DisposeAsync();
         if (_coreApi is not null) await _coreApi.DisposeAsync();
@@ -192,6 +209,8 @@ public class CoreApiDispatchEnvironment
         foreach (var dir in new[] { _runOutputDir, _workspaceDir })
             try { if (dir is not null && Directory.Exists(dir)) Directory.Delete(dir, recursive: true); }
             catch (IOException) { /* leave for manual cleanup */ }
+        // A run whose containment the stopped runner never released leaves nothing behind.
+        await TestSession.SweepAsync();
     }
 
     internal static Task BuildImageAsync(string tag, string dockerfilePath)

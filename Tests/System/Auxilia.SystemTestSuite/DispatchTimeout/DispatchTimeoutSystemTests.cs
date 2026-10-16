@@ -40,7 +40,7 @@ public sealed class DispatchTimeoutSystemTests
         _network = new NetworkBuilder()
             .WithName($"auxilia-dispatch-timeout-{Guid.NewGuid():N}".Substring(0, 30)).Build();
         await _network.CreateAsync();
-        _rabbitMq = new RabbitMqBuilder("rabbitmq:3.13-management")
+        _rabbitMq = new RabbitMqBuilder("rabbitmq:4-management")
             .WithUsername("guest").WithPassword("guest")
             .WithNetwork(_network).WithNetworkAliases("rabbitmq")
             .Build();

@@ -2,7 +2,9 @@ using System.Diagnostics;
 using GitHub.Copilot;
 using GitHub.Copilot.Rpc;
 using Auxilia.Workflows.AiAgent.CodingAgent;
+using Auxilia.Workflows.Sandbox;
 using Auxilia.Workflows.Views;
+using Auxilia.Workflows.Actions;
 
 namespace Auxilia.Slots.GitHubCopilot;
 
@@ -33,10 +35,18 @@ public sealed class CopilotSdkAgent(
         var stopwatch = Stopwatch.StartNew();
         var settings = new SessionState(request.PermissionMode, request.PushPolicy);
         using var sessionScope = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        // Per-action policies are enforced at the enforcement points (the push gateway, …)
+        // against what each action actually does — never by classifying a request.
+        using var actionPolicies = ActionGate.Register(new AgentSessionActionApprover(
+            kind => kind == ActionKinds.GitPush ? settings.PushPolicy : settings.PermissionMode,
+            request.Interaction, onChatEntry, _time));
+        // The SDK spawns the CLI itself: it is launched through the sandbox wrapper so it runs
+        // as the unprivileged agent user, and every process it leaves dies with the session.
+        using var agentSession = AgentSandbox.EnterAgentSession();
 
         await using var client = new CopilotClient(new CopilotClientOptions
         {
-            Connection = RuntimeConnection.ForStdio(options.CliPath, null),
+            Connection = RuntimeConnection.ForStdio(AgentSandbox.WrapperFor(options.CliPath), null),
             GitHubToken = options.Token,
             WorkingDirectory = request.WorkspaceDirectory,
         });
@@ -217,23 +227,25 @@ public sealed class CopilotSdkAgent(
     }
 
     /// <summary>
-    /// Permission requests through the SAME policy model as the Claude provider: pushes are
-    /// governed by the push policy, everything else by the permission mode; ask-mode raises an
-    /// operator decision card with the request rendered as detail.
+    /// Permission requests through the SAME policy model as the Claude provider: every request
+    /// (a push-looking one included) is governed by the permission mode — a request's shape is no
+    /// basis for a security decision — and the PUSH itself is decided by the push policy at the
+    /// push gateway; ask-mode raises an operator decision card with the request as detail.
     /// </summary>
     private async Task<PermissionDecision> DecidePermissionAsync(
         PermissionRequest permission, CodingAgentRequest request, SessionState settings,
         Func<AgentChatEntry, CancellationToken, Task> onChatEntry, CancellationToken ct)
     {
         var (summary, detail, isPush) = Describe(permission);
-        var policy = isPush ? settings.PushPolicy : settings.PermissionMode;
+        var policy = settings.PermissionMode;
 
         if (request.Interaction is not { } interaction
             || string.Equals(policy, AgentPermissionModes.AutoAllow, StringComparison.OrdinalIgnoreCase))
         {
             await onChatEntry(new AgentChatEntry(
                 AgentChatRole.System,
-                $"{summary} was allowed automatically ({(isPush ? "push policy" : "permission mode")}: auto-allow).",
+                $"{summary} was allowed automatically (permission mode: auto-allow)."
+                + (isPush ? " Its push is decided by the push policy at the push gateway." : ""),
                 _time.GetUtcNow(), Label: "Permission", DetailTag: "permissions"), ct);
             return PermissionDecision.ApproveOnce();
         }

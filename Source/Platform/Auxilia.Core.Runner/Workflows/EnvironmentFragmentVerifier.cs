@@ -36,3 +36,30 @@ public static class EnvironmentFragmentVerifier
         }
     }
 }
+
+/// <summary>
+/// The runner's one publisher-trust check for signed artifacts (packages, plugins, environment
+/// fragments): an RSA-PSS signature over <paramref name="hash"/> by a key in
+/// <paramref name="trustedKeys"/>.
+/// </summary>
+public static class PublisherSignature
+{
+    public static bool Verify(
+        byte[] hash, string? signatureBase64, string? publisherKeyBase64, IReadOnlyCollection<string> trustedKeys)
+    {
+        if (string.IsNullOrEmpty(signatureBase64) || string.IsNullOrEmpty(publisherKeyBase64)
+            || !trustedKeys.Contains(publisherKeyBase64))
+            return false;
+        try
+        {
+            using var rsa = RSA.Create();
+            rsa.ImportSubjectPublicKeyInfo(Convert.FromBase64String(publisherKeyBase64), out _);
+            return rsa.VerifyHash(hash, Convert.FromBase64String(signatureBase64),
+                HashAlgorithmName.SHA256, RSASignaturePadding.Pss);
+        }
+        catch (Exception e) when (e is FormatException or CryptographicException)
+        {
+            return false;
+        }
+    }
+}

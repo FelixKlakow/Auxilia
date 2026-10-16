@@ -36,6 +36,7 @@ public sealed class WorkflowReadoptionService(
     CoreRunnerInfo instanceInfo,
     AuditLog auditLog,
     Pods.IPodHost podHost,
+    RunContainment containment,
     ILogger<WorkflowReadoptionService> logger)
 {
     public async Task<ReadoptionPlan> RunAsync(CancellationToken ct = default)
@@ -61,6 +62,8 @@ public sealed class WorkflowReadoptionService(
         {
             RestoreToken(record);
             await RestorePodControlAsync(record, ct);
+            var adoptedId = record.Id;
+            await containment.Egress.ResumeAsync(adoptedId, evt => containment.OnEgressEventAsync(adoptedId, evt), ct);
             containerHost.AttachExitWatcher(container.ContainerId,
                 exit => HandleReadoptedExitAsync(record, exit));
             logger.LogInformation(
@@ -111,6 +114,7 @@ public sealed class WorkflowReadoptionService(
         // adopted (and exit-collecting, torn down via their exit path) instances is swept.
         var live = plan.Adopt.Concat(plan.CollectExit).Select(p => p.Record.Id).ToHashSet();
         await podHost.SweepOrphanedAsync(live, ct);
+        await containment.Egress.SweepOrphanedAsync(live, ct);
 
         logger.LogInformation(
             "Re-adoption complete. Adopted={Adopted} ExitsCollected={Exits} FailedRecords={Failed} CleanKilled={Killed}",
@@ -182,7 +186,7 @@ public sealed class WorkflowReadoptionService(
 
     private Task CleanupRunRootsAsync(Guid instanceId)
         => RunRootsCleanup.CleanupAsync(
-            workspaceManager, podHost, dispatcherSettings.Value, logger, instanceId);
+            workspaceManager, podHost, containment, dispatcherSettings.Value, logger, instanceId);
 
     private static Guid? CommandIdOf(WorkflowInstanceRecord record)
         => DispatchCommandOf(record)?.CommandId;

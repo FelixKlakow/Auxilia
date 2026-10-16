@@ -21,7 +21,9 @@ public class WorkspaceManagerEmptyWorkspaceTests
         _settings = new WorkflowDispatcherSettings
         {
             WorkspaceRootDirectory = Path.Combine(_tempRoot, "workspaces"),
-            WarmCacheDirectory = Path.Combine(_tempRoot, "repo-cache")
+            WarmCacheDirectory = Path.Combine(_tempRoot, "repo-cache"),
+            // The fixture's origins are local repositories (a trusted dev-host opt-in).
+            AllowedCloneTransports = ["https", "http", "ssh", "git", "file"]
         };
         _sut = TestStores.NewWorkspaceManager(_settings);
     }

@@ -49,6 +49,30 @@ internal static class TestStores
     public static AuditLog NewAuditLog()
         => new(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System);
 
+    public static RunContainment NewContainment(
+        FakeBrokerIdentityIssuer? issuer = null, Auxilia.Core.Runner.Workflows.Egress.IEgressHost? egressHost = null,
+        AuditLog? auditLog = null, WorkflowInstanceRegistry? instanceRegistry = null,
+        WorkflowDispatcherSettings? settings = null)
+    {
+        auditLog ??= NewAuditLog();
+        settings ??= new WorkflowDispatcherSettings();
+        return new RunContainment(
+            NewBusCredentials(issuer, auditLog),
+            egressHost ?? new FakeEgressHost(),
+            NewArtifactPersister(Moq.Mock.Of<Auxilia.Messaging.IMessageBusClient>(), NewArtifactStore(), settings, auditLog),
+            instanceRegistry ?? NewWorkflowInstanceRegistry(),
+            auditLog,
+            Options.Create(settings),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<RunContainment>.Instance);
+    }
+
+    public static WorkloadBusCredentials NewBusCredentials(
+        FakeBrokerIdentityIssuer? issuer = null, AuditLog? auditLog = null)
+        => new(issuer ?? new FakeBrokerIdentityIssuer(),
+            Options.Create(new WorkflowDispatcherSettings()),
+            auditLog ?? NewAuditLog(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<WorkloadBusCredentials>.Instance);
+
     public static WorkflowStatusPublisher NewStatusPublisher(Auxilia.Messaging.IMessageBusClient bus)
         => new(bus, TimeProvider.System);
 

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Auxilia.Workflows.Sandbox;
 
 namespace Auxilia.Workflows.AiAgent.CodingAgent;
 
@@ -23,10 +24,23 @@ public sealed class ProcessCliProcessFactory : ICliProcessFactory
     public static readonly ProcessCliProcessFactory Instance = new();
 
     public ICliProcess Start(ProcessStartInfo startInfo)
-        => new ProcessCliProcess(Process.Start(startInfo)
-            ?? throw new InvalidOperationException($"Failed to start '{startInfo.FileName}'."));
+    {
+        // The CLI is agent-controlled code: unprivileged agent user, no platform secret, and
+        // nothing it spawns outlives the session (the lease kills leftovers when it ends).
+        var lease = AgentSandbox.EnterAgentSession();
+        try
+        {
+            return new ProcessCliProcess(Process.Start(AgentSandbox.Confine(startInfo))
+                ?? throw new InvalidOperationException($"Failed to start '{startInfo.FileName}'."), lease);
+        }
+        catch
+        {
+            lease.Dispose();
+            throw;
+        }
+    }
 
-    private sealed class ProcessCliProcess(Process process) : ICliProcess
+    private sealed class ProcessCliProcess(Process process, IDisposable lease) : ICliProcess
     {
         public TextReader Output => process.StandardOutput;
         public TextReader Error => process.StandardError;
@@ -50,6 +64,10 @@ public sealed class ProcessCliProcessFactory : ICliProcessFactory
             }
         }
 
-        public void Dispose() => process.Dispose();
+        public void Dispose()
+        {
+            process.Dispose();
+            lease.Dispose();
+        }
     }
 }

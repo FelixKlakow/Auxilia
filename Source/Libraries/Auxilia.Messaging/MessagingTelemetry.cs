@@ -33,5 +33,14 @@ public static class MessagingTelemetry
         Meter.CreateCounter<long>(
             "messaging.receive.count",
             description: "Number of messages received from the message bus");
+
+    /// <summary>
+    ///     Counts workload-scoped deliveries dropped because their publisher may not speak for the
+    ///     instance they name — every increment is a forgery attempt (or a misconfigured client).
+    /// </summary>
+    public static readonly Counter<long> RejectedAttributionCounter =
+        Meter.CreateCounter<long>(
+            "messaging.attribution.rejected.count",
+            description: "Workload-scoped messages dropped for a publisher that may not speak for their instance");
 }
 

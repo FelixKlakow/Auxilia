@@ -7,6 +7,14 @@ fake for tests. Publishes are broker-confirmed (a publish completes only once Ra
 acknowledged it). Referenced by the workflow SDK (`Auxilia.Workflows`); pure Core clients
 never need it (they use the Core's filtered event streams instead).
 
+Every publish carries the broker-validated publisher identity (`user_id`). Consumers drop an
+`IWorkloadScopedMessage` whose publisher is a workload identity other than the instance it
+names, and any `IPlatformOnlyMessage` published by a workload or unattributed —
+`WorkloadBusIdentity` defines the naming. `IBrokerIdentityIssuer`
+(`RabbitMqManagementIdentityIssuer`) mints and revokes narrowly scoped per-workload broker
+users; a client created with `queuePublishExchange` routes queue publishes through that
+(ingress) exchange, the only route a workload identity has.
+
 ## License
 
 Business Source License 1.1 — free for personal production use; commercial use requires a

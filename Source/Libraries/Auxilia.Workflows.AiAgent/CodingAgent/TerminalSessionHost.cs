@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Auxilia.Workflows.Sandbox;
 
 namespace Auxilia.Workflows.AiAgent.CodingAgent;
 
@@ -63,23 +64,33 @@ public sealed class TmuxSessionHost : ISessionHost
     private string _sessionName = "agent-session";
     private bool _ownsServer = true;
     private Process? _ttyd;
+    private IDisposable? _agentSession;
 
     public async Task StartAsync(TerminalSessionInfo session, CancellationToken cancellationToken)
     {
         _sessionName = session.SessionName;
         _ownsServer = session.EndsServerOnExit;
+        // The tmux server, the session command, and ttyd (whose viewers type into the session)
+        // all run as the unprivileged agent user; every tmux client call joins that same server.
+        _agentSession ??= AgentSandbox.EnterAgentSession();
         await RunAsync(BuildTmuxStartInfo(session), cancellationToken);
 
         if (!session.ServeTerminal)
             return;
         var ttyd = new ProcessStartInfo { FileName = "ttyd", UseShellExecute = false };
-        foreach (var argument in new[]
-                 {
-                     "--writable", "--port", session.TerminalPort.ToString(),
-                     "tmux", "attach", "-t", session.SessionName
-                 })
+        ttyd.ArgumentList.Add("--writable");
+        ttyd.ArgumentList.Add("--port");
+        ttyd.ArgumentList.Add(session.TerminalPort.ToString());
+        // The platform's per-run terminal credential: only the Core's authenticated proxy holds it.
+        if (System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.TerminalCredential)
+            is { Length: > 0 } credential)
+        {
+            ttyd.ArgumentList.Add("--credential");
+            ttyd.ArgumentList.Add($"auxilia:{credential}");
+        }
+        foreach (var argument in new[] { "tmux", "attach", "-t", session.SessionName })
             ttyd.ArgumentList.Add(argument);
-        _ttyd = Process.Start(ttyd) ?? throw new InvalidOperationException("Failed to start ttyd.");
+        _ttyd = Process.Start(AgentSandbox.Confine(ttyd)) ?? throw new InvalidOperationException("Failed to start ttyd.");
     }
 
     /// <summary>
@@ -185,6 +196,8 @@ public sealed class TmuxSessionHost : ISessionHost
         {
             // Exited in between — nothing left to stop.
         }
+        _agentSession?.Dispose();
+        _agentSession = null;
     }
 
     private static async Task RunAsync(ProcessStartInfo startInfo, CancellationToken ct)
@@ -209,7 +222,7 @@ public sealed class TmuxSessionHost : ISessionHost
 
     private static async Task<int> TryRunAsync(ProcessStartInfo startInfo, CancellationToken ct)
     {
-        using var process = Process.Start(startInfo)
+        using var process = Process.Start(AgentSandbox.Confine(startInfo))
             ?? throw new InvalidOperationException($"Failed to start '{startInfo.FileName}'.");
         await process.WaitForExitAsync(ct);
         return process.ExitCode;

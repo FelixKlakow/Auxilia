@@ -182,6 +182,15 @@ builder.Services.AddHostedService<WorkflowSchemaTrackingService>();
 builder.Services.AddSingleton<RunStreamPublisher>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RunStreamPublisher>());
 builder.Services.AddHostedService<ArtifactTrackingService>();
+// Runner audit records join the Core's central, chained trail.
+builder.Services.AddHostedService<AuditIngestionService>();
+// The audit chain's external anchor: every stored record's head, signed, outside the audit store.
+builder.Services.AddSingleton(sp => new Auxilia.PlatformData.AuditCheckpointFile(
+    sp.GetRequiredService<IOptions<CoreApiSettings>>().Value.AuditCheckpointPath
+    ?? Path.Combine(platformData.JsonDirectory, "audit-checkpoints.jsonl"),
+    sp.GetRequiredService<Auxilia.PlatformData.AuditIntegrity>(), TimeProvider.System));
+builder.Services.AddSingleton<Auxilia.PlatformData.IAuditAnchor>(
+    sp => sp.GetRequiredService<Auxilia.PlatformData.AuditCheckpointFile>());
 builder.Services.AddHostedService<ArtifactStreamPublisher>();
 builder.Services.AddHostedService<EventTrackingService>();
 builder.Services.AddHostedService<EventStreamPublisher>();
@@ -195,6 +204,14 @@ builder.Services.AddMcpServer()
     .WithTools<Auxilia.Core.Api.Mcp.CoreMcpTools>();
 
 var app = builder.Build();
+
+// A keyed audit chain is the production posture: its anchor belongs on write-once storage the
+// database writers cannot touch — the default path beside the data is a development choice.
+if (!string.IsNullOrWhiteSpace(platformData.ProtectionKeyBase64)
+    && string.IsNullOrWhiteSpace(app.Services.GetRequiredService<IOptions<CoreApiSettings>>().Value.AuditCheckpointPath))
+    app.Logger.LogWarning(
+        "The audit anchor uses its default path {Path}; production must point CoreApi:AuditCheckpointPath at write-once storage.",
+        app.Services.GetRequiredService<Auxilia.PlatformData.AuditCheckpointFile>().Path);
 
 // Bootstrap governance (human admin from config, if any) and the Core API-key principal.
 await app.Services.GetRequiredService<GovernanceSeeder>().SeedAsync(app.Lifetime.ApplicationStopping);
@@ -1011,6 +1028,23 @@ app.MapPost("/internal/runs/{runId:guid}/resolve-slot", async (
                 : StatusCodes.Status404NotFound);
 }).RequireRateLimiting("resolve-slot");
 
+// The NON-SECRET setting values a runner needs to interpret a plugin's declared templates (its
+// egress endpoints, e.g. tcp://{Host}:{Port}) — same token authorization as slot resolution;
+// Secret-kind settings are never returned.
+app.MapPost("/internal/runs/{runId:guid}/slot-settings", async (
+        Guid runId, ResolveSlotSettingsRequest request, HttpContext http,
+        SlotCredentialResolver resolver, CancellationToken ct) =>
+{
+    var token = http.Request.Headers["X-Resolution-Token"].ToString();
+    if (string.IsNullOrEmpty(token))
+        return Results.Json(new { error = "missing resolution token" }, statusCode: StatusCodes.Status401Unauthorized);
+    var (success, error, values) = await resolver.ResolveSettingValuesAsync(
+        runId, token, request.ProviderType, request.Keys ?? [], ct);
+    return success
+        ? Results.Ok(values)
+        : Results.Json(new { error }, statusCode: StatusCodes.Status403Forbidden);
+}).RequireRateLimiting("resolve-slot");
+
 // --- Configurations ---
 // A Personal configuration (the default) is self-owned; sharing platform-wide (Company) is the
 // deliberate opt-in and needs the configuration-management permission — mirroring connectors.
@@ -1182,6 +1216,14 @@ app.MapGet("/api/audit", async (
         return fail;
     return Results.Ok(await svc.QueryAsync(
         new AuditQuery(actor, action, subject, fromUtc, toUtc, skip, take == 0 ? 50 : take), ct));
+}).RequireAuthorization();
+
+app.MapGet("/api/audit/integrity", async (
+        HttpContext http, IPolicyEngine policy, AuditReadService svc, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.AuditRead, ct) is { } fail)
+        return fail;
+    return Results.Ok(await svc.VerifyAsync(ct));
 }).RequireAuthorization();
 
 // --- Provider catalog (Core-owned governance: which slot providers may be configured; deny-by-default) ---

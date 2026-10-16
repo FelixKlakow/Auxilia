@@ -26,7 +26,7 @@ public sealed class ResourceProxyHandler(
     public async Task StartAsync(CancellationToken ct = default)
     {
         var queueName = dispatcherSettings.Value.ResourceProxyQueueName;
-        await messageBus.DeclareQueueAsync(queueName, ct);
+        await WorkloadBusTopology.ExposeIngressQueueAsync(messageBus, queueName, ct);
         _subscription = await messageBus.SubscribeAsync<ResourceRequest>(queueName, HandleAsync, ct);
 
         logger.LogInformation("ResourceProxyHandler started — listening on {QueueName}.", queueName);

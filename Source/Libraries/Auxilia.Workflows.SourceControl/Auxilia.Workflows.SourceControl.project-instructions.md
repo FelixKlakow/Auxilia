@@ -4,6 +4,8 @@ Slot-package that adds source-control vocabulary to the workflow SDK. Declares w
 
 > Write access (`ISourceControlWriteAccess`, incl. `PushAsync`) is **capability-declared but not production-backed** — it is currently satisfied only by fakes/stubs; there is no credentialed production push provider yet.
 
+`GitRunner.cs` (`ProcessGitRunner`) runs the workflow's own git through `AgentSandbox.Confine`: the same unprivileged identity as the agent sharing the workspace (coherent file ownership), never a platform secret; its pushes reach the remote only through the SDK's push gateway.
+
 ## File / Folder Map
 ```
 Source/Libraries/Auxilia.Workflows.SourceControl/
@@ -18,5 +20,6 @@ Source/Libraries/Auxilia.Workflows.SourceControl/
 ├── SourceControlOperation.cs                   # Operation keys used by the policy decorators
 ├── SourceControlCapabilities.cs                # ICapability: RequiredPermissions[], SupportedHostTypes? (open string vocabulary — SourceHostTypes constants, OrdinalIgnoreCase)
 ├── Permission.cs                               # Enum of SCM permissions (Read, Write, Admin…)
+├── GitRunner.cs                                # IGitRunner + ProcessGitRunner (sandboxed local git for workflow code)
 └── SourceControlWorkflowBuilderExtensions.cs   # RequiresSourceControl() — thin wrapper over builder.Requires<T>
 ```

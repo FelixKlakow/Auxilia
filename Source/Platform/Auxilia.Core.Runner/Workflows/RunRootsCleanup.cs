@@ -32,12 +32,16 @@ internal static class RunRootsCleanup
     public static async Task<IReadOnlyList<Pods.CompanionLog>> CleanupAsync(
         WorkspaceManager workspaceManager,
         Pods.IPodHost podHost,
+        RunContainment containment,
         WorkflowDispatcherSettings settings,
         ILogger logger,
         Guid instanceId,
         bool includePackage = true,
         CancellationToken ct = default)
     {
+        // The run is over on every path that reaches here: its broker identity dies first; its
+        // egress topology (and the egress log as evidence) once the container is gone.
+        await containment.ReleaseAsync(instanceId, containerGone: includePackage, ct);
         await workspaceManager.CleanupAsync(instanceId);
         var companionLogs = await podHost.TeardownAsync(instanceId, ct);
         DeleteDirectory(OutputDirectoryFor(settings, instanceId), "run output root", logger);

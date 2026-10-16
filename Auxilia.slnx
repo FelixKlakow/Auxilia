@@ -24,6 +24,7 @@
     <Project Path="Source\Platform\Auxilia.AdminConsole\Auxilia.AdminConsole.csproj" />
     <Project Path="Source\Platform\Auxilia.Core.Api\Auxilia.Core.Api.csproj" />
     <Project Path="Source\Platform\Auxilia.Core.Runner\Auxilia.Core.Runner.csproj" />
+    <Project Path="Source\Platform\Auxilia.EgressGateway\Auxilia.EgressGateway.csproj" />
     <Project Path="Source\Platform\Auxilia.TriggerHost\Auxilia.TriggerHost.csproj" />
   </Folder>
   <Folder Name="/Source/Libraries/">
@@ -68,6 +69,7 @@
     <Project Path="Tests\Platform\Auxilia.AdminConsole.Tests\Auxilia.AdminConsole.Tests.csproj" />
     <Project Path="Tests\Platform\Auxilia.Core.Api.Tests\Auxilia.Core.Api.Tests.csproj" />
     <Project Path="Tests\Platform\Auxilia.Core.Runner.Tests\Auxilia.Core.Runner.Tests.csproj" />
+    <Project Path="Tests\Platform\Auxilia.EgressGateway.Tests\Auxilia.EgressGateway.Tests.csproj" />
     <Project Path="Tests\Platform\Auxilia.TriggerHost.Tests\Auxilia.TriggerHost.Tests.csproj" />
   </Folder>
   <Folder Name="/Tests/Libraries/">

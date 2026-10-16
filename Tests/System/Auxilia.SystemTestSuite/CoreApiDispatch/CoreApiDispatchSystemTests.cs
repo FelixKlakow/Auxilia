@@ -42,7 +42,17 @@ public class CoreApiDispatchSystemTests
         var runResp = await Client.PostAsync($"/api/configurations/{config!.Id}/run", null, cancellationToken);
         runResp.EnsureSuccessStatusCode();
 
-        var state = await success.Task.WaitAsync(TimeSpan.FromSeconds(120), cancellationToken);
+        WorkflowStateMessage state;
+        try
+        {
+            state = await success.Task.WaitAsync(TimeSpan.FromSeconds(120), cancellationToken);
+        }
+        catch (TimeoutException)
+        {
+            Assert.Fail("No terminal state within 120 s.\n--- Runner log tail ---\n"
+                        + await CoreApiDispatchEnvironment.RunnerLogTailAsync());
+            throw;
+        }
         Assert.That(state.State, Is.EqualTo(WorkflowState.Success),
             $"Dynamic dummy run ended {state.State}. Error: {state.ErrorMessage}");
 
@@ -93,7 +103,17 @@ public class CoreApiDispatchSystemTests
         var runResp = await Client.PostAsync($"/api/configurations/{config!.Id}/run", null, cancellationToken);
         runResp.EnsureSuccessStatusCode();
 
-        var state = await success.Task.WaitAsync(TimeSpan.FromSeconds(120), cancellationToken);
+        WorkflowStateMessage state;
+        try
+        {
+            state = await success.Task.WaitAsync(TimeSpan.FromSeconds(120), cancellationToken);
+        }
+        catch (TimeoutException)
+        {
+            Assert.Fail("No terminal state within 120 s.\n--- Runner log tail ---\n"
+                        + await CoreApiDispatchEnvironment.RunnerLogTailAsync());
+            throw;
+        }
         Assert.That(state.State, Is.EqualTo(WorkflowState.Success),
             $"Static dummy run ended {state.State}. Error: {state.ErrorMessage}");
 

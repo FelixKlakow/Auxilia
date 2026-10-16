@@ -85,9 +85,7 @@ public class WorkflowDispatcherEmptyWorkspaceTests
             Options.Create(new DockerWorkflowLauncherSettings
             {
                 RabbitMqHost = "rabbitmq",
-                RabbitMqPort = 5672,
-                RabbitMqUserName = "guest",
-                RabbitMqPassword = "guest"
+                RabbitMqPort = 5672
             }),
             Options.Create(_dispatcherSettings),
             new Mock<IHttpClientFactory>().Object,
@@ -111,6 +109,7 @@ public class WorkflowDispatcherEmptyWorkspaceTests
             new Auxilia.PlatformData.Protection.NullSettingsProtector(),
             new FakePodHost(),
             new Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry(),
+            TestStores.NewContainment(),
             NullLogger<WorkflowDispatcher>.Instance);
 
         await _sut.StartAsync(CancellationToken.None);

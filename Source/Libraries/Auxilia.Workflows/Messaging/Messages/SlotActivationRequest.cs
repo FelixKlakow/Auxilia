@@ -10,4 +10,4 @@ public sealed record SlotActivationRequest(
     string SlotName,
     /// <summary>Base64 DER ephemeral public key — the response is encrypted for it.</summary>
     string PublicKey,
-    string? InstanceToken = null);
+    string? InstanceToken = null) : Auxilia.Messaging.IWorkloadScopedMessage;

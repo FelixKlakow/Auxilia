@@ -80,7 +80,10 @@ public static class WorkspaceSetup
         startInfo.RedirectStandardOutput = true;
         startInfo.RedirectStandardError = true;
 
-        using var process = Process.Start(startInfo)
+        // Setup runs repository-controlled code (package scripts, build hooks): it runs as the
+        // unprivileged agent user without any platform secret. System packages belong in the
+        // run's environment layers, which are composed at image-build time.
+        using var process = Process.Start(Sandbox.AgentSandbox.Confine(startInfo))
                             ?? throw new InvalidOperationException(
                                 $"Failed to start the setup shell for mount '{task.MountId}'.");
         var stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);

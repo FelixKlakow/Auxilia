@@ -1,5 +1,6 @@
 # A minimal authenticated git-over-HTTP server for system tests: Apache + git-http-backend
-# (smart HTTP) behind Basic auth, seeded with one bare repo containing README.md. The runner must
+# (smart HTTP) behind Basic auth, seeded with one bare repo containing README.md — owned by
+# Apache's worker user, so authenticated pushes (through a run's push gateway) land too. The runner must
 # present the credential (builduser / the-pat) — a wrong or missing credential gets a 401, so this
 # proves the per-run repository's auth was resolved and injected correctly. Debian base: its git
 # package ships git-http-backend (Alpine's does not).
@@ -16,6 +17,7 @@ RUN apt-get update \
  && git add README.md && git commit -q -m seed \
  && git clone -q --bare /tmp/seed /git/test.git \
  && git -C /git/test.git update-server-info \
+ && chown -R daemon:daemon /git \
  && rm -rf /tmp/seed && cd / \
  && mkdir -p /git-cgi \
  && cp "$(git --exec-path)/git-http-backend" /git-cgi/git-http-backend \

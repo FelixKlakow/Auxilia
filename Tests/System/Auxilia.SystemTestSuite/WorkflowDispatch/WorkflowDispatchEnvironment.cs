@@ -27,7 +27,7 @@ public class WorkflowDispatchEnvironment
     internal const string DummyWorkflowsImageName = "auxilia-dummy-workflows:system-test";
     internal const string RunnerImageName        = "auxilia-core-runner:system-test";
     private  const string RabbitMqAlias            = "rabbitmq";
-    private  const string RabbitMqImage            = "rabbitmq:3.13-management";
+    private  const string RabbitMqImage            = "rabbitmq:4-management";
 
     // Generated once per test session — used as the Docker network name so the
     // Runner can attach workflow containers to the same network.
@@ -41,6 +41,19 @@ public class WorkflowDispatchEnvironment
     private RabbitMqContainer _rabbitMq  = null!;
 
     public static IMessageBusClient MessageBusClient { get; private set; } = null!;
+
+    private static IContainer? _runnerForLogs;
+
+    /// <summary>The runner container's log tail, for failure diagnostics.</summary>
+    internal static async Task<string> RunnerLogTailAsync()
+    {
+        if (_runnerForLogs is null)
+            return "<no runner>";
+        var (stdout, stderr) = await _runnerForLogs.GetLogsAsync(timestampsEnabled: false);
+        var lines = (stdout + "\n" + stderr).Split('\n');
+        return string.Join("\n", lines.TakeLast(80));
+    }
+
     public static string            RabbitMqHost     { get; private set; } = null!;
     public static int               RabbitMqPort     { get; private set; }
 
@@ -48,6 +61,7 @@ public class WorkflowDispatchEnvironment
     public async Task OneTimeSetUp()
     {
         // Build the Runner and dummy-workflows images in parallel from source.
+        await TestImages.BuildEgressGatewayAsync();
         await Task.WhenAll(
             BuildImageAsync(RunnerImageName,     "Source/Platform/Auxilia.Core.Runner/Dockerfile"),
             BuildImageAsync(DummyWorkflowsImageName, "Tests/System/Auxilia.Workflows.Testing/Dockerfile"));
@@ -90,13 +104,15 @@ public class WorkflowDispatchEnvironment
             .WithEnvironment("WorkflowLauncher__NetworkName",    NetworkName)
             .WithEnvironment("WorkflowLauncher__RabbitMqHost",   RabbitMqAlias)
             .WithEnvironment("WorkflowLauncher__RabbitMqPort",   "5672")
-            .WithEnvironment("WorkflowLauncher__RabbitMqUserName", "guest")
-            .WithEnvironment("WorkflowLauncher__RabbitMqPassword", "guest")
+            .WithEnvironment("WorkflowLauncher__EgressGatewayImage", TestImages.EgressGatewayImageName)
+            // Everything this runner creates carries the session label the teardown sweeps.
+            .WithEnvironment(TestSession.RunnerVariable, TestSession.Id)
             // DockerSocketPath default (unix:///var/run/docker.sock) is correct on Linux.
             .WithWaitStrategy(
                 Wait.ForUnixContainer().UntilMessageIsLogged("WorkflowDispatcher started"))
             .Build();
         await _runner.StartAsync();
+        _runnerForLogs = _runner;
 
         // Test-side message bus — connects to the host-mapped RabbitMQ port.
         MessageBusClient = await RabbitMqClient.CreateAsync(RabbitMqHost, RabbitMqPort);
@@ -105,10 +121,14 @@ public class WorkflowDispatchEnvironment
     [OneTimeTearDown]
     public async Task OneTimeTearDown()
     {
+        // Session objects first: a leftover gateway would pin the test network.
+        await TestSession.SweepAsync();
         if (MessageBusClient is IAsyncDisposable d) await d.DisposeAsync();
         await _runner.DisposeAsync();
         await _rabbitMq.DisposeAsync();
         await _network.DisposeAsync();
+        // A run whose containment the stopped runner never released leaves nothing behind.
+        await TestSession.SweepAsync();
     }
 
     internal static Task BuildImageAsync(string tag, string dockerfilePath)

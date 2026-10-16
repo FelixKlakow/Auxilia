@@ -97,6 +97,11 @@ public sealed class DockerPodHost(
     internal const string CompanionNameLabel = "auxilia.companion-name";
     internal const string RuntimeSpawnLabel = "auxilia.companion-runtime";
 
+    internal static readonly IReadOnlyList<string> CompanionDroppedCapabilities =
+        ["NET_RAW", "MKNOD", "SYS_CHROOT", "SETFCAP", "SETPCAP", "AUDIT_WRITE"];
+
+    internal const long CompanionPidsLimit = 2048;
+
     public async Task MaterializeAsync(IDockerClient client, PodPlan plan, CancellationToken ct)
     {
         // The pod network is --internal: companions have ZERO egress by design. The workflow
@@ -105,21 +110,24 @@ public sealed class DockerPodHost(
         {
             Name = plan.NetworkName,
             Internal = true,
-            Labels = PodLabels(plan.InstanceId)
+            Labels = settingsOptions.Value.Stamp(PodLabels(plan.InstanceId))
         }, ct);
 
         foreach (var volume in plan.Volumes)
             await client.Volumes.CreateAsync(new VolumesCreateParameters
             {
                 Name = volume.DockerVolumeName,
-                Labels = PodLabels(plan.InstanceId)
+                Labels = settingsOptions.Value.Stamp(PodLabels(plan.InstanceId))
             }, ct);
 
         foreach (var companion in plan.Companions)
         {
             await EnsureImageAsync(client, companion.Image, ct);
-            var created = await client.Containers.CreateContainerAsync(
-                BuildCompanionParameters(companion, plan.InstanceId, plan.NetworkName), ct);
+            var parameters = BuildCompanionParameters(companion, plan.InstanceId, plan.NetworkName);
+            settingsOptions.Value.Stamp((Dictionary<string, string>)parameters.Labels);
+            // Companions run workload-chosen code too: the same second kernel boundary.
+            parameters.HostConfig.Runtime = await SandboxRuntime.ResolveAsync(client, settingsOptions.Value, ct);
+            var created = await client.Containers.CreateContainerAsync(parameters, ct);
             await client.Containers.StartContainerAsync(created.ID, new ContainerStartParameters(), ct);
             logger.LogInformation(
                 "Companion started. Instance={InstanceId} Companion={Companion} ContainerId={ContainerId}",
@@ -150,7 +158,15 @@ public sealed class DockerPodHost(
             {
                 Binds = companion.VolumeBinds.ToList(),
                 Memory = companion.MemoryMb is { } mb ? mb * 1024L * 1024L : 0,
-                NanoCPUs = companion.Cpus is { } cpus ? (long)(cpus * 1_000_000_000) : 0
+                NanoCPUs = companion.Cpus is { } cpus ? (long)(cpus * 1_000_000_000) : 0,
+                // Companions are arbitrary (digest-pinned) service images: they keep the default
+                // capability set their entrypoints rely on (privilege drop via setuid, chown of
+                // data dirs) minus everything a service never needs (raw sockets above all,
+                // which would allow spoofing on the pod network) and can never escalate.
+                Privileged = false,
+                CapDrop = CompanionDroppedCapabilities.ToList(),
+                SecurityOpt = ["no-new-privileges:true"],
+                PidsLimit = CompanionPidsLimit
             },
             NetworkingConfig = new NetworkingConfig
             {
@@ -167,8 +183,10 @@ public sealed class DockerPodHost(
     {
         using var client = clientFactory.CreateClient(settingsOptions.Value.DockerSocketPath);
         await EnsureImageAsync(client, companion.Image, ct);
-        var created = await client.Containers.CreateContainerAsync(
-            BuildCompanionParameters(companion, instanceId, networkName, runtimeSpawned: true), ct);
+        var parameters = BuildCompanionParameters(companion, instanceId, networkName, runtimeSpawned: true);
+        settingsOptions.Value.Stamp((Dictionary<string, string>)parameters.Labels);
+        parameters.HostConfig.Runtime = await SandboxRuntime.ResolveAsync(client, settingsOptions.Value, ct);
+        var created = await client.Containers.CreateContainerAsync(parameters, ct);
         await client.Containers.StartContainerAsync(created.ID, new ContainerStartParameters(), ct);
         logger.LogInformation(
             "Runtime companion started. Instance={InstanceId} Companion={Companion} ContainerId={ContainerId}",

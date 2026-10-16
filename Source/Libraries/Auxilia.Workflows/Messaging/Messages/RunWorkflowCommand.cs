@@ -75,4 +75,4 @@ public sealed record RunWorkflowCommand(
     /// only — deterministic per run, no mid-run catalog reads. Null when no base carries an
     /// image reference (runtime spawns then always fail their base resolution).
     /// </summary>
-    string? PodBaseImagesJson = null);
+    string? PodBaseImagesJson = null) : Auxilia.Messaging.IPlatformOnlyMessage;

@@ -14,7 +14,9 @@ public sealed class AuditReadServiceTests
     private static AuditReadService NewService(out InMemoryDataAccess<AuditRecord> store)
     {
         store = new InMemoryDataAccess<AuditRecord>();
-        return new AuditReadService(store);
+        return new AuditReadService(store, new Auxilia.PlatformData.AuditLog(store, TimeProvider.System),
+            new Auxilia.PlatformData.AuditCheckpointFile(Path.Combine(Path.GetTempPath(), $"auxilia-cp-{Guid.NewGuid():N}.jsonl"),
+                new Auxilia.PlatformData.AuditIntegrity(null), TimeProvider.System));
     }
 
     private static async Task SeedAsync(

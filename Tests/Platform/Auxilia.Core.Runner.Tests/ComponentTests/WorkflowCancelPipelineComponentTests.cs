@@ -55,6 +55,11 @@ public class WorkflowCancelPipelineComponentTests
                 services.AddSingleton<Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry>();
                 services.AddSingleton<Auxilia.PlatformData.Protection.ISettingsProtector,
                     Auxilia.PlatformData.Protection.NullSettingsProtector>();
+                services.AddSingleton<Auxilia.Messaging.IBrokerIdentityIssuer, FakeBrokerIdentityIssuer>();
+                services.AddSingleton<WorkloadBusCredentials>();
+                services.AddSingleton<Auxilia.Core.Runner.Workflows.Egress.IEgressHost, FakeEgressHost>();
+                services.AddSingleton<ArtifactPersister>();
+                services.AddSingleton<RunContainment>();
                 services.AddSingleton<WorkflowStateHandler>();
                 services.AddSingleton<WorkflowCancelDispatcher>();
             })

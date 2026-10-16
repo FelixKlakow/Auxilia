@@ -3,8 +3,15 @@
   "ContentHashBase64": "",
   "SignatureBase64": "",
   "PublicKeyBase64": "",
-  "Contracts": ["Auxilia.Workflows.SourceControl.ISourceControlAccess"],
+  "Contracts": [
+    "Auxilia.Workflows.SourceControl.ISourceControlAccess"
+  ],
   "Category": "workspace",
+  "NetworkEndpoints": [
+    "github.com",
+    "api.github.com",
+    "*.githubusercontent.com"
+  ],
   "Description": "A GitHub repository as the workflow's workspace: cloned into the run's workspace before launch, browsable over the GitHub API.",
   "Settings": [
     {

@@ -207,6 +207,7 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task<ArtifactDto?> GetArtifactAsync(Guid id, CancellationToken ct = default) => Nope<Task<ArtifactDto?>>();
     public Task<Stream?> OpenArtifactContentAsync(Guid id, CancellationToken ct = default) => Nope<Task<Stream?>>();
     public Task<PagedResult<AuditEntry>> QueryAuditAsync(AuditQuery query, CancellationToken ct = default) => Nope<Task<PagedResult<AuditEntry>>>();
+    public Task<AuditIntegrityReport> VerifyAuditAsync(CancellationToken ct = default) => Nope<Task<AuditIntegrityReport>>();
     public Task<Connector> CreateConnectorAsync(CreateConnector request, CancellationToken ct = default) => Nope<Task<Connector>>();
     public Task<Connector> UpdateConnectorAsync(Guid id, UpdateConnector request, CancellationToken ct = default) => Nope<Task<Connector>>();
     public Task<PagedResult<Connector>> QueryConnectorsAsync(ConnectorQuery query, CancellationToken ct = default) => Nope<Task<PagedResult<Connector>>>();

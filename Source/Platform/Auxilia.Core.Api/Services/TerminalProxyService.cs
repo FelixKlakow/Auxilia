@@ -12,10 +12,13 @@ public sealed class TerminalProxyService(IHttpClientFactory httpClientFactory)
     public async Task ForwardHttpAsync(
         HttpContext http, string endpoint, string path, CancellationToken ct)
     {
+        var (address, authorization) = SplitCredential(endpoint);
         var client = httpClientFactory.CreateClient("terminal-proxy");
-        using var upstream = await client.GetAsync(
-            new Uri($"http://{endpoint}/{path}{PassthroughQuery(http)}"),
-            HttpCompletionOption.ResponseHeadersRead, ct);
+        using var request = new HttpRequestMessage(HttpMethod.Get,
+            new Uri($"http://{address}/{path}{PassthroughQuery(http)}"));
+        if (authorization is not null)
+            request.Headers.TryAddWithoutValidation("Authorization", authorization);
+        using var upstream = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
 
         http.Response.StatusCode = (int)upstream.StatusCode;
         if (upstream.Content.Headers.ContentType is { } contentType)
@@ -26,11 +29,14 @@ public sealed class TerminalProxyService(IHttpClientFactory httpClientFactory)
     public async Task ForwardWebSocketAsync(
         HttpContext http, string endpoint, string path, CancellationToken ct)
     {
+        var (address, authorization) = SplitCredential(endpoint);
         using var upstream = new ClientWebSocket();
         // ttyd requires its "tty" subprotocol — mirror whatever the client asked for.
         foreach (var protocol in http.WebSockets.WebSocketRequestedProtocols)
             upstream.Options.AddSubProtocol(protocol);
-        await upstream.ConnectAsync(new Uri($"ws://{endpoint}/{path}{PassthroughQuery(http)}"), ct);
+        if (authorization is not null)
+            upstream.Options.SetRequestHeader("Authorization", authorization);
+        await upstream.ConnectAsync(new Uri($"ws://{address}/{path}{PassthroughQuery(http)}"), ct);
 
         using var downstream = await http.WebSockets.AcceptWebSocketAsync(upstream.SubProtocol);
         var clientToContainer = PumpAsync(downstream, upstream, ct);
@@ -39,6 +45,20 @@ public sealed class TerminalProxyService(IHttpClientFactory httpClientFactory)
         // Either side ended — close both directions; the losing pump unwinds on the aborted socket.
         await TryCloseAsync(upstream);
         await TryCloseAsync(downstream);
+    }
+
+    /// <summary>
+    /// A run's terminal endpoint may carry the run's terminal credential as userinfo
+    /// (<c>user:secret@host:port</c>): it becomes the upstream Basic authorization — the client
+    /// never sees it, the terminal admits nobody without it.
+    /// </summary>
+    internal static (string Address, string? Authorization) SplitCredential(string endpoint)
+    {
+        var at = endpoint.LastIndexOf('@');
+        return at <= 0
+            ? (endpoint, null)
+            : (endpoint[(at + 1)..], "Basic " + Convert.ToBase64String(
+                System.Text.Encoding.UTF8.GetBytes(endpoint[..at])));
     }
 
     private static async Task PumpAsync(WebSocket from, WebSocket to, CancellationToken ct)

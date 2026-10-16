@@ -13,7 +13,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends nodejs \
  && npm install -g @github/copilot \
  && curl -fsSL https://claude.ai/install.sh | bash \
- && ln -s /root/.local/bin/claude /usr/local/bin/claude \
+ && install -m 755 "$(readlink -f /root/.local/bin/claude)" /usr/local/bin/claude \
  && curl -fsSL -o /usr/local/bin/ttyd \
       https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 \
  && chmod +x /usr/local/bin/ttyd \

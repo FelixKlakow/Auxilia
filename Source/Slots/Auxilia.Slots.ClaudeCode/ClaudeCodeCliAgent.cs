@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Auxilia.Workflows.AiAgent.CodingAgent;
 using Auxilia.Workflows.Views;
+using Auxilia.Workflows.Actions;
 
 namespace Auxilia.Slots.ClaudeCode;
 
@@ -40,6 +41,11 @@ public sealed class ClaudeCodeCliAgent(
         using var sessionScope = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         // Mutable per-session state: the operator can retune it live over the setting channel.
         var permissionMode = new SessionSettings(request.PermissionMode, request.PushPolicy);
+        // Per-action policies are enforced at the enforcement points (the push gateway, …)
+        // against what each action actually does — never by reading a command string.
+        using var actionPolicies = ActionGate.Register(new AgentSessionActionApprover(
+            kind => kind == ActionKinds.GitPush ? permissionMode.PushPolicy : permissionMode.PermissionMode,
+            request.Interaction, onChatEntry, _time));
         var planTracker = new PlanTracker();
         var multiTurn = request.MultiTurn && request.Interaction is not null;
         Task? guidanceTask = null;
@@ -382,10 +388,12 @@ public sealed class ClaudeCodeCliAgent(
             return;
         }
 
-        // Per-action policy: a git push is governed by ITS policy, everything else by the
-        // global mode — "auto-approve edits but ask before each push" and the inverse both work.
+        // Every tool call — a push-looking one included — is governed by the global mode: a
+        // command string is no basis for a security decision (anything can be chained onto a
+        // 'git push'). The PUSH itself is decided separately by the push policy, at the push
+        // gateway, against the refs it actually updates.
         var isPush = IsGitPush(control.ToolName, control.InputJson);
-        var effectivePolicy = isPush ? settings.PushPolicy : settings.PermissionMode;
+        var effectivePolicy = settings.PermissionMode;
 
         // Auto mode: the session stays steerable (guidance, halt), but permission requests are
         // approved without an operator round-trip — the container is still the sandbox.
@@ -394,9 +402,8 @@ public sealed class ClaudeCodeCliAgent(
             await WriteLineAsync(process, stdinGate, AllowResponse(control.RequestId), ct);
             await onChatEntry(new AgentChatEntry(
                 AgentChatRole.System,
-                isPush
-                    ? "A git push was allowed automatically (push policy: auto-allow)."
-                    : $"Tool '{control.ToolName}' was allowed automatically (permission mode: auto-allow).",
+                $"Tool '{control.ToolName}' was allowed automatically (permission mode: auto-allow)."
+                + (isPush ? " Its push is decided by the push policy at the push gateway." : ""),
                 _time.GetUtcNow(), Label: "Permission", DetailTag: "permissions"), ct);
             return;
         }
@@ -414,7 +421,7 @@ public sealed class ClaudeCodeCliAgent(
 
         var answer = await interaction.AskAsync(new AgentQuestion(
             isPush
-                ? "The agent wants to PUSH to the remote repository. Allow it?"
+                ? $"The agent asks to use the tool '{control.ToolName}' (it pushes — the push itself is confirmed separately by the push policy). Allow it?"
                 : $"The agent asks to use the tool '{control.ToolName}'. Allow it?",
             options, MultiSelect: false, AllowFreeText: false,
             Detail: PrettyJson(control.InputJson)), ct);

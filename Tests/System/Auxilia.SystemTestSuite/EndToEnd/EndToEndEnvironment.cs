@@ -109,6 +109,9 @@ public class EndToEndEnvironment
     private MongoDbContainer  _mongoDb    = null!;
     private IContainer        _greenMail  = null!;
     private IContainer        _gitServer  = null!;
+
+    /// <summary>The authenticated git server the per-run repositories are cloned from and pushed to.</summary>
+    internal static IContainer GitServer { get; private set; } = null!;
     private string            _publishDir = null!;
     private string            _runOutputDir = null!;
     private string            _workspaceDir = null!;
@@ -159,6 +162,7 @@ public class EndToEndEnvironment
             "Source/Slots/Auxilia.Slots.SimulatedWorkItems/Auxilia.Slots.SimulatedWorkItems.csproj", _publishDir);
 
         // Sequential on purpose: parallel docker builds have wedged Docker Desktop daemons.
+        await TestImages.BuildEgressGatewayAsync();
         await WorkflowDispatchEnvironment.BuildImageAsync(
             WorkflowDispatchEnvironment.RunnerImageName, "Source/Platform/Auxilia.Core.Runner/Dockerfile");
         await WorkflowDispatchEnvironment.BuildImageAsync(
@@ -196,8 +200,9 @@ public class EndToEndEnvironment
             .WithNetwork(_network).WithNetworkAliases(GitServerAlias)
             .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("resuming normal operations"))
             .Build();
+        GitServer = _gitServer;
 
-        _rabbitMq = new RabbitMqBuilder("rabbitmq:3.13-management")
+        _rabbitMq = new RabbitMqBuilder("rabbitmq:4-management")
             .WithUsername("guest").WithPassword("guest")
             .WithNetwork(_network).WithNetworkAliases(RabbitMqAlias)
             .Build();
@@ -259,6 +264,15 @@ public class EndToEndEnvironment
             $"/api/workflow-types/{WorkflowType}/access/grant",
             new WorkflowTypeAccessChange(PermissionActions.WorkflowTrigger, PrincipalId: RunAsPrincipalId)))
             .EnsureSuccessStatusCode();
+        // Likewise for the providers its configuration binds: an ungranted provider is
+        // administrators-only, so each is registered in the catalog and granted to the principal.
+        foreach (var provider in MailReviewProviders())
+        {
+            (await CoreApiClient.PostAsJsonAsync("/api/provider-catalog", provider)).EnsureSuccessStatusCode();
+            (await CoreApiClient.PutAsJsonAsync($"/api/provider-catalog/{provider.ProviderType}/grants",
+                    new SetProviderGrants([new AccessGrant(AccessGrantKind.Principal, RunAsPrincipalId.ToString("D"))])))
+                .EnsureSuccessStatusCode();
+        }
         var triggerHostApiKey = await CreateCoreServiceKeyAsync("E2E Trigger Host", "Operator");
         MailReviewConfigurationId = await CreateMailReviewConfigurationAsync();
 
@@ -278,8 +292,9 @@ public class EndToEndEnvironment
             .WithEnvironment("WorkflowLauncher__NetworkName",      NetworkName)
             .WithEnvironment("WorkflowLauncher__RabbitMqHost",     RabbitMqAlias)
             .WithEnvironment("WorkflowLauncher__RabbitMqPort",     "5672")
-            .WithEnvironment("WorkflowLauncher__RabbitMqUserName", "guest")
-            .WithEnvironment("WorkflowLauncher__RabbitMqPassword", "guest")
+            .WithEnvironment("WorkflowLauncher__EgressGatewayImage", TestImages.EgressGatewayImageName)
+            // Everything this runner creates carries the session label the teardown sweeps.
+            .WithEnvironment(TestSession.RunnerVariable, TestSession.Id)
             .WithEnvironment("WorkflowLauncher__ExtraEnvironmentVariables__AUXILIA_DEVELOPER_MODE", "1")
             // Core.Api runs as a container on this network: terminal endpoints must be
             // container-name:port (loopback host ports are unreachable from inside it).
@@ -378,6 +393,25 @@ public class EndToEndEnvironment
 
         await Task.Delay(TimeSpan.FromMilliseconds(500)); // seed propagation window
     }
+
+    /// <summary>The catalog registrations (mirroring the plugin manifests) of the providers the mail-review configuration binds.</summary>
+    private static IEnumerable<RegisterSlotProvider> MailReviewProviders() =>
+    [
+        new RegisterSlotProvider("fake-code-review-happy", "code-review", "System-test stand-in provider.",
+            [], []),
+        new RegisterSlotProvider("email-work-items", "task-source", "Work items from a mailbox.",
+            ["Auxilia.Workflows.TaskSource.IWorkItemAccess"],
+            [
+                new RegisterProviderSetting("ImapHost", "IMAP host", "Text", Required: true),
+                new RegisterProviderSetting("ImapPort", "IMAP port", "Number", DefaultValue: "3143"),
+                new RegisterProviderSetting("UseSsl", "Use SSL/TLS", "Boolean", DefaultValue: "true"),
+                new RegisterProviderSetting("Username", "Username", "Text", Required: true),
+                new RegisterProviderSetting("Password", "Password", "Secret", Required: true),
+                new RegisterProviderSetting("SmtpHost", "SMTP host", "Text", Required: true),
+                new RegisterProviderSetting("SmtpPort", "SMTP port", "Number", DefaultValue: "3025"),
+                new RegisterProviderSetting("Folder", "Mail folder", "Text", DefaultValue: "INBOX"),
+            ]),
+    ];
 
     /// <summary>The GreenMail IMAP/SMTP settings shape shared by the slot instance and the config binding.</summary>
     internal static Dictionary<string, string> EmailSettings() => new()
@@ -500,6 +534,8 @@ public class EndToEndEnvironment
     [OneTimeTearDown]
     public async Task OneTimeTearDown()
     {
+        // Session objects first: a leftover gateway would pin the test network.
+        await TestSession.SweepAsync();
         CoreApiClient?.Dispose();
         if (MessageBusClient is IAsyncDisposable d) await d.DisposeAsync();
         if (AdminConsole is not null) await AdminConsole.DisposeAsync();
@@ -514,6 +550,8 @@ public class EndToEndEnvironment
         TryDelete(_publishDir);
         TryDelete(_runOutputDir);
         TryDelete(_workspaceDir);
+        // A run whose containment the stopped runner never released leaves nothing behind.
+        await TestSession.SweepAsync();
     }
 
     private static void TryDelete(string directory)

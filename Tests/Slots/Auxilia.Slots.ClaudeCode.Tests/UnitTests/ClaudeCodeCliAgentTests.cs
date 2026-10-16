@@ -417,14 +417,45 @@ public sealed class ClaudeCodeCliAgentTests
     }
 
     [Test]
-    public async Task InteractiveSession_PushIsAsked_EvenWhenTheGlobalModeIsAutoAllow()
+    public async Task InteractiveSession_PushLookingCommand_FollowsThePermissionMode_NotThePushPolicy()
     {
+        // A command string is no basis for a security decision: under the old regex rule,
+        // 'rm -rf x; git push' was auto-approved by an auto-allow PUSH policy while every other
+        // tool required the operator. The tool call now always follows the permission mode.
         var stdout = """
-            {"type":"control_request","request_id":"ctrl-p","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"git push origin main"}}}
+            {"type":"control_request","request_id":"ctrl-p","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"rm -rf data; git push origin main"}}}
             {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
             """;
         var factory = new FakeProcessFactory(stdout, exitCode: 0);
-        var interaction = new FakeInteraction(new AgentAnswer(["allow"]));
+        var interaction = new FakeInteraction(new AgentAnswer(["deny"]));
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        await agent.RunAsync(
+            Request with
+            {
+                Interaction = interaction,
+                PermissionMode = AgentPermissionModes.AskOperator,
+                PushPolicy = AgentPermissionModes.AutoAllow,
+            },
+            (_, _) => Task.CompletedTask);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(interaction.LastQuestion?.Prompt, Does.Contain("Bash"),
+                "ask mode asks for the tool call, push-looking or not");
+            Assert.That(factory.LastProcess!.Input.ToString(), Does.Not.Contain("\"behavior\":\"allow\""));
+        });
+    }
+
+    [Test]
+    public async Task InteractiveSession_AutoAllowMode_PushLookingCommand_RunsAndThePushPolicyGuardsThePush()
+    {
+        var stdout = """
+            {"type":"control_request","request_id":"ctrl-p2","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"git push origin main"}}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
+            """;
+        var factory = new FakeProcessFactory(stdout, exitCode: 0);
+        var interaction = new FakeInteraction();
         var agent = new ClaudeCodeCliAgent(Options(), factory);
 
         await agent.RunAsync(
@@ -436,31 +467,70 @@ public sealed class ClaudeCodeCliAgentTests
             },
             (_, _) => Task.CompletedTask);
 
-        Assert.That(interaction.LastQuestion?.Prompt, Does.Contain("PUSH"),
-            "The push policy governs pushes independently of the global auto-allow mode.");
-    }
-
-    [Test]
-    public async Task InteractiveSession_AutoPushPolicy_ApprovesThePushWithoutAsking()
-    {
-        var stdout = """
-            {"type":"control_request","request_id":"ctrl-p2","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"git push origin main"}}}
-            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}
-            """;
-        var factory = new FakeProcessFactory(stdout, exitCode: 0);
-        var interaction = new FakeInteraction();
-        var agent = new ClaudeCodeCliAgent(Options(), factory);
-
-        await agent.RunAsync(
-            Request with { Interaction = interaction, PushPolicy = AgentPermissionModes.AutoAllow },
-            (_, _) => Task.CompletedTask);
-
         Assert.Multiple(() =>
         {
-            Assert.That(interaction.LastQuestion, Is.Null);
+            Assert.That(interaction.LastQuestion, Is.Null, "the tool call itself follows auto-allow");
             Assert.That(factory.LastProcess!.Input.ToString(),
                 Does.Contain("ctrl-p2").And.Contain("\"behavior\":\"allow\""));
         });
+    }
+
+    [Test]
+    public async Task Session_RegistersItsActionPolicies_ForItsLifetimeOnly()
+    {
+        var stdout = """{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"done"}""";
+        var decisions = new List<Auxilia.Workflows.Actions.ActionDecision>();
+        var factory = new GateProbingProcessFactory(stdout, decisions);
+        var agent = new ClaudeCodeCliAgent(Options(), factory);
+
+        await agent.RunAsync(
+            Request with { Interaction = null, PushPolicy = AgentPermissionModes.AskOperator },
+            (_, _) => Task.CompletedTask);
+        var afterSession = await Auxilia.Workflows.Actions.ActionGate.DecideAsync(ProbePush, CancellationToken.None);
+
+        Assert.That(decisions.Single().Allowed, Is.False,
+            "during the session its ask-operator policy governs pushes — and there is no operator to ask");
+        Assert.That(afterSession.Allowed, Is.True, "the registration ends with the session");
+    }
+
+    private static readonly Auxilia.Workflows.Actions.GatedAction ProbePush = new Auxilia.Workflows.Workspace.GitPushRequest(
+        "MAIN", "https://git.example.invalid/repo.git",
+        [new Auxilia.Workflows.Workspace.GitRefUpdate(new string('1', 40), new string('2', 40), "refs/heads/main")]).ToAction();
+
+    /// <summary>A CLI whose first output read asks the push gate — i.e. a push made mid-session.</summary>
+    private sealed class GateProbingProcessFactory(
+        string stdout, List<Auxilia.Workflows.Actions.ActionDecision> decisions) : IClaudeCliProcessFactory
+    {
+        public IClaudeCliProcess Start(ProcessStartInfo startInfo) => new GateProbingProcess(stdout, decisions);
+
+        private sealed class GateProbingProcess(
+            string stdout, List<Auxilia.Workflows.Actions.ActionDecision> decisions) : IClaudeCliProcess
+        {
+            public TextReader Output { get; } = new ProbingReader(stdout, decisions);
+            public TextReader Error { get; } = new StringReader("");
+            public TextWriter Input { get; } = new StringWriter();
+            public Task<int> WaitForExitAsync(CancellationToken cancellationToken) => Task.FromResult(0);
+            public void CloseInput() { }
+            public void Kill() { }
+            public void Dispose() { }
+        }
+
+        private sealed class ProbingReader(
+            string stdout, List<Auxilia.Workflows.Actions.ActionDecision> decisions) : TextReader
+        {
+            private readonly StringReader _inner = new(stdout);
+            private bool _probed;
+
+            public override async ValueTask<string?> ReadLineAsync(CancellationToken cancellationToken)
+            {
+                if (!_probed)
+                {
+                    _probed = true;
+                    decisions.Add(await Auxilia.Workflows.Actions.ActionGate.DecideAsync(ProbePush, cancellationToken));
+                }
+                return await _inner.ReadLineAsync(cancellationToken);
+            }
+        }
     }
 
     [Test]

@@ -29,7 +29,7 @@ public sealed class WorkflowRegistrationHandler(
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         var queueName = dispatcherSettings.Value.RegistrationQueueName;
-        await messageBus.DeclareQueueAsync(queueName, cancellationToken);
+        await WorkloadBusTopology.ExposeIngressQueueAsync(messageBus, queueName, cancellationToken);
         _subscription = await messageBus.SubscribeAsync<WorkflowRegistrationRequest>(
             queueName, HandleAsync, cancellationToken);
     }

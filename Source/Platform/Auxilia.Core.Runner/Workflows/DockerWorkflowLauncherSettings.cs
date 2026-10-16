@@ -8,31 +8,115 @@ namespace Auxilia.Core.Runner.Workflows;
 public sealed class DockerWorkflowLauncherSettings
 {
     /// <summary>
-    /// Name of the Docker network workflow containers are attached to.
-    /// Must be the same network that RabbitMQ is reachable on.
-    /// Leave null to run containers without explicit network assignment (uses Docker default).
+    /// The operator's egress network: where each run's egress gateway reaches the outside world
+    /// and the broker (<see cref="RabbitMqHost"/>), and — in "container-network" terminal mode —
+    /// where the Core reaches a run's terminal. Workflow containers are NEVER attached to it:
+    /// they sit on their run's own internal network behind the gateway. Null = Docker's default
+    /// bridge.
     /// </summary>
     public string? NetworkName { get; set; }
 
     /// <summary>
-    /// Name of an operator-created internal Docker network (<c>docker network create --internal</c>)
-    /// that still hosts RabbitMQ but has no internet egress. Containers whose effective network
-    /// policy is default-deny with no allowed endpoints are attached here instead of
-    /// <see cref="NetworkName"/>. Leave null to disable internal-network isolation.
+    /// Image of the per-run egress gateway (<c>Source/Platform/Auxilia.EgressGateway</c>): the
+    /// allowlisting, logging HTTP(S) proxy and platform relay every workflow container's
+    /// traffic leaves through.
     /// </summary>
-    public string? InternalNetworkName { get; set; }
+    public string EgressGatewayImage { get; set; } = "auxilia-egress-gateway:latest";
+
+    /// <summary>How long a run's egress gateway may take to listen before the launch fails.</summary>
+    public int EgressGatewayStartupSeconds { get; set; } = 120;
 
     /// <summary>
-    /// RabbitMQ hostname as seen from inside the Docker network
-    /// (e.g. the Testcontainer network alias "rabbitmq").
+    /// RabbitMQ hostname as seen from the egress network (e.g. the Testcontainer network alias
+    /// "rabbitmq", or host.docker.internal for a broker on the host). Workflow containers reach
+    /// it only through their gateway's relay.
     /// </summary>
     public string RabbitMqHost { get; set; } = "localhost";
 
+    /// <remarks>
+    /// There is deliberately no user name or password here: every workflow container connects
+    /// with its OWN per-instance broker identity, minted at dispatch (<see cref="WorkloadBusCredentials"/>).
+    /// </remarks>
     public int RabbitMqPort { get; set; } = 5672;
 
-    public string RabbitMqUserName { get; set; } = "guest";
+    /// <summary>
+    /// Process-count ceiling per workflow container (fork-bomb containment). Zero or negative
+    /// disables the limit.
+    /// </summary>
+    public long ContainerPidsLimit { get; set; } = 4096;
 
-    public string RabbitMqPassword { get; set; } = "guest";
+    /// <summary>
+    /// Memory ceiling per workflow container in MiB, so one run cannot starve the runner host.
+    /// Zero or negative disables the limit.
+    /// </summary>
+    public long ContainerMemoryMb { get; set; } = 8192;
+
+    /// <summary>
+    /// The Linux capabilities a workflow container keeps after <c>--cap-drop ALL</c>. Null = the
+    /// platform's minimal set (<see cref="DockerWorkflowLauncher.RetainedCapabilities"/>: workspace
+    /// ownership, the drop to the unprivileged agent user, signalling its own children). A host
+    /// with special workloads may widen it deliberately; it never grants privileged mode.
+    /// </summary>
+    public string[]? ContainerCapabilities { get; set; }
+
+    /// <summary>Lines of the workflow container's own output kept as the <c>container-log</c> run artifact.</summary>
+    public int ContainerLogLines { get; set; } = 20000;
+
+    /// <summary>CPU ceiling per workflow container (fractional cores). Zero or negative = unlimited.</summary>
+    public double ContainerCpus { get; set; }
+
+    /// <summary>
+    /// OCI runtime for workflow containers, e.g. <c>runsc</c> (gVisor) or <c>kata-runtime</c> for a
+    /// second kernel boundary around agent workloads. Null = the daemon default (runc). The
+    /// runtime must be installed on the Docker host.
+    /// </summary>
+    public string? ContainerRuntime { get; set; }
+
+    /// <summary>
+    /// Sandboxed OCI runtimes chosen automatically when <see cref="ContainerRuntime"/> is unset —
+    /// the first one the Docker daemon offers wraps every workflow container and companion in a
+    /// second kernel boundary (defaults in appsettings: gVisor <c>runsc</c>, Kata).
+    /// </summary>
+    public string[] PreferredSandboxRuntimes { get; set; } = [];
+
+    /// <summary>
+    /// Refuse every launch that would run on the shared host kernel: no configured runtime and
+    /// none of <see cref="PreferredSandboxRuntimes"/> offered by the daemon. Unset follows the
+    /// runner's posture — required as soon as <c>WorkflowDispatcher:TrustedSigningKeys</c> is
+    /// configured (production); only an explicit <c>false</c> opts a production runner out.
+    /// </summary>
+    public bool? RequireSandboxRuntime { get; set; }
+
+    /// <summary>
+    /// Platform service endpoints (<c>host:port</c>) no run may reach directly — e.g. the broker's
+    /// management API, the Core, a database — refused by every run's egress gateway even when an
+    /// allow entry names the host. The broker's AMQP endpoint is always protected.
+    /// </summary>
+    public string[] ProtectedEndpoints { get; set; } = [];
+
+    /// <summary>
+    /// Operator labels stamped on every container, network and volume this runner creates
+    /// (ownership, cost centre, a test session), so tooling selects exactly this runner's objects.
+    /// Platform labels win on a key collision.
+    /// </summary>
+    public Dictionary<string, string> ContainerLabels { get; set; } = [];
+
+    internal Dictionary<string, string> Stamp(Dictionary<string, string> platformLabels)
+    {
+        foreach (var (key, value) in ContainerLabels)
+            platformLabels.TryAdd(key, value);
+        return platformLabels;
+    }
+
+    /// <summary>Resolves the posture-following defaults against the dispatcher's trust configuration.</summary>
+    public void ApplyPosture(WorkflowDispatcherSettings dispatcher)
+        => RequireSandboxRuntime ??= dispatcher.TrustedSigningKeys.Count > 0;
+
+    /// <summary>
+    /// A daemon that cannot enforce egress (Windows containers) runs NOTHING unless this is set —
+    /// the operator's explicit acceptance that its allow-all runs leave the network unmediated.
+    /// </summary>
+    public bool AllowUnenforcedEgress { get; set; }
 
     /// <summary>
     /// URI of the Docker daemon socket used to launch workflow containers. Defaults to the
@@ -86,10 +170,11 @@ public sealed class DockerWorkflowLauncherSettings
     /// <summary>
     /// Adds <c>host.docker.internal:host-gateway</c> to every workflow container so the name
     /// resolves on PLAIN Linux Docker exactly like it does under Docker Desktop (where the
-    /// entry is redundant but harmless) — the dev stack's RabbitMQ/clone URLs rely on it.
-    /// Grants no connectivity by itself; the run's network policy still governs egress.
+    /// name resolves without it). Off by default — least privilege: enable it only on a plain
+    /// Linux dev host whose RabbitMQ/clone URLs point at the host. Grants no connectivity by
+    /// itself; the run's network policy still governs egress.
     /// </summary>
-    public bool MapHostGateway { get; set; } = true;
+    public bool MapHostGateway { get; set; }
 
     /// <summary>
     /// How a declared interactive terminal is made reachable for the Core's proxy.

@@ -63,9 +63,9 @@ public class WorkflowDispatchSystemTests
             stateTcs.Task,
             Task.Delay(TimeSpan.FromSeconds(90), CancellationToken.None));
 
-        Assert.That(completed, Is.EqualTo(stateTcs.Task),
-            "No WorkflowStateMessage received within 90 seconds. " +
-            "Check Runner logs and ensure the dummy-workflows image was built.");
+        if (completed != stateTcs.Task)
+            Assert.Fail("No WorkflowStateMessage received within 90 seconds.\n--- Runner log tail ---\n"
+                        + await WorkflowDispatchEnvironment.RunnerLogTailAsync());
 
         var stateMsg = stateTcs.Task.Result;
         Assert.That(stateMsg.State, Is.EqualTo(WorkflowState.Success),

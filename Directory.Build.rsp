@@ -1,0 +1,3 @@
+# CLI builds release their MSBuild worker processes when they finish: reused idle nodes piled up
+# to several GB across long build/test sessions and starved the machine of memory.
+-nodeReuse:false

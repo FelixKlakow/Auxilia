@@ -13,7 +13,7 @@ public sealed record WorkflowEventMessage(
     string WorkflowType,
     string WorkItemId,
     string? PayloadJson,
-    DateTimeOffset TimestampUtc)
+    DateTimeOffset TimestampUtc) : Auxilia.Messaging.IWorkloadScopedMessage
 {
     // Topic exchange (selective routing), same scheme as workflow.artifacts.
     public const string ExchangeName = "workflow.events";

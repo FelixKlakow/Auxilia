@@ -9,7 +9,7 @@ namespace Auxilia.Workflows.Messaging.Messages;
 public sealed record WorkflowSchemaPublished(
     string WorkflowType,
     WorkflowSchema Schema,
-    DateTimeOffset TimestampUtc)
+    DateTimeOffset TimestampUtc) : Auxilia.Messaging.IPlatformOnlyMessage
 {
     public const string ExchangeName = "workflow.schema-registrations";
 }

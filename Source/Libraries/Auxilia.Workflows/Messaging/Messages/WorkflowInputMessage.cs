@@ -9,4 +9,4 @@ namespace Auxilia.Workflows.Messaging.Messages;
 public sealed record WorkflowInputMessage(
     Guid WorkflowInstanceId,
     string PayloadJson,
-    DateTimeOffset TimestampUtc);
+    DateTimeOffset TimestampUtc) : Auxilia.Messaging.IPlatformOnlyMessage;

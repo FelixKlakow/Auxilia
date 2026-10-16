@@ -16,8 +16,9 @@ namespace Auxilia.SystemTestSuite.EndToEnd;
 /// the in-image driven-stub CLI through tmux — refinement check, plan, implementation — with
 /// turn completion arriving over the Claude Stop-hook contract. The story is the email
 /// work-items slot's launch-context mail; AI review and the operator gates are disabled by run
-/// inputs (no operator answers in a system test), push-mode=skip. Success must yield the
-/// implementation-plan and review-bundle outputs and the persisted agent chat.
+/// inputs (no operator answers in a system test), push-mode=auto. Success must yield the
+/// implementation-plan and review-bundle outputs, the persisted agent chat, and the pushed
+/// branch on the authenticated remote — reached only through the SDK's push gateway.
 /// Cost rule: never real AI in system tests — the stub CLI stands in for the author.
 /// </summary>
 [TestFixture]
@@ -77,8 +78,8 @@ public sealed class ImplementationWorkflowSystemTests
         var connector = (await connectorResp.Content.ReadFromJsonAsync<Connector>(cancellationToken))!;
 
         // 2. Dispatch the run. The context carries both the workflow's inputs (work-item-id +
-        //    step toggles: no AI review, no operator gates, no push — nobody answers gates in a
-        //    system test) and the email work-items slot's story fields (the same
+        //    step toggles: no AI review, no operator gates — nobody answers gates in a system
+        //    test — and an automatic push) and the email work-items slot's story fields (the same
         //    WORKFLOW_CONTEXT__* shape a mailbox trigger would deliver). The author binds the
         //    real claude-code-cli provider pointed at the in-image DRIVEN stub with a fake
         //    account token (never a real credential), so ClaudeInteractiveLogin writes the hook
@@ -97,7 +98,7 @@ public sealed class ImplementationWorkflowSystemTests
                     ["ai-code-review"] = "false",
                     ["user-plan-gate"] = "false",
                     ["user-code-gate"] = "false",
-                    ["push-mode"] = "skip",
+                    ["push-mode"] = "auto",
                     ["gate-idle-compaction"] = "0",
                     // The email work-items slot reads the triggering mail from the launch context.
                     ["WorkItemId"] = StoryId,
@@ -198,6 +199,14 @@ public sealed class ImplementationWorkflowSystemTests
                 Has.Some.Contains("Implementation plan"),
                 "The stub's plan must be persisted as an assistant chat entry.");
         });
+
+        // 6. The workflow's push landed on the authenticated remote. The workspace never held
+        //    the credential (the clone is stripped, origin points at the loopback push gateway),
+        //    so the commit can only have travelled through the gateway's credentialed relay.
+        var remoteLog = await EndToEndEnvironment.GitServer.ExecAsync(
+            ["git", "--git-dir=/git/test.git", "log", "--all", "--format=%s"], cancellationToken);
+        Assert.That(remoteLog.Stdout, Does.Contain($"Implement {StoryId}"),
+            $"The implementation commit must reach the remote through the push gateway.\n{remoteLog.Stderr}");
     }
 
     /// <summary>
@@ -388,9 +397,44 @@ public sealed class ImplementationWorkflowSystemTests
             : string.Join("\n", statusEvents.Select(e =>
                 $"  {e.TimestampUtc:HH:mm:ss} {e.WorkflowInstanceId} {e.WorkflowType} {e.State} {e.ErrorMessage}"));
         var runnerLogs = await EndToEndEnvironment.LogTailAsync(EndToEndEnvironment.Runner);
+        var containerLogs = new System.Text.StringBuilder();
+        foreach (var instanceId in statusEvents
+                     .Where(e => e.State is "Running" or "Failed" or "Success")
+                     .Select(e => e.WorkflowInstanceId).Distinct())
+            containerLogs.Append(await ContainerLogTailAsync(instanceId));
         Assert.Fail(
             $"{message}\n" +
             $"Observed status events:\n{observed}\n\n" +
+            $"--- Workflow container logs (tail) ---\n{containerLogs}\n" +
             $"--- Runner logs (tail) ---\n{runnerLogs}");
+    }
+
+    /// <summary>The run's persisted container-log artifact (written at container exit), tail only.</summary>
+    private static async Task<string> ContainerLogTailAsync(Guid instanceId)
+    {
+        try
+        {
+            for (var attempt = 0; attempt < 10; attempt++)
+            {
+                var page = await EndToEndEnvironment.CoreApiClient.GetFromJsonAsync<PagedResult<ArtifactDto>>(
+                    $"/api/artifacts?runId={instanceId}&artifactType=container-log");
+                if (page?.Items.FirstOrDefault() is { } artifact)
+                {
+                    // The payload lives in the RUNNER's store here (no shared payload root).
+                    var read = await EndToEndEnvironment.Runner.ExecAsync(
+                    [
+                        "sh", "-c",
+                        $"f=$(find / -xdev -name {artifact.Id:N} 2>/dev/null | head -n 1); [ -n \"$f\" ] && tail -n 120 \"$f\""
+                    ]);
+                    return $"[{instanceId}]\n{read.Stdout}\n";
+                }
+                await Task.Delay(1000);
+            }
+            return $"[{instanceId}] no container-log artifact\n";
+        }
+        catch (Exception ex)
+        {
+            return $"[{instanceId}] container log unavailable: {ex.Message}\n";
+        }
     }
 }

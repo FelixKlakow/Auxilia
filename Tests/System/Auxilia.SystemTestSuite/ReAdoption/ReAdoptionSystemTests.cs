@@ -119,8 +119,10 @@ public sealed class ReAdoptionSystemTests
 
         // Runner down; the workflow container dies while nobody is watching (SIGKILL → 137).
         await ReAdoptionEnvironment.Runner.StopAsync(cancellationToken);
+        // The run's egress gateway carries the instance label too — select the WORKFLOW container.
         var containerId = (await DockerAsync(
-            $"ps -q --filter label=auxilia.instance-id={instanceId:D}", cancellationToken)).Trim();
+            $"ps -q --filter label=auxilia.workflow=1 --filter label=auxilia.instance-id={instanceId:D}",
+            cancellationToken)).Trim();
         Assert.That(containerId, Is.Not.Empty, "the labeled workflow container must exist on the host");
         await DockerAsync($"kill {containerId}", cancellationToken);
 

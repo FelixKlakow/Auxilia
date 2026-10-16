@@ -111,6 +111,9 @@ public interface ICoreClient
     /// <summary>Queries the Core's centralized audit log (newest first); requires the audit-read permission.</summary>
     Task<PagedResult<AuditEntry>> QueryAuditAsync(AuditQuery query, CancellationToken ct = default);
 
+    /// <summary>Re-verifies the integrity of the whole audit trail; requires the audit-read permission.</summary>
+    Task<AuditIntegrityReport> VerifyAuditAsync(CancellationToken ct = default);
+
     // --- Connectors ---
     Task<Connector> CreateConnectorAsync(CreateConnector request, CancellationToken ct = default);
     /// <summary>Renames a connector and/or upserts settings key-by-key — the credential-refresh path.</summary>

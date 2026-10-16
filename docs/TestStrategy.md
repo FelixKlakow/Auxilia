@@ -112,11 +112,19 @@ are replaced with in-process abstractions / stubs.
 - Docker must be running on the host.
 - The latest image is always built from the local source before containers are started (no stale
   images). Locally, a `.prebuilt-images` marker in the repo root (or `AUXILIA_PREBUILT_IMAGES=1`)
-  skips the in-test builds — but only while the marker is FRESH: `TestImages` compares it against
-  the newest build-input write (`Source/`, `Tests/`, `Scripts/`, root files; `bin`/`obj`/
-  `core-data` excluded), auto-rebuilds every image when stale, and renews the marker on success.
+  skips the in-test builds — but only per image while it is FRESH: `TestImages` compares the
+  newest build-input write (`Source/`, `Tests/`, `Scripts/`, root files; `bin`/`obj`/
+  `core-data` excluded) against the later of the marker's own timestamp (a manual "everything is
+  prebuilt" touch) and that image's last successful in-test build, which the marker records per
+  tag. A stale image is rebuilt; a run rebuilding some images never vouches for the others.
   CI leaves both unset.
 - Tests are time-bounded (20–30 s per assertion).
+- The broker is the same `rabbitmq:4-management` image the dev stack runs — a broker-version
+  regression (RabbitMQ 4 refuses transient non-exclusive queues) must surface here, not on a dev box.
+- Every workflow-launching environment labels its runner's objects with the test process's
+  session id (`TestSession`, via `WorkflowLauncher:ContainerLabels`) and sweeps exactly that
+  label at teardown — a run whose containment the stopped runner never released (a test that
+  passes on the success event) leaves no container, gateway or run network behind.
 - NUnit `[Category("System")]` attribute on every fixture.
 
 **Execution:**

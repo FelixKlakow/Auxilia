@@ -30,7 +30,7 @@ public sealed class WorkflowAnnouncementHandler(
     public async Task StartAsync(CancellationToken ct = default)
     {
         var queueName = dispatcherSettings.Value.AnnouncementQueueName;
-        await messageBus.DeclareQueueAsync(queueName, ct);
+        await WorkloadBusTopology.ExposeIngressQueueAsync(messageBus, queueName, ct);
         _subscription = await messageBus.SubscribeAsync<WorkflowAnnouncementMessage>(
             queueName, HandleAsync, ct);
 

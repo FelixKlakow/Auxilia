@@ -11,4 +11,4 @@ public sealed record ResourceRequest(
     string Operation,
     string PayloadJson,
     Guid RequestId,
-    string? InstanceToken = null);
+    string? InstanceToken = null) : Auxilia.Messaging.IWorkloadScopedMessage;

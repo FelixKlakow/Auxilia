@@ -59,6 +59,7 @@ public class DockerWorkflowLauncherCopyInTests
             Options.Create(DefaultSettings),
             _mockFactory.Object,
             new FakePodHost(),
+            new FakeEgressHost(),
             NullLogger<DockerWorkflowLauncher>.Instance);
     }
 

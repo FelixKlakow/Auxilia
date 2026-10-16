@@ -96,6 +96,15 @@ public interface IMessageBusClient
         Func<T, CancellationToken, Task> handler,
         CancellationToken cancellationToken = default)
         => SubscribeToExchangeSharedAsync(exchangeName, queueName, handler, cancellationToken);
+
+    /// <summary>
+    ///     Binds an existing queue to an exchange under <paramref name="routingKey" /> — how the
+    ///     platform exposes a queue on a workload ingress exchange. The default is a no-op: in-memory
+    ///     fakes deliver queue publishes by queue name regardless of bindings.
+    /// </summary>
+    Task BindQueueAsync(
+        string queueName, string exchangeName, string routingKey, CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
 }
 
 /// <summary>

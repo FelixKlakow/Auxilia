@@ -30,7 +30,7 @@ public sealed record WorkflowStatusEvent(
     /// to end clients, which only ever talk to the Core's authenticated terminal proxy. Stamped
     /// on the transition after launch; consumers preserve the last non-null value.
     /// </summary>
-    string? TerminalEndpoint = null)
+    string? TerminalEndpoint = null) : Auxilia.Messaging.IPlatformOnlyMessage
 {
     // Topic exchange (selective routing) — a NEW name, because the retired fanout
     // "workflow.status-events" cannot be redeclared with a different type in place.

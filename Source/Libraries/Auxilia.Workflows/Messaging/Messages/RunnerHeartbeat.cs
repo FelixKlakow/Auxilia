@@ -12,7 +12,7 @@ public sealed record RunnerHeartbeat(
     string ServiceName,
     DateTimeOffset TimestampUtc,
     string? HostPlatform = null,
-    string? HostArchitecture = null)
+    string? HostArchitecture = null) : Auxilia.Messaging.IPlatformOnlyMessage
 {
     public const string ExchangeName = "platform.runner-heartbeats";
 }

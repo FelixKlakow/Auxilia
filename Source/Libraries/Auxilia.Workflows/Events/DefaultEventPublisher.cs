@@ -8,7 +8,8 @@ namespace Auxilia.Workflows.Events;
 /// Bus-backed event publisher: validates the event type is declared and not platform-reserved,
 /// caps the payload (large data belongs in the Artifact Store, referenced from the payload),
 /// and publishes to the <see cref="WorkflowEventMessage.ExchangeName"/> topic exchange keyed
-/// by event type.
+/// by event type (platform topology, declared by the runner — a workload identity cannot declare
+/// exchanges).
 /// </summary>
 public sealed class DefaultEventPublisher(
     IMessageBusClient messageBus,
@@ -17,8 +18,6 @@ public sealed class DefaultEventPublisher(
     IReadOnlyList<EventDescriptor> declaredEvents) : IEventPublisher
 {
     internal const int MaxPayloadBytes = 64 * 1024;
-
-    private bool _exchangeDeclared;
 
     public Task PublishAsync<TPayload>(
         string eventType, TPayload payload, string? workItemId = null, CancellationToken ct = default)
@@ -41,12 +40,6 @@ public sealed class DefaultEventPublisher(
             throw new InvalidOperationException(
                 $"Event '{eventType}' payload exceeds {MaxPayloadBytes / 1024} KB — persist the data " +
                 "as an artifact and reference it from the payload.");
-
-        if (!_exchangeDeclared)
-        {
-            await messageBus.DeclareTopicExchangeAsync(WorkflowEventMessage.ExchangeName, ct);
-            _exchangeDeclared = true;
-        }
 
         await messageBus.PublishToTopicExchangeAsync(WorkflowEventMessage.ExchangeName,
             WorkflowEventMessage.RoutingKeyFor(eventType),

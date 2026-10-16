@@ -25,6 +25,17 @@ public sealed record PluginManifest(
     /// </summary>
     public IReadOnlyList<string>? RequiredTools { get; init; }
 
+    /// <summary>
+    /// Network endpoints this provider calls from INSIDE the run container (same syntax as a
+    /// workflow's declared endpoints: <c>host</c>, <c>host:port</c>, <c>*.suffix</c>, and
+    /// <c>tcp://host:port</c> for raw TCP). The runner adds them to the egress of every run that
+    /// binds the provider — the provider's own knowledge, so no platform code knows a vendor's
+    /// hosts. An entry may template over the provider's own NON-secret settings
+    /// (<c>tcp://{SmtpHost}:{SmtpPort}</c>): the runner expands it per binding, so a configurable
+    /// server is reachable exactly as configured.
+    /// </summary>
+    public IReadOnlyList<string>? NetworkEndpoints { get; init; }
+
     /// <summary>One plain-language sentence describing what the provider does, shown to admins and configurators.</summary>
     public string? Description { get; init; }
 

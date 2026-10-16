@@ -11,6 +11,15 @@ console) would otherwise run on the author's credential — the client environme
 Failure messages go through `DescribeForLog`, which redacts every `-e` value. `CodingAgent/CliProcess.cs`
 (`ICliProcessFactory`/`ICliProcess`) is the child-process seam the headless CLI slot agents run behind.
 
+Containment: `ProcessCliProcessFactory` and `TmuxSessionHost` start every agent process through
+`AgentSandbox.Confine` (unprivileged `auxilia-agent` user, no platform secret) and hold an agent-session
+lease for the process's lifetime (the last lease to end kills every leftover agent-user process).
+`CodingAgent/AgentSessionActionApprover.cs` is a session's per-action policy at `ActionGate`: each action
+kind maps to a policy (agents map `git.push` → push policy, everything else → permission mode);
+auto-allow allows and records, ask-operator asks the operator with the action's concrete details, and
+denies when the session has no operator. Slots register it for the session's lifetime; tool-permission
+decisions never classify command strings as pushes (a reworded command must not change a decision).
+
 ## Architecture
 
 Named AI slots are registered as keyed services by the provider's `ISlotHandler`:

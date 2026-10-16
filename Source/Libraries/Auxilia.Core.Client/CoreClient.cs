@@ -406,6 +406,9 @@ public sealed class CoreClient : ICoreClient
 
     // --- Audit ---
 
+    public Task<AuditIntegrityReport> VerifyAuditAsync(CancellationToken ct = default)
+        => GetAsync<AuditIntegrityReport>("/api/audit/integrity", ct);
+
     public Task<PagedResult<AuditEntry>> QueryAuditAsync(AuditQuery query, CancellationToken ct = default)
         => GetAsync<PagedResult<AuditEntry>>("/api/audit?" + Query(
             ("actor", query.Actor),

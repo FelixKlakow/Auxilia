@@ -4,10 +4,11 @@ namespace Auxilia.SystemTestSuite;
 
 /// <summary>
 /// Builds the system-test Docker images. The <c>.prebuilt-images</c> marker in the repo root (or
-/// <c>AUXILIA_PREBUILT_IMAGES=1</c>) opts out of in-test builds — but only while the images are
-/// FRESH: any build input written after the marker forces an automatic rebuild of every image,
-/// and each successful rebuild renews the marker. CI leaves both unset so images are always
-/// rebuilt from local source.
+/// <c>AUXILIA_PREBUILT_IMAGES=1</c>) opts out of in-test builds — but only while an image is
+/// FRESH, judged PER IMAGE: an image is skipped only when no build input was written after both
+/// the marker's own timestamp (a human's "everything is prebuilt" touch) and that image's last
+/// successful in-test build, which the marker records per tag. A run that rebuilds a few images
+/// therefore never vouches for the others. CI leaves both unset so images are always rebuilt.
 /// </summary>
 internal static class TestImages
 {
@@ -18,15 +19,26 @@ internal static class TestImages
     private static readonly string[] ExcludedDirectories =
         ["bin", "obj", "TestResults", "node_modules", ".git", ".vs", "core-data"];
 
-    // One decision per test process: every image shares the same build-input cutoff, and the
-    // marker renewal after the first rebuilt image must not flip later images back to skipping.
-    private static readonly Lazy<bool> SkipBuilds = new(DecideSkip);
+    // One snapshot per test process: the newest build input and the marker's stamps as they were
+    // when the first image was considered — stamps written during this process change nothing.
+    private static readonly Lazy<Freshness> Snapshot = new(TakeSnapshot);
+    private static readonly object StampGate = new();
+
+    private sealed record Freshness(
+        bool OptedOut, DateTime MarkerTime, IReadOnlyDictionary<string, DateTime> Stamps,
+        string NewestPath, DateTime NewestTime);
+
+    /// <summary>The per-run egress gateway every launched workflow container sits behind.</summary>
+    internal const string EgressGatewayImageName = "auxilia-egress-gateway:system-test";
+
+    internal static Task BuildEgressGatewayAsync()
+        => BuildImageAsync(EgressGatewayImageName, "Source/Platform/Auxilia.EgressGateway/Dockerfile");
 
     internal static async Task BuildImageAsync(string tag, string dockerfilePath)
     {
         // Local opt-out: docker builds spawned from the test process can hang on a wedged
         // Docker Desktop daemon, so a marker of prebuilt-and-still-fresh images skips them.
-        if (SkipBuilds.Value)
+        if (IsFresh(tag))
         {
             await Console.Out.WriteLineAsync($"Prebuilt-images opt-out active — skipping docker build for {tag}.");
             return;
@@ -55,29 +67,71 @@ internal static class TestImages
             throw;
         }
 
-        try
-        {
-            if (File.Exists(MarkerPath))
-                File.SetLastWriteTimeUtc(MarkerPath, DateTime.UtcNow);
-        }
-        catch (IOException) { /* a concurrent failure deleted the marker — that wins */ }
+        RecordBuilt(tag);
     }
 
-    private static bool DecideSkip()
+    private static bool IsFresh(string tag)
     {
-        var hasMarker = File.Exists(MarkerPath);
-        if (!hasMarker)
-            return Environment.GetEnvironmentVariable("AUXILIA_PREBUILT_IMAGES") == "1";
-
-        var markerTime = File.GetLastWriteTimeUtc(MarkerPath);
-        var (newestPath, newestTime) = NewestBuildInputWrite();
-        if (newestTime <= markerTime)
+        var snapshot = Snapshot.Value;
+        if (snapshot.OptedOut)
             return true;
-
+        if (snapshot.MarkerTime == DateTime.MinValue)
+            return false;
+        var builtAt = snapshot.Stamps.TryGetValue(tag, out var stamp) && stamp > snapshot.MarkerTime
+            ? stamp
+            : snapshot.MarkerTime;
+        if (snapshot.NewestTime <= builtAt)
+            return true;
         Console.WriteLine(
-            $"Prebuilt-images marker is STALE ({Path.GetRelativePath(RepoPaths.Root, newestPath)} " +
-            $"written {newestTime:u}, marker {markerTime:u}) — rebuilding the system-test images.");
+            $"Image {tag} is STALE ({Path.GetRelativePath(RepoPaths.Root, snapshot.NewestPath)} " +
+            $"written {snapshot.NewestTime:u}, image built {builtAt:u}) — rebuilding it.");
         return false;
+    }
+
+    private static Freshness TakeSnapshot()
+    {
+        if (!File.Exists(MarkerPath))
+            return new Freshness(
+                Environment.GetEnvironmentVariable("AUXILIA_PREBUILT_IMAGES") == "1",
+                DateTime.MinValue, new Dictionary<string, DateTime>(), MarkerPath, DateTime.MinValue);
+        var (newestPath, newestTime) = NewestBuildInputWrite();
+        return new Freshness(false, File.GetLastWriteTimeUtc(MarkerPath), ReadStamps(), newestPath, newestTime);
+    }
+
+    /// <summary>The marker's per-image stamps: one <c>tag ticks</c> line per image built in-test.</summary>
+    private static Dictionary<string, DateTime> ReadStamps()
+    {
+        var stamps = new Dictionary<string, DateTime>(StringComparer.Ordinal);
+        try
+        {
+            foreach (var line in File.ReadAllLines(MarkerPath))
+                if (line.Split(' ', 2) is [var tag, var ticks] && long.TryParse(ticks, out var value))
+                    stamps[tag] = new DateTime(value, DateTimeKind.Utc);
+        }
+        catch (IOException) { /* concurrently deleted — no stamps */ }
+        return stamps;
+    }
+
+    /// <summary>
+    /// Records <paramref name="tag"/> as freshly built. The marker's own timestamp is preserved —
+    /// it stays the human's "everything is prebuilt" claim, which a partial rebuild must not renew.
+    /// </summary>
+    private static void RecordBuilt(string tag)
+    {
+        lock (StampGate)
+        {
+            try
+            {
+                if (!File.Exists(MarkerPath))
+                    return;
+                var markerTime = File.GetLastWriteTimeUtc(MarkerPath);
+                var stamps = ReadStamps();
+                stamps[tag] = DateTime.UtcNow;
+                File.WriteAllLines(MarkerPath, stamps.Select(kv => $"{kv.Key} {kv.Value.Ticks}"));
+                File.SetLastWriteTimeUtc(MarkerPath, markerTime);
+            }
+            catch (IOException) { /* a concurrent failure deleted the marker — that wins */ }
+        }
     }
 
     private static (string Path, DateTime Time) NewestBuildInputWrite()

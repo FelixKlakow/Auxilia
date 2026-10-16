@@ -103,7 +103,7 @@ public class DefaultSignalEmitterTests
     }
 
     [Test]
-    public async Task WorkflowBuilder_Run_DeclaresWorkflowSignalsQueue()
+    public async Task WorkflowBuilder_Run_DeclaresOnlyItsOwnQueues()
     {
         var bus = new RecordingBus();
         var mockExit = new Mock<IProcessExitService>();
@@ -125,7 +125,13 @@ public class DefaultSignalEmitterTests
 
         await builder.Run([], context);
 
-        Assert.That(bus.DeclaredQueues, Does.Contain("workflow.signals"));
+        // A workload identity may declare only its own per-instance queues: the signals queue
+        // (and every other platform queue/exchange) is runner topology.
+        Assert.That(bus.DeclaredQueues, Does.Not.Contain("workflow.signals"));
+        Assert.That(bus.DeclaredQueues, Is.Not.Empty);
+        Assert.That(bus.DeclaredQueues.All(q => q.StartsWith("workflow-response-") || q.StartsWith("workflow-cancel-")
+                                                || q.StartsWith("workflow-drain-")),
+            Is.True, string.Join(", ", bus.DeclaredQueues));
     }
 
     // ── Fakes ─────────────────────────────────────────────────────────────────

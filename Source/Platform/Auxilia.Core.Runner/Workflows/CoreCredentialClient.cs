@@ -10,6 +10,10 @@ public interface ICoreCredentialClient
 {
     Task<ResolvedSlotCredential?> ResolveAsync(
         Guid coreRunId, string resolutionToken, string slotName, string publicKey, CancellationToken ct);
+
+    /// <summary>Non-secret setting values of every binding of a provider in the run, or null when unavailable.</summary>
+    Task<ResolvedSlotSettings?> ResolveSettingValuesAsync(
+        Guid coreRunId, string resolutionToken, string providerType, IReadOnlyList<string> keys, CancellationToken ct);
 }
 
 /// <summary>
@@ -53,6 +57,40 @@ public sealed class CoreCredentialClient(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Core slot resolution errored. RunId={RunId} Slot={Slot}", coreRunId, slotName);
+            return null;
+        }
+    }
+
+    public async Task<ResolvedSlotSettings?> ResolveSettingValuesAsync(
+        Guid coreRunId, string resolutionToken, string providerType, IReadOnlyList<string> keys, CancellationToken ct)
+    {
+        var baseAddress = settings.Value.CoreApiBaseAddress;
+        if (string.IsNullOrWhiteSpace(baseAddress))
+            return null;
+
+        var http = httpClientFactory.CreateClient("core-api");
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post, $"{baseAddress.TrimEnd('/')}/internal/runs/{coreRunId}/slot-settings")
+        {
+            Content = JsonContent.Create(new ResolveSlotSettingsRequest(providerType, keys))
+        };
+        request.Headers.Add("X-Resolution-Token", resolutionToken);
+        try
+        {
+            using var response = await http.SendAsync(request, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogWarning(
+                    "Core slot-settings resolution failed. RunId={RunId} Provider={Provider} Status={Status}",
+                    coreRunId, providerType, (int)response.StatusCode);
+                return null;
+            }
+            return await response.Content.ReadFromJsonAsync<ResolvedSlotSettings>(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Core slot-settings resolution errored. RunId={RunId} Provider={Provider}",
+                coreRunId, providerType);
             return null;
         }
     }

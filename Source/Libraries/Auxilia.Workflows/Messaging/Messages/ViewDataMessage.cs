@@ -9,7 +9,7 @@ public sealed record ViewDataMessage(
     Guid WorkflowInstanceId,
     string ViewName,
     long Sequence,
-    string PayloadJson)
+    string PayloadJson) : Auxilia.Messaging.IWorkloadScopedMessage
 {
     // Topic exchange (selective routing) — a NEW name, because the retired fanout
     // "workflow.view-data" cannot be redeclared with a different type in place.

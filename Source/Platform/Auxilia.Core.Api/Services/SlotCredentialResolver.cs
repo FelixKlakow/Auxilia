@@ -177,6 +177,47 @@ public sealed class SlotCredentialResolver(
         return (true, null, new ResolvedSlotCredential(providerType, encrypted!, expiresUtc));
     }
 
+    /// <summary>
+    /// The plain values of <paramref name="keys"/> for every binding of
+    /// <paramref name="providerType"/> in the run — non-secret settings only (catalog-declared
+    /// Secret keys are never returned) — for runner subsystems that interpret a plugin's declared
+    /// templates, such as its egress endpoints. Authorized by the run-scoped token, audited.
+    /// </summary>
+    public async Task<(bool Success, string? Error, ResolvedSlotSettings? Settings)> ResolveSettingValuesAsync(
+        Guid runId, string resolutionToken, string providerType, IReadOnlyList<string> keys, CancellationToken ct)
+    {
+        var (record, authorizationError) = await AuthorizedStashAsync(runId, resolutionToken, ct);
+        if (record is null)
+            return (false, authorizationError, null);
+
+        var result = new List<IReadOnlyDictionary<string, string>>();
+        foreach (var binding in JsonSerializer.Deserialize<List<SlotBinding>>(record.SlotBindingsJson) ?? [])
+        {
+            if (binding.DelegatedResource is not null)
+                continue;
+            var bindingType = binding.ProviderType;
+            if (string.IsNullOrEmpty(bindingType) && binding.ConnectorId is { } typedBy)
+                bindingType = (await connectors.GetAsync(typedBy, ct))?.ProviderType;
+            if (!string.Equals(bindingType, providerType, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var secretKeys = await bindingSecrets.SecretKeysAsync(binding, ct);
+            IReadOnlyDictionary<string, string>? settings = binding.ConnectorId is { } connectorId
+                ? await connectors.ResolveSettingsAsync(connectorId, ct)
+                : binding.Settings;
+            var values = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var key in keys.Distinct(StringComparer.Ordinal))
+                if (!secretKeys.Contains(key)
+                    && settings?.TryGetValue(key, out var value) == true && value is { Length: > 0 })
+                    values[key] = value;
+            result.Add(values);
+        }
+
+        await audit.AppendAsync("core-api", "workflow.slot-settings.resolved", runId.ToString(),
+            $"{providerType}: {string.Join(",", keys)}", ct: ct);
+        return (true, null, new ResolvedSlotSettings(result));
+    }
+
     private async Task<(bool Success, string? Error, ResolvedSlotCredential? Credential)> RejectAsync(
         Guid runId, string reason, string error, CancellationToken ct)
     {

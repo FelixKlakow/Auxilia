@@ -27,6 +27,16 @@ public sealed class FakeCoreCredentialClient : ICoreCredentialClient
         return Task.FromResult(OnResolve?.Invoke(slotName, publicKey));
     }
 
+    /// <summary>Non-secret setting values per provider type, served to endpoint-template expansion.</summary>
+    public Dictionary<string, IReadOnlyList<IReadOnlyDictionary<string, string>>> SettingValues { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    public Task<ResolvedSlotSettings?> ResolveSettingValuesAsync(
+        Guid coreRunId, string resolutionToken, string providerType, IReadOnlyList<string> keys, CancellationToken ct)
+        => Task.FromResult(SettingValues.TryGetValue(providerType, out var bindings)
+            ? new ResolvedSlotSettings(bindings)
+            : null);
+
     /// <summary>
     /// Configures the fake to resolve every slot to <paramref name="providerType"/> with
     /// <paramref name="settings"/> RSA-encrypted (OAEP-SHA256) for the instance's public key —

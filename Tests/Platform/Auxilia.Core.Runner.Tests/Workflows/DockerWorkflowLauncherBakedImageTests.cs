@@ -95,21 +95,17 @@ public class DockerWorkflowLauncherBakedImageTests
     }
 
     [Test]
-    public void BuildBakedImageContainerParameters_DefaultDenyWithNoEndpoints_AttachesInternalNetwork()
+    public void BuildBakedImageContainerParameters_WithAnEgressPlan_JoinsOnlyTheRunNetwork()
     {
-        var settings = new DockerWorkflowLauncherSettings
-        {
-            NetworkName = "auxilia-net",
-            InternalNetworkName = "auxilia-internal"
-        };
+        var id = Guid.NewGuid();
         var request = MakeBakedRequest() with
         {
-            NetworkPolicy = new EffectiveNetworkPolicy(NetworkPolicyMode.DefaultDeny, [])
+            Egress = new Auxilia.Core.Runner.Workflows.Egress.EgressPlan(id, "", [], null)
         };
 
-        var p = DockerWorkflowLauncher.BuildBakedImageContainerParameters(request, settings);
+        var p = DockerWorkflowLauncher.BuildBakedImageContainerParameters(request, DefaultSettings);
 
-        Assert.That(p.NetworkingConfig!.EndpointsConfig.Keys, Is.EqualTo(new[] { "auxilia-internal" }));
+        Assert.That(p.NetworkingConfig!.EndpointsConfig.Keys, Is.EqualTo(new[] { $"auxilia-run-{id:N}" }));
     }
 
     [Test]
@@ -147,6 +143,7 @@ public class DockerWorkflowLauncherBakedImageTests
             Options.Create(DefaultSettings),
             mockFactory.Object,
             new FakePodHost(),
+            new FakeEgressHost(),
             NullLogger<DockerWorkflowLauncher>.Instance);
 
         // Create a stub plugin file in a temp dir

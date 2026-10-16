@@ -7,7 +7,15 @@
     "Auxilia.Workflows.AiAgent.CodingAgent.ICodingAgent"
   ],
   "Category": "coding-agent",
-  "RequiredTools": ["copilot"],
+  "NetworkEndpoints": [
+    "api.githubcopilot.com",
+    "*.githubcopilot.com",
+    "api.github.com",
+    "github.com"
+  ],
+  "RequiredTools": [
+    "copilot"
+  ],
   "Description": "Runs the GitHub Copilot CLI as the coding agent of a workflow; the token reaches the agent container just-in-time.",
   "Settings": [
     {
@@ -16,7 +24,7 @@
       "Kind": "Secret",
       "Required": true,
       "ConnectFlow": "github",
-      "HelpText": "A GitHub token with Copilot access. Connect\u2026 signs you in through the browser; a pasted token works too. Stored encrypted and never displayed back."
+      "HelpText": "A GitHub token with Copilot access. Connect… signs you in through the browser; a pasted token works too. Stored encrypted and never displayed back."
     },
     {
       "Key": "Model",

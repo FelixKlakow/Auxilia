@@ -7,7 +7,7 @@ public record WorkflowConfigurationResponse(
     bool Success,
     string? ErrorMessage,
     IReadOnlyDictionary<string, EncryptedSlotConfiguration> Slots,
-    IReadOnlyDictionary<string, ISignalHandlerDescriptor> SignalHandlers)
+    IReadOnlyDictionary<string, ISignalHandlerDescriptor> SignalHandlers) : Auxilia.Messaging.IPlatformOnlyMessage
 {
     [JsonConstructor]
     public WorkflowConfigurationResponse(

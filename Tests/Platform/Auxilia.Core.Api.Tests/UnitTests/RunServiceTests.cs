@@ -28,7 +28,8 @@ public sealed class RunServiceTests
     private AesGcmSettingsProtector _protector = null!;
 
     private (RunService Service, FakeMessageBusClient Bus, RunConfigurationService Configs,
-        WorkflowTypeRegistryService Registry, RunnerLivenessTracker Liveness) New(bool allowDispatchWithoutRunner = true)
+        WorkflowTypeRegistryService Registry, RunnerLivenessTracker Liveness) New(
+        bool allowDispatchWithoutRunner = true, bool restrictedDefaultAccess = false)
     {
         var bus = new FakeMessageBusClient();
         var protector = _protector = new AesGcmSettingsProtector(RandomNumberGenerator.GetBytes(32));
@@ -86,7 +87,7 @@ public sealed class RunServiceTests
             new AccessGrantEvaluator(
                 new InMemoryDataAccess<PrincipalRecord>(), new InMemoryDataAccess<GroupMembershipRecord>()),
             TestResourceAccess.EmptyPrincipalDirectory(),
-            TestResourceAccess.Open,
+            restrictedDefaultAccess ? TestResourceAccess.Restricted : TestResourceAccess.Open,
             liveness,
             new EnvironmentBaseService(
                 new InMemoryDataAccess<EnvironmentBaseRecord>(),
@@ -409,6 +410,21 @@ public sealed class RunServiceTests
             "a personal repository admits only its owner and granted subjects — like connectors");
         Assert.That(ex, Is.InstanceOf<RunAccessDeniedException>(),
             "an access denial maps to 403 like every other dispatch gate, never to 400");
+    }
+
+    [Test]
+    public async Task RunInline_AnUncataloguedProvider_IsGatedLikeOneWithoutGrants()
+    {
+        var (service, _, _, registry, _) = New(restrictedDefaultAccess: true);
+        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+
+        var ex = Assert.ThrowsAsync<RunAccessDeniedException>(() => service.RunInlineAsync(
+            new RunRequest("wt", SlotBindings:
+                [new SlotBinding("s", "runner-installed-only", Settings: new Dictionary<string, string>())]),
+            triggeredBy: Guid.NewGuid(), CancellationToken.None));
+
+        Assert.That(ex!.Message, Does.Contain("runner-installed-only").And.Contain("restricted"),
+            "naming a provider the catalog does not know must not bypass the default-deny access rule");
     }
 
     [Test]

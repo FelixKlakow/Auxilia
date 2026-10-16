@@ -20,15 +20,25 @@ public sealed class ClaudeInteractiveLogin(
 {
     private readonly TimeProvider _time = time ?? TimeProvider.System;
 
-    /// <summary>The CLI's home; overridable for tests.</summary>
-    public string HomeDirectory { get; init; } =
-        Environment.GetEnvironmentVariable("HOME")
-        ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    /// <summary>The CLI's home — the agent's, where the CLI runs sandboxed; overridable for tests.</summary>
+    public string HomeDirectory { get; init; } = Auxilia.Workflows.Sandbox.AgentSandbox.AgentHome;
 
     public async Task PrepareAsync(string workspaceDirectory, CancellationToken cancellationToken)
     {
         await WriteHookSettingsAsync(cancellationToken);
+        await WriteCredentialsAsync(workspaceDirectory, cancellationToken);
+        HandOver();
+    }
 
+    /// <summary>The prepared CLI state belongs to the identity the CLI runs as.</summary>
+    private void HandOver()
+    {
+        Auxilia.Workflows.Sandbox.AgentSandbox.GrantToAgent(Path.Combine(HomeDirectory, ".claude"));
+        Auxilia.Workflows.Sandbox.AgentSandbox.GrantToAgent(Path.Combine(HomeDirectory, ".claude.json"));
+    }
+
+    private async Task WriteCredentialsAsync(string workspaceDirectory, CancellationToken cancellationToken)
+    {
         if (credentials.OAuthToken is not { Length: > 0 } token)
             return;
 
@@ -92,6 +102,7 @@ public sealed class ClaudeInteractiveLogin(
             : new JsonObject();
         settings["enableAllProjectMcpServers"] = true;
         await File.WriteAllTextAsync(settingsPath, settings.ToJsonString(), cancellationToken);
+        HandOver();
     }
 
     /// <summary>

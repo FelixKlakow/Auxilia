@@ -11,9 +11,13 @@ public sealed class DefaultWorkflowRunContext : IWorkflowRunContext, IAsyncDispo
     public DefaultWorkflowRunContext(string[] args)
     {
         var uri = ParseBrokerUri(args);
-        var user = uri.UserInfo.Split(':') is [var u, ..] ? u : "guest";
-        var pass = uri.UserInfo.Split(':') is [_, var p] ? p : "guest";
-        _clientTask = RabbitMqClient.CreateAsync(uri.Host, uri.Port == -1 ? 5672 : uri.Port, user, pass);
+        var user = uri.UserInfo.Split(':') is [var u, ..] ? Uri.UnescapeDataString(u) : "guest";
+        var pass = uri.UserInfo.Split(':') is [_, var p] ? Uri.UnescapeDataString(p) : "guest";
+        // A platform-launched instance holds its OWN broker identity, which may publish only
+        // through the platform's ingress exchange — never the default exchange.
+        var ingress = System.Environment.GetEnvironmentVariable(WorkflowEnvironmentVariables.BusIngressExchange);
+        _clientTask = RabbitMqClient.CreateAsync(
+            uri.Host, uri.Port == -1 ? 5672 : uri.Port, user, pass, queuePublishExchange: ingress);
         ExitService = new DefaultProcessExitService();
         Logger = NullLogger.Instance;
     }
@@ -38,7 +42,8 @@ public sealed class DefaultWorkflowRunContext : IWorkflowRunContext, IAsyncDispo
             var port = System.Environment.GetEnvironmentVariable("RabbitMq__Port") ?? "5672";
             var user = System.Environment.GetEnvironmentVariable("RabbitMq__UserName") ?? "guest";
             var pass = System.Environment.GetEnvironmentVariable("RabbitMq__Password") ?? "guest";
-            return new Uri($"amqp://{user}:{pass}@{host}:{port}");
+            return new Uri(
+                $"amqp://{Uri.EscapeDataString(user)}:{Uri.EscapeDataString(pass)}@{host}:{port}");
         }
 
         // 3. Local default.

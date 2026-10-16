@@ -37,7 +37,7 @@ dotnet test <Project>.Tests/ --filter "FullyQualifiedName~<TestName>"  # single 
 
 ## Layout
 
-`Source/Platform` (the deployables: Core.Api, Core.Runner, AdminConsole, TriggerHost) ·
+`Source/Platform` (the deployables: Core.Api, Core.Runner, AdminConsole, TriggerHost, and the runner-managed per-run EgressGateway image) ·
 `Source/Libraries` (contracts, clients, workflow SDK, messaging, data, governance) ·
 `Source/Slots` (provider plugins) · `Source/Workflows` (the shipped workflow images) ·
 `Tests/{Platform,Libraries,Slots,Workflows}` (mirroring test projects) · `Tests/System`
@@ -47,7 +47,7 @@ dotnet test <Project>.Tests/ --filter "FullyQualifiedName~<TestName>"  # single 
 
 Work items from external task sources trigger **signed, stateful workflow programs** that run in isolated containers and communicate **exclusively via the message bus** (`IMessageBusClient`). AI agents have full UI parity via an MCP server. The platform is three deployables plus a client-library family, sharing `Auxilia.Core.Contracts`/`Auxilia.Core.Client`: **`Auxilia.Core.Api`** (control plane — REST + authenticated MCP, identity/RBAC/groups, connector admin, audit, Run API, live-view + artifact SSE, failover monitor, workflow-type registry), **`Auxilia.Core.Runner`** (execution plane — container launch, egress policy, JIT credential delivery), and **`Auxilia.AdminConsole`** (operator/admin Blazor UI, a pure Core client with no database). The **workflow domain is a library**: `Auxilia.Workflows.Client` (authoring, interval triggers, artifact chaining over the Core's filtered artifact SSE — never the bus), hostable in any app; `Source/Platform/Auxilia.TriggerHost` is the bundled always-on reference host (+ email intake). The Core services each own their own database; **secrets live only in the Core**. (The `Auxilia.BackendService` monolith and the `Auxilia.WorkflowStudio` deployable have both been retired — see `docs/backend-service-retirement-plan.md` and the backlog's Studio→library program.)
 
-**Credential/trust model** (details in `docs/ARCHITECTURE.md`): a workflow is **signature-trusted** and receives **scoped** credentials **just-in-time, per slot, encrypted for that instance**, decrypted and used inside the container under a default-deny **egress policy**. The protection is *who gets a credential and when*, not hiding it from the workflow. (Exception: the initial repo clone is done Core-side and its token stripped before the workspace is mounted.)
+**Credential/trust model** (details in `docs/ARCHITECTURE.md`): a workflow is **signature-trusted** and receives **scoped** credentials **just-in-time, per slot, encrypted for that instance**, decrypted and used inside the container under a default-deny **egress policy**. The protection is *who gets a credential and when*, not hiding it from the workflow. (Exception: the initial repo clone is done Core-side and its token stripped before the workspace is mounted.) A signature vouches for the program, not for an agent it hosts: **workload containment** (ARCHITECTURE §7) holds regardless — a per-run broker identity, a per-run egress gateway as the only route out, a confined container, agent processes sandboxed away from the SDK's secrets, pushes gated per action, and a central tamper-evident audit.
 
 ## Rules
 

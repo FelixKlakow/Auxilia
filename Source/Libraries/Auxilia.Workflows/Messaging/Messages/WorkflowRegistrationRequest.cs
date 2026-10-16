@@ -5,4 +5,4 @@ public record WorkflowRegistrationRequest(
     WorkflowManifest Manifest,
     string PublicKey,
     string ResponseTopic,
-    string? InstanceToken = null);
+    string? InstanceToken = null) : Auxilia.Messaging.IWorkloadScopedMessage;

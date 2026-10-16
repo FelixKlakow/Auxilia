@@ -13,3 +13,13 @@ public sealed record ResolveSlotRequest(string SlotName, string PublicKey);
 /// runner only ever relays this ciphertext to the workflow.
 /// </summary>
 public sealed record ResolvedSlotCredential(string ProviderType, string EncryptedSettings, DateTimeOffset ExpiresUtc);
+
+/// <summary>
+/// Runner → Core request for the plain values of NON-SECRET settings of every binding of one
+/// provider in a run: the keys its signed plugin manifest's endpoint templates reference
+/// (<c>tcp://{Host}:{Port}</c>). Secret-kind settings are never returned.
+/// </summary>
+public sealed record ResolveSlotSettingsRequest(string ProviderType, IReadOnlyList<string> Keys);
+
+/// <summary>The requested non-secret values — one map per binding of the provider in the run.</summary>
+public sealed record ResolvedSlotSettings(IReadOnlyList<IReadOnlyDictionary<string, string>> Bindings);

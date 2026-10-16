@@ -95,8 +95,6 @@ public class WorkflowDispatchPipelineComponentTests
                     s.NetworkName    = "test-net";
                     s.RabbitMqHost   = "rabbitmq";
                     s.RabbitMqPort   = 5672;
-                    s.RabbitMqUserName = "guest";
-                    s.RabbitMqPassword = "guest";
                 });
 
                 // Runner profile — allow everything (no env requirement failures)
@@ -145,6 +143,11 @@ public class WorkflowDispatchPipelineComponentTests
                 services.AddSingleton(TestStores.NewHostPlatformProbe());
                 services.AddSingleton<Auxilia.Core.Runner.Workflows.Pods.IPodHost>(new Auxilia.Core.Runner.Tests.Workflows.FakePodHost());
                 services.AddSingleton<Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry>();
+                services.AddSingleton<Auxilia.Messaging.IBrokerIdentityIssuer, FakeBrokerIdentityIssuer>();
+                services.AddSingleton<WorkloadBusCredentials>();
+                services.AddSingleton<Auxilia.Core.Runner.Workflows.Egress.IEgressHost, FakeEgressHost>();
+                services.AddSingleton<ArtifactPersister>();
+                services.AddSingleton<RunContainment>();
                 services.AddSingleton<WorkflowDispatcher>();
             })
             .Build();
@@ -196,10 +199,15 @@ public class WorkflowDispatchPipelineComponentTests
         await _bus.WaitForConditionAsync(() => _launcher.Calls.Count > 0, Timeout);
 
         var env = _launcher.Calls[0].EnvironmentVariables;
-        Assert.That(env["RabbitMq__Host"],     Is.EqualTo("rabbitmq"));
+        // The broker is reached ONLY through the run's egress gateway relay.
+        Assert.That(env["RabbitMq__Host"],     Is.EqualTo("egress"));
         Assert.That(env["RabbitMq__Port"],     Is.EqualTo("5672"));
-        Assert.That(env["RabbitMq__UserName"], Is.EqualTo("guest"));
-        Assert.That(env["RabbitMq__Password"], Is.EqualTo("guest"));
+        Assert.That(_launcher.Calls[0].Egress!.Forwards, Does.Contain("5672=rabbitmq:5672/amqp"));
+        // Never a platform account: the instance's own minted identity, ingress-confined.
+        Assert.That(env["RabbitMq__UserName"],
+            Is.EqualTo(Auxilia.Messaging.WorkloadBusIdentity.UserNameFor(Guid.Parse(env["Workflow__InstanceId"]))));
+        Assert.That(env["RabbitMq__Password"], Is.Not.Empty.And.Not.EqualTo("guest"));
+        Assert.That(env["RabbitMq__IngressExchange"], Is.EqualTo("workflow.ingress"));
     }
 
     [Test]

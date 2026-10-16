@@ -20,10 +20,8 @@ public sealed class CopilotConsoleBridge : IConsoleSessionEventSource, IConsoleS
     private Func<ConsoleSessionEvent, CancellationToken, Task>? _onEvent;
     private CancellationTokenSource? _lifetime;
 
-    /// <summary>The CLI's home; overridable for tests.</summary>
-    public string HomeDirectory { get; init; } =
-        Environment.GetEnvironmentVariable("HOME")
-        ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    /// <summary>The CLI's home — the agent's, where the CLI runs sandboxed; overridable for tests.</summary>
+    public string HomeDirectory { get; init; } = Auxilia.Workflows.Sandbox.AgentSandbox.AgentHome;
 
     /// <summary>The port payloads are posted to; only valid after <see cref="StartAsync"/>.</summary>
     public int Port { get; private set; }
@@ -64,6 +62,7 @@ public sealed class CopilotConsoleBridge : IConsoleSessionEventSource, IConsoleS
         await File.WriteAllTextAsync(
             portFile, Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
             cancellationToken);
+        Auxilia.Workflows.Sandbox.AgentSandbox.GrantToAgent(Path.GetDirectoryName(portFile)!);
     }
 
     /// <summary>Registers a workflow-hosted MCP server in the Copilot CLI's config (merged).</summary>
@@ -88,6 +87,7 @@ public sealed class CopilotConsoleBridge : IConsoleSessionEventSource, IConsoleS
         };
         config["mcpServers"] = servers;
         await File.WriteAllTextAsync(configPath, config.ToJsonString(), cancellationToken);
+        Auxilia.Workflows.Sandbox.AgentSandbox.GrantToAgent(Path.GetDirectoryName(configPath)!);
     }
 
     public ValueTask StopAsync()

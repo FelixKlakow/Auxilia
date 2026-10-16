@@ -38,9 +38,7 @@ public class WorkflowDispatcherTests
     {
         NetworkName = "test-net",
         RabbitMqHost = "rabbitmq",
-        RabbitMqPort = 5672,
-        RabbitMqUserName = "guest",
-        RabbitMqPassword = "guest"
+        RabbitMqPort = 5672
     };
 
     private static byte[] CreateMinimalPackageZip(string workflowType = "my-workflow")
@@ -158,6 +156,7 @@ public class WorkflowDispatcherTests
             new Auxilia.PlatformData.Protection.NullSettingsProtector(),
             new FakePodHost(),
             new Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry(),
+            TestStores.NewContainment(),
             NullLogger<WorkflowDispatcher>.Instance);
 
         await _sut.StartAsync(CancellationToken.None);
@@ -240,10 +239,17 @@ public class WorkflowDispatcherTests
         Assert.That(captured, Is.Not.Null);
         Assert.Multiple(() =>
         {
-            Assert.That(captured!.EnvironmentVariables["RabbitMq__Host"],     Is.EqualTo("rabbitmq"));
+            // The broker is reached ONLY through the run's egress gateway relay.
+            Assert.That(captured!.EnvironmentVariables["RabbitMq__Host"],     Is.EqualTo("egress"));
             Assert.That(captured!.EnvironmentVariables["RabbitMq__Port"],     Is.EqualTo("5672"));
-            Assert.That(captured!.EnvironmentVariables["RabbitMq__UserName"], Is.EqualTo("guest"));
-            Assert.That(captured!.EnvironmentVariables["RabbitMq__Password"], Is.EqualTo("guest"));
+            Assert.That(captured!.Egress!.Forwards, Does.Contain("5672=rabbitmq:5672/amqp"));
+            Assert.That(captured!.EnvironmentVariables["HTTPS_PROXY"],        Is.EqualTo("http://egress:3128"));
+            // Never a platform account: the instance's own minted identity, ingress-confined.
+            Assert.That(captured!.EnvironmentVariables["RabbitMq__UserName"],
+                Is.EqualTo(Auxilia.Messaging.WorkloadBusIdentity.UserNameFor(
+                    Guid.Parse(captured.EnvironmentVariables["Workflow__InstanceId"]))));
+            Assert.That(captured!.EnvironmentVariables["RabbitMq__Password"], Is.Not.Empty.And.Not.EqualTo("guest"));
+            Assert.That(captured!.EnvironmentVariables["RabbitMq__IngressExchange"], Is.EqualTo("workflow.ingress"));
         });
     }
 
@@ -431,6 +437,7 @@ public class WorkflowDispatcherTests
             new Auxilia.PlatformData.Protection.NullSettingsProtector(),
             new FakePodHost(),
             new Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry(),
+            TestStores.NewContainment(),
             NullLogger<WorkflowDispatcher>.Instance);
         await _sut.StartAsync(CancellationToken.None);
 
@@ -524,6 +531,7 @@ public class WorkflowDispatcherTests
             new Auxilia.PlatformData.Protection.NullSettingsProtector(),
             new FakePodHost(),
             new Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry(),
+            TestStores.NewContainment(),
             NullLogger<WorkflowDispatcher>.Instance);
         await _sut.StartAsync(CancellationToken.None);
 
@@ -764,6 +772,7 @@ public class WorkflowDispatcherTests
             protector ?? new Auxilia.PlatformData.Protection.NullSettingsProtector(),
             podHost ?? new FakePodHost(),
             new Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry(),
+            TestStores.NewContainment(),
             NullLogger<WorkflowDispatcher>.Instance);
     }
 

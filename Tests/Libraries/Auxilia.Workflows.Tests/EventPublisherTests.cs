@@ -112,12 +112,13 @@ public class EventPublisherTests
     }
 
     [Test]
-    public async Task PublishAsync_MultiplePublishes_DeclaresExchangeOnce()
+    public async Task PublishAsync_NeverDeclaresPlatformTopology()
     {
         await _sut.PublishAsync("nightly-clean");
         await _sut.PublishAsync("nightly-clean");
 
-        Assert.That(_bus.DeclaredExchanges, Is.EqualTo(new[] { WorkflowEventMessage.ExchangeName }));
+        // The runner declares workflow.events before any launch; a workload identity cannot.
+        Assert.That(_bus.DeclaredExchanges, Is.Empty);
     }
 
     [Test]

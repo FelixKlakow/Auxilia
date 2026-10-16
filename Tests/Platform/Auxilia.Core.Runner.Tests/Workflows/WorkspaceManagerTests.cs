@@ -27,7 +27,9 @@ public class WorkspaceManagerTests
         _settings = new WorkflowDispatcherSettings
         {
             WorkspaceRootDirectory = Path.Combine(_tempRoot, "workspaces"),
-            WarmCacheDirectory = Path.Combine(_tempRoot, "repo-cache")
+            WarmCacheDirectory = Path.Combine(_tempRoot, "repo-cache"),
+            // The fixture's origins are local repositories (a trusted dev-host opt-in).
+            AllowedCloneTransports = ["https", "http", "ssh", "git", "file"]
         };
         _sut = TestStores.NewWorkspaceManager(_settings);
     }
@@ -223,26 +225,25 @@ public class WorkspaceManagerTests
         Assert.Multiple(() =>
         {
             Assert.That(Directory.Exists(_settings.WarmCacheDirectory), Is.False,
-                "A push-enabled clone (its credential stays configured) must never enter the warm cache.");
+                "A push-enabled clone (about to diverge from its origin) must never enter the warm cache.");
             Assert.That(GitOutput(repoDir, "remote", "get-url", "origin"), Is.EqualTo(_originRepo),
-                "The origin remote stays usable for the push.");
+                "The origin stays the plain clone source — the SDK's push gateway takes it over.");
         });
     }
 
     [Test]
-    public async Task Prepare_AllowPushWithPushScopedUrl_TheRemoteCarriesOnlyThePushCredential()
+    public async Task Prepare_AllowPush_TheCloneConfigurationHoldsNoCredential()
     {
-        // The push URL points at the same repository — in production it differs only in the
-        // credential userinfo (push-scoped token instead of the full one).
-        var pushUrl = _originRepo.Replace('\\', '/');
         var runRoot = await _sut.PrepareAsync(
             Guid.NewGuid(),
-            [new RepositoryDeclaration("push", _originRepo) { AllowPush = true, PushCloneUrl = pushUrl }],
+            [new RepositoryDeclaration("push", _originRepo) { AllowPush = true }],
             ct: CancellationToken.None);
 
-        Assert.That(GitOutput(Path.Combine(runRoot!, "repos", "push"), "remote", "get-url", "origin"),
-            Is.EqualTo(pushUrl),
-            "The container-visible remote must hold the push-scoped credential, not the clone one.");
+        var config = File.ReadAllText(Path.Combine(runRoot!, "repos", "push", ".git", "config"));
+        Assert.That(System.Text.RegularExpressions.Regex.IsMatch(config, @"://[^/\s]*@"), Is.False,
+            "No credential may ever be written into a workspace clone — not even for pushing.");
+        Assert.That(GitOutput(Path.Combine(runRoot!, "repos", "push"), "config", "protocol.file.allow"),
+            Is.EqualTo("never"), "the workload's own git must not reach the host filesystem");
     }
 
     // ------------------------------------------------------------------ failure

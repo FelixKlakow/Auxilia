@@ -37,6 +37,12 @@ public static class DependencyInjectionExtensions
             string.IsNullOrWhiteSpace(settings.ProtectionKeyBase64)
                 ? new NullSettingsProtector()
                 : new AesGcmSettingsProtector(Convert.FromBase64String(settings.ProtectionKeyBase64)));
+        // The audit chain is keyed from the same platform secret: a store-only attacker can
+        // neither rewrite the trail undetected nor recompute its hashes.
+        services.AddSingleton(new AuditIntegrity(
+            string.IsNullOrWhiteSpace(settings.ProtectionKeyBase64)
+                ? null
+                : Convert.FromBase64String(settings.ProtectionKeyBase64)));
         return services;
     }
 }

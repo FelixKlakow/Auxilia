@@ -105,6 +105,49 @@ public sealed class SlotCredentialResolverTests
     }
 
     [Test]
+    public async Task SettingValues_ReturnOnlyNonSecretKeys_OfEveryBindingOfTheProvider()
+    {
+        var fixture = NewFixture();
+        await RegisterSecretProviderAsync(fixture.Catalog);
+        var connector = await fixture.Connectors.CreateAsync(
+            new CreateConnector("agent", "local-agent",
+                new Dictionary<string, string> { ["apiKey"] = "sk-connector", ["model"] = "m-connector" }),
+            ownerPrincipalId: null, CancellationToken.None);
+        var runId = Guid.NewGuid();
+        var token = Guid.NewGuid().ToString("N");
+        await fixture.Resolver.StashAsync(runId, token,
+        [
+            new SlotBinding("a", ConnectorId: connector.Id),
+            new SlotBinding("b", "local-agent", Settings: new Dictionary<string, string> { ["model"] = "m-inline" }),
+            new SlotBinding("c", "other", Settings: new Dictionary<string, string> { ["model"] = "elsewhere" }),
+        ], triggeredBy: null, ct: CancellationToken.None);
+
+        var (success, error, values) = await fixture.Resolver.ResolveSettingValuesAsync(
+            runId, token, "local-agent", ["model", "apiKey"], CancellationToken.None);
+
+        Assert.That(success, Is.True, error);
+        Assert.That(values!.Bindings.Select(b => b.GetValueOrDefault("model")),
+            Is.EquivalentTo(new[] { "m-connector", "m-inline" }));
+        Assert.That(values.Bindings.Any(b => b.ContainsKey("apiKey")), Is.False, "a Secret-kind value never leaves the Core");
+    }
+
+    [Test]
+    public async Task SettingValues_RequireTheRunsToken()
+    {
+        var fixture = NewFixture();
+        var runId = Guid.NewGuid();
+        await fixture.Resolver.StashAsync(runId, "the-real-token",
+            [new SlotBinding("b", "local-agent", Settings: new Dictionary<string, string> { ["model"] = "m" })],
+            triggeredBy: null, ct: CancellationToken.None);
+
+        var (success, _, values) = await fixture.Resolver.ResolveSettingValuesAsync(
+            runId, "another-token", "local-agent", ["model"], CancellationToken.None);
+
+        Assert.That(success, Is.False);
+        Assert.That(values, Is.Null);
+    }
+
+    [Test]
     public async Task Resolve_WrongToken_Fails()
     {
         var (resolver, _, _) = New();

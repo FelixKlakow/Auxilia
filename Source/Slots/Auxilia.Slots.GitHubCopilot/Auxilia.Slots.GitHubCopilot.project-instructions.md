@@ -12,6 +12,11 @@ lower-case key so the shared git-credential resolvers match), `Model`, `CliPath`
 
 ## Special rules
 
+- Containment: the SDK-driven CLI is launched through `AgentSandbox.WrapperFor(CliPath)` (unprivileged
+  agent user) under an agent-session lease; the line-mode CLI goes through `ProcessCliProcessFactory`.
+  Permission requests follow the permission mode; the session's `AgentSessionActionApprover` decides
+  pushes at the SDK's push gateway (push policy) from their actual ref updates.
+
 - The CLI child runs behind `ICliProcessFactory` (`Auxilia.Workflows.AiAgent.CodingAgent`; tests
   inject a fake). ANY exception leaving `RunAsync` — cancellation, a chat callback whose bus
   publish failed — kills the child's process tree before rethrowing; an exited child is never

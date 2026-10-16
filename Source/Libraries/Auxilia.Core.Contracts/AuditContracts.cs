@@ -12,7 +12,34 @@ public sealed record AuditEntry(
     string Action,
     string Subject,
     string Outcome,
-    string? DetailJson);
+    string? DetailJson)
+{
+    /// <summary>The platform service that recorded the entry (e.g. the runner a forwarded entry came from).</summary>
+    public string? Source { get; init; }
+}
+
+/// <summary>One integrity break in the audit trail: where, and what no longer holds.</summary>
+public sealed record AuditIntegrityBreak(string ChainId, long Sequence, Guid? RecordId, string Problem);
+
+/// <summary>
+/// The verdict over the stored audit trail: every writer's chain re-verified (sequence, links,
+/// keyed hashes). <see cref="Keyed"/> tells whether the chain is keyed by a platform secret the
+/// store does not hold (only then is a deliberate rewrite detectable, not just an edit).
+/// </summary>
+public sealed record AuditIntegrityReport(
+    bool Intact,
+    bool Keyed,
+    int Chains,
+    int Records,
+    int Unchained,
+    IReadOnlyList<AuditIntegrityBreak> Breaks)
+{
+    /// <summary>
+    /// Chains whose head a signed checkpoint outside the store vouches for — truncating them in
+    /// the store is detected (up to the last checkpoint interval).
+    /// </summary>
+    public int AnchoredChains { get; init; }
+}
 
 /// <summary>
 /// Filter for querying the audit log. Unset fields are ignored; results are newest-first and paged.

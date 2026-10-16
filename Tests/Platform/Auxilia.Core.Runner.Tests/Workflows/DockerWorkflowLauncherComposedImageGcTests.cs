@@ -31,6 +31,7 @@ public sealed class DockerWorkflowLauncherComposedImageGcTests
             Options.Create(new DockerWorkflowLauncherSettings { ComposedImageMaxAgeDays = maxAgeDays }),
             factory.Object,
             new FakePodHost(),
+            new FakeEgressHost(),
             NullLogger<DockerWorkflowLauncher>.Instance);
     }
 

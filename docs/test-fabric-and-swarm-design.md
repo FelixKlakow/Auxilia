@@ -461,9 +461,9 @@ topic** following the selective-routing design:
 - Declared in the manifest: `DeclaresSwarmChannel<TNegotiation>("planning")` — the payload
   schema is published, membership is the run group, and an instance can only bind channels
   its group owns. (Hard membership *enforcement* on the bus shares the known dependency of
-  the event-spoofing residual: per-container bus credentials. Until that program lands, the
-  channel has the same trust level as the rest of the in-container bus surface — acceptable
-  because every member is a signed, approved program.)
+  the event-spoofing residual: per-container bus credentials — delivered 2026-10-15 as
+  per-run broker identities with topic-pinned routing keys and publisher attribution, so the
+  channel's membership can be enforced by the run's broker permissions.)
 - Ephemeral by default (not persisted, not a view); an optional mirror flag copies traffic
   into a run view for observability when an operator wants to watch the negotiation.
 

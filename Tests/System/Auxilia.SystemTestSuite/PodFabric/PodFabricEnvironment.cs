@@ -42,7 +42,11 @@ public class PodFabricEnvironment
     internal const string SpawnableBaseName = "sim-machine";
 
     private const string RabbitMqAlias = "rabbitmq";
+    /// <summary>The simulated system's own broker (a scenario companion, part of the system under test).</summary>
     private const string RabbitMqImage = "rabbitmq:3.13-management";
+
+    /// <summary>The platform broker — the same image the dev stack runs.</summary>
+    private const string PlatformRabbitMqImage = "rabbitmq:4-management";
     private const string CoreApiAlias = "core-api";
     private const string ContainerRunOutput = "/run-output";
     private const string ContainerWorkspaces = "/workspaces";
@@ -73,6 +77,7 @@ public class PodFabricEnvironment
     public async Task OneTimeSetUp()
     {
         // Sequential on purpose — parallel docker builds have wedged Docker Desktop daemons.
+        await TestImages.BuildEgressGatewayAsync();
         await TestImages.BuildImageAsync(RunnerImageName, "Source/Platform/Auxilia.Core.Runner/Dockerfile");
         await TestImages.BuildImageAsync(CoreApiImageName, "Source/Platform/Auxilia.Core.Api/Dockerfile");
         await TestImages.BuildImageAsync(DummyWorkflowsImageName, "Tests/System/Auxilia.Workflows.Testing/Dockerfile");
@@ -81,7 +86,7 @@ public class PodFabricEnvironment
         _network = new NetworkBuilder().WithName(NetworkName).Build();
         await _network.CreateAsync();
 
-        _rabbitMq = new RabbitMqBuilder(RabbitMqImage)
+        _rabbitMq = new RabbitMqBuilder(PlatformRabbitMqImage)
             .WithUsername("guest").WithPassword("guest")
             .WithNetwork(_network).WithNetworkAliases(RabbitMqAlias)
             .Build();
@@ -127,8 +132,9 @@ public class PodFabricEnvironment
             .WithEnvironment("WorkflowLauncher__NetworkName", NetworkName)
             .WithEnvironment("WorkflowLauncher__RabbitMqHost", RabbitMqAlias)
             .WithEnvironment("WorkflowLauncher__RabbitMqPort", "5672")
-            .WithEnvironment("WorkflowLauncher__RabbitMqUserName", "guest")
-            .WithEnvironment("WorkflowLauncher__RabbitMqPassword", "guest")
+            .WithEnvironment("WorkflowLauncher__EgressGatewayImage", TestImages.EgressGatewayImageName)
+            // Everything this runner creates carries the session label the teardown sweeps.
+            .WithEnvironment(TestSession.RunnerVariable, TestSession.Id)
             .WithEnvironment("WorkflowDispatcher__RunOutputDirectory", ContainerRunOutput)
             .WithEnvironment("WorkflowDispatcher__RunOutputHostDirectory", _runOutputDir)
             .WithEnvironment("WorkflowDispatcher__WorkspaceRootDirectory", ContainerWorkspaces)
@@ -314,6 +320,8 @@ public class PodFabricEnvironment
     [OneTimeTearDown]
     public async Task OneTimeTearDown()
     {
+        // Session objects first: a leftover gateway would pin the test network.
+        await TestSession.SweepAsync();
         CoreApiClient?.Dispose();
         if (MessageBusClient is IAsyncDisposable disposable) await disposable.DisposeAsync();
         if (_coreApi is not null) await _coreApi.DisposeAsync();
@@ -325,5 +333,7 @@ public class PodFabricEnvironment
         foreach (var dir in new[] { _runOutputDir, _workspaceDir, ArtifactsDir })
             try { if (dir is not null && Directory.Exists(dir)) Directory.Delete(dir, recursive: true); }
             catch (IOException) { /* leave for manual cleanup */ }
+        // A run whose containment the stopped runner never released leaves nothing behind.
+        await TestSession.SweepAsync();
     }
 }

@@ -28,12 +28,18 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
     private readonly IConnection _connection;
     private readonly IChannel _publishChannel;
     private readonly ILogger _logger;
+    private readonly string _userName;
+    private readonly string? _queuePublishExchange;
 
-    private RabbitMqClient(IConnection connection, IChannel publishChannel, ILogger logger)
+    private RabbitMqClient(
+        IConnection connection, IChannel publishChannel, ILogger logger, string userName,
+        string? queuePublishExchange)
     {
         _connection = connection;
         _publishChannel = publishChannel;
         _logger = logger;
+        _userName = userName;
+        _queuePublishExchange = queuePublishExchange;
     }
 
     public async ValueTask DisposeAsync()
@@ -82,27 +88,40 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
             static (carrier, key, value) => carrier[key] = value);
 
         var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(message));
-        var props = new BasicProperties
-        {
-            Persistent = true,
-            ContentType = "application/json",
-            Headers = headers,
-            // Tag the CLR message type so fanout subscribers can reject messages that
-            // aren't theirs: a fanout exchange delivers every message to every bound queue,
-            // and lenient JSON deserialization would otherwise silently coerce a mismatched
-            // command into a record with null fields.
-            Type = message?.GetType().FullName
-        };
+        var props = NewProperties(message, headers);
 
-        await _publishChannel.BasicPublishAsync(
-            string.Empty,
-            topic,
-            false,
-            props,
-            body,
-            cancellationToken);
+        // A client confined to an ingress exchange (workload identities have no write permission
+        // on the default exchange) routes queue publishes through it under the queue name. The
+        // publish is mandatory: a queue the platform never bound to the ingress fails loudly
+        // (PublishReturnException) instead of vanishing.
+        if (_queuePublishExchange is { } ingress)
+            await _publishChannel.BasicPublishAsync(ingress, topic, true, props, body, cancellationToken);
+        else
+            await _publishChannel.BasicPublishAsync(string.Empty, topic, false, props, body, cancellationToken);
 
         MessagingTelemetry.PublishCounter.Add(1, new TagList { { "messaging.topic", topic } });
+    }
+
+    private BasicProperties NewProperties<T>(T message, Dictionary<string, object?> headers) => new()
+    {
+        Persistent = true,
+        ContentType = "application/json",
+        Headers = headers,
+        // Tag the CLR message type so fanout subscribers can reject messages that
+        // aren't theirs: a fanout exchange delivers every message to every bound queue,
+        // and lenient JSON deserialization would otherwise silently coerce a mismatched
+        // command into a record with null fields.
+        Type = message?.GetType().FullName,
+        // The broker validates user_id against the connection's authenticated user, so every
+        // consumer learns WHO published a delivery — the basis of workload attribution.
+        UserId = _userName
+    };
+
+    public async Task BindQueueAsync(
+        string queueName, string exchangeName, string routingKey, CancellationToken cancellationToken = default)
+    {
+        await _publishChannel.QueueBindAsync(
+            queueName, exchangeName, routingKey, null, cancellationToken: cancellationToken);
     }
 
     public async Task DeclareTopicExchangeAsync(string exchangeName, CancellationToken cancellationToken = default)
@@ -141,17 +160,7 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
             static (carrier, key, value) => carrier[key] = value);
 
         var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(message));
-        var props = new BasicProperties
-        {
-            Persistent = true,
-            ContentType = "application/json",
-            Headers = headers,
-            // Tag the CLR message type so fanout subscribers can reject messages that
-            // aren't theirs: a fanout exchange delivers every message to every bound queue,
-            // and lenient JSON deserialization would otherwise silently coerce a mismatched
-            // command into a record with null fields.
-            Type = message?.GetType().FullName
-        };
+        var props = NewProperties(message, headers);
 
         await _publishChannel.BasicPublishAsync(
             exchangeName,
@@ -210,10 +219,12 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
         // on the captured stale name would 404 and close the bind channel, silently killing all
         // NEW selective subscriptions until process restart. Non-exclusive + auto-delete keeps
         // the old lifecycle (the queue disappears once its consumer is gone) while still letting
-        // recovery re-declare it on the fresh connection.
+        // recovery re-declare it on the fresh connection. Durable: RabbitMQ 4 refuses transient
+        // non-exclusive queues (deprecated feature transient_nonexcl_queues) — auto-delete still
+        // removes it with its last consumer.
         var queueName = $"topic-sub-{Guid.NewGuid():N}";
         await channel.QueueDeclareAsync(
-            queueName, durable: false, exclusive: false, autoDelete: true, arguments: null,
+            queueName, durable: true, exclusive: false, autoDelete: true, arguments: null,
             cancellationToken: cancellationToken);
         foreach (var routingKey in routingKeys)
             await channel.QueueBindAsync(queueName, exchangeName, routingKey, null, cancellationToken: cancellationToken);
@@ -324,6 +335,36 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
                     return;
                 }
 
+                // Attribution: a message speaking for a workload instance is honoured only from
+                // the platform or from THAT instance's own broker identity — a workload can never
+                // forge views, events, state, or requests for another run, whatever its body says.
+                if (msg is IWorkloadScopedMessage scoped
+                    && !WorkloadBusIdentity.MayPublishFor(ea.BasicProperties.UserId, scoped.WorkflowInstanceId))
+                {
+                    _logger.LogWarning(
+                        "Dropping {MessageType} for instance {InstanceId} on {Queue}: publisher '{Publisher}' may not speak for it.",
+                        typeof(T).Name, scoped.WorkflowInstanceId, queueName, ea.BasicProperties.UserId ?? "<unattributed>");
+                    MessagingTelemetry.RejectedAttributionCounter.Add(1,
+                        new TagList { { "messaging.queue", queueName }, { "messaging.type", typeof(T).Name } });
+                    await channel.BasicNackAsync(ea.DeliveryTag, false, requeue: false);
+                    return;
+                }
+
+                // Platform-only messages (commands, responses, lifecycle facts, audit) are
+                // honoured only from an attributed platform identity — never a workload.
+                if (msg is IPlatformOnlyMessage
+                    && (string.IsNullOrEmpty(ea.BasicProperties.UserId)
+                        || WorkloadBusIdentity.IsWorkloadUser(ea.BasicProperties.UserId)))
+                {
+                    _logger.LogWarning(
+                        "Dropping platform-only {MessageType} on {Queue}: publisher '{Publisher}' is not a platform identity.",
+                        typeof(T).Name, queueName, ea.BasicProperties.UserId ?? "<unattributed>");
+                    MessagingTelemetry.RejectedAttributionCounter.Add(1,
+                        new TagList { { "messaging.queue", queueName }, { "messaging.type", typeof(T).Name } });
+                    await channel.BasicNackAsync(ea.DeliveryTag, false, requeue: false);
+                    return;
+                }
+
                 await handler(msg, CancellationToken.None);
             }
             catch (Exception exception)
@@ -347,10 +388,16 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
         return await channel.BasicConsumeAsync(queueName, false, consumer, cancellationToken);
     }
 
+    /// <param name="queuePublishExchange">
+    ///     When set, <see cref="PublishAsync{T}" /> routes through this exchange (routing key = the
+    ///     queue name) instead of the default exchange — the mode of a workload identity, which may
+    ///     only reach the queues the platform bound to its ingress exchange.
+    /// </param>
     public static async Task<RabbitMqClient> CreateAsync(string hostName, int port = 5672,
         string userName = "guest", string password = "guest",
         ILogger? logger = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? queuePublishExchange = null)
     {
         var factory = new ConnectionFactory
         {
@@ -360,7 +407,23 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
             Password = password,
             AutomaticRecoveryEnabled = true
         };
-        var connection = await factory.CreateConnectionAsync(cancellationToken);
+        // A broker that is still starting (a fresh container beside the service) refuses the
+        // first connections for a few seconds — retry briefly before failing the host.
+        IConnection connection;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                connection = await factory.CreateConnectionAsync(cancellationToken);
+                break;
+            }
+            catch (RabbitMQ.Client.Exceptions.BrokerUnreachableException ex) when (attempt < 10)
+            {
+                logger?.LogWarning("Broker {Host}:{Port} not reachable yet (attempt {Attempt}): {Reason}",
+                    hostName, port, attempt, ex.InnerException?.Message ?? ex.Message);
+                await Task.Delay(TimeSpan.FromSeconds(Math.Min(attempt * 1.5, 5)), cancellationToken);
+            }
+        }
         // Publisher confirmations: BasicPublishAsync awaits the broker's ack (PublishException
         // on nack/return) instead of completing once the frame left the socket.
         var channel = await connection.CreateChannelAsync(
@@ -368,7 +431,9 @@ public sealed class RabbitMqClient : IMessageBusClient, IAsyncDisposable
                 publisherConfirmationsEnabled: true,
                 publisherConfirmationTrackingEnabled: true),
             cancellationToken);
-        return new RabbitMqClient(connection, channel, logger ?? NullLogger.Instance);
+        return new RabbitMqClient(
+            connection, channel, logger ?? NullLogger.Instance, userName,
+            string.IsNullOrWhiteSpace(queuePublishExchange) ? null : queuePublishExchange);
     }
 
     /// <summary>

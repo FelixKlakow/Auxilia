@@ -5,7 +5,7 @@ Slot provider `email-work-items` for the `work-items` slot (category `task-sourc
 is the work item and comments become mail replies.
 
 Builds `Auxilia.Slots.Email.slothandler.dll` with its `*.slothandler.manifest.json` sidecar —
-the naming contract of `FileSystemPluginDiscovery`. Manifest settings: IMAP/SMTP host + port,
+the naming contract of `FileSystemPluginDiscovery`. Its manifest declares `NetworkEndpoints` as templates over its own settings — `tcp://{ImapHost}:{ImapPort}` and `tcp://{SmtpHost}:{SmtpPort}` — so a run reaches exactly the configured mail servers through the egress gateway's TCP relays (ARCHITECTURE §10). Manifest settings: IMAP/SMTP host + port,
 `Username`, `Password` (a `Secret` with `ConnectFlow: google-gmail`), `UseSsl`, `Folder`.
 
 ## Special Rules

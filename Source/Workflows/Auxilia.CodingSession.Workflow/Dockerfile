@@ -13,7 +13,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates git tmux \
  && rm -rf /var/lib/apt/lists/* \
  && curl -fsSL https://claude.ai/install.sh | bash \
- && ln -s /root/.local/bin/claude /usr/local/bin/claude \
+ && install -m 755 "$(readlink -f /root/.local/bin/claude)" /usr/local/bin/claude \
  && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
  && apt-get install -y --no-install-recommends nodejs \
  && rm -rf /var/lib/apt/lists/* \

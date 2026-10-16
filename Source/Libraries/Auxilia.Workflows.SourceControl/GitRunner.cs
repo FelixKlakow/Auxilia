@@ -18,7 +18,9 @@ public sealed class ProcessGitRunner : IGitRunner
     public async Task<(int ExitCode, string Output)> RunAsync(
         string workingDirectory, string arguments, CancellationToken cancellationToken)
     {
-        using var process = Process.Start(new ProcessStartInfo
+        // Same identity as the agent that shares the workspace (file ownership stays coherent),
+        // never a platform secret; a push reaches its remote only through the push gateway.
+        using var process = Process.Start(Auxilia.Workflows.Sandbox.AgentSandbox.Confine(new ProcessStartInfo
         {
             FileName = "git",
             Arguments = arguments,
@@ -26,7 +28,7 @@ public sealed class ProcessGitRunner : IGitRunner
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true
-        }) ?? throw new InvalidOperationException("Failed to start git.");
+        })) ?? throw new InvalidOperationException("Failed to start git.");
         // Both pipes are drained concurrently: a git that fills stderr while stdout is being
         // read to the end would otherwise block on the full pipe and never exit.
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);

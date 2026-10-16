@@ -61,9 +61,7 @@ public sealed class WorkflowDispatcherPodTests
             {
                 NetworkName = "test-net",
                 RabbitMqHost = "rabbitmq",
-                RabbitMqPort = 5672,
-                RabbitMqUserName = "guest",
-                RabbitMqPassword = "guest"
+                RabbitMqPort = 5672
             }),
             Options.Create(new WorkflowDispatcherSettings()),
             Mock.Of<IHttpClientFactory>(),
@@ -87,6 +85,7 @@ public sealed class WorkflowDispatcherPodTests
             new Auxilia.PlatformData.Protection.NullSettingsProtector(),
             new FakePodHost(),
             _podControlRegistry,
+            TestStores.NewContainment(),
             NullLogger<WorkflowDispatcher>.Instance);
         await _sut.StartAsync(CancellationToken.None);
     }

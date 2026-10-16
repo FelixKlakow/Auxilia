@@ -56,6 +56,33 @@ try
             sp.GetRequiredService<ILogger<RabbitMqClient>>()
         ).GetAwaiter().GetResult());
 
+    // --- Per-instance workload broker identities (RabbitMQ management API) ---
+    // The runner's own broker account must carry the administrator tag: it mints one narrowly
+    // scoped user per workflow container and deletes it when the run ends. No workload ever
+    // receives this account.
+    builder.Services.AddHttpClient("rabbitmq-management");
+    builder.Services.AddSingleton<IBrokerIdentityIssuer>(sp =>
+    {
+        var host = builder.Configuration["RabbitMq:Host"] ?? "localhost";
+        var managementUri = builder.Configuration["RabbitMq:ManagementUri"] is { Length: > 0 } configured
+            ? new Uri(configured)
+            : new Uri($"http://{host}:15672/");
+        return new RabbitMqManagementIdentityIssuer(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("rabbitmq-management"),
+            new RabbitMqManagementSettings(
+                managementUri,
+                builder.Configuration["RabbitMq:UserName"] ?? "guest",
+                builder.Configuration["RabbitMq:Password"] ?? "guest",
+                builder.Configuration["RabbitMq:VirtualHost"] ?? "/"),
+            sp.GetRequiredService<ILogger<RabbitMqManagementIdentityIssuer>>());
+    });
+    builder.Services.AddSingleton<WorkloadBusCredentials>();
+    // Per-run egress gateway (Source/Platform/Auxilia.EgressGateway) and the run containment
+    // that ties a run's broker identity, egress and evidence to its lifecycle.
+    builder.Services.AddSingleton<Auxilia.Core.Runner.Workflows.Egress.IEgressHost,
+        Auxilia.Core.Runner.Workflows.Egress.DockerEgressHost>();
+    builder.Services.AddSingleton<RunContainment>();
+
     // --- Runner profile ---
     builder.Services.Configure<RunnerProfile>(builder.Configuration.GetSection("RunnerProfile"));
 
@@ -82,6 +109,9 @@ try
     builder.Services.AddSingleton<Auxilia.PlatformData.Artifacts.IArtifactStore,
         Auxilia.PlatformData.Artifacts.FileSystemArtifactStore>();
     builder.Services.AddSingleton<ArtifactPersister>();
+    // The runner keeps its own chained audit copy AND forwards every record to the Core's
+    // central trail (the single place audit is read and verified).
+    builder.Services.AddSingleton<IAuditRelay, BusAuditRelay>();
     builder.Services.AddSingleton<AuditLog>();
     if (string.IsNullOrWhiteSpace(platformDataSettings.ProtectionKeyBase64))
         Log.Warning("PlatformData:ProtectionKeyBase64 is not configured — slot settings are stored unprotected (dev only).");
@@ -132,7 +162,10 @@ try
     builder.Services.AddSingleton<Auxilia.Core.Runner.Workflows.Pods.PodControlHandler>();
     builder.Services.AddSingleton<IDockerClientFactory, DefaultDockerClientFactory>();
     builder.Services.AddSingleton<IDeveloperModeProvider, EnvironmentDeveloperModeProvider>();
-    builder.Services.AddSingleton<IWorkflowPackageVerifier, WorkflowPackageVerifier>();
+    builder.Services.AddSingleton<IWorkflowPackageVerifier>(sp => new WorkflowPackageVerifier(
+        sp.GetRequiredService<IDeveloperModeProvider>(),
+        sp.GetRequiredService<ILogger<WorkflowPackageVerifier>>(),
+        sp.GetRequiredService<IOptions<WorkflowDispatcherSettings>>().Value.TrustedSigningKeys));
     builder.Services.AddHttpClient("workflow-packages");
     builder.Services.AddHttpClient("core-api");
 
@@ -143,6 +176,11 @@ try
     // --- Workflow dispatcher settings ---
     builder.Services.Configure<WorkflowDispatcherSettings>(
         builder.Configuration.GetSection("WorkflowDispatcher"));
+    // The production posture (trusted publisher keys) requires the second kernel boundary
+    // unless the operator explicitly opts out.
+    builder.Services.AddOptions<DockerWorkflowLauncherSettings>()
+        .PostConfigure<IOptions<WorkflowDispatcherSettings>>((launcher, dispatcher) =>
+            launcher.ApplyPosture(dispatcher.Value));
 
     // --- Slot configuration seeding ---
     builder.Services.AddSingleton<SlotProviderRegistry>();
@@ -247,6 +285,11 @@ try
             Log.Warning(ex, "Composed-image sweep failed — continuing; stale auxilia-env images only cost disk.");
         }
     }
+
+    // Every exchange a workload publishes on exists before the first launch: workload identities
+    // cannot declare platform topology.
+    await WorkloadBusTopology.DeclareAsync(
+        app.Services.GetRequiredService<IMessageBusClient>(), app.Lifetime.ApplicationStopping);
 
     var handler = app.Services.GetRequiredService<WorkflowRegistrationHandler>();
     await handler.StartAsync(app.Lifetime.ApplicationStopping);

@@ -62,6 +62,7 @@ public class DockerWorkflowLauncherFailureCleanupTests
             Options.Create(DefaultSettings),
             _mockFactory.Object,
             _podHost,
+            new FakeEgressHost(),
             NullLogger<DockerWorkflowLauncher>.Instance);
     }
 

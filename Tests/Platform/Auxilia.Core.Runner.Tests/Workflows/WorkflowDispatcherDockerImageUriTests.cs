@@ -23,20 +23,21 @@ public class WorkflowDispatcherDockerImageUriTests
     private Mock<IHttpClientFactory> _mockHttpFactory = null!;
     private Func<RunWorkflowCommand, CancellationToken, Task>? _capturedHandler;
     private WorkflowDispatcher _sut = null!;
+    private FakeBrokerIdentityIssuer _brokerIssuer = null!;
 
     private static DockerWorkflowLauncherSettings DefaultLauncherSettings() => new()
     {
         NetworkName    = "test-net",
         RabbitMqHost   = "rabbitmq",
-        RabbitMqPort   = 5672,
-        RabbitMqUserName = "guest",
-        RabbitMqPassword = "guest"
+        RabbitMqPort   = 5672
     };
 
     private WorkflowDispatcher BuildDispatcher(
         DockerWorkflowLauncherSettings? launcherSettings = null,
         SlotProviderRegistry? providerRegistry = null,
-        IHttpClientFactory? httpFactory = null)
+        IHttpClientFactory? httpFactory = null,
+        WorkflowDispatcherSettings? dispatcherSettings = null,
+        string? daemonOs = null)
     {
         var disposable = new Mock<IAsyncDisposable>();
         disposable.Setup(d => d.DisposeAsync()).Returns(ValueTask.CompletedTask);
@@ -67,7 +68,7 @@ public class WorkflowDispatcherDockerImageUriTests
             _mockBus.Object,
             _mockLauncher.Object,
             Options.Create(launcherSettings ?? DefaultLauncherSettings()),
-            Options.Create(new WorkflowDispatcherSettings()),
+            Options.Create(dispatcherSettings ?? new WorkflowDispatcherSettings { ContainerExitGraceSeconds = 0 }),
             httpFactory ?? _mockHttpFactory.Object,
             _mockVerifier.Object,
             _mockPendingPackages.Object,
@@ -82,14 +83,76 @@ public class WorkflowDispatcherDockerImageUriTests
             TestStores.NewArtifactStore(),
             new NetworkPolicyResolver(NullLogger<NetworkPolicyResolver>.Instance),
             TestStores.NewWorkspaceManager(),
-            TestStores.NewHostPlatformProbe(),
+            daemonOs is null ? TestStores.NewHostPlatformProbe() : HostPlatformReporting(daemonOs),
             Mock.Of<IRepositoryAuthResolver>(),
             TestStores.NewAuditLog(),
             TestStores.NewInstanceInfo(),
             new Auxilia.PlatformData.Protection.NullSettingsProtector(),
             new FakePodHost(),
             new Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry(),
+            TestStores.NewContainment(_brokerIssuer),
             NullLogger<WorkflowDispatcher>.Instance);
+    }
+
+    private static RunnerHostPlatformProbe HostPlatformReporting(string os)
+    {
+        var system = new Mock<Docker.DotNet.ISystemOperations>();
+        system.Setup(s => s.GetSystemInfoAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Docker.DotNet.Models.SystemInfoResponse { OSType = os, Architecture = "x86_64" });
+        var client = new Mock<Docker.DotNet.IDockerClient>();
+        client.SetupGet(c => c.System).Returns(system.Object);
+        var factory = new Mock<IDockerClientFactory>();
+        factory.Setup(f => f.CreateClient(It.IsAny<string?>())).Returns(client.Object);
+        return new RunnerHostPlatformProbe(factory.Object, Options.Create(new DockerWorkflowLauncherSettings()),
+            NullLogger<RunnerHostPlatformProbe>.Instance);
+    }
+
+    private async Task<WorkflowStatusEvent?> DispatchOnAsync(WorkflowDispatcher dispatcher, string packageUri)
+    {
+        await _sut.StopAsync();
+        _sut = dispatcher;
+        await _sut.StartAsync(CancellationToken.None);
+        WorkflowStatusEvent? failed = null;
+        _mockBus
+            .Setup(b => b.PublishToTopicExchangeAsync(
+                "workflow.status", It.IsAny<string>(), It.IsAny<WorkflowStatusEvent>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, WorkflowStatusEvent, CancellationToken>((_, _, e, _) =>
+            {
+                if (e.State == "PreFlightFailed")
+                    failed = e;
+            })
+            .Returns(Task.CompletedTask);
+        await _capturedHandler!(new RunWorkflowCommand(
+            Guid.NewGuid(), "wf", packageUri, new Dictionary<string, string>()), CancellationToken.None);
+        return failed;
+    }
+
+    [Test]
+    public async Task ASignatureTrustingRunner_RefusesADockerTag_AndRunsADigestPinnedImage()
+    {
+        var trusting = new WorkflowDispatcherSettings { ContainerExitGraceSeconds = 0, TrustedSigningKeys = ["key"] };
+
+        var refused = await DispatchOnAsync(BuildDispatcher(dispatcherSettings: trusting), "docker://img:1");
+        Assert.That(refused?.ErrorMessage, Does.Contain("not pinned by digest"));
+
+        var pinned = await DispatchOnAsync(BuildDispatcher(dispatcherSettings: trusting),
+            "docker://img@sha256:" + new string('a', 64));
+        Assert.That(pinned, Is.Null);
+    }
+
+    [Test]
+    public async Task ADaemonThatCannotEnforceEgress_RunsNothing_UntilTheOperatorAcceptsIt()
+    {
+        var refused = await DispatchOnAsync(BuildDispatcher(daemonOs: "windows"), "docker://img:1");
+        Assert.That(refused?.ErrorMessage, Does.Contain("AllowUnenforcedEgress"));
+        _mockLauncher.Verify(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        var accepted = DefaultLauncherSettings();
+        accepted.AllowUnenforcedEgress = true;
+        var allowAll = await DispatchOnAsync(BuildDispatcher(launcherSettings: accepted, daemonOs: "windows"),
+            "docker://img:1");
+        Assert.That(allowAll?.ErrorMessage, Does.Contain("only execute allow-all runs"),
+            "even when accepted, a non-allow-all run is never launched without enforcement");
     }
 
     [SetUp]
@@ -100,6 +163,7 @@ public class WorkflowDispatcherDockerImageUriTests
         _mockVerifier       = new Mock<IWorkflowPackageVerifier>();
         _mockPendingPackages = new Mock<PendingWorkflowPackageStore>();
         _mockHttpFactory    = new Mock<IHttpClientFactory>();
+        _brokerIssuer       = new FakeBrokerIdentityIssuer();
 
         _mockVerifier.Setup(v => v.Verify(It.IsAny<Stream>())).Returns(true);
         _mockPendingPackages.Setup(p => p.Store(It.IsAny<Guid>(), It.IsAny<string>()));
@@ -115,6 +179,59 @@ public class WorkflowDispatcherDockerImageUriTests
     public async Task TearDown() => await _sut.StopAsync();
 
     // -----------------------------------------------------------------------
+
+    [Test]
+    public async Task HandleAsync_Launch_HandsTheContainerItsOwnScopedBrokerIdentity()
+    {
+        WorkflowLaunchRequest? captured = null;
+        _mockLauncher
+            .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
+            .ReturnsAsync(new WorkflowLaunchResult());
+
+        await _capturedHandler!(new RunWorkflowCommand(
+            Guid.NewGuid(), "wf", "docker://img:1", new Dictionary<string, string>()), CancellationToken.None);
+
+        var instanceId = Guid.Parse(captured!.EnvironmentVariables["Workflow__InstanceId"]);
+        var user = WorkloadBusIdentity.UserNameFor(instanceId);
+        Assert.That(captured.EnvironmentVariables["RabbitMq__UserName"], Is.EqualTo(user));
+        Assert.That(captured.EnvironmentVariables["RabbitMq__Password"], Is.EqualTo($"pw-{user}"));
+        Assert.That(_brokerIssuer.Active.Keys, Is.EquivalentTo(new[] { user }));
+        Assert.That(_brokerIssuer.Active[user],
+            Is.EqualTo(Auxilia.Workflows.Messaging.WorkloadBusAccess.For(instanceId, WorkloadBusTopology.IngressQueues(new WorkflowDispatcherSettings()))).Using<BrokerPermissions>(
+                (a, b) => a.Configure == b.Configure && a.Write == b.Write && a.Read == b.Read));
+    }
+
+    [Test]
+    public async Task HandleAsync_LaunchFailure_RevokesTheIssuedIdentity()
+    {
+        _mockLauncher
+            .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("docker down"));
+
+        await _capturedHandler!(new RunWorkflowCommand(
+            Guid.NewGuid(), "wf", "docker://img:1", new Dictionary<string, string>()), CancellationToken.None);
+
+        Assert.That(_brokerIssuer.Active, Is.Empty, "a run that never started must not leave a live credential");
+        Assert.That(_brokerIssuer.Revoked, Has.Count.EqualTo(1));
+    }
+
+    [Test]
+    public async Task HandleAsync_ContainerExit_RevokesTheIdentity()
+    {
+        WorkflowLaunchRequest? captured = null;
+        _mockLauncher
+            .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
+            .ReturnsAsync(new WorkflowLaunchResult());
+        await _capturedHandler!(new RunWorkflowCommand(
+            Guid.NewGuid(), "wf", "docker://img:1", new Dictionary<string, string>()), CancellationToken.None);
+        Assert.That(_brokerIssuer.Active, Has.Count.EqualTo(1));
+
+        await captured!.OnExited!(new ContainerExit(0, null));
+
+        Assert.That(_brokerIssuer.Active, Is.Empty);
+    }
 
     [Test]
     public async Task HandleAsync_DockerUri_SetsDockerImageUri_AndSkipsHttpDownload()

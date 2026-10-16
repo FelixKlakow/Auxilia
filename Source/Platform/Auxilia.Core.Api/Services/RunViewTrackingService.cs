@@ -141,13 +141,23 @@ public sealed class RunViewTrackingService(
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        if (_lifetime is not null)
-            await _lifetime.CancelAsync();
+        // Idempotent against a host that disposes before (or while) it stops.
+        if (Volatile.Read(ref _lifetime) is { } lifetime)
+        {
+            try
+            {
+                await lifetime.CancelAsync();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Already disposed — nothing left to cancel.
+            }
+        }
         if (_subscription is not null)
             await _subscription.DisposeAsync();
         if (_sweeper is not null)
             await _sweeper.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken).ContinueWith(_ => { });
     }
 
-    public void Dispose() => _lifetime?.Dispose();
+    public void Dispose() => Interlocked.Exchange(ref _lifetime, null)?.Dispose();
 }

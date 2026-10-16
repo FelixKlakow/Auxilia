@@ -169,71 +169,62 @@ public class DockerWorkflowLauncherParamTests
         Assert.That(p.NetworkingConfig, Is.Null);
     }
 
-    // ------------------------------------------------------------------ internal network selection
+    // ------------------------------------------------------------------ egress network selection
 
-    private static DockerWorkflowLauncherSettings DualNetworkSettings() => new()
-    {
-        NetworkName = "auxilia-net",
-        InternalNetworkName = "auxilia-internal"
-    };
+    private static Auxilia.Core.Runner.Workflows.Egress.EgressPlan Plan(Guid id, int? terminalPort = null)
+        => new(id, "api.nuget.org", ["5672=rabbitmq:5672/bus"], terminalPort);
 
     [Test]
-    public void WhenDefaultDenyWithNoEndpoints_AndInternalNetworkConfigured_AttachesInternalNetwork()
+    public void WithAnEgressPlan_TheContainerJoinsOnlyItsRunNetwork_AsTheWorkflowAlias()
     {
-        var request = SimpleRequest() with
-        {
-            NetworkPolicy = new EffectiveNetworkPolicy(NetworkPolicyMode.DefaultDeny, [])
-        };
+        var id = Guid.NewGuid();
+        var request = SimpleRequest() with { Egress = Plan(id) };
 
-        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(request, DualNetworkSettings());
+        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(
+            request, new DockerWorkflowLauncherSettings { NetworkName = "auxilia-net" });
 
-        Assert.That(p.NetworkingConfig!.EndpointsConfig.Keys, Is.EqualTo(new[] { "auxilia-internal" }));
+        Assert.That(p.NetworkingConfig!.EndpointsConfig.Keys, Is.EqualTo(new[] { $"auxilia-run-{id:N}" }),
+            "never the operator's network: the gateway is the run's only way out");
+        Assert.That(p.NetworkingConfig.EndpointsConfig.Values.Single().Aliases, Is.EqualTo(new[] { "workflow" }));
     }
 
     [Test]
-    public void WhenDefaultDenyWithEndpoints_KeepsRegularNetwork()
+    public void WithAnEgressPlan_TheTerminalIsNeverPublishedFromTheWorkflowContainer()
     {
-        var request = SimpleRequest() with
-        {
-            NetworkPolicy = new EffectiveNetworkPolicy(NetworkPolicyMode.DefaultDeny, ["api.nuget.org"])
-        };
+        var request = SimpleRequest() with { Egress = Plan(Guid.NewGuid(), 7681), PublishTerminalPort = 7681 };
 
-        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(request, DualNetworkSettings());
+        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(request, new DockerWorkflowLauncherSettings());
 
-        Assert.That(p.NetworkingConfig!.EndpointsConfig.Keys, Is.EqualTo(new[] { "auxilia-net" }));
+        Assert.That(p.HostConfig.PortBindings, Is.Null.Or.Empty, "the gateway relays and publishes it");
+        Assert.That(p.ExposedPorts!.Keys, Is.EqualTo(new[] { "7681/tcp" }));
     }
 
     [Test]
-    public void WhenAllowAll_KeepsRegularNetwork()
+    public void TheGateway_IsUnprivileged_AndCarriesThePlanAsData()
     {
-        var request = SimpleRequest() with
+        var id = Guid.NewGuid();
+        var p = Auxilia.Core.Runner.Workflows.Egress.DockerEgressHost.BuildGatewayParameters(
+            Plan(id, 7681), new DockerWorkflowLauncherSettings());
+
+        Assert.Multiple(() =>
         {
-            NetworkPolicy = new EffectiveNetworkPolicy(NetworkPolicyMode.AllowAll, [])
-        };
-
-        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(request, DualNetworkSettings());
-
-        Assert.That(p.NetworkingConfig!.EndpointsConfig.Keys, Is.EqualTo(new[] { "auxilia-net" }));
+            Assert.That(p.Env, Does.Contain("EGRESS_ALLOW=api.nuget.org"));
+            Assert.That(p.Env, Does.Contain("EGRESS_FORWARDS=5672=rabbitmq:5672/bus"));
+            Assert.That(p.Env, Does.Contain($"EGRESS_AMQP_USER=auxilia-wf-{id:N}"), "the relay admits only the run's own identity");
+            Assert.That(p.HostConfig.CapDrop, Is.EqualTo(new[] { "ALL" }));
+            Assert.That(p.HostConfig.ReadonlyRootfs, Is.True);
+            Assert.That(p.HostConfig.SecurityOpt, Does.Contain("no-new-privileges:true"));
+            Assert.That(p.NetworkingConfig.EndpointsConfig.Keys, Is.EqualTo(new[] { $"auxilia-run-{id:N}" }));
+            Assert.That(p.NetworkingConfig.EndpointsConfig.Values.Single().Aliases, Is.EqualTo(new[] { "egress" }));
+            Assert.That(p.HostConfig.PortBindings!["7681/tcp"].Single().HostIP, Is.EqualTo("127.0.0.1"));
+        });
     }
 
     [Test]
-    public void WhenDefaultDenyWithNoEndpoints_ButNoInternalNetworkConfigured_KeepsRegularNetwork()
+    public void WithoutAnEgressPlan_TheOperatorsNetworkIsUsed()
     {
-        var settings = new DockerWorkflowLauncherSettings { NetworkName = "auxilia-net" };
-        var request = SimpleRequest() with
-        {
-            NetworkPolicy = new EffectiveNetworkPolicy(NetworkPolicyMode.DefaultDeny, [])
-        };
-
-        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(request, settings);
-
-        Assert.That(p.NetworkingConfig!.EndpointsConfig.Keys, Is.EqualTo(new[] { "auxilia-net" }));
-    }
-
-    [Test]
-    public void WhenNoNetworkPolicy_KeepsRegularNetwork()
-    {
-        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(SimpleRequest(), DualNetworkSettings());
+        var p = DockerWorkflowLauncher.BuildCreateContainerParameters(
+            SimpleRequest(), new DockerWorkflowLauncherSettings { NetworkName = "auxilia-net" });
 
         Assert.That(p.NetworkingConfig!.EndpointsConfig.Keys, Is.EqualTo(new[] { "auxilia-net" }));
     }

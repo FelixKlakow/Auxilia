@@ -16,6 +16,29 @@ public static class WorkflowEnvironmentVariables
     public const string PodControlQueue = "Workflow__PodControlQueue";
     public const string InstanceId = "Workflow__InstanceId";
     public const string InstanceToken = "Workflow__InstanceToken";
+
+    /// <summary>
+    /// The exchange the instance's own broker identity publishes queue messages through (it has
+    /// no write permission on the default exchange); unset for dev runs on a platform account.
+    /// </summary>
+    public const string BusIngressExchange = "RabbitMq__IngressExchange";
+    public const string BusUserName = "RabbitMq__UserName";
+    public const string BusPassword = "RabbitMq__Password";
+
+    /// <summary>
+    /// Prefix of one variable per push-enabled workspace mount (suffixed with the upper-cased
+    /// mount id) carrying the credentialed push remote. Only the SDK reads it: the remote is
+    /// served to the workspace through the local push gateway, and the variable is scrubbed
+    /// before anything else starts — no agent ever holds the push credential.
+    /// </summary>
+    public const string PushRemotePrefix = "Workflow__PushRemote__";
+
+    /// <summary>
+    /// The run's terminal credential: the web terminal requires it, and only the Core's
+    /// authenticated terminal proxy presents it — no other process on the host or the operator
+    /// network can open the session.
+    /// </summary>
+    public const string TerminalCredential = "Workflow__TerminalCredential";
     /// <summary>Directory where the workflow writes its declared outputs for persistence.</summary>
     public const string OutputDirectory = "Workflow__OutputDirectory";
     /// <summary>Directory containing the per-run repository workspace (ARCHITECTURE §9).</summary>

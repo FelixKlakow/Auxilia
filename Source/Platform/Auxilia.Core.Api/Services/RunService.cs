@@ -160,25 +160,34 @@ public sealed class RunService(
     /// approval pipeline) are exempt — the Core itself is the actor there; a failover re-dispatch
     /// acts as the original triggering principal and is gated like them.
     /// </summary>
-    private async Task EnsureMayUseCatalogEntryAsync(
+    private Task EnsureMayUseCatalogEntryAsync(
         ProviderCatalogEntry entry, Guid? triggeredBy, CancellationToken ct)
+        => EnsureMayUseProviderAsync(entry.ProviderType, entry.Grants, triggeredBy, ct);
+
+    /// <summary>
+    /// The access rule behind <see cref="EnsureMayUseCatalogEntryAsync"/>. A provider the catalog
+    /// does not know (installed on a runner, never registered) has no grants by definition —
+    /// naming its type inline must never bypass the platform default.
+    /// </summary>
+    private async Task EnsureMayUseProviderAsync(
+        string providerType, IReadOnlyList<AccessGrant> grants, Guid? triggeredBy, CancellationToken ct)
     {
         if (triggeredBy is not { } principal)
             return;
         if (await principalDirectory.IsAdministratorAsync(principal, ct))
             return;
-        if (entry.Grants.Count == 0)
+        if (grants.Count == 0)
         {
             if (!await defaultAccess.IsRestrictedAsync(ct))
                 return;
             throw new RunAccessDeniedException(
-                $"provider '{entry.ProviderType}' carries no grants and the platform default "
+                $"provider '{providerType}' carries no grants and the platform default "
                 + "is restricted — only administrators may bind it until access is granted");
         }
         if (!await grantEvaluator.IsGrantedAsync(
-                System.Text.Json.JsonSerializer.Serialize(entry.Grants), principal, ct))
+                System.Text.Json.JsonSerializer.Serialize(grants), principal, ct))
             throw new RunAccessDeniedException(
-                $"not permitted to use provider '{entry.ProviderType}'");
+                $"not permitted to use provider '{providerType}'");
     }
 
     /// <summary>
@@ -482,9 +491,15 @@ public sealed class RunService(
         string workflowType, SlotBinding binding, IReadOnlySet<string>? providedTools,
         Guid? triggeredBy, CancellationToken ct)
     {
-        var entry = await ResolveCatalogEntryAsync(binding, ct);
-        if (entry is null)
+        var providerType = await ProviderTypeOfAsync(binding, ct);
+        if (string.IsNullOrEmpty(providerType))
             return null;
+        var entry = await providerCatalog.FindAsync(providerType, ct);
+        if (entry is null)
+        {
+            await EnsureMayUseProviderAsync(providerType, [], triggeredBy, ct);
+            return null;
+        }
         if (providedTools is not null && entry.RequiredTools.Count > 0)
         {
             var missing = entry.RequiredTools.Where(t => !providedTools.Contains(t)).ToList();
@@ -498,15 +513,13 @@ public sealed class RunService(
         return entry;
     }
 
-    /// <summary>The catalog entry behind a binding — inline provider type or the connector's.</summary>
-    private async Task<ProviderCatalogEntry?> ResolveCatalogEntryAsync(SlotBinding binding, CancellationToken ct)
+    /// <summary>The provider type behind a binding — inline or the connector's.</summary>
+    private async Task<string?> ProviderTypeOfAsync(SlotBinding binding, CancellationToken ct)
     {
         var providerType = binding.ProviderType;
         if (string.IsNullOrEmpty(providerType) && binding.ConnectorId is { } connectorId)
             providerType = (await connectors.GetAsync(connectorId, ct))?.ProviderType;
-        if (string.IsNullOrEmpty(providerType))
-            return null;
-        return await providerCatalog.FindAsync(providerType, ct);
+        return providerType;
     }
 
     /// <summary>A slot bound several times (AllowMultiple) gets suffixed mount ids: slot, slot-2, …</summary>

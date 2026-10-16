@@ -8,8 +8,22 @@ namespace Auxilia.Core.Api.Services;
 /// Read/query side of the Core's centralized audit log (written by <see cref="Auxilia.PlatformData.AuditLog"/>).
 /// The Core owns the audit store, so reads go straight to its own database — no cross-service access.
 /// </summary>
-public sealed class AuditReadService(IDataAccess<AuditRecord> audit)
+public sealed class AuditReadService(
+    IDataAccess<AuditRecord> audit, Auxilia.PlatformData.AuditLog auditLog,
+    Auxilia.PlatformData.AuditCheckpointFile checkpoints)
 {
+    /// <summary>Re-verifies every writer chain of the stored trail (sequence, links, keyed hashes).</summary>
+    public async Task<AuditIntegrityReport> VerifyAsync(CancellationToken ct)
+    {
+        var report = Auxilia.PlatformData.AuditChain.Verify(
+            (await audit.ReadAsync(ct)).ToList(), auditLog.Integrity, await checkpoints.ReadAsync(ct));
+        return new AuditIntegrityReport(report.Intact, report.Keyed, report.Chains, report.Records, report.Unchained,
+            report.Breaks.Select(b => new AuditIntegrityBreak(b.ChainId, b.Sequence, b.RecordId, b.Problem)).ToList())
+        {
+            AnchoredChains = report.AnchoredChains
+        };
+    }
+
     public async Task<PagedResult<AuditEntry>> QueryAsync(AuditQuery query, CancellationToken ct)
     {
         var all = (await audit.ReadAsync(ct)).AsEnumerable();
@@ -30,5 +44,5 @@ public sealed class AuditReadService(IDataAccess<AuditRecord> audit)
     }
 
     private static AuditEntry ToDto(AuditRecord a) =>
-        new(a.Id, a.TimestampUtc, a.Actor, a.Action, a.Subject, a.Outcome, a.DetailJson);
+        new(a.Id, a.TimestampUtc, a.Actor, a.Action, a.Subject, a.Outcome, a.DetailJson) { Source = a.Source };
 }

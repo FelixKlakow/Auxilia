@@ -11,4 +11,4 @@ public sealed record SlotActivationResponse(
     bool Success,
     string? ErrorMessage,
     EncryptedSlotConfiguration? Slot,
-    DateTimeOffset? ExpiresUtc = null);
+    DateTimeOffset? ExpiresUtc = null) : Auxilia.Messaging.IPlatformOnlyMessage;

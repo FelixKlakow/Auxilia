@@ -30,7 +30,7 @@ public sealed class SlotActivationHandler(
     public async Task StartAsync(CancellationToken ct = default)
     {
         var queueName = dispatcherSettings.Value.SlotActivationQueueName;
-        await messageBus.DeclareQueueAsync(queueName, ct);
+        await WorkloadBusTopology.ExposeIngressQueueAsync(messageBus, queueName, ct);
         _subscription = await messageBus.SubscribeAsync<SlotActivationRequest>(queueName, HandleAsync, ct);
 
         logger.LogInformation("SlotActivationHandler started — listening on {QueueName}.", queueName);

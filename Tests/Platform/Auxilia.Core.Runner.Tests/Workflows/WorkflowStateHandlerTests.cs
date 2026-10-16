@@ -80,6 +80,7 @@ public class WorkflowStateHandlerTests
             TestStores.NewWorkspaceManager(_settings),
             new FakePodHost(),
             new Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry(),
+            TestStores.NewContainment(),
             Options.Create(_settings),
             new Auxilia.PlatformData.Protection.NullSettingsProtector(),
             NullLogger<WorkflowStateHandler>.Instance);
@@ -357,6 +358,7 @@ public class WorkflowStateHandlerTests
             TestStores.NewArtifactPersister(_mockBus.Object, _artifactStore, _settings),
             TestStores.NewWorkspaceManager(_settings),
             new FakePodHost(), new Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry(),
+            TestStores.NewContainment(),
             Options.Create(_settings), protector, NullLogger<WorkflowStateHandler>.Instance);
         await handler.StartAsync(CancellationToken.None);
 

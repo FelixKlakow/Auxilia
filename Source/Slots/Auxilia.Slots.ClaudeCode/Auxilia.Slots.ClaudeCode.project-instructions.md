@@ -24,6 +24,12 @@ when present in stored settings but deliberately not offered in the editor.
 
 ## Special rules
 
+- Containment: `ClaudeCliProcessFactory` starts the CLI through `AgentSandbox.Confine` (unprivileged
+  agent user, no platform secret, agent-session lease). Every tool permission — a push-looking
+  Bash command included — follows the session's permission mode; the session registers an
+  `AgentSessionActionApprover` at `ActionGate`, so the PUSH itself is decided by the push policy at
+  the SDK's push gateway from its actual ref updates (`IsGitPush` only labels the question).
+
 - ANY exception leaving `RunAsync` — cancellation, a chat callback whose bus publish failed —
   kills the CLI's process tree (`IClaudeCliProcess.Kill`, no-op once exited) before rethrowing.
 - The credential reaches the CLI ONLY via the child process environment

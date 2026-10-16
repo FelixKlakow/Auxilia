@@ -18,6 +18,7 @@ public sealed class WorkflowStateHandler(
     WorkspaceManager workspaceManager,
     Pods.IPodHost podHost,
     Pods.PodControlRegistry podControlRegistry,
+    RunContainment containment,
     IOptions<WorkflowDispatcherSettings> dispatcherSettings,
     Auxilia.PlatformData.Protection.ISettingsProtector settingsProtector,
     ILogger<WorkflowStateHandler> logger)
@@ -26,9 +27,9 @@ public sealed class WorkflowStateHandler(
 
     public async Task StartAsync(CancellationToken ct = default)
     {
-        await messageBus.DeclareExchangeAsync("workflow.state", ct);
+        await messageBus.DeclareExchangeAsync(WorkflowQueues.StateExchangeName, ct);
         _subscription = await messageBus.SubscribeToExchangeAsync<WorkflowStateMessage>(
-            "workflow.state", HandleAsync, ct);
+            WorkflowQueues.StateExchangeName, HandleAsync, ct);
 
         logger.LogInformation("WorkflowStateHandler started — listening on workflow.state.");
     }
@@ -121,7 +122,7 @@ public sealed class WorkflowStateHandler(
         {
             podControlRegistry.Consume(message.WorkflowInstanceId);
             var companionLogs = await RunRootsCleanup.CleanupAsync(
-                workspaceManager, podHost, dispatcherSettings.Value, logger,
+                workspaceManager, podHost, containment, dispatcherSettings.Value, logger,
                 message.WorkflowInstanceId, includePackage: false, ct);
             if (companionLogs.Count > 0)
                 await artifactPersister.PersistCompanionLogsAsync(

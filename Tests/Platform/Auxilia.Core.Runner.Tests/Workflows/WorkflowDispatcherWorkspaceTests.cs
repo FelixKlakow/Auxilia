@@ -54,7 +54,9 @@ public class WorkflowDispatcherWorkspaceTests
         {
             WorkspaceRootDirectory = Path.Combine(_tempRoot, "workspaces"),
             WarmCacheDirectory = Path.Combine(_tempRoot, "repo-cache"),
-            RunOutputDirectory = Path.Combine(_tempRoot, "run-output")
+            RunOutputDirectory = Path.Combine(_tempRoot, "run-output"),
+            // The fixture's origins are local repositories (a trusted dev-host opt-in).
+            AllowedCloneTransports = ["https", "http", "ssh", "git", "file"]
         };
 
         _schemaStore = TestStores.NewWorkflowSchemaStore();
@@ -98,9 +100,7 @@ public class WorkflowDispatcherWorkspaceTests
             Options.Create(new DockerWorkflowLauncherSettings
             {
                 RabbitMqHost = "rabbitmq",
-                RabbitMqPort = 5672,
-                RabbitMqUserName = "guest",
-                RabbitMqPassword = "guest"
+                RabbitMqPort = 5672
             }),
             Options.Create(_dispatcherSettings),
             new Mock<IHttpClientFactory>().Object,
@@ -124,6 +124,7 @@ public class WorkflowDispatcherWorkspaceTests
             new Auxilia.PlatformData.Protection.NullSettingsProtector(),
             new FakePodHost(),
             new Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry(),
+            TestStores.NewContainment(),
             NullLogger<WorkflowDispatcher>.Instance);
 
         await _sut.StartAsync(CancellationToken.None);
@@ -279,6 +280,43 @@ public class WorkflowDispatcherWorkspaceTests
         Assert.That(captured, Is.Not.Null);
         Assert.That(File.Exists(Path.Combine(captured!.WorkspaceDirectoryBind!, "repos", "main", "test.txt")),
             Is.True, "The per-run repository must be cloned into the prepared workspace.");
+    }
+
+    [Test]
+    public async Task WhenMountAllowsPush_ThePushRemoteGoesOnlyToTheSdk_NeverIntoTheClone()
+    {
+        _mockRepoAuth
+            .Setup(r => r.ResolveAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RepositoryAuth("user", "clone-pat", PushToken: "push-pat"));
+        WorkflowLaunchRequest? captured = null;
+        _mockLauncher
+            .Setup(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
+            .ReturnsAsync(new WorkflowLaunchResult());
+        var remote = "https://git.example.invalid/org/repo.git";
+        var originalPrepare = _originRepo;
+
+        var command = new RunWorkflowCommand(
+            Guid.NewGuid(), WorkflowType, "docker://workspace-workflow:test",
+            new Dictionary<string, string>(),
+            ResolutionToken: "run-token",
+            WorkspaceMounts:
+            [
+                new WorkspaceMountDispatch("main", "git-repository",
+                    new Dictionary<string, string> { ["clone-url"] = originalPrepare, ["allow-push"] = "true" },
+                    AuthSlotName: "mount-auth:main")
+            ]);
+        await _capturedHandler!(command, CancellationToken.None);
+
+        Assert.That(captured, Is.Not.Null);
+        // A local origin carries no userinfo; the dispatcher still announces the push remote to
+        // the SDK (and only to the SDK), and the clone's own configuration holds no credential.
+        Assert.That(captured!.EnvironmentVariables.ContainsKey("Workflow__PushRemote__MAIN"), Is.True);
+        Assert.That(Auxilia.Core.Runner.Workflows.RepositoryCloneUrl.WithCredentials(remote, "user", "push-pat"),
+            Does.Contain("push-pat"), "an https push remote carries the PUSH-scoped token, never the clone one");
+        var config = File.ReadAllText(Path.Combine(captured.WorkspaceDirectoryBind!, "repos", "main", ".git", "config"));
+        Assert.That(config, Does.Not.Contain("clone-pat").And.Not.Contain("push-pat"));
     }
 
     [Test]

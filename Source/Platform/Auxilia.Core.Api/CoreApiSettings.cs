@@ -15,6 +15,13 @@ public sealed class CoreApiSettings
     /// </summary>
     public List<StaticRunConfiguration> StaticConfigurations { get; set; } = new();
 
+    /// <summary>
+    /// Where the signed audit checkpoints (one per stored record) are appended — keep it on
+    /// storage the audit database's writers cannot touch (separate volume, write-once/WORM).
+    /// Unset: beside the platform data.
+    /// </summary>
+    public string? AuditCheckpointPath { get; set; }
+
     /// <summary>Validity of a Core-resolved slot credential; the workflow re-requests after expiry.</summary>
     public TimeSpan SlotCredentialLifetime { get; set; } = TimeSpan.FromMinutes(30);
 

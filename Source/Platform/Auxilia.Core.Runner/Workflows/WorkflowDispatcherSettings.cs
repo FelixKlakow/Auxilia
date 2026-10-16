@@ -49,15 +49,29 @@ public sealed class WorkflowDispatcherSettings
     /// </summary>
     public bool AllowAllNetworkPermitted { get; set; }
 
+    /// <summary>
+    /// Endpoints every run may reach in addition to its own allowlist — platform services a
+    /// workload legitimately calls (e.g. the Core API host for token-authorized downloads).
+    /// Same entry syntax as manifest endpoints (<c>host</c>, <c>host:port</c>, <c>*.suffix</c>).
+    /// </summary>
+    public string[]? PlatformEgressEndpoints { get; set; }
+
+    /// <summary>
+    /// Denied egress attempts after which a run is terminated as a breakout attempt (every
+    /// denial is audited regardless). Zero disables the kill switch.
+    /// </summary>
+    public int EgressDenialLimit { get; set; }
+
     /// <summary>Endpoints removed from every run's allowlist regardless of manifest or run config.</summary>
     public List<string> BlockedEndpoints { get; set; } = [];
 
     /// <summary>
-    /// SPKI public keys (base64) trusted to sign Core-delivered environment fragments — the same
-    /// trust bar as workflow packages, since environment scripts execute at image build. Empty =
-    /// permissive (dev hosts; the host configuration is the operator's trust decision).
+    /// Publisher keys (base-64 SubjectPublicKeyInfo) trusted for EVERYTHING this runner hands to a
+    /// container: environment-layer fragments, workflow ZIP packages and slot-handler plugins must
+    /// carry a valid signature by one of them. Empty = the dev-host posture (integrity checks only,
+    /// self-signed artifacts accepted) — never for production.
     /// </summary>
-    public List<string> TrustedEnvironmentSigningKeys { get; set; } = [];
+    public List<string> TrustedSigningKeys { get; set; } = [];
 
     /// <summary>
     /// Directory under which each run gets its output folder ({dir}/{instanceId}). Mounted
@@ -101,6 +115,24 @@ public sealed class WorkflowDispatcherSettings
     /// </summary>
     public string WarmCacheDirectory { get; set; } =
         Path.Combine(Path.GetTempPath(), "auxilia-repo-cache");
+
+    /// <summary>
+    /// The git transports a workspace clone source (and every fetch the runner makes for it) may
+    /// use. Null = the network transports <c>https, http, ssh, git</c>; an operator narrows it
+    /// (e.g. https only) or — on a trusted single-host dev setup with local mirrors — adds
+    /// <c>file</c>, which also admits plain local paths. Command transports (<c>ext</c>,
+    /// <c>fd</c>) are never honoured, whatever is listed.
+    /// </summary>
+    public string[]? AllowedCloneTransports { get; set; }
+
+    internal static readonly string[] DefaultCloneTransports = ["https", "http", "ssh", "git"];
+
+    internal IReadOnlyList<string> EffectiveCloneTransports
+        => (AllowedCloneTransports ?? DefaultCloneTransports)
+            .Select(t => t.Trim().ToLowerInvariant())
+            .Where(t => t is not ("ext" or "fd" or ""))
+            .Distinct()
+            .ToList();
 
     /// <summary>Per-(run, view) persisted item cap; items beyond it are dropped and logged.</summary>
     public long MaxViewItemsPerView { get; set; } = 10_000;

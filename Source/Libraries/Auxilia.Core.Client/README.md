@@ -2,7 +2,8 @@
 
 Typed HTTP client for the entire [Auxilia](https://github.com/FelixKlakow/Auxilia) Core
 API: dispatch and observe runs, manage configurations and connectors, consume artifacts
-and platform events, administer identity. This is the supported way for any application —
+and platform events, administer identity, read the audit trail and verify its integrity
+(`VerifyAuditAsync`). This is the supported way for any application —
 service, desktop app, or tool — to drive the Core.
 
 Auxilia is a self-hosted platform for governed AI agent workflows: signed workflow

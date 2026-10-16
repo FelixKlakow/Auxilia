@@ -14,7 +14,7 @@ public sealed record ArtifactPersistedEvent(
     int Version,
     string ContentHash,
     long SizeBytes,
-    DateTimeOffset TimestampUtc)
+    DateTimeOffset TimestampUtc) : Auxilia.Messaging.IPlatformOnlyMessage
 {
     // Topic exchange (selective routing) — a NEW name, because the retired fanout
     // "workflow.artifact-events" cannot be redeclared with a different type in place.

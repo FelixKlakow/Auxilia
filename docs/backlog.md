@@ -3,6 +3,80 @@
 > Live tracker of known follow-ups (open items only). Delivered programs and their decision
 > records live in `docs/delivered/` and the git history.
 
+## Security review 2026-10-15 — workload containment (agent breakout)
+
+Review question: does the platform ensure full audit and restriction when an agent inside a
+workflow container tries to break out? Answer before this wave: no — signature trust was
+treated as behavioural trust. Every finding below is fixed; all mechanisms are general (no
+provider/workflow knowledge) and documented in ARCHITECTURE §7 *Workload containment*.
+
+- ~~**Shared platform broker account in every container**~~ — containers held the runner's own
+  RabbitMQ account: a container could consume the run-command queue (stealing other runs'
+  resolution tokens → their secrets via `resolve-slot` with its own key), publish forged commands
+  (`docker://` skips verification), forge views/events/status. — DONE: per-run identities
+  (`IBrokerIdentityIssuer` / `WorkloadBusAccess`: own queues + `workflow.ingress` + state/views/
+  events, topic-pinned routing keys), revoked on every terminal path; broker-validated
+  `user_id` attribution drops forged `IWorkloadScopedMessage`s and workload-published
+  `IPlatformOnlyMessage`s. System-proven: `Messaging/WorkloadBusIsolationSystemTests`.
+- ~~**No endpoint-granular egress; open default network; host gateway mapped**~~ — DONE: per-run
+  egress gateway, allowlist = policy + workspace hosts + slot providers' manifest
+  `NetworkEndpoints` + `PlatformEgressEndpoints`; `MapHostGateway` opt-in. System-proven:
+  `Egress/EgressIsolationSystemTests`.
+- ~~**Docker-default containers (root, full default caps, no NNP, no limits)**~~ — DONE:
+  `--cap-drop ALL` + minimal retained set (`ContainerCapabilities`), `no-new-privileges`,
+  pids/memory/CPU ceilings, optional `ContainerRuntime`; companions hardened too.
+- ~~**Agent reads the SDK's secrets (`env`, `/proc/1/environ`)**~~ — DONE: `AgentSandbox`
+  (unprivileged `auxilia-agent` user for agents, terminals, setup scripts and workspace git;
+  platform secrets scrubbed from the SDK environment); no agent process outlives its session.
+- ~~**Push credential in `.git/config`; regex push gate (bypass: `rm …; git push`)**~~ — DONE:
+  SDK push gateway + per-action `ActionGate`; tool permissions follow the permission mode only.
+- ~~**Clone sources unvalidated (local paths, option injection, traversing mount ids)**~~ — DONE:
+  `AllowedCloneTransports`, `--` before sources, safe mount ids/branches,
+  `protocol.file.allow=never` in clones.
+- ~~**Audit fragmented (runner DB) and editable; no egress traffic audit; 40-line log tail
+  only**~~ — DONE: runner records forwarded to the Core (`platform.audit`), keyed hash chain +
+  `GET /api/audit/integrity` / MCP `verify_audit` / `VerifyAuditAsync`; live egress audit +
+  kill switch (`EgressDenialLimit`); `container-log` and `egress-log` artifacts.
+
+- ~~**Found while building the gateway: allow-all would reach platform internals; the broker
+  relay admits any login**~~ — DONE: the `*` wildcard covers public addresses only (private /
+  internal destinations — broker management, Core, database, other runs' gateways — need an
+  explicit entry); the AMQP relay inspects `Connection.Start-Ok` and admits only the run's own
+  identity, so even default/leaked platform credentials are useless from a container.
+- ~~**Known Lows closed in the same wave**~~ — plugin/package publisher pinning
+  (`TrustedSigningKeys`), unlisted package entries refused, per-run terminal credential.
+- ~~**Found while proving the wave end to end**~~ — DONE: (1) raw-TCP providers (mail) had no
+  route behind the gateway → general `tcp://host:port` relays (named hosts, resolved to the
+  gateway inside the workload only) and plugin endpoint TEMPLATES over non-secret settings
+  (`tcp://{SmtpHost}:{SmtpPort}`, expanded runner-side from the signed manifest via the Core's
+  `/internal/runs/{id}/slot-settings`); the broker host is never a run endpoint. (2) Providers
+  prepared agent CLI state in the SDK's HOME, invisible to the sandboxed CLI →
+  `AgentSandbox.AgentHome` + `GrantToAgent`. (3) A provider type absent from the Core catalog
+  skipped the default-deny bind gate → gated like an entry without grants.
+
+- ~~**Residuals of the first pass**~~ — DONE: a sandboxed runtime is used automatically when the
+  daemon offers one (`PreferredSandboxRuntimes`) and can be made mandatory
+  (`RequireSandboxRuntime`, required by default once `TrustedSigningKeys` is set); a signed
+  checkpoint outside the store after every stored record detects any truncation
+  (`AuditCheckpointPath`); daemons that cannot enforce egress
+  run nothing unless `AllowUnenforcedEgress`; a signature-trusting runner refuses undigested
+  `docker://` coordinates.
+
+- ~~**Found by the dev-stack smoke (2026-10-16)**~~ — DONE: banning the broker's whole HOST
+  also banned a dev git server on the same `host.docker.internal` → protected endpoints are
+  host:port, enforced by name and address (`EGRESS_PROTECTED`); topic-subscription queues were
+  transient non-exclusive, which RabbitMQ 4 refuses (dev broker 4.3.4; system tests run 3.13) →
+  durable auto-delete; a fresh broker container raced the services' first connect → bounded
+  retry in `RabbitMqClient.CreateAsync`; the system-test git server could not accept pushes
+  (repo owned by root, Apache runs as daemon) → chowned, and the implementation system test now
+  pushes through the push gateway; the system suite now runs the same RabbitMQ 4 image as the
+  dev stack (`rabbitmq:4-management`), so broker-version regressions surface in tests.
+
+Boundaries of the model (each with its control, ARCHITECTURE §7): the agent's own model
+credential is visible to the agent by the trust model's design (allowlisted endpoints only); the
+sandboxed runtime must be installed on the runner host (required in the production posture); the
+checkpoint file belongs on write-once storage to protect the anchor itself.
+
 ## Code review 2026-09-09 — open findings
 
 Full-repo review (six parallel reviewers, findings traced end to end before listing). Grouped by
@@ -164,13 +238,17 @@ through as they close, same as the other sections.
 - ~~`/api/configurations/{id}/run?onBehalfOf=` evaluates visibility before the delegation policy
   (visibility oracle).~~ — DONE 2026-09-10: delegation policy first, visibility (for the triggering principal) second. Component `CallerWithoutOnBehalfOf_IsRefusedBeforeVisibility_SoTheTargetsAccessIsNotRevealed`.
 - ~~MCP `run_workflow` lets `RunAccessDeniedException` escape as a protocol error.~~ — DONE 2026-09-09: `run_workflow` catches it and returns a tool error like `run_configuration`.
-- Push-policy gate is a regex over the shell text (quote-splitting or `$(echo push)` bypass to
-  the global mode); the scoped push token remains the real boundary.
-- `PluginManifestVerifier` verifies against the key inside the manifest (integrity only, no
+- ~~Push-policy gate is a regex over the shell text (quote-splitting or `$(echo push)` bypass to
+  the global mode); the scoped push token remains the real boundary.~~ — DONE 2026-10-15: the push credential never enters the workspace; the SDK's push gateway decides every push from its parsed ref updates (`ActionGate`, kind `git.push`) and tool permissions no longer classify command strings.
+- ~~`PluginManifestVerifier` verifies against the key inside the manifest (integrity only, no
   publisher pinning); `WorkflowPackageVerifier` extracts zip entries absent from
-  `manifest.Files`.
-- ttyd runs `--writable` with no credential on the host loopback; the Core ticket is the only
-  auth.
+  `manifest.Files`.~~ — DONE 2026-10-15: the runner pins plugins and packages to
+  `WorkflowDispatcher:TrustedSigningKeys` (plugin manifest hash + signature checked runner-side
+  before injection); packages carrying entries the signed manifest does not list are refused.
+- ~~ttyd runs `--writable` with no credential on the host loopback; the Core ticket is the only
+  auth.~~ — DONE 2026-10-15: a per-run terminal credential (`Workflow__TerminalCredential`) is
+  required by ttyd and presented only by the Core's proxy (Core-internal endpoint userinfo); the
+  terminal is relayed by the run's egress gateway.
 - ~~`Source/Platform/Auxilia.AdminConsole` has no `*.project-instructions.md` (Rule 0).~~ — DONE 2026-09-09: `Auxilia.AdminConsole.project-instructions.md` written (purpose, auth/token relay, invariants, file map).
 
 ### Decisions needed
@@ -265,6 +343,8 @@ Open:
   deterministic (run, type) id (`RunLifecycleEventPublisher.IsAuthentic`). Residual risk: a
   spoofer computing the deterministic id for a run that never reached that state can still
   plant one false event — full proofing needs per-container bus credentials (bigger program).
+  — DONE 2026-10-15: per-run broker identities + broker-validated publisher attribution; a
+  workload can no longer publish to `workflow.events` under the reserved prefix or for another run.
 - ~~Run-lifecycle events carry no `WorkItemId`~~ — DONE 2026-08-08: `RunLifecycleEventPublisher`
   enriches each `run.*` event best-effort from the Core's own run record (dispatch context key
   `WorkItemId` in the stored `DispatchCommandJson`, addressable by instance OR command id);
@@ -474,8 +554,9 @@ access lists, `GET /api/roles`, and the `GET /api/directory/subjects` sharing di
 - **Windows-container runners** — windows-base layers are stored but never served to Linux
   composition. (Mixed-base selections now fail fast at dispatch — 2026-08-01 — and each
   layer's base rides its catalog entry.)
-- **Trust keys in real deployments** — `WorkflowDispatcher__TrustedEnvironmentSigningKeys`
-  is empty (permissive) in dev; any real deployment needs the key material story.
+- **Trust keys in real deployments** — `WorkflowDispatcher__TrustedSigningKeys` (since
+  2026-10-15 the runner's one publisher-trust list: environment fragments, workflow packages,
+  slot plugins) is empty (permissive) in dev; any real deployment needs the key material story.
 - ~~Versioned bases~~ — DONE 2026-08-03 (ARCHITECTURE "Versioned bases"): admin-managed
   environment-base catalog ((name, version) pairs, `/api/environment-bases`, provider-catalog
   gated, full client surface), layers optionally pin a registered base version, the pin rides
@@ -658,11 +739,9 @@ rules) remains a note for the ASB backend. Remaining:
 ## Deeper platform consolidation (from the separation plan)
 - Core.Api + Core.Runner shared **Core DB tier** (currently separate DBs; several features
   bridge the split over the bus).
-- **Endpoint-granular network-policy enforcement** — the resolver computes per-run
-  `AllowedEndpoints` and the launcher realizes only the no-egress case at the Docker level
-  (`--internal` network); per-endpoint enforcement needs the future EGRESS PROXY (a per-run
-  HTTP(S)/DNS forward proxy the container's only route points at, filtering on the allowed
-  list) — a design of its own, not an increment.
+- ~~**Endpoint-granular network-policy enforcement**~~ — DONE 2026-10-15: the per-run egress
+  gateway (`Source/Platform/Auxilia.EgressGateway`) on the run's `--internal` network is the
+  container's only route out; allowlist as data, every attempt logged and audited.
 - ~~Run-API quotas~~ — DONE 2026-08-05: `CoreApi:RunQuotas` — `MaxActiveRuns` (platform-wide
   cap on non-terminal runs) and `MaxDispatchesPerPrincipalPerMinute` (per-principal fixed
   window; system dispatches without a principal — failover redispatch, the approval

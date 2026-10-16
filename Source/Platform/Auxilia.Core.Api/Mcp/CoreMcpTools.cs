@@ -494,6 +494,19 @@ public sealed class CoreMcpTools(
             cancellationToken));
     }
 
+    [McpServerTool(Name = "verify_audit")]
+    [Description("Re-verifies the integrity of the Core's audit trail: every writer chain's sequence, " +
+                 "links and keyed hashes. Reports whether the trail is intact and every break found.")]
+    public async Task<CallToolResult> VerifyAuditAsync(
+        RequestContext<CallToolRequestParams> context, CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (await DenyAsync(principalId, PermissionActions.AuditRead, null, cancellationToken) is { } denial)
+            return denial;
+        return JsonResult(await audit.VerifyAsync(cancellationToken));
+    }
+
     [McpServerTool(Name = "list_connectors")]
     [Description("Lists the connectors visible to you: company connectors plus personal ones you own " +
                  "or were granted (connector managers see all). Setting keys only — secret values are " +

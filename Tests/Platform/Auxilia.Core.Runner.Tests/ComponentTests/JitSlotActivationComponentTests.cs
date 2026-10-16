@@ -95,6 +95,11 @@ public class JitSlotActivationComponentTests
                 services.AddSingleton(TestStores.NewHostPlatformProbe());
                 services.AddSingleton<Auxilia.Core.Runner.Workflows.Pods.IPodHost>(new Auxilia.Core.Runner.Tests.Workflows.FakePodHost());
                 services.AddSingleton<Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry>();
+                services.AddSingleton<Auxilia.Messaging.IBrokerIdentityIssuer, FakeBrokerIdentityIssuer>();
+                services.AddSingleton<WorkloadBusCredentials>();
+                services.AddSingleton<Auxilia.Core.Runner.Workflows.Egress.IEgressHost, FakeEgressHost>();
+                services.AddSingleton<ArtifactPersister>();
+                services.AddSingleton<RunContainment>();
                 services.AddSingleton<WorkflowDispatcher>();
             })
             .Build();

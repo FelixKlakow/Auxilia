@@ -40,6 +40,7 @@ public class ReAdoptionEnvironment
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
     {
+        await TestImages.BuildEgressGatewayAsync();
         await WorkflowDispatchEnvironment.BuildImageAsync(
             WorkflowDispatchEnvironment.RunnerImageName, "Source/Platform/Auxilia.Core.Runner/Dockerfile");
         await WorkflowDispatchEnvironment.BuildImageAsync(
@@ -50,7 +51,7 @@ public class ReAdoptionEnvironment
         _network = new NetworkBuilder().WithName(NetworkName).Build();
         await _network.CreateAsync();
 
-        _rabbitMq = new RabbitMqBuilder("rabbitmq:3.13-management")
+        _rabbitMq = new RabbitMqBuilder("rabbitmq:4-management")
             .WithUsername("guest").WithPassword("guest")
             .WithNetwork(_network).WithNetworkAliases(RabbitMqAlias)
             .Build();
@@ -70,8 +71,9 @@ public class ReAdoptionEnvironment
             .WithEnvironment("WorkflowLauncher__NetworkName",      NetworkName)
             .WithEnvironment("WorkflowLauncher__RabbitMqHost",     RabbitMqAlias)
             .WithEnvironment("WorkflowLauncher__RabbitMqPort",     "5672")
-            .WithEnvironment("WorkflowLauncher__RabbitMqUserName", "guest")
-            .WithEnvironment("WorkflowLauncher__RabbitMqPassword", "guest")
+            .WithEnvironment("WorkflowLauncher__EgressGatewayImage", TestImages.EgressGatewayImageName)
+            // Everything this runner creates carries the session label the teardown sweeps.
+            .WithEnvironment(TestSession.RunnerVariable, TestSession.Id)
             .WithEnvironment("WorkflowDispatcher__CommandQueueName",        CommandQueue)
             .WithEnvironment("WorkflowDispatcher__RegistrationQueueName",   "workflow-registration-readopt")
             .WithEnvironment("WorkflowDispatcher__AnnouncementQueueName",   "workflow.announcements-readopt")
@@ -122,6 +124,8 @@ public class ReAdoptionEnvironment
     [OneTimeTearDown]
     public async Task OneTimeTearDown()
     {
+        // Session objects first: a leftover gateway would pin the test network.
+        await TestSession.SweepAsync();
         CoreApiClient?.Dispose();
         if (MessageBusClient is IAsyncDisposable d) await d.DisposeAsync();
         if (_coreApi is not null) await _coreApi.DisposeAsync();
@@ -129,5 +133,7 @@ public class ReAdoptionEnvironment
         await _rabbitMq.DisposeAsync();
         await _mongoDb.DisposeAsync();
         await _network.DisposeAsync();
+        // A run whose containment the stopped runner never released leaves nothing behind.
+        await TestSession.SweepAsync();
     }
 }

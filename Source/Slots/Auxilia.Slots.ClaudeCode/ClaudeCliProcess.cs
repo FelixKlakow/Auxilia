@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Auxilia.Workflows.Sandbox;
 
 namespace Auxilia.Slots.ClaudeCode;
 
@@ -24,13 +25,24 @@ public sealed class ClaudeCliProcessFactory : IClaudeCliProcessFactory
 {
     public IClaudeCliProcess Start(ProcessStartInfo startInfo)
     {
-        var process = Process.Start(startInfo)
-                      ?? throw new InvalidOperationException(
-                          $"Failed to start the Claude Code CLI ('{startInfo.FileName}').");
-        return new ClaudeCliProcess(process);
+        // The CLI is agent-controlled code: unprivileged agent user, no platform secret, and
+        // nothing it spawns outlives the session (the lease kills leftovers when it ends).
+        var lease = AgentSandbox.EnterAgentSession();
+        try
+        {
+            var process = Process.Start(AgentSandbox.Confine(startInfo))
+                          ?? throw new InvalidOperationException(
+                              $"Failed to start the Claude Code CLI ('{startInfo.FileName}').");
+            return new ClaudeCliProcess(process, lease);
+        }
+        catch
+        {
+            lease.Dispose();
+            throw;
+        }
     }
 
-    private sealed class ClaudeCliProcess(Process process) : IClaudeCliProcess
+    private sealed class ClaudeCliProcess(Process process, IDisposable lease) : IClaudeCliProcess
     {
         public TextReader Output => process.StandardOutput;
         public TextReader Error => process.StandardError;
@@ -67,6 +79,10 @@ public sealed class ClaudeCliProcessFactory : IClaudeCliProcessFactory
             }
         }
 
-        public void Dispose() => process.Dispose();
+        public void Dispose()
+        {
+            process.Dispose();
+            lease.Dispose();
+        }
     }
 }

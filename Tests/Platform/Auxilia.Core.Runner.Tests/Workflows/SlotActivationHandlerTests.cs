@@ -325,6 +325,10 @@ public class SlotActivationHandlerTests
             LastCall = (coreRunId, resolutionToken, slotName);
             return Task.FromResult(Result);
         }
+
+        public Task<ResolvedSlotSettings?> ResolveSettingValuesAsync(
+            Guid coreRunId, string resolutionToken, string providerType, IReadOnlyList<string> keys, CancellationToken ct)
+            => Task.FromResult<ResolvedSlotSettings?>(null);
     }
 
     [Test]

@@ -2,7 +2,9 @@
 # Core.Runner wired for real Docker workflow runs (slot plugins, environment layers, dev mode).
 # State lives in Source/Platform/Auxilia.Core.Api/core-data (JSON backend) and survives restarts.
 # Requires: Docker Desktop and a prior solution build (pass -Build to build first). The
-# auxilia-rabbitmq container and the sim git-server image are started/built here if missing.
+# auxilia-rabbitmq container, the sim git-server image and the egress gateway image are
+# started/built here if missing (the runner mints per-run broker users through RabbitMQ's
+# management API on localhost:15672 with the guest administrator account).
 #
 # By default the services run HIDDEN, logging to .devstack\api.log / runner.log.
 # Stop them with -Stop; pass -Windowed to get the old one-visible-window-per-service behavior.
@@ -37,6 +39,15 @@ if (-not (docker ps --format "{{.Names}}" | Select-String -Quiet "^auxilia-rabbi
     docker rm -f auxilia-rabbitmq 2>$null | Out-Null
     docker run -d --name auxilia-rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:4-management | Out-Null
     Write-Host "auxilia-rabbitmq started (localhost:5672, guest/guest)."
+}
+
+# Every workflow container runs behind its run's egress gateway (the runner starts one per run
+# from this image) — built when missing, rebuilt with -Build so it tracks the source.
+docker image inspect auxilia-egress-gateway:latest 2>$null | Out-Null
+if ($Build -or $LASTEXITCODE -ne 0) {
+    Write-Host "Building auxilia-egress-gateway:latest..."
+    docker build -t auxilia-egress-gateway:latest -f "$repo\Source\Platform\Auxilia.EgressGateway\Dockerfile" $repo
+    if ($LASTEXITCODE -ne 0) { throw "The egress gateway image build failed." }
 }
 
 $runnerEnv = @{

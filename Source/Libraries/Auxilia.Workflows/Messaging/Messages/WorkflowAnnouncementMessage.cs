@@ -5,4 +5,4 @@ public sealed record WorkflowAnnouncementMessage(
     string WorkflowName,
     string PublicKey,
     string ResponseTopic,
-    string? InstanceToken = null);
+    string? InstanceToken = null) : Auxilia.Messaging.IWorkloadScopedMessage;

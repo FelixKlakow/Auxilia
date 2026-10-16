@@ -1,5 +1,6 @@
 using Auxilia.Messaging;
 using Auxilia.Core.Runner.Workflows.Storage;
+using Auxilia.Workflows.Messaging;
 using Auxilia.Workflows.Messaging.Messages;
 using Microsoft.Extensions.Logging;
 
@@ -13,8 +14,8 @@ public sealed class SignalDispatcher(
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        await messageBus.DeclareQueueAsync("workflow.signals", cancellationToken);
-        await messageBus.SubscribeAsync<WorkflowSignalMessage>("workflow.signals", HandleAsync, cancellationToken);
+        await WorkloadBusTopology.ExposeIngressQueueAsync(messageBus, WorkflowQueues.SignalsQueueName, cancellationToken);
+        await messageBus.SubscribeAsync<WorkflowSignalMessage>(WorkflowQueues.SignalsQueueName, HandleAsync, cancellationToken);
     }
 
     private async Task HandleAsync(WorkflowSignalMessage message, CancellationToken ct)

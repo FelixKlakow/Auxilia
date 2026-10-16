@@ -38,6 +38,13 @@ public class WorkflowAnnouncementHandlerTests
         _mockBus
             .Setup(b => b.DeclareQueueAsync("workflow.announcements", It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
+        _mockBus
+            .Setup(b => b.DeclareTopicExchangeAsync("workflow.ingress", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _mockBus
+            .Setup(b => b.BindQueueAsync(
+                "workflow.announcements", "workflow.ingress", "workflow.announcements", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         _mockBus
             .Setup(b => b.SubscribeAsync<WorkflowAnnouncementMessage>(
@@ -92,6 +99,17 @@ public class WorkflowAnnouncementHandlerTests
     {
         _mockBus.Verify(
             b => b.DeclareQueueAsync("workflow.announcements", It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Test]
+    public void WhenStartCalled_ExposesAnnouncementsQueueOnTheWorkloadIngress()
+    {
+        // Workload identities cannot publish to the default exchange: the queue is reachable
+        // from a container ONLY through its ingress binding.
+        _mockBus.Verify(
+            b => b.BindQueueAsync("workflow.announcements", "workflow.ingress", "workflow.announcements",
+                It.IsAny<CancellationToken>()),
             Times.Once);
     }
 

@@ -10,4 +10,4 @@ public sealed record WorkflowStateMessage(
     WorkflowState State,
     string? ErrorMessage,
     string? WorkflowName = null,
-    string? InstanceToken = null);
+    string? InstanceToken = null) : Auxilia.Messaging.IWorkloadScopedMessage;

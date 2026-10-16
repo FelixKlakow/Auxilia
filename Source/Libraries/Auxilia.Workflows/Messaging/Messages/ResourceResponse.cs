@@ -8,4 +8,4 @@ public sealed record ResourceResponse(
     Guid RequestId,
     bool Success,
     string? ErrorMessage,
-    string? ResultJson);
+    string? ResultJson) : Auxilia.Messaging.IPlatformOnlyMessage;

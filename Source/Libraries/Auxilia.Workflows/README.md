@@ -20,6 +20,12 @@ parity.
   all handled by `Run(args)`; your code is the application delegate.
 - **Companions & pod control** — declare digest-pinned service containers and spawn more
   at runtime inside the signed envelope, on the run's private zero-egress pod network.
+- **Containment built in** — under the platform, workload-controlled processes (agent CLIs,
+  their terminals, workspace setup scripts and git) run as an unprivileged sandbox user
+  without any platform secret (`AgentSandbox`); a push reaches its remote only through the
+  SDK's loopback push gateway, where a per-action policy (`ActionGate`, kind `git.push`)
+  decides it from the push's actual ref updates. The bus is reached with the run's own
+  broker identity through the platform's ingress exchange.
 - **Tool-provision matching** — `ProvidesTools("claude", "copilot")` declares the CLIs the
   workflow's image bundles; slot handlers declare what they need (`RequiredTools` in their
   manifest) and match data-driven — no provider names in workflow source.

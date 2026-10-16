@@ -215,6 +215,7 @@ public sealed class WorkflowReadoptionTests
             new NullSettingsProtector(),
             new FakePodHost(),
             new Auxilia.Core.Runner.Workflows.Pods.PodControlRegistry(),
+            TestStores.NewContainment(),
             NullLogger<WorkflowDispatcher>.Instance);
 
         _schemaStore = TestStores.NewWorkflowSchemaStore();
@@ -225,6 +226,7 @@ public sealed class WorkflowReadoptionTests
             TestStores.NewWorkspaceManager(), new NullSettingsProtector(),
             Options.Create(dispatcherSettings), _instanceInfo, TestStores.NewAuditLog(),
             new FakePodHost(),
+            TestStores.NewContainment(),
             NullLogger<WorkflowReadoptionService>.Instance);
     }
 

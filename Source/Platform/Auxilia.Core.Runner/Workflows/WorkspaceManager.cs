@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using Auxilia.Workflows.Workspace;
 using Microsoft.Extensions.Options;
 
@@ -36,6 +37,21 @@ public sealed class WorkspaceManager(
         if (repositories.Count == 0 && emptyWorkspaces.Count == 0)
             return null;
 
+        // Every source is validated BEFORE anything touches disk: mount ids become host paths
+        // and clone sources become git arguments — neither may escape what the run is owed.
+        foreach (var workspace in emptyWorkspaces)
+            EnsureSafeMountId(workspace.Id);
+        foreach (var repository in repositories)
+        {
+            EnsureSafeMountId(repository.Id);
+            if (CloneSourceRejection(repository.CloneUrl, settings.Value.EffectiveCloneTransports) is { } reason)
+                throw new InvalidOperationException(
+                    $"repository '{repository.Id}' clone source {StripUserInfo(repository.CloneUrl)} rejected: {reason}");
+            if (repository.Branch is { } requestedBranch && !IsSafeBranchName(requestedBranch))
+                throw new InvalidOperationException(
+                    $"repository '{repository.Id}' branch '{requestedBranch}' is not a valid branch name");
+        }
+
         var runRoot = RunRootFor(instanceId);
         foreach (var workspace in emptyWorkspaces)
             PrepareEmptyWorkspace(instanceId, runRoot, workspace);
@@ -47,8 +63,8 @@ public sealed class WorkspaceManager(
             if (repository.NoCache || repository.AllowPush)
             {
                 // Fresh clone per run: sensitive repos never enter the warm cache, and a
-                // push-enabled clone keeps its credential — which must never be cached either.
-                await CloneAsync(repository, runRepoDir, ct);
+                // push-enabled clone (about to diverge from its origin) never shares one.
+                await CloneAsync(repository, runRepoDir, settings.Value.EffectiveCloneTransports, ct);
             }
             else
             {
@@ -67,6 +83,10 @@ public sealed class WorkspaceManager(
                  string.IsNullOrWhiteSpace(repository.CommitEmail)
                      ? "agent@auxilia.invalid" : repository.CommitEmail],
                 repository.CloneUrl, ct);
+            // The clone is handed to the workload: its own git must not reach the runner host's
+            // filesystem through file:// or local-path remotes (submodules included).
+            await RunGitAsync(
+                ["-C", runRepoDir, "config", "protocol.file.allow", "never"], repository.CloneUrl, ct);
 
             logger.LogInformation(
                 "Workspace repository prepared. InstanceId={InstanceId} RepositoryId={RepositoryId} CloneUrl={CloneUrl} NoCache={NoCache}",
@@ -133,14 +153,15 @@ public sealed class WorkspaceManager(
         if (!Directory.Exists(cacheDir))
         {
             Directory.CreateDirectory(settings.Value.WarmCacheDirectory);
-            await CloneAsync(repository, cacheDir, ct);
+            await CloneAsync(repository, cacheDir, settings.Value.EffectiveCloneTransports, ct);
             return cacheDir;
         }
 
         try
         {
             await RunGitAsync(
-                ["-C", cacheDir, "fetch", "--prune", "origin"], repository.CloneUrl, ct, authenticated: true);
+                ["-C", cacheDir, "fetch", "--prune", "origin"], repository.CloneUrl, ct, authenticated: true,
+                transports: settings.Value.EffectiveCloneTransports);
         }
         catch (InvalidOperationException ex)
         {
@@ -165,33 +186,27 @@ public sealed class WorkspaceManager(
         return head.StartsWith(prefix, StringComparison.Ordinal) ? head[prefix.Length..] : head;
     }
 
-    private static async Task CloneAsync(RepositoryDeclaration repository, string targetDirectory, CancellationToken ct)
+    private static async Task CloneAsync(
+        RepositoryDeclaration repository, string targetDirectory, IReadOnlyList<string> transports, CancellationToken ct)
     {
         // The clone always names the credential-stripped URL: that is what git records as the
         // origin, so no .git/config — cache or per-run — ever holds the clone credential; the
         // credential rides only in the command's own -c configuration (ARCHITECTURE §8).
-        var args = new List<string> { "clone", StripUserInfo(repository.CloneUrl) };
+        var args = new List<string> { "clone" };
         if (repository.Branch is not null)
         {
             args.Add("--branch");
             args.Add(repository.Branch);
         }
+        // "--" ends option parsing: a clone source can never be read as a git option
+        // (e.g. --upload-pack=<command>), whatever the binding says.
+        args.Add("--");
+        args.Add(StripUserInfo(repository.CloneUrl));
         args.Add(targetDirectory);
 
-        await RunGitAsync(args, repository.CloneUrl, ct, authenticated: true);
-
-        // EXCEPTION (Model B, decided 2026-07-27): a push-enabled mount keeps its scoped
-        // credential on the per-run clone so the agent can push; each push is governed by the
-        // agent's per-action permission policy, and the clone never enters the warm cache.
-        // When the connector supplied a push-scoped token, THAT is the remote's credential —
-        // the container holds push authority only, not the full token.
-        if (!repository.AllowPush)
-            return;
-        var pushUrl = repository.PushCloneUrl is { Length: > 0 } scoped ? scoped : repository.CloneUrl;
-        if (!string.Equals(pushUrl, StripUserInfo(repository.CloneUrl), StringComparison.Ordinal))
-            await RunGitAsync(
-                ["-C", targetDirectory, "remote", "set-url", "origin", pushUrl],
-                repository.CloneUrl, ct);
+        await RunGitAsync(args, repository.CloneUrl, ct, authenticated: true, transports: transports);
+        // No exception for push-enabled mounts: their credential never enters the clone. The
+        // dispatcher hands the push remote to the SDK alone, whose push gateway serves it.
     }
 
     /// <summary>
@@ -201,7 +216,8 @@ public sealed class WorkspaceManager(
     /// per-invocation URL rewrite. Non-zero exit throws with the (redacted) stderr.
     /// </summary>
     private static async Task<string> RunGitAsync(
-        IReadOnlyList<string> args, string cloneUrl, CancellationToken ct, bool authenticated = false)
+        IReadOnlyList<string> args, string cloneUrl, CancellationToken ct, bool authenticated = false,
+        IReadOnlyList<string>? transports = null)
     {
         var psi = new ProcessStartInfo("git")
         {
@@ -211,6 +227,15 @@ public sealed class WorkspaceManager(
         };
         psi.ArgumentList.Add("-c");
         psi.ArgumentList.Add("credential.helper=");
+        // Transport allowlist for everything the runner fetches (the configured transports; by
+        // default network ones only — no file://, local paths, ext:: (command execution) or
+        // fd::) — so neither a clone source nor a submodule/redirect can make the RUNNER HOST
+        // read its own filesystem or run a command.
+        foreach (var protocol in TransportConfiguration(transports ?? []))
+        {
+            psi.ArgumentList.Add("-c");
+            psi.ArgumentList.Add(protocol);
+        }
         if (authenticated)
             foreach (var arg in CredentialConfigFor(cloneUrl))
                 psi.ArgumentList.Add(arg);
@@ -247,6 +272,50 @@ public sealed class WorkspaceManager(
                 $"git {commandName} for {StripUserInfo(cloneUrl)} failed (exit {process.ExitCode}): {Redact(stderr, cloneUrl)}");
         return stdout.Trim();
     }
+
+    private static IEnumerable<string> TransportConfiguration(IReadOnlyList<string> transports)
+    {
+        yield return "protocol.allow=never";
+        foreach (var transport in transports)
+            yield return $"protocol.{transport}.allow=always";
+    }
+
+    private static readonly Regex ScpLikeSource =
+        new(@"^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:(?!//)\S+$", RegexOptions.CultureInvariant);
+
+    private static readonly Regex SafeMountId =
+        new(@"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Why a clone source is refused, or null when its transport is one of
+    /// <paramref name="transports"/> (<see cref="WorkflowDispatcherSettings.AllowedCloneTransports"/>):
+    /// a URL's scheme, <c>ssh</c> for scp-like <c>user@host:path</c>, <c>file</c> for local paths.
+    /// </summary>
+    internal static string? CloneSourceRejection(string cloneUrl, IReadOnlyList<string> transports)
+    {
+        if (string.IsNullOrWhiteSpace(cloneUrl) || cloneUrl.TrimStart().StartsWith('-'))
+            return "not a repository location";
+        var transport = ScpLikeSource.IsMatch(cloneUrl) ? "ssh"
+            : Uri.TryCreate(cloneUrl, UriKind.Absolute, out var uri) && !uri.IsFile ? uri.Scheme.ToLowerInvariant()
+            : "file";
+        return transports.Contains(transport) && transport is not ("ext" or "fd")
+            ? null
+            : $"transport '{transport}' is not allowed on this runner (WorkflowDispatcher:AllowedCloneTransports)";
+    }
+
+    /// <summary>A mount id becomes a host directory name: no separators, no traversal.</summary>
+    internal static void EnsureSafeMountId(string mountId)
+    {
+        if (!SafeMountId.IsMatch(mountId) || mountId is "." or "..")
+            throw new InvalidOperationException($"workspace mount id '{mountId}' is not a safe identifier.");
+    }
+
+    /// <summary>A branch name that can never be read as a git option or a revision range.</summary>
+    internal static bool IsSafeBranchName(string branch)
+        => branch.Length is > 0 and <= 255
+           && !branch.StartsWith('-')
+           && !branch.Contains("..", StringComparison.Ordinal)
+           && !branch.Any(c => char.IsControl(c) || char.IsWhiteSpace(c) || c is '~' or '^' or ':' or '?' or '*' or '[' or '\\');
 
     /// <summary>
     /// The per-command git configuration that injects a tokened URL's credential: a

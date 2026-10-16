@@ -126,6 +126,7 @@ public class CoreClientEnvironment
             PlatformPublicKeyBase64 = Convert.ToBase64String(platformKey.ExportSubjectPublicKeyInfo());
         }
 
+        await TestImages.BuildEgressGatewayAsync();
         await Task.WhenAll(
             TestImages.BuildImageAsync(CoreApiDispatch.CoreApiDispatchEnvironment.RunnerImageName,
                 "Source/Platform/Auxilia.Core.Runner/Dockerfile"),
@@ -137,7 +138,7 @@ public class CoreClientEnvironment
         _network = new NetworkBuilder().WithName(NetworkName).Build();
         await _network.CreateAsync();
 
-        _rabbitMq = new RabbitMqBuilder("rabbitmq:3.13-management")
+        _rabbitMq = new RabbitMqBuilder("rabbitmq:4-management")
             .WithUsername("guest").WithPassword("guest")
             .WithNetwork(_network).WithNetworkAliases(RabbitMqAlias)
             .Build();
@@ -159,8 +160,9 @@ public class CoreClientEnvironment
                 CoreApiDispatch.CoreApiDispatchEnvironment.DummyWorkflowsImageName)
             .WithEnvironment("WorkflowLauncher__RabbitMqHost", RabbitMqAlias)
             .WithEnvironment("WorkflowLauncher__RabbitMqPort", "5672")
-            .WithEnvironment("WorkflowLauncher__RabbitMqUserName", "guest")
-            .WithEnvironment("WorkflowLauncher__RabbitMqPassword", "guest")
+            .WithEnvironment("WorkflowLauncher__EgressGatewayImage", TestImages.EgressGatewayImageName)
+            // Everything this runner creates carries the session label the teardown sweeps.
+            .WithEnvironment(TestSession.RunnerVariable, TestSession.Id)
             .WithWaitStrategy(
                 Wait.ForUnixContainer().UntilMessageIsLogged("WorkflowDispatcher started"))
             .Build();
@@ -241,6 +243,8 @@ public class CoreClientEnvironment
     [OneTimeTearDown]
     public async Task OneTimeTearDown()
     {
+        // Session objects first: a leftover gateway would pin the test network.
+        await TestSession.SweepAsync();
         // Container logs are the only evidence when the platform misbehaves mid-suite; the
         // test process's console is swallowed by vstest, so persist them next to the repo.
         await DumpLogsAsync(_coreApi, "core-api");
@@ -254,5 +258,7 @@ public class CoreClientEnvironment
         if (_runner is not null) await _runner.DisposeAsync();
         if (_rabbitMq is not null) await _rabbitMq.DisposeAsync();
         if (_network is not null) await _network.DisposeAsync();
+        // A run whose containment the stopped runner never released leaves nothing behind.
+        await TestSession.SweepAsync();
     }
 }
