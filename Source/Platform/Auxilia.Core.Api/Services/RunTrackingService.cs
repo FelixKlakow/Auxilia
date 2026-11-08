@@ -128,6 +128,10 @@ public sealed class RunTrackingService(
             // must not shift the completion time.
             CompletedUtc = mergeBase?.CompletedUtc
                            ?? (CoreRunStates.IsTerminal(statusEvent.State) ? statusEvent.TimestampUtc : null),
+            // A reason belongs to the state it came with; the item count only ever grows.
+            Reason = statusEvent.Reason
+                     ?? (mergeBase?.State == statusEvent.State ? mergeBase.Reason : null),
+            LastViewSequence = MaxOf(statusEvent.LastViewSequence, mergeBase?.LastViewSequence),
             ConfigurationId = mergeBase?.ConfigurationId,
             ConfigurationName = mergeBase?.ConfigurationName,
             OwnerServiceId = ownerServiceId,
@@ -145,6 +149,8 @@ public sealed class RunTrackingService(
             await runs.RemoveAsync(dispatchRecord.Id, ct);
         return true;
     }
+
+    private static long? MaxOf(long? a, long? b) => a is null ? b : b is null ? a : Math.Max(a.Value, b.Value);
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {

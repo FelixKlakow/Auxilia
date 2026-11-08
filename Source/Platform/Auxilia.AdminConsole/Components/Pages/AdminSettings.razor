@@ -89,6 +89,75 @@ else
             </p>
         </div>
     </section>
+
+    <section class="card">
+        <div class="card-header">
+            <h2>Run checkpoints</h2>
+            <p class="card-subtitle">
+                How long what a workflow saves of itself while it runs — a session handed back to its
+                user — is kept after its latest save. A run's request beats the workflow's declaration,
+                which beats the general lifetime, as far as you let them; the maximum caps them all.
+            </p>
+        </div>
+        <div class="card-body">
+            <form class="toolbar" @onsubmit="SaveCheckpointLifetimesAsync" @onsubmit:preventDefault>
+                <label>
+                    General lifetime (hours)
+                    <input class="input-inline" type="number" min="0" step="any" @bind="_checkpointHours"
+                           placeholder="deployment default"/>
+                </label>
+                <label>
+                    Maximum (hours)
+                    <input class="input-inline" type="number" min="0" step="any" @bind="_checkpointMaxHours"
+                           placeholder="deployment maximum"/>
+                </label>
+                <div class="toolbar-actions">
+                    <button type="submit" class="btn btn-primary"
+                            disabled="@(_busy || _checkpointHours is <= 0 || _checkpointMaxHours is <= 0)">
+                        Save lifetimes
+                    </button>
+                </div>
+            </form>
+            <p class="field-hint">
+                Empty clears a value back to the deployment configuration (unless changed there: a week,
+                and at most thirty days).
+            </p>
+            <h3 class="body-caption">Who may set a lifetime other than the general one</h3>
+            <div class="form-grid">
+                <label class="radio-row">
+                    <input type="radio" name="checkpoint-overrides" value="@CheckpointLifetimeOverrideModes.Run"
+                           checked="@(_checkpointOverrides == CheckpointLifetimeOverrideModes.Run)"
+                           @onchange="() => _checkpointOverrides = CheckpointLifetimeOverrideModes.Run"/>
+                    <span>
+                        <strong>Runs and workflows</strong> (the default) — a run request may set its
+                        checkpoints' lifetime; otherwise the workflow's declared one applies.
+                    </span>
+                </label>
+                <label class="radio-row">
+                    <input type="radio" name="checkpoint-overrides" value="@CheckpointLifetimeOverrideModes.Workflow"
+                           checked="@(_checkpointOverrides == CheckpointLifetimeOverrideModes.Workflow)"
+                           @onchange="() => _checkpointOverrides = CheckpointLifetimeOverrideModes.Workflow"/>
+                    <span>
+                        <strong>Workflows only</strong> — a workflow's declared lifetime applies; a run
+                        request that sets one is refused.
+                    </span>
+                </label>
+                <label class="radio-row">
+                    <input type="radio" name="checkpoint-overrides" value="@CheckpointLifetimeOverrideModes.None"
+                           checked="@(_checkpointOverrides == CheckpointLifetimeOverrideModes.None)"
+                           @onchange="() => _checkpointOverrides = CheckpointLifetimeOverrideModes.None"/>
+                    <span>
+                        <strong>Nobody</strong> — the general lifetime applies to every checkpoint.
+                    </span>
+                </label>
+            </div>
+            <div class="button-row">
+                <button class="btn btn-primary" disabled="@_busy" @onclick="SaveCheckpointOverridesAsync">
+                    Save who may override
+                </button>
+            </div>
+        </div>
+    </section>
 }
 
 @code {
@@ -102,6 +171,9 @@ else
     private string _defaultAccess = DefaultResourceAccessModes.Restricted;
     private int? _loginLifetimeMinutes;
     private string? _storedLoginLifetime;
+    private double? _checkpointHours;
+    private double? _checkpointMaxHours;
+    private string _checkpointOverrides = CheckpointLifetimeOverrideModes.Run;
 
     private readonly CancellationTokenSource _cts = new();
 
@@ -119,6 +191,15 @@ else
             _storedLoginLifetime = settings.FirstOrDefault(
                 s => s.Key == PlatformSettingKeys.LoginTokenLifetimeMinutes)?.Value;
             _loginLifetimeMinutes = int.TryParse(_storedLoginLifetime, out var minutes) ? minutes : null;
+            _checkpointHours = HoursOf(settings, PlatformSettingKeys.CheckpointLifetimeHours);
+            _checkpointMaxHours = HoursOf(settings, PlatformSettingKeys.CheckpointLifetimeMaxHours);
+            _checkpointOverrides = settings.FirstOrDefault(
+                    s => s.Key == PlatformSettingKeys.CheckpointLifetimeOverrides)?.Value?.ToLowerInvariant() switch
+            {
+                CheckpointLifetimeOverrideModes.Workflow => CheckpointLifetimeOverrideModes.Workflow,
+                CheckpointLifetimeOverrideModes.None => CheckpointLifetimeOverrideModes.None,
+                _ => CheckpointLifetimeOverrideModes.Run,
+            };
             _denied = false;
             _error = null;
         }
@@ -151,6 +232,38 @@ else
                 new SetPlatformSetting(minutes.ToString()), _cts.Token);
             _notice = $"Login token lifetime set to {minutes} minutes.";
         });
+
+    private Task SaveCheckpointLifetimesAsync()
+        => MutateAsync(async () =>
+        {
+            await Core.SetPlatformSettingAsync(PlatformSettingKeys.CheckpointLifetimeHours,
+                new SetPlatformSetting(Invariant(_checkpointHours)), _cts.Token);
+            await Core.SetPlatformSettingAsync(PlatformSettingKeys.CheckpointLifetimeMaxHours,
+                new SetPlatformSetting(Invariant(_checkpointMaxHours)), _cts.Token);
+            _notice = "Checkpoint lifetimes saved — they apply from the next save on.";
+        });
+
+    private Task SaveCheckpointOverridesAsync()
+        => MutateAsync(async () =>
+        {
+            await Core.SetPlatformSettingAsync(PlatformSettingKeys.CheckpointLifetimeOverrides,
+                new SetPlatformSetting(_checkpointOverrides), _cts.Token);
+            _notice = _checkpointOverrides switch
+            {
+                CheckpointLifetimeOverrideModes.Workflow => "Only workflows may set a checkpoint lifetime now.",
+                CheckpointLifetimeOverrideModes.None => "Every checkpoint keeps the general lifetime now.",
+                _ => "Runs and workflows may set a checkpoint lifetime.",
+            };
+        });
+
+    private static double? HoursOf(IEnumerable<PlatformSettingDto> settings, string key)
+        => double.TryParse(settings.FirstOrDefault(s => s.Key == key)?.Value,
+            System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var hours)
+            ? hours
+            : null;
+
+    private static string Invariant(double? hours)
+        => hours?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "";
 
     private async Task ConfirmStepUpAsync()
     {

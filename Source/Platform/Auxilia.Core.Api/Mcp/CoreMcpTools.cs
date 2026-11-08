@@ -47,7 +47,9 @@ public sealed class CoreMcpTools(
     Auxilia.UniversalDataAccess.IDataAccess<Data.CoreArtifactRecord> artifacts,
     Auxilia.UniversalDataAccess.IDataAccess<Data.CoreEventRecord> events,
     Auxilia.UniversalDataAccess.IDataAccess<Data.CoreRunRecord> runRecords,
-    RunAccessService runAccess)
+    RunAccessService runAccess,
+    RunInputFileService inputFiles,
+    RunCheckpointService checkpoints)
 {
     private static readonly JsonSerializerOptions JsonOptions = JsonSerializerOptions.Web;
 
@@ -58,6 +60,13 @@ public sealed class CoreMcpTools(
         RequestContext<CallToolRequestParams> context,
         [Description("Registered workflow type name.")] string workflowType,
         [Description("Optional JSON object of run context key/values.")] string? contextJson = null,
+        [Description("Optional comma-separated tools the image must provide (name or name@version); "
+                     + "the run ends PreFlightFailed otherwise.")] string? requiredTools = null,
+        [Description("Optional JSON object: declared input-file name → id of an upload_run_input_file upload.")]
+        string? inputFilesJson = null,
+        [Description("Optional hours this run's checkpoints are kept after their latest save — refused where "
+                     + "the platform does not let runs set it, or above its maximum.")]
+        double? checkpointLifetimeHours = null,
         CancellationToken cancellationToken = default)
     {
         if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
@@ -67,8 +76,20 @@ public sealed class CoreMcpTools(
 
         try
         {
+            var files = ParseObject(inputFilesJson).ToDictionary(
+                kv => kv.Key,
+                kv => Guid.TryParse(kv.Value, out var id)
+                    ? id
+                    : throw new InvalidOperationException($"input file '{kv.Key}': '{kv.Value}' is not an upload id"));
             var accepted = await runs.RunInlineAsync(
-                new RunRequest(workflowType, ParseObject(contextJson)), principalId, cancellationToken);
+                new RunRequest(workflowType, ParseObject(contextJson))
+                {
+                    RequiredTools = requiredTools?.Split(',',
+                        StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                    InputFiles = files.Count > 0 ? files : null,
+                    CheckpointLifetimeHours = checkpointLifetimeHours,
+                },
+                principalId, cancellationToken);
             return JsonResult(new { runId = accepted.RunId, commandId = accepted.CommandId });
         }
         catch (RunAccessDeniedException ex)
@@ -76,6 +97,42 @@ public sealed class CoreMcpTools(
             return Error(ex.Message);
         }
         catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException)
+        {
+            return Error(ex.Message);
+        }
+    }
+
+    [McpServerTool(Name = "upload_run_input_file")]
+    [Description("Uploads a file (base64) for a run you are about to start; name the returned id in run_workflow's "
+                 + "inputFilesJson under the input-file name the workflow declares. Held encrypted and yours alone "
+                 + "until a run of yours takes it or it expires unused; deleted when that run ends.")]
+    public async Task<CallToolResult> UploadRunInputFileAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("The file content, base64-encoded.")] string contentBase64,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (await DenyAsync(principalId, PermissionActions.WorkflowTrigger, null, cancellationToken) is { } denial)
+            return denial;
+        byte[] content;
+        try
+        {
+            content = Convert.FromBase64String(contentBase64);
+        }
+        catch (FormatException)
+        {
+            return Error("contentBase64 is not base64");
+        }
+        try
+        {
+            using var stream = new MemoryStream(content);
+            var file = await inputFiles.UploadAsync(principalId, stream, cancellationToken);
+            await auditLog.AppendAsync(principalId.ToString(), "run.input-file.uploaded", file.Id.ToString(),
+                $"{file.Length} bytes", JsonSerializer.Serialize(new { sha256 = file.Sha256 }), cancellationToken);
+            return JsonResult(file);
+        }
+        catch (RunInputFileTooLargeException ex)
         {
             return Error(ex.Message);
         }
@@ -465,10 +522,41 @@ public sealed class CoreMcpTools(
             all = all.Where(a => a.RunInstanceId == effectiveRunId);
         }
         var page = all.OrderByDescending(a => a.CreatedUtc).Take(Math.Clamp(limit, 1, 500))
-            .Select(a => new ArtifactDto(
-                a.Id, a.ArtifactType, a.WorkflowType, a.WorkItemId, a.RunInstanceId,
-                a.Version, a.ContentHash, a.SizeBytes, a.CreatedUtc)).ToList();
+            .Select(a => a.ToDto()).ToList();
         return JsonResult(page);
+    }
+
+    [McpServerTool(Name = "delete_artifact")]
+    [Description("Deletes a run checkpoint (an artifact of kind \"checkpoint\"), e.g. once it was downloaded. " +
+                 "Only the principal the run runs for, its starter, and administrators may; every other artifact is kept.")]
+    public async Task<CallToolResult> DeleteArtifactAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Artifact id (GUID).")] string artifactId,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (!Guid.TryParse(artifactId, out var id))
+            return Error("artifactId must be a GUID.");
+        if (await DenyAsync(principalId, PermissionActions.ArtifactConsume, artifactId, cancellationToken) is { } denial)
+            return denial;
+        var artifact = await artifacts.ReadAsync(id, cancellationToken);
+        var viewer = await runAccess.ViewerForAsync(principalId, cancellationToken);
+        switch (await runAccess.MayDeleteAsync(viewer, artifact, cancellationToken))
+        {
+            case ArtifactDeletion.Hidden:
+                return Error("artifact not found.");
+            case ArtifactDeletion.Forbidden:
+                return Error("only the run's own principals and administrators delete its checkpoints.");
+            case ArtifactDeletion.Kept:
+                return Error("only run checkpoints can be deleted — the platform keeps every other artifact.");
+        }
+        var checkpoint = artifact!;
+        if (!await checkpoints.DeleteAsync(checkpoint, cancellationToken))
+            return Error("artifact not found.");
+        await auditLog.AppendAsync(principalId.ToString(), "artifact.checkpoint-deleted", id.ToString(),
+            $"{checkpoint.ArtifactType} v{checkpoint.Version} of run {checkpoint.RunInstanceId}", ct: cancellationToken);
+        return JsonResult(new { deleted = id });
     }
 
     [McpServerTool(Name = "get_artifact")]
@@ -488,9 +576,7 @@ public sealed class CoreMcpTools(
         var viewer = await runAccess.ViewerForAsync(principalId, cancellationToken);
         return a is null || !await runAccess.CanSeeRunAsync(viewer, a.RunInstanceId, cancellationToken)
             ? Error("artifact not found.")
-            : JsonResult(new ArtifactDto(
-                a.Id, a.ArtifactType, a.WorkflowType, a.WorkItemId, a.RunInstanceId,
-                a.Version, a.ContentHash, a.SizeBytes, a.CreatedUtc));
+            : JsonResult(a.ToDto());
     }
 
     [McpServerTool(Name = "query_events")]

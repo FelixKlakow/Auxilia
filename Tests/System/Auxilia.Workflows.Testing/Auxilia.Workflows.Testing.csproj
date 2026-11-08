@@ -10,6 +10,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\Source\Libraries\Auxilia.Workflows\Auxilia.Workflows.csproj" />
     <ProjectReference Include="..\..\..\Source\Libraries\Auxilia.Workflows.SourceControl\Auxilia.Workflows.SourceControl.csproj" />
+    <ProjectReference Include="..\..\..\Source\Libraries\Auxilia.Workflows.AiAgent\Auxilia.Workflows.AiAgent.csproj" />
   </ItemGroup>
 
 </Project>

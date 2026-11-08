@@ -62,12 +62,19 @@ public sealed record WorkflowSchema(
     public Companions.PodControlDeclaration? PodControl { get; init; }
 
     /// <summary>
-    /// Tool names the workflow's IMAGE bundles (e.g. the CLIs its Dockerfile installs) — an open
-    /// vocabulary matched against each slot provider's declared required tools: a provider is
-    /// bindable only when every tool it requires is provided. Empty admits only providers that
-    /// require no tools.
+    /// Tools the workflow's IMAGE bundles (e.g. the CLIs its Dockerfile installs) — an open
+    /// vocabulary of <c>name</c> or <c>name@version</c>, matched against each slot provider's
+    /// declared required tools and a run's required tools: a requirement without a version is met
+    /// by the tool in any version, one with a version only by exactly that version. Empty admits
+    /// only providers that require no tools.
     /// </summary>
     public IReadOnlyList<string> ProvidedTools { get; init; } = [];
+
+    /// <summary>The files a run receives (see <see cref="WorkflowInputFileDescriptor"/>).</summary>
+    public IReadOnlyList<WorkflowInputFileDescriptor> InputFiles { get; init; } = [];
+
+    /// <summary>What the workflow saves while it runs (see <see cref="WorkflowCheckpointDescriptor"/>).</summary>
+    public IReadOnlyList<WorkflowCheckpointDescriptor> Checkpoints { get; init; } = [];
 }
 
 /// <summary>

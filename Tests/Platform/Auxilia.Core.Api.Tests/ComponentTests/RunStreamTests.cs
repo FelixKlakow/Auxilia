@@ -33,18 +33,22 @@ public sealed class RunStreamTests : CoreApiComponentTestBase
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         Assert.That(response.Content.Headers.ContentType!.MediaType, Is.EqualTo("text/event-stream"));
 
+        // Each transition is published once the previous frame arrived — back-to-back transitions
+        // may collapse into the latest state (status frames carry the run's state as the Core holds it).
+        using var sse = new SseFrames(await response.Content.ReadAsStreamAsync());
+        Assert.That(SseFrames.StateOf(await sse.NextAsync()), Is.EqualTo(RunStates.Dispatched), "the snapshot first");
+
         await MessageBus.SimulateReceivedAsync(WorkflowStatusEvent.ExchangeName,
             new WorkflowStatusEvent(runId, DummyType, "Running", null, DateTimeOffset.UtcNow));
+        var frames = new List<RunStreamEvent> { (await sse.NextAsync())! };
         await MessageBus.SimulateReceivedAsync(ViewDataMessage.ExchangeName,
-            new ViewDataMessage(runId, "log", 7, """{"line":"hello"}"""));
-        // A terminal transition ends the stream, which lets ReadAsStringAsync complete.
+            new ViewDataMessage(runId, "log", 1, """{"line":"hello"}"""));
+        frames.Add((await sse.NextAsync())!);
+        // A terminal transition ends the stream.
         await MessageBus.SimulateReceivedAsync(WorkflowStatusEvent.ExchangeName,
             new WorkflowStatusEvent(runId, DummyType, "Success", null, DateTimeOffset.UtcNow));
-
-        // The first frame is the Dispatched snapshot; the live frames follow.
-        var frames = ParseFrames(await response.Content.ReadAsStringAsync()).Skip(1).ToList();
-
-        Assert.That(frames, Has.Count.EqualTo(3));
+        frames.Add((await sse.NextAsync())!);
+        Assert.That(await sse.NextAsync(), Is.Null, "the verdict closes the stream");
 
         var running = frames[0];
         Assert.Multiple(() =>
@@ -60,7 +64,7 @@ public sealed class RunStreamTests : CoreApiComponentTestBase
         {
             Assert.That(view.Kind, Is.EqualTo(RunStreamEvent.ViewKind));
             Assert.That(view.RunId, Is.EqualTo(runId));
-            Assert.That(view.Sequence, Is.EqualTo(7));
+            Assert.That(view.Sequence, Is.EqualTo(1));
             var item = JsonSerializer.Deserialize<ViewDataMessage>(view.PayloadJson, JsonSerializerOptions.Web)!;
             Assert.That(item.ViewName, Is.EqualTo("log"));
             Assert.That(item.PayloadJson, Does.Contain("hello"));
@@ -91,12 +95,16 @@ public sealed class RunStreamTests : CoreApiComponentTestBase
                 DateTimeOffset.UtcNow));
 
         // ReadAsStringAsync completes only because the Failed status terminated the stream.
-        // (The first frame is the Dispatched snapshot.)
+        // (The first frame is the Dispatched snapshot.) Status frames carry the run's state as the
+        // Core holds it — a Queued superseded microseconds later may collapse into the Failed.
         var frames = ParseFrames(await response.Content.ReadAsStringAsync()).Skip(1).ToList();
 
-        Assert.That(frames, Has.Count.EqualTo(2));
+        var states = frames.Select(f => JsonSerializer.Deserialize<WorkflowStatusEvent>(
+            f.PayloadJson, JsonSerializerOptions.Web)!.State).ToList();
+        Assert.That(states, Is.EqualTo(new[] { "Queued", "Failed" }).Or.EqualTo(new[] { "Failed" }),
+            "in order, never a state twice, the verdict last");
         var failed = JsonSerializer.Deserialize<WorkflowStatusEvent>(
-            frames[1].PayloadJson, JsonSerializerOptions.Web)!;
+            frames[^1].PayloadJson, JsonSerializerOptions.Web)!;
         Assert.Multiple(() =>
         {
             Assert.That(failed.State, Is.EqualTo("Failed"));
@@ -248,15 +256,19 @@ public sealed class RunStreamTests : CoreApiComponentTestBase
             $"/api/runs/{commandId}/stream", HttpCompletionOption.ResponseHeadersRead);
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
 
+        using var sse = new SseFrames(await response.Content.ReadAsStreamAsync());
+        var frames = new List<RunStreamEvent> { (await sse.NextAsync())! };
         await MessageBus.SimulateReceivedAsync(WorkflowStatusEvent.ExchangeName,
             new WorkflowStatusEvent(instanceId, DummyType, "Received", null, DateTimeOffset.UtcNow,
                 OwnerServiceId: Guid.NewGuid(), CommandId: commandId));
+        frames.Add((await sse.NextAsync())!);
         await MessageBus.SimulateReceivedAsync(ViewDataMessage.ExchangeName,
             new ViewDataMessage(instanceId, "log", 1, """{"line":"from the instance"}"""));
+        frames.Add((await sse.NextAsync())!);
         await MessageBus.SimulateReceivedAsync(WorkflowStatusEvent.ExchangeName,
             new WorkflowStatusEvent(instanceId, DummyType, "Success", null, DateTimeOffset.UtcNow));
-
-        var frames = ParseFrames(await response.Content.ReadAsStringAsync());
+        frames.Add((await sse.NextAsync())!);
+        Assert.That(await sse.NextAsync(), Is.Null, "the verdict closes the stream");
 
         Assert.That(frames, Has.Count.EqualTo(4),
             "the Dispatched snapshot, then claim status + view + terminal status must all reach the dispatch-id subscriber");
@@ -419,10 +431,11 @@ public sealed class RunStreamTests : CoreApiComponentTestBase
         return null;
     }
 
-    private static List<RunStreamEvent> ParseFrames(string body) =>
+    /// <summary>The SSE body's events (each block's <c>data:</c> line; ids and keepalives skipped).</summary>
+    internal static List<RunStreamEvent> ParseFrames(string body) =>
         body.Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
-            .Where(f => !f.StartsWith(':'))
-            .Select(f => f.StartsWith("data: ", StringComparison.Ordinal) ? f["data: ".Length..] : f)
-            .Select(f => JsonSerializer.Deserialize<RunStreamEvent>(f, JsonSerializerOptions.Web)!)
+            .Select(block => block.Split('\n').FirstOrDefault(l => l.StartsWith("data: ", StringComparison.Ordinal)))
+            .Where(data => data is not null)
+            .Select(data => JsonSerializer.Deserialize<RunStreamEvent>(data!["data: ".Length..], JsonSerializerOptions.Web)!)
             .ToList();
 }

@@ -1,0 +1,8 @@
+<Project>
+  <!-- The GitHub.Copilot.SDK version this slot runs on — ONE place, also read by every workflow
+       image that hosts the slot (CopilotCli.props): the image ships exactly the CLI version this
+       SDK expects. Bump it here only. -->
+  <PropertyGroup>
+    <CopilotSdkVersion>1.0.29</CopilotSdkVersion>
+  </PropertyGroup>
+</Project>

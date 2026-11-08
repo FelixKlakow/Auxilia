@@ -104,6 +104,10 @@ public sealed class WorkflowSchemaReadService(IDataAccess<CoreWorkflowTypeRecord
                 : null,
             MaxPodContainers = Auxilia.Workflows.Companions.CompanionTopologyValidator
                 .MaxContainers(schema.Companions, schema.PodControl),
-            ProvidedTools = schema.ProvidedTools
+            ProvidedTools = schema.ProvidedTools,
+            InputFiles = schema.InputFiles
+                .Select(f => new WorkflowInputFileDto(f.Name, f.Description, f.Required)).ToList(),
+            Checkpoints = schema.Checkpoints
+                .Select(c => new WorkflowCheckpointDto(c.Name, c.Description, c.LifetimeHours)).ToList(),
         };
 }

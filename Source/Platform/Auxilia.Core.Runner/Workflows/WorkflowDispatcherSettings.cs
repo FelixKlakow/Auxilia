@@ -138,6 +138,12 @@ public sealed class WorkflowDispatcherSettings
     public long MaxViewItemsPerView { get; set; } = 10_000;
 
     /// <summary>
+    /// The largest checkpoint a run may save, in bytes: a file, or a folder's content plus a small
+    /// allowance per archive entry.
+    /// </summary>
+    public long MaxCheckpointBytes { get; set; } = 64L * 1024 * 1024;
+
+    /// <summary>
     /// When true (default), announcements and registrations must carry the one-time instance
     /// token issued at launch, and responses go only to the platform-created response queue.
     /// Disable only for trusted-operator dev scenarios where workflows start outside the dispatcher.

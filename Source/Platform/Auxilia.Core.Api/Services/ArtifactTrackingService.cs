@@ -31,7 +31,11 @@ public sealed class ArtifactTrackingService(
     }
 
     private Task HandleAsync(ArtifactPersistedEvent persisted, CancellationToken ct)
-        => artifacts.SaveAsync(new CoreArtifactRecord
+        // A checkpoint is the Core's own record (RunCheckpointService) — its event only feeds the
+        // live stream; mirroring it could resurrect a copy the next save already replaced.
+        => persisted.Kind == Auxilia.Core.Contracts.ArtifactKinds.Checkpoint
+            ? Task.CompletedTask
+            : artifacts.SaveAsync(new CoreArtifactRecord
         {
             Id = persisted.ArtifactId,
             ArtifactType = persisted.ArtifactType,

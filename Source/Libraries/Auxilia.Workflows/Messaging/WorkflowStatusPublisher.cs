@@ -15,7 +15,7 @@ public sealed class WorkflowStatusPublisher(IMessageBusClient messageBus, TimePr
     public async Task PublishAsync(
         Guid instanceId, string workflowType, string state, string? errorMessage = null,
         Guid? ownerServiceId = null, Guid? commandId = null, string? terminalEndpoint = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default, string? reason = null, long? lastViewSequence = null)
     {
         if (!_exchangeDeclared)
         {
@@ -27,6 +27,6 @@ public sealed class WorkflowStatusPublisher(IMessageBusClient messageBus, TimePr
             WorkflowStatusEvent.RoutingKeyFor(instanceId, commandId),
             new WorkflowStatusEvent(
                 instanceId, workflowType, state, errorMessage, timeProvider.GetUtcNow(),
-                ownerServiceId, commandId, terminalEndpoint), ct);
+                ownerServiceId, commandId, terminalEndpoint, reason, lastViewSequence), ct);
     }
 }

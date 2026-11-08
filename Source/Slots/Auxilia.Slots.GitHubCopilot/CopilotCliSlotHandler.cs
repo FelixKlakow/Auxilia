@@ -7,7 +7,9 @@ namespace Auxilia.Slots.GitHubCopilot;
 /// <summary>
 /// Slot handler for provider type "github-copilot-cli": backs the "coding-agent" slot with
 /// the GitHub Copilot CLI. The token arrives as an encrypted JIT slot setting and is handed
-/// to the CLI only through its process environment.
+/// to the CLI only through its process environment — or, in an SDK session, through the
+/// session's token callback, which re-reads the slot (<see cref="CopilotTokenSource"/>) so a
+/// token replaced or refreshed during the run reaches the running session.
 /// </summary>
 public sealed class CopilotCliSlotHandler : ISlotHandler
 {
@@ -20,11 +22,12 @@ public sealed class CopilotCliSlotHandler : ISlotHandler
                 if (!options.HasCredential)
                     throw new InvalidOperationException(
                         "The github-copilot-cli provider requires a GitHub token with Copilot access.");
-                services.AddScoped<ICodingAgent>(_ => options.UseSdkSession
-                    ? new CopilotSdkAgent(options)
-                    : new CopilotCliAgent(options));
+                services.AddKeyedSingleton(slotName, (provider, _) => TokenSourceFor(provider, slotName, options));
+                services.AddScoped(provider => CreateAgent(
+                    options, provider.GetRequiredKeyedService<CopilotTokenSource>(slotName)));
                 // Console mode (the interactive CLI in tmux+ttyd) consumes the raw
-                // coordinates; the token rides the session environment as GH_TOKEN.
+                // coordinates; the token rides the session environment as GH_TOKEN — fixed for
+                // the console session's life (an interactive CLI's environment cannot change).
                 services.AddScoped(_ => new CodingAgentCredentials(
                     null, null, options.CliPath, options.Model)
                 {
@@ -52,9 +55,9 @@ public sealed class CopilotCliSlotHandler : ISlotHandler
                 if (!reviewerOptions.HasCredential)
                     throw new InvalidOperationException(
                         "The github-copilot-cli provider requires a GitHub token with Copilot access.");
-                services.AddKeyedScoped<ICodingAgent>(slotName, (_, _) => reviewerOptions.UseSdkSession
-                    ? new CopilotSdkAgent(reviewerOptions)
-                    : new CopilotCliAgent(reviewerOptions));
+                services.AddKeyedSingleton(slotName, (provider, _) => TokenSourceFor(provider, slotName, reviewerOptions));
+                services.AddKeyedScoped(slotName, (provider, _) => CreateAgent(
+                    reviewerOptions, provider.GetRequiredKeyedService<CopilotTokenSource>(slotName)));
                 services.AddKeyedScoped(slotName, (_, _) => new CodingAgentCredentials(
                     null, null, reviewerOptions.CliPath, reviewerOptions.Model)
                 {
@@ -71,4 +74,20 @@ public sealed class CopilotCliSlotHandler : ISlotHandler
                 throw new InvalidOperationException($"Unknown slot: {slotName}");
         }
     }
+
+    private static ICodingAgent CreateAgent(CopilotCliOptions options, CopilotTokenSource tokens)
+        => options.UseSdkSession
+            ? new CopilotSdkAgent(options, tokens: tokens)
+            : new CopilotCliAgent(options, tokens: tokens);
+
+    /// <summary>
+    /// The slot's token source: re-reads the slot through the run's
+    /// <see cref="ISlotConfigurationSource"/> when the run has one (just-in-time activation), and
+    /// keeps the registered token otherwise (bundled configurations, tests).
+    /// </summary>
+    internal static CopilotTokenSource TokenSourceFor(IServiceProvider provider, string slotName, CopilotCliOptions options)
+        => provider.GetService<ISlotConfigurationSource>() is { } source
+            ? new CopilotTokenSource(options, async ct => (await source.FetchAsync(slotName, ct)).Settings,
+                provider.GetService<TimeProvider>())
+            : new CopilotTokenSource(options);
 }

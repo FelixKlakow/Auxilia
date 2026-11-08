@@ -106,7 +106,11 @@ public sealed class ArtifactStreamPublisher(
             new ArtifactDto(
                 persisted.ArtifactId, persisted.ArtifactType, persisted.WorkflowType,
                 persisted.WorkItemId, persisted.RunInstanceId, persisted.Version,
-                persisted.ContentHash, persisted.SizeBytes, persisted.TimestampUtc),
+                persisted.ContentHash, persisted.SizeBytes, persisted.TimestampUtc)
+            {
+                Kind = persisted.Kind,
+                ExpiresUtc = persisted.ExpiresUtc,
+            },
             persisted.TimestampUtc));
         return Task.CompletedTask;
     }

@@ -25,6 +25,21 @@ public sealed class CopilotCliAgentTests
     }
 
     [Test]
+    public async Task RunAsync_StartsEachSpawnOnTheConnectorsCurrentToken()
+    {
+        var factory = new FakeCliProcessFactory("done\n");
+        var tokens = new CopilotTokenSource(new CopilotCliOptions { Token = "first" },
+            _ => Task.FromResult<IReadOnlyDictionary<string, string>>(new Dictionary<string, string> { ["token"] = "replaced" }),
+            new FrozenAfter(CopilotTokenSource.MinimumRecheck));
+        var agent = new CopilotCliAgent(new CopilotCliOptions { Token = "first" }, factory, tokens: tokens);
+
+        await agent.RunAsync(Request, (_, _) => Task.CompletedTask);
+
+        Assert.That(factory.LastStartInfo!.Environment["GH_TOKEN"], Is.EqualTo("replaced"));
+        Assert.That(factory.LastStartInfo.ArgumentList, Has.None.Contains("replaced"));
+    }
+
+    [Test]
     public async Task RunAsync_StreamsLines_AndReportsTheExitCode()
     {
         var factory = new FakeCliProcessFactory("thinking\n\ndone\n", exitCode: 0);
@@ -142,9 +157,21 @@ public sealed class CopilotCliAgentTests
     private sealed class FakeCliProcessFactory(string stdout, int exitCode = 0, string stderr = "") : ICliProcessFactory
     {
         public FakeCliProcess? LastProcess { get; private set; }
+        public ProcessStartInfo? LastStartInfo { get; private set; }
 
         public ICliProcess Start(ProcessStartInfo startInfo)
-            => LastProcess = new FakeCliProcess(stdout, stderr, exitCode);
+        {
+            LastStartInfo = startInfo;
+            return LastProcess = new FakeCliProcess(stdout, stderr, exitCode);
+        }
+    }
+
+    /// <summary>A clock whose second reading is one interval after the first: the next read is due.</summary>
+    private sealed class FrozenAfter(TimeSpan step) : TimeProvider
+    {
+        private readonly DateTimeOffset _start = DateTimeOffset.UnixEpoch;
+        private int _readings;
+        public override DateTimeOffset GetUtcNow() => _readings++ == 0 ? _start : _start + step;
     }
 
     private sealed class FakeCliProcess(string stdout, string stderr, int exitCode) : ICliProcess

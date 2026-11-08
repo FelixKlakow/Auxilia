@@ -42,6 +42,7 @@ builder.Services.AddPlatformEntity<CoreWorkspaceRecord>(platformData);
 builder.Services.AddPlatformEntity<PlatformSettingRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreRunRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreRunViewRecord>(platformData);
+builder.Services.AddPlatformEntity<CoreRunInputFileRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreDashboardPinRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreArtifactRecord>(platformData);
 builder.Services.AddPlatformEntity<CoreEventRecord>(platformData);
@@ -90,6 +91,17 @@ builder.Services.AddRateLimiter(options =>
             _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = coreApiRateSettings.ResolutionRateLimitPermitsPerMinute,
+                Window = TimeSpan.FromMinutes(1)
+            }));
+    // Checkpoint saves get their own budget: a workflow saving after every turn must never
+    // starve its own credential re-resolution.
+    options.AddPolicy("checkpoint-save", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Request.Headers["X-Resolution-Token"].ToString() is { Length: > 0 } token
+                ? token : "anonymous",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = coreApiRateSettings.CheckpointSavesPerMinute,
                 Window = TimeSpan.FromMinutes(1)
             }));
     options.AddPolicy("auth-login", httpContext =>
@@ -169,6 +181,17 @@ builder.Configuration.GetSection("ArtifactStore").Bind(artifactStoreSettings);
 builder.Services.AddSingleton(artifactStoreSettings);
 builder.Services.AddSingleton<Auxilia.PlatformData.Artifacts.IArtifactPayloadReader,
     Auxilia.PlatformData.Artifacts.FileSystemArtifactPayloadReader>();
+// Run input files live encrypted beside the artifact payloads — storage every Core node shares.
+builder.Services.AddSingleton(new RunInputFileStorage(
+    Path.Combine(artifactStoreSettings.ResolveRoot(platformData), "run-input-files")));
+builder.Services.AddSingleton<RunInputFileService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<RunInputFileService>());
+// Run checkpoints too: Core-written and Core-encrypted, in their own folder of that storage.
+builder.Services.AddSingleton(new RunCheckpointStorage(
+    Path.Combine(artifactStoreSettings.ResolveRoot(platformData), "run-checkpoints")));
+builder.Services.AddSingleton<CheckpointLifetimePolicy>();
+builder.Services.AddSingleton<RunCheckpointService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<RunCheckpointService>());
 builder.Services.AddSingleton<Auxilia.Workflows.Messaging.WorkflowStatusPublisher>();
 builder.Services.AddSingleton<RunnerLivenessTracker>();
 builder.Services.AddSingleton<TerminalTicketService>();
@@ -205,6 +228,12 @@ builder.Services.AddMcpServer()
     .WithTools<Auxilia.Core.Api.Mcp.CoreMcpTools>();
 
 var app = builder.Build();
+
+// Without a protection key every secret the Core keeps — connector credentials, run input files,
+// run checkpoints — is stored in the clear: a trusted-operator development posture only.
+if (string.IsNullOrWhiteSpace(platformData.ProtectionKeyBase64))
+    app.Logger.LogWarning(
+        "PlatformData:ProtectionKeyBase64 is not configured — secrets, run input files and checkpoints are stored unprotected (dev only).");
 
 // A keyed audit chain is the production posture: its anchor belongs on write-once storage the
 // database writers cannot touch — the default path beside the data is a development choice.
@@ -626,13 +655,17 @@ app.MapPost("/api/runs/{id:guid}/rerun", async (
     }
 }).RequireAuthorization();
 
-// Live-view stream (SSE): status transitions + view items for a run, fanned from the bus via the
-// RunStreamBroker, until the run reaches a terminal state or the client disconnects. Replaces the
-// BackendService SignalR /hubs/views live push.
+// Live-view stream (SSE): the run's status and view items until the run reaches a terminal state
+// or the client disconnects — RESUMABLE: every frame's id is the position after it, and a client
+// sending one back (Last-Event-ID, or ?after= on a first connect) gets everything after it exactly
+// once, in order: stored items first, then the live feed from the bus (RunStreamSession).
 app.MapGet("/api/runs/{id:guid}/stream", async (
-        Guid id, HttpContext http, IPolicyEngine policy, RunAccessService access, RunStreamBroker broker,
-        RunStreamPublisher streamPublisher, Auxilia.UniversalDataAccess.IDataAccess<CoreRunRecord> runRecords,
-        Microsoft.Extensions.Options.IOptions<CoreApiSettings> apiSettings, CancellationToken ct) =>
+        Guid id, string? after, HttpContext http, IPolicyEngine policy, RunAccessService access,
+        RunStreamBroker broker, RunStreamPublisher streamPublisher,
+        Auxilia.UniversalDataAccess.IDataAccess<CoreRunRecord> runRecords,
+        Auxilia.UniversalDataAccess.IDataAccess<CoreRunViewRecord> viewRecords,
+        Microsoft.Extensions.Options.IOptions<CoreApiSettings> apiSettings, TimeProvider clock,
+        ILoggerFactory loggers, CancellationToken ct) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.RunObserve, ct) is { } fail)
     {
@@ -645,10 +678,26 @@ app.MapGet("/api/runs/{id:guid}/stream", async (
         return;
     }
 
-    // SUBSCRIBE FIRST, then read the snapshot: a transition landing between the two is delivered
-    // live (duplicated at worst — the client dedupes by (view, sequence) and status frames are
-    // idempotent), never lost. Reading before subscribing would drop every non-terminal
-    // transition in the gap. Nothing is written to the response before the run is authorized.
+    // Where the client stands: a browser's EventSource sends Last-Event-ID on every reconnect,
+    // while ?after= carries a position the client kept from an earlier stream — the header is
+    // the newer of the two.
+    RunStreamCursor? resumeAfter = null;
+    var position = http.Request.Headers["Last-Event-ID"].ToString() is { Length: > 0 } lastEventId
+        ? lastEventId
+        : after;
+    if (position is { Length: > 0 })
+    {
+        if (!RunStreamCursor.TryParse(position, out var parsed))
+        {
+            await Results.BadRequest(new { error = "not a stream position this Core issued" }).ExecuteAsync(http);
+            return;
+        }
+        resumeAfter = parsed;
+    }
+
+    // SUBSCRIBE FIRST, then read the record and the store: whatever lands in between arrives live
+    // as well and is dropped by sequence — never lost. Nothing is written to the response before
+    // the run is authorized.
     using var subscription = await broker.SubscribeAsync(id, ct);
 
     // The id may be the dispatch COMMAND id rather than the runner's instance id. Selective
@@ -674,6 +723,14 @@ app.MapGet("/api/runs/{id:guid}/stream", async (
     if (aliasOf is { } instanceId)
         await streamPublisher.RegisterAliasAsync(id, instanceId, ct);
 
+    // A client that already holds everything a finished run will ever stream is told so: 204 is
+    // also what stops a browser's EventSource from reconnecting.
+    if (await RunStreamSession.IsCompleteAsync(record, resumeAfter, viewRecords, ct))
+    {
+        await Results.NoContent().ExecuteAsync(http);
+        return;
+    }
+
     http.Response.Headers.ContentType = "text/event-stream";
     http.Response.Headers.CacheControl = "no-cache";
     http.Response.Headers["X-Accel-Buffering"] = "no";
@@ -684,25 +741,18 @@ app.MapGet("/api/runs/{id:guid}/stream", async (
 
     try
     {
-        // SNAPSHOT first frame: the tracked record's current state, so a (re)subscriber never
-        // depends on a future transition to learn where the run stands — after a Core restart a
-        // reconnecting client is current immediately. TerminalEndpoint stays Core-internal —
-        // presence rides RunStatus.HasTerminal.
-        var snapshot = new Auxilia.Workflows.Messaging.Messages.WorkflowStatusEvent(
-            record.Id, record.WorkflowType, record.State, record.ErrorMessage,
-            record.UpdatedUtc, record.OwnerServiceId, record.CommandId);
-        await SseWriter.WriteEventAsync(http.Response, new RunStreamEvent(
-            RunStreamEvent.StatusKind, id, 0,
-            System.Text.Json.JsonSerializer.Serialize(snapshot, System.Text.Json.JsonSerializerOptions.Web),
-            record.UpdatedUtc), ct);
-        if (CoreRunStates.IsTerminal(record.State))
-            return;
-
-        await SseWriter.PumpAsync(
-            http.Response, subscription.Reader,
+        var session = new RunStreamSession(
+            id, record, resumeAfter, subscription.Reader, runRecords, viewRecords,
+            async (text, token) =>
+            {
+                await http.Response.WriteAsync(text, token);
+                await http.Response.Body.FlushAsync(token);
+            },
+            clock,
             TimeSpan.FromSeconds(apiSettings.Value.SseKeepaliveSeconds),
-            evt => evt.Kind == RunStreamEvent.StatusKind && CoreRunStates.IsTerminalStatus(evt.PayloadJson),
-            ct);
+            TimeSpan.FromMilliseconds(apiSettings.Value.StreamGapWaitMilliseconds),
+            loggers.CreateLogger<RunStreamSession>());
+        await session.RunAsync(ct);
     }
     catch (OperationCanceledException)
     {
@@ -829,6 +879,7 @@ app.MapDelete("/api/runs", async (
         HttpContext http, IPolicyEngine policy, RunAccessService access,
         Auxilia.UniversalDataAccess.IDataAccess<CoreRunRecord> runStore,
         Auxilia.UniversalDataAccess.IDataAccess<CoreRunViewRecord> viewStore,
+        Auxilia.UniversalDataAccess.IDataAccess<CoreArtifactRecord> artifactStore,
         AuditLog audit, TimeProvider clock, CancellationToken ct,
         bool includeStale = false, int staleMinutes = 30) =>
 {
@@ -837,11 +888,19 @@ app.MapDelete("/api/runs", async (
     // Only runs the caller may see are cleared — administrators clear everyone's.
     var viewer = await access.ViewerForAsync(CoreClaims.PrincipalIdOf(http.User)!.Value, ct);
     var staleCutoff = clock.GetUtcNow() - TimeSpan.FromMinutes(Math.Max(1, staleMinutes));
-    var doomed = (await runStore.ReadAsync(ct))
+    // A run that still holds checkpoints stays until they are deleted or expire: its principals
+    // reach them through the run, so clearing it would strand what it hands back.
+    var holding = (await artifactStore.ReadAsync(ct))
+        .Where(a => a.Kind == ArtifactKinds.Checkpoint)
+        .Select(a => a.RunInstanceId)
+        .ToHashSet();
+    var clearable = (await runStore.ReadAsync(ct))
         .Where(viewer.CanSee)
         .Where(r => CoreRunStates.IsTerminal(r.State)
                     || (includeStale && r.UpdatedUtc < staleCutoff))
         .ToList();
+    var doomed = clearable.Where(r => !holding.Contains(r.Id)).ToList();
+    var retained = clearable.Count - doomed.Count;
     foreach (var run in doomed)
     {
         foreach (var view in (await viewStore.ReadAsync(ct)).Where(v => v.RunId == run.Id).ToList())
@@ -850,14 +909,15 @@ app.MapDelete("/api/runs", async (
     }
     await audit.AppendAsync(
         CoreClaims.PrincipalIdOf(http.User)!.Value.ToString("D"), "run.clear-history",
-        "runs", "cleared", $"{{\"deleted\":{doomed.Count},\"includeStale\":{includeStale.ToString().ToLowerInvariant()}}}", ct);
-    return Results.Ok(new { deleted = doomed.Count });
+        "runs", "cleared",
+        $"{{\"deleted\":{doomed.Count},\"retainedForCheckpoints\":{retained},\"includeStale\":{includeStale.ToString().ToLowerInvariant()}}}", ct);
+    return Results.Ok(new { deleted = doomed.Count, retainedForCheckpoints = retained });
 }).RequireAuthorization();
 
 // The read-later counterpart of the live stream: a run's persisted view items (outputs), so a
 // client can inspect results after the run finished. Gated like observing the live stream.
 app.MapGet("/api/runs/{id:guid}/views", async (
-        Guid id, string? view, HttpContext http, IPolicyEngine policy, RunAccessService access,
+        Guid id, string? view, long? after, HttpContext http, IPolicyEngine policy, RunAccessService access,
         Auxilia.UniversalDataAccess.IDataAccess<CoreRunViewRecord> views,
         CancellationToken ct, int skip = 0, int take = 200) =>
 {
@@ -873,7 +933,11 @@ app.MapGet("/api/runs/{id:guid}/views", async (
     var all = (await views.ReadAsync(ct)).Where(v => v.RunId == runId);
     if (!string.IsNullOrWhiteSpace(view))
         all = all.Where(v => string.Equals(v.ViewName, view, StringComparison.Ordinal));
-    var ordered = all.OrderBy(v => v.TimestampUtc).ThenBy(v => v.Sequence).ToList();
+    // Sequences are run-wide: their order IS the publish order, and ?after= continues from a
+    // stream position (or a previous page) without overlap.
+    if (after is { } from)
+        all = all.Where(v => v.Sequence > from);
+    var ordered = all.OrderBy(v => v.Sequence).ToList();
     var effectiveTake = take <= 0 ? 200 : take;
     var page = ordered.Skip(skip).Take(effectiveTake)
         .Select(v => new RunViewItem(v.ViewName, v.Sequence, v.PayloadJson, v.TimestampUtc))
@@ -918,9 +982,7 @@ app.MapGet("/api/artifacts", async (
         ? all.OrderByDescending(a => a.CreatedUtc).ToList()
         : all.OrderBy(a => a.CreatedUtc).ToList();
     var effectiveTake = take <= 0 ? 50 : take;
-    var page = ordered.Skip(skip).Take(effectiveTake).Select(a => new ArtifactDto(
-        a.Id, a.ArtifactType, a.WorkflowType, a.WorkItemId, a.RunInstanceId,
-        a.Version, a.ContentHash, a.SizeBytes, a.CreatedUtc)).ToList();
+    var page = ordered.Skip(skip).Take(effectiveTake).Select(a => a.ToDto()).ToList();
     return Results.Ok(new PagedResult<ArtifactDto>(page, ordered.Count, skip, effectiveTake));
 }).RequireAuthorization();
 
@@ -932,9 +994,7 @@ app.MapGet("/api/artifacts/{id:guid}", async (
         return fail;
     var viewer = await access.ViewerForAsync(CoreClaims.PrincipalIdOf(http.User)!.Value, ct);
     return await artifacts.ReadAsync(id, ct) is { } a && await access.CanSeeRunAsync(viewer, a.RunInstanceId, ct)
-        ? Results.Ok(new ArtifactDto(
-            a.Id, a.ArtifactType, a.WorkflowType, a.WorkItemId, a.RunInstanceId,
-            a.Version, a.ContentHash, a.SizeBytes, a.CreatedUtc))
+        ? Results.Ok(a.ToDto())
         : Results.NotFound();
 }).RequireAuthorization();
 
@@ -943,7 +1003,7 @@ app.MapGet("/api/artifacts/{id:guid}", async (
 app.MapGet("/api/artifacts/{id:guid}/content", async (
         Guid id, HttpContext http, IPolicyEngine policy, RunAccessService access,
         Auxilia.UniversalDataAccess.IDataAccess<CoreArtifactRecord> artifacts,
-        Auxilia.PlatformData.Artifacts.IArtifactPayloadReader payloads,
+        Auxilia.PlatformData.Artifacts.IArtifactPayloadReader payloads, RunCheckpointService checkpoints,
         AuditLog audit, ILogger<Program> logger, CancellationToken ct) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ArtifactConsume, ct) is { } fail)
@@ -957,6 +1017,18 @@ app.MapGet("/api/artifacts/{id:guid}/content", async (
             ? !await access.AdmitAsync(viewer, producingRun, "artifact", ct)
             : !viewer.IsAdministrator)
         return Results.NotFound();
+    if (artifact.Kind == ArtifactKinds.Checkpoint)
+    {
+        // A checkpoint lives encrypted in the Core's own storage — decrypted for this download only.
+        if (await checkpoints.ReadContentAsync(artifact, ct) is not { } content)
+            return Results.NotFound(new { error = "the checkpoint is gone, past its lifetime, or unreadable" });
+        await audit.AppendAsync(CoreClaims.PrincipalIdOf(http.User)?.ToString() ?? "unknown",
+            PermissionActions.ArtifactConsume, id.ToString(),
+            $"checkpoint {artifact.ArtifactType} v{artifact.Version}", ct: ct);
+        var archive = artifact.MediaType == RunCheckpointService.ArchiveMediaType;
+        return Results.File(content, artifact.MediaType ?? "application/octet-stream",
+            $"{artifact.ArtifactType}-v{artifact.Version}{(archive ? ".tar.gz" : "")}");
+    }
     if (await payloads.OpenReadAsync(id, ct) is not { } payload)
     {
         logger.LogWarning(
@@ -968,6 +1040,39 @@ app.MapGet("/api/artifacts/{id:guid}/content", async (
         PermissionActions.ArtifactConsume, id.ToString(), $"{artifact.ArtifactType} v{artifact.Version}", ct: ct);
     return Results.Stream(payload, "application/octet-stream",
         $"{artifact.ArtifactType}-v{artifact.Version}");
+}).RequireAuthorization();
+
+// Deleting a run checkpoint (ARCHITECTURE §9) — e.g. once its principals downloaded it: the
+// principal the run runs for, its starter, and administrators; grantees only read. Every other
+// artifact is the platform's record and stays.
+app.MapDelete("/api/artifacts/{id:guid}", async (
+        Guid id, HttpContext http, IPolicyEngine policy, RunAccessService access,
+        Auxilia.UniversalDataAccess.IDataAccess<CoreArtifactRecord> artifacts,
+        RunCheckpointService checkpoints, AuditLog audit, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ArtifactConsume, ct) is { } fail)
+        return fail;
+    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+        return Results.Unauthorized();
+    var artifact = await artifacts.ReadAsync(id, ct);
+    var viewer = await access.ViewerForAsync(principalId, ct);
+    switch (await access.MayDeleteAsync(viewer, artifact, ct))
+    {
+        case ArtifactDeletion.Hidden:
+            return Results.NotFound();
+        case ArtifactDeletion.Forbidden:
+            return Results.Json(new { error = "only the run's own principals and administrators delete its checkpoints" },
+                statusCode: StatusCodes.Status403Forbidden);
+        case ArtifactDeletion.Kept:
+            return Results.Json(new { error = "only run checkpoints can be deleted — the platform keeps every other artifact" },
+                statusCode: StatusCodes.Status409Conflict);
+    }
+    var checkpoint = artifact!;
+    if (!await checkpoints.DeleteAsync(checkpoint, ct))
+        return Results.NotFound();
+    await audit.AppendAsync(principalId.ToString(), "artifact.checkpoint-deleted", id.ToString(),
+        $"{checkpoint.ArtifactType} v{checkpoint.Version} of run {checkpoint.RunInstanceId}", ct: ct);
+    return Results.NoContent();
 }).RequireAuthorization();
 
 // Artifact SSE stream, SERVER-SIDE FILTERED (artifact type / work item): the client-surface
@@ -1100,6 +1205,33 @@ app.MapGet("/api/events/stream", async (
     }
 }).RequireAuthorization();
 
+// Run input files (ARCHITECTURE §9): the caller uploads a file for a run it is about to start —
+// the body IS the file. Held encrypted and the caller's own until a run request of its names it
+// (RunRequest.InputFiles), deleted unused at its expiry or once that run has ended.
+app.MapPost("/api/run-input-files", async (
+        HttpContext http, IPolicyEngine policy, RunInputFileService inputFiles, AuditLog audit,
+        Microsoft.Extensions.Options.IOptions<CoreApiSettings> apiSettings, CancellationToken ct) =>
+{
+    if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.WorkflowTrigger, ct) is { } fail)
+        return fail;
+    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+        return Results.Unauthorized();
+    // The server's own body cap would cut a large file off before the configured limit applies.
+    if (http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } bodyLimit)
+        bodyLimit.MaxRequestBodySize = (long)apiSettings.Value.MaxRunInputFileBytes + 1;
+    try
+    {
+        var file = await inputFiles.UploadAsync(principalId, http.Request.Body, ct);
+        await audit.AppendAsync(principalId.ToString(), "run.input-file.uploaded", file.Id.ToString(),
+            $"{file.Length} bytes", System.Text.Json.JsonSerializer.Serialize(new { sha256 = file.Sha256 }), ct);
+        return Results.Ok(file);
+    }
+    catch (RunInputFileTooLargeException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status413PayloadTooLarge);
+    }
+}).RequireAuthorization();
+
 // --- Internal: runner <-> Core just-in-time slot-credential resolution ---
 // Authorized by the run-scoped resolution token (header), NOT a principal API key — the runner
 // can resolve only slots of runs the Core dispatched to it. Secrets are resolved and encrypted
@@ -1119,6 +1251,70 @@ app.MapPost("/internal/runs/{runId:guid}/resolve-slot", async (
                 ? StatusCodes.Status403Forbidden
                 : StatusCodes.Status404NotFound);
 }).RequireRateLimiting("resolve-slot");
+
+// A run's input file for the runner to place into the container before launch — the same gate as
+// resolve-slot: the run's resolution token, refused once the run has ended (audited by the resolver).
+app.MapGet("/internal/runs/{runId:guid}/input-files/{name}", async (
+        Guid runId, string name, HttpContext http, SlotCredentialResolver resolver,
+        RunInputFileService inputFiles, AuditLog audit, CancellationToken ct) =>
+{
+    var token = http.Request.Headers["X-Resolution-Token"].ToString();
+    if (string.IsNullOrEmpty(token))
+        return Results.Json(new { error = "missing resolution token" }, statusCode: StatusCodes.Status401Unauthorized);
+    if (await resolver.AuthorizeAsync(runId, token, ct) is { Ok: false } refused)
+        return Results.Json(new { error = refused.Error }, statusCode: StatusCodes.Status403Forbidden);
+    if (await inputFiles.OpenAsync(runId, name, ct) is not { } file)
+        return Results.NotFound();
+    await audit.AppendAsync("core-runner", "run.input-file.delivered", runId.ToString(), name,
+        System.Text.Json.JsonSerializer.Serialize(new { sha256 = file.Record.Sha256, bytes = file.Record.Length }), ct);
+    return Results.File(file.Content, "application/octet-stream");
+}).RequireRateLimiting("resolve-slot");
+
+// A run checkpoint the runner read from the run's output directory (ARCHITECTURE §9) — the same
+// gate: the run's resolution token, refused once the run has ended. The body IS the content; the
+// Core encrypts it and keeps it as the newest copy of the run's checkpoint of that name.
+app.MapPost("/internal/runs/{runId:guid}/checkpoints/{name}", async (
+        Guid runId, string name, HttpContext http, SlotCredentialResolver resolver, RunAccessService access,
+        WorkflowSchemaReadService schemas, RunCheckpointService checkpoints, AuditLog audit,
+        Microsoft.Extensions.Options.IOptions<CoreApiSettings> apiSettings, CancellationToken ct) =>
+{
+    var token = http.Request.Headers["X-Resolution-Token"].ToString();
+    if (string.IsNullOrEmpty(token))
+        return Results.Json(new { error = "missing resolution token" }, statusCode: StatusCodes.Status401Unauthorized);
+    if (await resolver.AuthorizeAsync(runId, token, ct) is { Ok: false } refused)
+        return Results.Json(new { error = refused.Error }, statusCode: StatusCodes.Status403Forbidden);
+    if (await access.ResolveAsync(runId, ct) is not { } run)
+        return Results.NotFound(new { error = "the run is not recorded" });
+    // Only for the instance the run's claim recorded: before the Core holds the claim it cannot
+    // tell which instance runs the dispatch, and a guess could attach the copy to no run at all.
+    if (!Guid.TryParse(http.Request.Headers["X-Workflow-Instance"].ToString(), out var instanceId))
+        return Results.BadRequest(new { error = "the checkpoint names no instance" });
+    if (run.Id != instanceId)
+        return run.Id == runId
+            ? Results.Conflict(new { error = "the run's claim is not recorded yet — save again shortly" })
+            : Results.BadRequest(new { error = "the checkpoint names no instance of this run" });
+    var declared = (await schemas.GetSchemaAsync(run.WorkflowType, ct))?.Checkpoints.FirstOrDefault(c => c.Name == name);
+    if (declared is null)
+        return Results.BadRequest(new { error = $"'{run.WorkflowType}' declares no checkpoint '{name}'" });
+    if (http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } bodyLimit)
+        bodyLimit.MaxRequestBodySize = (long)apiSettings.Value.MaxCheckpointBytes + 1;
+    try
+    {
+        var saved = await checkpoints.SaveAsync(
+            run, instanceId, name, http.Request.ContentType, http.Request.Body, http.Request.ContentLength,
+            declared.LifetimeHours, ct);
+        // Stored — recorded even when the runner stops waiting right now.
+        await audit.AppendAsync("core-runner", "run.checkpoint.saved", saved.Id.ToString(),
+            $"{name} v{saved.Version} of run {instanceId}",
+            System.Text.Json.JsonSerializer.Serialize(new { sha256 = saved.ContentHash, bytes = saved.SizeBytes, expiresUtc = saved.ExpiresUtc }),
+            CancellationToken.None);
+        return Results.Ok(saved);
+    }
+    catch (RunCheckpointTooLargeException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status413PayloadTooLarge);
+    }
+}).RequireRateLimiting("checkpoint-save");
 
 // The NON-SECRET setting values a runner needs to interpret a plugin's declared templates (its
 // egress endpoints, e.g. tcp://{Host}:{Port}) — same token authorization as slot resolution;

@@ -5,13 +5,17 @@ RUN dotnet publish Source/Workflows/Auxilia.Implementation.Workflow/Auxilia.Impl
     -c Release -o /app/publish --no-self-contained
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+# The Copilot CLI version the Copilot slot's SDK expects — written on publish by the slot's
+# CopilotCli.props — pinned, never whatever npm calls current. Copied ahead of the tooling
+# layer: that layer reinstalls exactly when the version changes and stays cached otherwise.
+COPY --from=build /app/publish/copilot-cli-version /tmp/copilot-cli-version
 # BOTH coding CLIs (author/reviewer are provider-configurable), git, tmux+ttyd for the
 # driven author console. This layer never changes with source edits, so Docker caches it.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates git gnupg tmux \
  && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
  && apt-get install -y --no-install-recommends nodejs \
- && npm install -g @github/copilot \
+ && npm install -g "@github/copilot@$(cat /tmp/copilot-cli-version)" \
  && curl -fsSL https://claude.ai/install.sh | bash \
  && install -m 755 "$(readlink -f /root/.local/bin/claude)" /usr/local/bin/claude \
  && curl -fsSL -o /usr/local/bin/ttyd \

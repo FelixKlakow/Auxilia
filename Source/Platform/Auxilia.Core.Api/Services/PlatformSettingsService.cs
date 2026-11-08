@@ -10,8 +10,8 @@ namespace Auxilia.Core.Api.Services;
 /// <summary>
 /// Runtime platform settings: security knobs an administrator changes without a redeployment
 /// (gated <c>policy.administer</c> + step-up elevation at the endpoint). Known keys only — a
-/// typo must fail loudly, not lie dormant. Unset keys fall back to deployment configuration;
-/// every write is audited.
+/// typo must fail loudly, not lie dormant. Unset keys fall back to deployment configuration — an
+/// empty value clears a key back to it; every write is audited.
 /// </summary>
 public sealed class PlatformSettingsService(
     IDataAccess<PlatformSettingRecord> store,
@@ -29,6 +29,15 @@ public sealed class PlatformSettingsService(
     {
         key = key?.Trim() ?? "";
         value = value?.Trim() ?? "";
+        if (value.Length == 0)
+        {
+            if (!KnownKeys.Contains(key))
+                throw new ArgumentException($"unknown platform setting '{key}'");
+            await store.RemoveAsync(PlatformSettingRecord.IdFor(key), ct);
+            await auditLog.AppendAsync(
+                actor?.ToString("D") ?? "core-api", "platform-settings.cleared", key, "deployment default", ct: ct);
+            return new PlatformSettingDto(key, "", clock.GetUtcNow());
+        }
         Validate(key, value);
         var record = new PlatformSettingRecord
         {
@@ -43,6 +52,10 @@ public sealed class PlatformSettingsService(
             actor?.ToString("D") ?? "core-api", "platform-settings.updated", key, value, ct: ct);
         return new PlatformSettingDto(record.Key, record.Value, record.UpdatedUtc);
     }
+
+    /// <summary>The stored value of a known setting; null when unset (the caller applies its fallback).</summary>
+    public async Task<string?> GetAsync(string key, CancellationToken ct)
+        => (await store.ReadAsync(PlatformSettingRecord.IdFor(key), ct))?.Value;
 
     /// <summary>The /auth/login bearer lifetime: the stored setting, else the configured default.</summary>
     public async Task<TimeSpan> GetLoginTokenLifetimeAsync(CancellationToken ct)
@@ -68,6 +81,15 @@ public sealed class PlatformSettingsService(
             stored?.Value, DefaultResourceAccessModes.Open, StringComparison.OrdinalIgnoreCase);
     }
 
+    private static readonly HashSet<string> KnownKeys =
+    [
+        PlatformSettingKeys.LoginTokenLifetimeMinutes,
+        PlatformSettingKeys.DefaultResourceAccess,
+        PlatformSettingKeys.CheckpointLifetimeHours,
+        PlatformSettingKeys.CheckpointLifetimeOverrides,
+        PlatformSettingKeys.CheckpointLifetimeMaxHours,
+    ];
+
     private static void Validate(string key, string value)
     {
         switch (key)
@@ -82,6 +104,21 @@ public sealed class PlatformSettingsService(
                     throw new ArgumentException(
                         $"default-resource-access must be '{DefaultResourceAccessModes.Restricted}' "
                         + $"or '{DefaultResourceAccessModes.Open}'");
+                return;
+            case PlatformSettingKeys.CheckpointLifetimeHours:
+            case PlatformSettingKeys.CheckpointLifetimeMaxHours:
+                if (!double.TryParse(value, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var hours)
+                    || !CheckpointLifetimePolicy.IsValidHours(hours))
+                    throw new ArgumentException(
+                        $"{key} must be a positive number of hours, at most {CheckpointLifetimePolicy.MaxHours}");
+                return;
+            case PlatformSettingKeys.CheckpointLifetimeOverrides:
+                if (value.ToLowerInvariant() is not (CheckpointLifetimeOverrideModes.Run
+                    or CheckpointLifetimeOverrideModes.Workflow or CheckpointLifetimeOverrideModes.None))
+                    throw new ArgumentException(
+                        $"{key} must be '{CheckpointLifetimeOverrideModes.Run}', "
+                        + $"'{CheckpointLifetimeOverrideModes.Workflow}' or '{CheckpointLifetimeOverrideModes.None}'");
                 return;
             default:
                 throw new ArgumentException($"unknown platform setting '{key}'");

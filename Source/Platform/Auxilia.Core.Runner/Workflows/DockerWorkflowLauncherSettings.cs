@@ -180,6 +180,13 @@ public sealed class DockerWorkflowLauncherSettings
     public Dictionary<string, string>? ExtraEnvironmentVariables { get; set; }
 
     /// <summary>
+    /// How long a run may wait for its operator at most, in minutes — the cap on every session's
+    /// own idle timeout and the timeout of a session that sets none (no run holds its container
+    /// forever). Handed to each launch as <c>Workflow__MaxIdleMinutes</c>.
+    /// </summary>
+    public double MaxIdleMinutes { get; set; } = 60;
+
+    /// <summary>
     /// Adds <c>host.docker.internal:host-gateway</c> to every workflow container so the name
     /// resolves on PLAIN Linux Docker exactly like it does under Docker Desktop (where the
     /// name resolves without it). Off by default — least privilege: enable it only on a plain

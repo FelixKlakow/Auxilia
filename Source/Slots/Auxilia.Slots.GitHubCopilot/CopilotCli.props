@@ -1,0 +1,24 @@
+<Project>
+  <!-- Imported by a workflow image that hosts this slot: the image ships the Copilot CLI in exactly
+       the version this slot's SDK expects (the SDK's CopilotCliVersion). The SDK's own bundled
+       runtime is not what images ship: it serves SDK sessions only, while the slot's line and
+       console modes run the full CLI. Build assets only, and no runtime download — the workflow
+       never calls the SDK, it only learns which CLI version belongs to it. -->
+  <Import Project="$(MSBuildThisFileDirectory)CopilotSdk.props" />
+  <ItemGroup>
+    <PackageReference Include="GitHub.Copilot.SDK" Version="$(CopilotSdkVersion)" IncludeAssets="build" PrivateAssets="all" />
+  </ItemGroup>
+  <PropertyGroup>
+    <CopilotSkipCliDownload>true</CopilotSkipCliDownload>
+  </PropertyGroup>
+
+  <!-- The version rides the assembly — the workflow declares ProvidesTools("copilot@…") from it
+       (ProvidedTool.Versioned) — and the publish output, where the image's Dockerfile installs
+       exactly that CLI version. -->
+  <ItemGroup>
+    <AssemblyMetadata Include="CopilotCliVersion" Value="$(CopilotCliVersion)" />
+  </ItemGroup>
+  <Target Name="_WriteCopilotCliVersion" AfterTargets="Publish" Condition="'$(CopilotCliVersion)' != ''">
+    <WriteLinesToFile File="$(PublishDir)copilot-cli-version" Lines="$(CopilotCliVersion)" Overwrite="true" />
+  </Target>
+</Project>

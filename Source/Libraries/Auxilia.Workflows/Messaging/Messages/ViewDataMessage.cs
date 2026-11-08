@@ -1,9 +1,10 @@
 namespace Auxilia.Workflows.Messaging.Messages;
 
 /// <summary>
-/// One view item published by a workflow (ARCHITECTURE §15). <see cref="Sequence"/> is
-/// per-(instance, view) monotonic so consumers can order and de-duplicate. Large blobs
-/// belong in the Artifact Store, referenced from the payload — never inline.
+/// One view item published by a workflow (ARCHITECTURE §15). <see cref="Sequence"/> counts
+/// the instance's items across ALL its views (1, 2, 3, …) so consumers can order, de-duplicate,
+/// spot a missing item, and resume after one. Large blobs belong in the Artifact Store,
+/// referenced from the payload — never inline.
 /// </summary>
 public sealed record ViewDataMessage(
     Guid WorkflowInstanceId,

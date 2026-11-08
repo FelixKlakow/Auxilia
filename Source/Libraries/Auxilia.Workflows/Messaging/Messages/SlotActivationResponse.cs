@@ -1,9 +1,9 @@
 namespace Auxilia.Workflows.Messaging.Messages;
 
 /// <summary>
-/// Delivered to the instance's exclusive response queue. The credential expires at
-/// <see cref="ExpiresUtc"/>; the SDK transparently re-requests after expiry, so
-/// long-living instances never hold indefinitely valid secrets.
+/// Delivered to the instance's exclusive response queue. The delivered configuration is valid
+/// until <see cref="ExpiresUtc"/>; a handler that needs it longer fetches the slot again through
+/// <see cref="ISlotConfigurationSource"/> and receives what the connector holds then.
 /// </summary>
 public sealed record SlotActivationResponse(
     Guid WorkflowInstanceId,

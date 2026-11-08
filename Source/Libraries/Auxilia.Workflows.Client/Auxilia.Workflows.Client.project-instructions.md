@@ -12,7 +12,8 @@ Triggers fire only while some host embedding this library runs.
   distinct artifact type — the library must never receive the global artifact feed. Event
   triggers ride the analogous **filtered event SSE stream** (`StreamEventsAsync`) under the
   same one-consumer-per-type rule; the `run.*` types are the platform's reserved run-lifecycle
-  vocabulary.
+  vocabulary. `ArtifactChainingEngine.HandleAsync` drops artifacts of kind `checkpoint` (live and
+  catch-up alike) — a run's repeated copy of itself is not a finished output.
 - **The Core registry is the only workflow-type catalog.** `WorkflowAuthoring` validates
   against `GetWorkflowSchemaAsync`; there is no library-side type store (the Studio's private
   catalog died with it). Client-side validation is the fast path — the Core re-validates on

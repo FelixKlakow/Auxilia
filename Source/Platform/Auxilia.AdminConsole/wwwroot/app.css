@@ -559,6 +559,14 @@ h1:focus { outline: none; }
     color: var(--text-secondary);
 }
 
+/* A caption inside a padded card body — aligned with the body's content. */
+.body-caption {
+    margin: var(--space-5) 0 0.5rem;
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
 .cell-strong { font-weight: 600; color: var(--text); }
 .cell-mono { font-family: var(--mono); font-size: 0.8rem; }
 td.cell-mono { white-space: nowrap; }

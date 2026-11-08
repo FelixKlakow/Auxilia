@@ -349,8 +349,15 @@ internal sealed class FakeCoreClient : ICoreClient
         return Task.FromResult(Runs.FirstOrDefault(r => r.RunId == id));
     }
 
+    public IAsyncEnumerable<ClientStreamFrame<RunStreamEvent>> StreamRunAsync(
+        Guid runId, CancellationToken ct = default)
+        => StreamRunAsync(runId, after: null, ct);
+
+    public Task<RunInputFile> UploadRunInputFileAsync(Stream content, CancellationToken ct = default)
+        => Task.FromResult(new RunInputFile(Guid.NewGuid(), content.Length, "", DateTimeOffset.UtcNow.AddHours(1)));
+
     public async IAsyncEnumerable<ClientStreamFrame<RunStreamEvent>> StreamRunAsync(
-        Guid runId, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        Guid runId, string? after, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
         var frames = StreamFrames.Count > 0
             ? StreamFrames.ToList()
@@ -444,6 +451,7 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task<PagedResult<ArtifactDto>> QueryArtifactsAsync(ArtifactQuery query, CancellationToken ct = default) => Nope<Task<PagedResult<ArtifactDto>>>();
     public Task<ArtifactDto?> GetArtifactAsync(Guid id, CancellationToken ct = default) => Nope<Task<ArtifactDto?>>();
     public Task<Stream?> OpenArtifactContentAsync(Guid id, CancellationToken ct = default) => Nope<Task<Stream?>>();
+    public Task<bool> DeleteArtifactAsync(Guid id, CancellationToken ct = default) => Nope<Task<bool>>();
     public IAsyncEnumerable<ClientStreamFrame<ArtifactStreamEvent>> StreamArtifactEventsAsync(string? artifactType = null, string? workItemId = null, CancellationToken ct = default) => Nope<IAsyncEnumerable<ClientStreamFrame<ArtifactStreamEvent>>>();
     // --- Events (Events page + RunDetail strip) ---
     public List<EventDto> StoredEvents { get; } = [];
@@ -541,10 +549,13 @@ internal sealed class FakeCoreClient : ICoreClient
     public int GetRunViewsCalls { get; private set; }
 
     public Task<PagedResult<RunViewItem>> GetRunViewsAsync(
-        Guid runId, string? view = null, int skip = 0, int take = 200, CancellationToken ct = default)
+        Guid runId, string? view = null, int skip = 0, int take = 200, long? after = null,
+        CancellationToken ct = default)
     {
         GetRunViewsCalls++;
-        var matching = RunViews.Where(v => view is null || v.ViewName == view).ToList();
+        var matching = RunViews
+            .Where(v => (view is null || v.ViewName == view) && (after is null || v.Sequence > after))
+            .ToList();
         var page = matching.Skip(skip).Take(take).ToList();
         return Task.FromResult(new PagedResult<RunViewItem>(page, matching.Count, skip, take));
     }
@@ -689,7 +700,9 @@ internal sealed class FakeCoreClient : ICoreClient
     {
         var dto = new PlatformSettingDto(key, request.Value, DateTimeOffset.UtcNow);
         PlatformSettings.RemoveAll(s => s.Key == key);
-        PlatformSettings.Add(dto);
+        // An empty value clears the setting, as the Core does.
+        if (request.Value.Length > 0)
+            PlatformSettings.Add(dto);
         return Task.FromResult(dto);
     }
     public List<EnvironmentBaseDto> EnvironmentBases { get; } = [];

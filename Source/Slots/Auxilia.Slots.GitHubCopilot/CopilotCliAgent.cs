@@ -15,7 +15,8 @@ namespace Auxilia.Slots.GitHubCopilot;
 public sealed class CopilotCliAgent(
     CopilotCliOptions options,
     ICliProcessFactory? processFactory = null,
-    TimeProvider? time = null) : ICodingAgent
+    TimeProvider? time = null,
+    CopilotTokenSource? tokens = null) : ICodingAgent
 {
     private const int StderrTailLength = 1000;
 
@@ -33,7 +34,9 @@ public sealed class CopilotCliAgent(
                 + "provider's UseSdkSession setting; the headless CLI mode is one-shot.");
 
         var stopwatch = Stopwatch.StartNew();
-        using var process = _processFactory.Start(BuildStartInfo(request));
+        // Each spawn starts on the token the slot's connector holds now.
+        var token = tokens is not null ? (await tokens.CurrentAsync(cancellationToken)).Value : options.Token;
+        using var process = _processFactory.Start(BuildStartInfo(request, token));
         try
         {
             // Drain stderr concurrently so a chatty CLI can't dead-lock on a full pipe.
@@ -97,7 +100,9 @@ public sealed class CopilotCliAgent(
         }
     }
 
-    internal ProcessStartInfo BuildStartInfo(CodingAgentRequest request)
+    internal ProcessStartInfo BuildStartInfo(CodingAgentRequest request) => BuildStartInfo(request, options.Token);
+
+    internal ProcessStartInfo BuildStartInfo(CodingAgentRequest request, string? token)
     {
         // The CLI speaks UTF-8; without pinning it, Windows hosts decode the pipes with the
         // OEM codepage and every non-ASCII character reaches the views as mojibake.
@@ -128,7 +133,7 @@ public sealed class CopilotCliAgent(
         }
 
         // The token is exported only through the environment, never as an argument.
-        if (options.Token is { Length: > 0 } token)
+        if (token is { Length: > 0 })
             startInfo.Environment["GH_TOKEN"] = token;
         return startInfo;
     }

@@ -6,4 +6,8 @@ public sealed class NullSettingsProtector : ISettingsProtector
     public string Protect(string plaintext) => plaintext;
 
     public string Unprotect(string protectedValue) => protectedValue;
+
+    public byte[] ProtectBytes(ReadOnlySpan<byte> plaintext) => plaintext.ToArray();
+
+    public byte[] UnprotectBytes(ReadOnlySpan<byte> protectedValue) => protectedValue.ToArray();
 }

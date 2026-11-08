@@ -23,7 +23,7 @@ public static class CodingSessionWorkflow
             .WithLifetime(WorkflowLifetime.LongLiving)
             .WithInteractiveTerminal(SessionRunContext.DefaultTerminalPort)
             // What the Dockerfile installs — any provider whose CLI is bundled here is bindable.
-            .ProvidesTools("claude", "copilot", "codex")
+            .ProvidesTools("claude", ProvidedTool.Versioned("copilot", typeof(CodingSessionWorkflow).Assembly, "CopilotCliVersion"), "codex")
             .RequiresSourceControl("repository",
                 new SourceControlCapabilities { RequiredPermissions = [Permission.Read, Permission.Write] },
                 "The repository the live session works on (mounted by the Workspace Manager)")

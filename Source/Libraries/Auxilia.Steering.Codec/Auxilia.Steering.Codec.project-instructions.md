@@ -14,6 +14,10 @@ Invariants:
   decode throw; never remove or rename a wire property (`$type` names and JSON property
   names are the contract).
 - `$type` is the discriminator and serializes first (`JsonPropertyOrder(-10)` on the base).
+- `turn-ended` and `session-ended` are part of the multi-turn contract (documented in
+  `docs/steering-client-integration.md` §8): `turn-ended` after every finished turn, never after
+  the last one of a session that is ending; `session-ended.reason` from `SessionEndReasons`
+  (open vocabulary — the run's final status carries the same).
 - The Core stays semantics-blind: these shapes are opaque to Core.Api/Core.Runner —
   nothing in the Core may reference this library.
 

@@ -117,6 +117,41 @@ public sealed class CoreApiSettings
     /// an idle stream from a dead connection. 0 disables keepalives.
     /// </summary>
     public int SseKeepaliveSeconds { get; set; } = 15;
+
+    /// <summary>
+    /// How long a run stream holds back a view item whose predecessors are missing, re-reading the
+    /// store for them, before it reports the missing range as a gap and goes on. Items persist
+    /// within milliseconds, so only items the Core never retained (beyond
+    /// <see cref="MaxPersistedViewItemsPerRun"/>) outlast it.
+    /// </summary>
+    public int StreamGapWaitMilliseconds { get; set; } = 3000;
+
+    /// <summary>The largest file a client may upload for a run (<c>POST /api/run-input-files</c>), in bytes.</summary>
+    public int MaxRunInputFileBytes { get; set; } = 64 * 1024 * 1024;
+
+    /// <summary>Minutes an uploaded run input file waits for the run request that names it before it is deleted.</summary>
+    public int RunInputFileTtlMinutes { get; set; } = 60;
+
+    /// <summary>
+    /// Hours a run checkpoint is kept after its latest save, when the runtime platform setting
+    /// <c>artifacts.checkpoint-lifetime-hours</c> is unset.
+    /// </summary>
+    public int CheckpointLifetimeHours { get; set; } = 168;
+
+    /// <summary>
+    /// The longest a run checkpoint is kept, in hours, when the runtime platform setting
+    /// <c>artifacts.checkpoint-lifetime-max-hours</c> is unset (default 720, thirty days); 0 = no cap.
+    /// </summary>
+    public int CheckpointLifetimeMaxHours { get; set; } = 720;
+
+    /// <summary>The largest checkpoint the Core accepts from a runner, in bytes.</summary>
+    public int MaxCheckpointBytes { get; set; } = 64 * 1024 * 1024;
+
+    /// <summary>Checkpoint payloads one Core node holds in memory at once (saving or serving them).</summary>
+    public int MaxConcurrentCheckpointTransfers { get; set; } = 4;
+
+    /// <summary>Checkpoint saves accepted per run (keyed by its resolution token) per minute.</summary>
+    public int CheckpointSavesPerMinute { get; set; } = 30;
 }
 
 /// <summary>

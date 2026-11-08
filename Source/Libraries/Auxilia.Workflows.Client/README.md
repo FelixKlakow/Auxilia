@@ -16,7 +16,8 @@ parity.
 - **Interval triggers** — dispatch a stored configuration on a schedule.
 - **Artifact chaining** — trigger a workflow when another run produces a matching
   artifact, driven by the Core's filtered artifact event stream (never the message bus —
-  this library is a pure Core client).
+  this library is a pure Core client). A run's checkpoints (what it saves of itself while it
+  runs) never fire a trigger — chaining follows what runs produced.
 - **Event triggers** — trigger a workflow on a named platform event: events a workflow
   declares and publishes via the SDK, or the platform's built-in run-lifecycle vocabulary
   (`run.succeeded` / `run.failed` / `run.cancelled`), driven by the Core's filtered event

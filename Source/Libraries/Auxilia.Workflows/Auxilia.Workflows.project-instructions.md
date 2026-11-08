@@ -30,6 +30,34 @@ sequenceDiagram
   `Cancelled`/exit 0; any other `OperationCanceledException` (a provider HttpClient timeout, a child's
   own token) is `Failed`/exit 1. Inversely `SlotActivator`/`ResourceProxyClient`/`PodControlClient`
   rethrow the caller's cancellation as `OperationCanceledException`, never as their `TimeoutException`.
+- Input files: `RequiresInputFile` names are `WorkflowInputFileDescriptor.IsValidName` (lowercase
+  letters, digits, dashes — they become a file name and a variable suffix); `IRunInputFiles` reads
+  `WorkflowEnvironmentVariables.InputFileVariable(name)` and throws for an undeclared name. The
+  runner owns the delivery path (`InputFileDirectory`) — never let a launch extra set the variable.
+- Checkpoints: `DeclaresCheckpoint` names follow the input-file rule, paths
+  `WorkflowCheckpointDescriptor.IsValidRelativePath` (relative, no `..`, stored with `/`), the lifetime
+  is carried as `LifetimeHours`. `IRunCheckpoints` (`ResourceProxyRunCheckpoints`) sends ONLY the name
+  through the resource proxy (resource `run-checkpoints`, op `save`) — the runner takes the path from
+  the declaration it registered, so a workflow can never point a save elsewhere — one save at a time,
+  and a refused save throws.
+- `ProvidesTools` entries are `name` or `name@version` (validated in the builder; matching lives in
+  `Auxilia.Core.Contracts.ToolProvisions` — the SDK cannot reference the contracts, so keep the
+  builder's format check in step with `ToolProvisions.TryParse`).
+- `DefaultViewPublisher` numbers the run's view items with ONE counter across all views, assigned
+  and published under one gate (the bus order IS the sequence order; the Core's resumable stream
+  depends on it) — never per view, never reuse a number after a failed publish. The builder reports
+  its `LastSequence` and the `IRunOutcome` reason with the final state (`WorkflowStateMessage`).
+- `OperatorChannel`'s idle state machine (`SessionIdlePolicy`): Busy (a turn runs — no clock),
+  Waiting (after `PublishTurnEndedAsync` / a start without an instruction — late agent activity only
+  restarts the clock), Expecting (a turn ended after guidance was consumed mid-turn — the agent's
+  first activity makes it Busy); an open question always runs the clock; every operator input
+  restarts it. `RequestEnd` is the ONE end path (the operator's `end` included): first reason wins,
+  open questions are declined, between turns `EndToken` fires at once, otherwise at the turn's end.
+- `SlotActivator` stays alive for the whole run and is registered as the run's
+  `ISlotConfigurationSource`: a handler fetches its slot again mid-run (a credential that expires or
+  is replaced) and gets the connector's current settings. Activation responses are matched by slot
+  NAME, so the activator holds one activation per slot in flight (a per-slot gate) — never drop it.
+  Absent in bundled-configuration runs (dev hosts, tests): handlers resolve it optionally.
 
 ## File / Folder Map
 ```

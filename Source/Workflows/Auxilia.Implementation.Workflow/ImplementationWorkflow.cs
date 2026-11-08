@@ -26,7 +26,7 @@ public static class ImplementationWorkflow
                 "The story source — TFS/Azure DevOps (or mail); states are read from and "
                 + "written back to this source")
             // What the Dockerfile installs — agent providers match on it, not on provider names.
-            .ProvidesTools("claude", "copilot")
+            .ProvidesTools("claude", ProvidedTool.Versioned("copilot", typeof(ImplementationWorkflow).Assembly, "CopilotCliVersion"))
             .Requires<ICodingAgent>("coding-agent",
                 new AiCapabilities { MinContextWindow = 128_000, SupportedModalities = [Modality.Text] },
                 "The AUTHOR: one interactive CLI instance (visible in the run terminal) spans "

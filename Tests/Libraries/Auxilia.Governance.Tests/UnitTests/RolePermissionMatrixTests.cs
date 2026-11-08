@@ -45,6 +45,9 @@ public class RolePermissionMatrixTests
         new object[] { BuiltInRoles.Operator, PermissionActions.WorkflowTrigger, true },
         new object[] { BuiltInRoles.Auditor, PermissionActions.WorkflowTrigger, false },
         new object[] { BuiltInRoles.User, PermissionActions.RunObserve, true },
+        // Artifacts are scoped to the caller's runs, so a user may fetch its own (checkpoints too).
+        new object[] { BuiltInRoles.User, PermissionActions.ArtifactConsume, true },
+        new object[] { BuiltInRoles.Auditor, PermissionActions.ArtifactConsume, false },
         // Audit reading is Auditor and Administrator only.
         new object[] { BuiltInRoles.Auditor, PermissionActions.AuditRead, true },
         new object[] { BuiltInRoles.Administrator, PermissionActions.AuditRead, true },

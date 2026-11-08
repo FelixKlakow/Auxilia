@@ -18,6 +18,22 @@ parity.
 - **The runner handshake** — announcement, configuration, state reporting, slot
   activation, and the resource-proxy pattern (`IPodController`, steering, terminals) are
   all handled by `Run(args)`; your code is the application delegate.
+- **Views in publish order** — `IViewPublisher` numbers the run's items across all its views
+  (1, 2, 3, …); clients order, de-duplicate and resume by that number, and the SDK reports the
+  count with the run's final state.
+- **How the run ended** — `IRunOutcome.SetReason("…")` rides the final state; clients read it
+  as `RunStatus.Reason`.
+- **Files per run** — `RequiresInputFile("name")` declares a file the caller uploads for a run;
+  `IRunInputFiles.RequirePath("name")` finds it in the container.
+- **Saving while you run** — `DeclaresCheckpoint("session", "state/session")` declares a file or
+  folder in the output directory; `IRunCheckpoints.SaveAsync("session")` hands its current state
+  back to the run's principals (a folder as a `.tar.gz`) — the last save survives any ending.
+- **Tool versions** — `ProvidesTools("tool@1.2.3")` (or `ProvidedTool.Versioned`, from a version
+  the build recorded); a run that requires another version never starts on the image.
+- **Credentials that outlive the start** — slots activate just-in-time at bootstrap; a slot
+  handler (or the application) whose credential must stay current — a token that expires,
+  one its owner replaces mid-run — fetches its slot again through `ISlotConfigurationSource`
+  and gets what the bound connector holds now, delivered like the first activation.
 - **Companions & pod control** — declare digest-pinned service containers and spawn more
   at runtime inside the signed envelope, on the run's private zero-egress pod network.
 - **Containment built in** — under the platform, workload-controlled processes (agent CLIs,

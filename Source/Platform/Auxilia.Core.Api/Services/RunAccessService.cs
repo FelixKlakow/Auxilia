@@ -18,6 +18,19 @@ public enum RunRelation
     Granted,
 }
 
+/// <summary>Whether a caller may delete an artifact (<see cref="RunAccessService.MayDeleteAsync"/>).</summary>
+public enum ArtifactDeletion
+{
+    /// <summary>A checkpoint of a run the caller owns or administers.</summary>
+    Allowed,
+    /// <summary>Missing, or of a run the caller cannot reach — indistinguishable (404).</summary>
+    Hidden,
+    /// <summary>The caller reaches the run only through a grant (403).</summary>
+    Forbidden,
+    /// <summary>Not a checkpoint — the platform keeps every other artifact (409).</summary>
+    Kept,
+}
+
 /// <summary>
 /// One caller's view of runs: who they are, the groups a run grant can admit them through, and
 /// whether they administer the platform. Built once per request so a list never re-reads
@@ -41,9 +54,12 @@ public sealed record RunViewer(
     /// <summary>Whether the run is visible to this caller at all (lists, streams of related records).</summary>
     public bool CanSee(CoreRunRecord run) => IsAdministrator || RelationTo(run) != RunRelation.None;
 
-    /// <summary>Whether this caller may change who the run is shared with (grantees may not re-share).</summary>
-    public bool MayShare(CoreRunRecord run)
+    /// <summary>The run's own principals — the one it runs for and its starter — and administrators; grantees only read.</summary>
+    public bool OwnsOrAdministers(CoreRunRecord run)
         => IsAdministrator || RelationTo(run) is RunRelation.RunsFor or RunRelation.StartedBy;
+
+    /// <summary>Whether this caller may change who the run is shared with (grantees may not re-share).</summary>
+    public bool MayShare(CoreRunRecord run) => OwnsOrAdministers(run);
 
     private bool Admits(AccessGrant grant) => grant.Kind switch
     {
@@ -118,6 +134,23 @@ public sealed class RunAccessService(
             await audit.AppendAsync(viewer.PrincipalId.ToString("D"), AdministratorAccessAction,
                 run.Id.ToString(), surface, ct: ct);
         return true;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="viewer"/> may delete <paramref name="artifact"/>: only run checkpoints
+    /// are deletable, by the principal the run runs for, its starter, and administrators (audited
+    /// when the run is someone else's); a checkpoint whose run record is gone, by administrators.
+    /// </summary>
+    public async Task<ArtifactDeletion> MayDeleteAsync(RunViewer viewer, CoreArtifactRecord? artifact, CancellationToken ct)
+    {
+        if (artifact is null)
+            return ArtifactDeletion.Hidden;
+        var run = await ResolveAsync(artifact.RunInstanceId, ct);
+        if (run is null ? !viewer.IsAdministrator : !await AdmitAsync(viewer, run, "artifact-delete", ct))
+            return ArtifactDeletion.Hidden;
+        if (run is not null && !viewer.OwnsOrAdministers(run))
+            return ArtifactDeletion.Forbidden;
+        return artifact.Kind == ArtifactKinds.Checkpoint ? ArtifactDeletion.Allowed : ArtifactDeletion.Kept;
     }
 
     /// <summary>

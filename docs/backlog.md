@@ -9,6 +9,99 @@ An application integrating Auxilia for many people of one organization (one Oper
 that starts runs on their behalf, in repositories it manages) reviewed run isolation and
 containment. Outcomes (ARCHITECTURE §7, §9, §10, §16):
 
+- ~~**A long run outlives the agent token it started with**~~ — DONE: per-person tokens already
+  held (personal connectors, bindable only by their owner or grantees — administrators included —
+  resolved per run), but a slot's credential was fetched once at container start, so an 8-hour
+  GitHub token died inside a long multi-turn session and a token its owner replaced never arrived.
+  The SDK now serves the run's `SlotActivator` as `ISlotConfigurationSource` (re-activation through
+  runner and Core, one in flight per slot); the Copilot slot (SDK 1.0.29) answers the session's
+  `GitHubTokenProvider` from it (`CopilotTokenSource`: re-read about hourly, every minute once a
+  declared `token_expires_at` is inside its last hour) and each line-mode spawn starts on the current
+  token. Proven: `PersonalCredentialTests` (component), `PersonalCredentialSystemTests` (two people,
+  concurrent runs, a token replaced mid-run, no token in views/inputs/logs). Usage attribution in
+  Copilot itself is a manual check with real accounts; console (tmux) sessions keep the token they
+  started with.
+- ~~**A run stream only showed what happened after a client connected**~~ — DONE: a late or
+  reconnecting client had to read the stored views, then drop what arrived live again. The stream
+  resumes (`RunStreamSession`): every frame's SSE id is its position (`RunStreamEvent.Cursor`),
+  `Last-Event-ID` / `?after=` continue right after it — stored items first, then live, every frame
+  exactly once, in order; a position at the end of a finished run is a 204. View sequences are now
+  ONE counter per run across all its views (the SDK assigns and publishes them under one gate), so
+  order and gaps are exact; status frames are read from the run record (never a state the Core does
+  not hold, never an older one on a resume — transitions closer together than a record read
+  collapse into the latest); items the Core never retained become a `gap` frame; the verdict waits
+  (bounded) for every item the run reported (`LastViewSequence`). `GET /api/runs/{id}/views?after=`
+  pages in the same order; `ICoreClient.StreamRunAsync` reconnects from its last cursor and takes a
+  kept one (`after:`). Proven: `RunStreamResumeTests` (component), `CoreClientStreamSystemTests`
+  (late client, a client that leaves mid-run and resumes, a client after the end). Workflow images
+  built before this publish per-view sequences and must be rebuilt.
+- ~~**A multi-turn session held its container until someone ended it**~~ — DONE: run input
+  `idle-timeout` (minutes) for `claude-code` / `github-copilot`, capped by the runner's
+  `WorkflowLauncher:MaxIdleMinutes` (default 60 — also the timeout of a run that sets none): when
+  nobody writes for that long after a turn (or on an open question, which is then declined) the
+  session ends exactly as if `end` had been sent. The reason (`completed`/`ended`/`idle-timeout`/
+  `halted`/`failed`) rides `session-ended` and the run's final status (`RunStatus.Reason`, via
+  `IRunOutcome`); `turn-ended` is documented as part of the contract. Proven: `OperatorChannelIdleTests`,
+  `AgentSessionIdleTests` (a 2-minute timeout ends the session 2 minutes after its last turn),
+  `MultiTurnSessionSystemTests` (own timeout, the runner's cap, a timeout above the cap).
+  Single-turn sessions waiting on an unanswered question are not covered (they have no idle policy).
+- ~~**Continue an agent session the client started elsewhere, in a run**~~ — DECIDED: a custom
+  workflow, not the shipped `github-copilot` one. Reproducing the client's prompt byte for byte (so
+  the provider's cache keeps hitting) ties the run to that client's Copilot SDK version and session
+  setup, which an Auxilia release cannot follow. The platform gained the generic pieces it lacked:
+  **run input files** (the session state reaches exactly one run's container — encrypted at rest,
+  the uploader's alone, deleted with the run; `RunInputFileTests`, `RunInputFileSystemTests`) and
+  **run-required tool versions** (`name@version`; a run whose image ships another version ends
+  `PreFlightFailed`). The custom workflow resumes through the SDK (SDK 1.0.29 has
+  `ResumeSessionAsync`, `ConfigDirectory`, `SystemMessage` Customize, tool declarations and the
+  flags), hosts the session in `AgentSessionApplication` (steering forms, turns, idle end), and
+  ships the SDK's bundled runtime — SDK sessions are all it runs. The shipped Copilot images now pin
+  the CLI to the SDK's `CopilotCliVersion` (1.0.107, `CopilotCli.props`) and declare it.
+- ~~**Hand the session back**~~ — DONE as a general platform feature, **run checkpoints**: a
+  workflow declares a file or folder (`DeclaresCheckpoint`) and saves it while it runs
+  (`IRunCheckpoints.SaveAsync`, e.g. after every turn); only the name travels the resource proxy, the
+  runner reads the declared path without following links (a folder as a `.tar.gz`) and the Core
+  keeps it encrypted as the run's artifact of kind `checkpoint` — the newest version, the previous one
+  deleted only once the new one is stored, so the last save survives any ending. Lifetime: run
+  request > workflow declaration > general (`artifacts.checkpoint-lifetime-hours`), as far as
+  `artifacts.checkpoint-lifetime-overrides` (`run`/`workflow`/`none`) allows, all capped by
+  `artifacts.checkpoint-lifetime-max-hours` (a run request beyond is a 400) — settings cleared by an
+  empty value, editable on `/admin/settings`. The run's principals download it; the principal it runs
+  for, its starter and administrators delete it (`DELETE /api/artifacts/{id}`, MCP
+  `delete_artifact`, `DeleteArtifactAsync`); chaining never fires on it. The built-in User role
+  gained `artifact.consume` (artifacts are scoped to the caller's runs). Along the way: declared
+  outputs are read the same link-safe way (a planted link to the runner's `/proc/self/environ` was
+  followed before), and the resource proxy runs calls side by side. Proven: `RunCheckpointServiceTests`,
+  `CheckpointLifetimePolicyTests`, `RunCheckpointConnectorTests`/`SafeRunOutputTests` (the link
+  cases need symlink rights — skipped on Windows without Developer Mode; the Linux `O_NOFOLLOW`
+  path verified in the runner's `aspnet:10.0` base image), `RunCheckpointTests` (component),
+  `RunCheckpointSystemTests` (a failed run's last save handed back as a tree without the planted
+  link, then deleted). Two independent reviews afterwards hardened it: reads are snapshots of the
+  bytes counted at open (caps hold, archives never corrupt when a file changes mid-save), every
+  directory is checked by its real path, proxy calls have per-run limits and an arrival-based
+  deadline inside the SDK's wait, racing saves converge, payloads never outlive their records,
+  reads verify the digest and the lifetime, clearing the history keeps runs that hold checkpoints,
+  a default cap of thirty days, and saves before the claim is recorded are a 409.
+- **Run checkpoints — open:** no per-principal (or global) storage quota beyond the size cap,
+  lifetime and per-run rate limit; checkpoint payloads (like every artifact payload) are not
+  downloadable over MCP; the Core holds a payload in memory while it encrypts or serves it
+  (bounded per node — a streaming format would lift that).
+- ~~**Published images, or a compose file**~~ — DONE both (2026-11-08): `publish-images.yml`
+  pushes all twelve images (six platform, six workflow) to GHCR on the `v*` tags, amd64, with
+  provenance + SBOM and a digest list per release; `compose.yaml` + `.env.example` run the
+  platform from published or locally built images (verified end to end: a run through the
+  compose stack's runner, guard and egress gateway). The runner image no longer ships the
+  test-fake credential-probe slot (a `system-test` stage). `Setup-Platform.ps1` gained
+  `-Registry`/`-Pull` and reads each schema from the image it registers. Open: arm64 (the
+  session workflow images fetch an x86_64 ttyd — make it per-architecture, add the platform,
+  run once in CI); the stand-in CLI scripts of the workflow images belong in `system-test`
+  stages too; the admin console in compose (needs OIDC + a same-origin gateway); a
+  digest-pinned compose override per release; package visibility follows the repo (private) —
+  before images go public, check the redistribution terms of the agent CLIs the workflow
+  images bundle (Claude Code and the Copilot CLI are proprietary; Codex is Apache-2.0).
+- **Core.Runner still mirrors view items into its own store** (`ViewDataHandler`, write-only since
+  the Core became the read surface); its cap compares a run-wide sequence with
+  `MaxViewItemsPerView`, so it now caps per run. Remove the handler and its store.
 - ~~**Runs visible and steerable by every principal holding the role**~~ — DONE: per-run access
   (`RunAccessService`): the principal a run runs for, the one that started it on their behalf,
   its grants (the connector sharing model — `PUT /api/runs/{id}/grants`, MCP `set_run_grants`,

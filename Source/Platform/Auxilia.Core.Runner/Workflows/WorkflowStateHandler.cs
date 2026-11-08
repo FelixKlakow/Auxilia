@@ -93,7 +93,8 @@ public sealed class WorkflowStateHandler(
         await statusPublisher.PublishAsync(
             message.WorkflowInstanceId, record.WorkflowType,
             message.State.ToString(), message.ErrorMessage,
-            ownerServiceId: record.OwnerServiceId, ct: ct);
+            ownerServiceId: record.OwnerServiceId, ct: ct,
+            reason: message.Reason, lastViewSequence: message.LastViewSequence);
         await auditLog.AppendAsync(
             "steering-instance", "workflow.state-changed",
             message.WorkflowInstanceId.ToString(), message.State.ToString(),

@@ -55,5 +55,6 @@ public sealed class RunReadService(IDataAccess<CoreRunRecord> runs)
         RunsFor = r.RunsForPrincipalId,
         StartedBy = r.StartedByPrincipalId,
         Grants = AccessGrantEvaluator.Parse(r.GrantsJson),
+        Reason = r.Reason,
     };
 }

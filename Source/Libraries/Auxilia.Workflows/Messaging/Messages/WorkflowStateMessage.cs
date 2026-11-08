@@ -3,11 +3,15 @@ namespace Auxilia.Workflows.Messaging.Messages;
 /// <summary>
 /// Terminal state report of a run. Authenticated like every other SDK-to-runner message: the
 /// instance token proves the sender IS the instance and the workflow name binds it to the type
-/// the token was issued for; the runner ignores reports it cannot verify.
+/// the token was issued for; the runner ignores reports it cannot verify. <see cref="Reason"/> is
+/// the workflow's own account of how it ended (<see cref="IRunOutcome"/>);
+/// <see cref="LastViewSequence"/> the number of view items it published.
 /// </summary>
 public sealed record WorkflowStateMessage(
     Guid WorkflowInstanceId,
     WorkflowState State,
     string? ErrorMessage,
     string? WorkflowName = null,
-    string? InstanceToken = null) : Auxilia.Messaging.IWorkloadScopedMessage;
+    string? InstanceToken = null,
+    string? Reason = null,
+    long? LastViewSequence = null) : Auxilia.Messaging.IWorkloadScopedMessage;

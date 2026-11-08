@@ -26,6 +26,16 @@ public class CoreClientEnvironment
     internal const string EchoWorkflowType = "echo-workflow";
     internal const string EchoDecisionWorkflowType = "echo-decision-workflow";
     internal const string ContainmentProbeWorkflowType = "containment-probe-workflow";
+    internal const string CredentialRefreshWorkflowType = "credential-refresh-workflow";
+    internal const string ViewSequenceWorkflowType = "view-sequence-workflow";
+    internal const string IdleSessionWorkflowType = "idle-session-workflow";
+    internal const string InputFileWorkflowType = "input-file-workflow";
+    internal const string CheckpointWorkflowType = "checkpoint-workflow";
+
+    /// <summary>The runner's cap on how long a run may wait for its operator — short, so the cap itself is testable.</summary>
+    internal static readonly TimeSpan MaxIdle = TimeSpan.FromSeconds(15);
+    /// <summary>The test-fake slot provider whose settings a workflow can read back (baked onto the runner image).</summary>
+    internal const string CredentialProbeProviderType = "credential-probe";
     /// <summary>The runner's per-container memory ceiling here (small enough to reach on purpose).</summary>
     internal const int ContainerMemoryMb = 512;
     /// <summary>The dummy image by its content (images are approved by digest) — set once it is built.</summary>
@@ -56,6 +66,9 @@ public class CoreClientEnvironment
     /// </summary>
     private static IVolume _runRoots = null!;
     internal static string RunRootsPath { get; private set; } = "";
+    /// <summary>The artifact payload store the runner writes and the Core serves (a deployment shares it).</summary>
+    private static IVolume _artifacts = null!;
+    private const string ArtifactPayloadRoot = "/var/lib/auxilia/artifacts";
     private static IContainer _coreApi = null!;
     private static readonly List<HttpClient> HttpClients = [];
 
@@ -181,6 +194,11 @@ public class CoreClientEnvironment
         await _runRoots.CreateAsync();
         using (var daemon = new DockerClientConfiguration().CreateClient())
             RunRootsPath = (await daemon.Volumes.InspectAsync(_runRoots.Name)).Mountpoint;
+        _artifacts = new VolumeBuilder()
+            .WithName($"auxilia-artifacts-{TestSession.Id}")
+            .WithLabel(TestSession.LabelKey, TestSession.Id)
+            .Build();
+        await _artifacts.CreateAsync();
 
         // The production shape: the runner never holds the daemon socket — the Docker API guard
         // does, and allows exactly what a runner does. Every run in this environment (the
@@ -217,6 +235,8 @@ public class CoreClientEnvironment
             // directory — here the run roots, at the daemon's own path for them.
             .WithVolumeMount(_runRoots, RunRootsPath)
             .WithEnvironment("TMPDIR", RunRootsPath)
+            .WithVolumeMount(_artifacts, ArtifactPayloadRoot)
+            .WithEnvironment("ArtifactStore__PayloadRoot", ArtifactPayloadRoot)
             .WithEnvironment("RabbitMq__Host", RabbitMqAlias)
             .WithEnvironment("RabbitMq__Port", "5672")
             .WithEnvironment("RabbitMq__UserName", "guest")
@@ -231,6 +251,14 @@ public class CoreClientEnvironment
             .WithEnvironment("WorkflowLauncher__RabbitMqPort", "5672")
             .WithEnvironment("WorkflowLauncher__EgressGatewayImage", TestImages.EgressGatewayImageName)
             .WithEnvironment("WorkflowLauncher__ContainerMemoryMb", ContainerMemoryMb.ToString())
+            .WithEnvironment("WorkflowLauncher__MaxIdleMinutes",
+                MaxIdle.TotalMinutes.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            // The credential-probe slot (baked onto the runner image) for the personal-credential
+            // runs; the test-fake plugin is unsigned, so workflow containers run in developer
+            // mode, which relaxes plugin signature checks and nothing else.
+            .WithEnvironment($"WorkflowLauncher__SlotPackages__{CredentialProbeProviderType}",
+                "/app/slots/Auxilia.Slots.CredentialProbe.slothandler.dll")
+            .WithEnvironment("WorkflowLauncher__ExtraEnvironmentVariables__AUXILIA_DEVELOPER_MODE", "1")
             // Everything this runner creates carries the session label the teardown sweeps.
             .WithEnvironment(TestSession.RunnerVariable, TestSession.Id)
             .WithWaitStrategy(
@@ -250,6 +278,8 @@ public class CoreClientEnvironment
             // filesystem, so runs/principals/registrations survive RestartCoreApiAsync.
             .WithEnvironment("PlatformData__Backend", "Json")
             .WithEnvironment("PlatformData__JsonDirectory", "/core-data")
+            .WithVolumeMount(_artifacts, ArtifactPayloadRoot)
+            .WithEnvironment("ArtifactStore__PayloadRoot", ArtifactPayloadRoot)
             .WithEnvironment("PlatformData__ProtectionKeyBase64", Convert.ToBase64String(new byte[32]))
             .WithEnvironment("CoreSecurity__BootstrapApiKey", BootstrapApiKey)
             // Dispatch queues on the bus instead of gating on a seen runner heartbeat — the
@@ -264,6 +294,25 @@ public class CoreClientEnvironment
             .WithEnvironment("CoreApi__StaticWorkflowTypes__2__PackageUri", DummyPackageUri)
             .WithEnvironment("CoreApi__StaticWorkflowTypes__3__WorkflowType", ContainmentProbeWorkflowType)
             .WithEnvironment("CoreApi__StaticWorkflowTypes__3__PackageUri", DummyPackageUri)
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__4__WorkflowType", CredentialRefreshWorkflowType)
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__4__PackageUri", DummyPackageUri)
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__5__WorkflowType", ViewSequenceWorkflowType)
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__5__PackageUri", DummyPackageUri)
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__6__WorkflowType", IdleSessionWorkflowType)
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__6__PackageUri", DummyPackageUri)
+            // Registered WITH its schema, as a registration normally is: the Core knows the
+            // declared input files before the type's first run binds one.
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__7__WorkflowType", InputFileWorkflowType)
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__7__PackageUri", DummyPackageUri)
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__7__SchemaJson",
+                System.Text.Json.JsonSerializer.Serialize(
+                    Auxilia.Workflows.Testing.DummyWorkflows.InputFileWorkflow.Schema()))
+            // Its checkpoints are known to the Core before the first save arrives.
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__8__WorkflowType", CheckpointWorkflowType)
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__8__PackageUri", DummyPackageUri)
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__8__SchemaJson",
+                System.Text.Json.JsonSerializer.Serialize(
+                    Auxilia.Workflows.Testing.DummyWorkflows.CheckpointWorkflow.Schema()))
             // The package-trust roundtrip: a trusted publisher key (auto-Active uploads), the
             // platform signing key (approve-time re-sign), and the network-internal base address
             // core:// package URIs resolve to — the RUNNER must be able to reach it.
@@ -332,6 +381,7 @@ public class CoreClientEnvironment
         if (_dockerGuard is not null) await _dockerGuard.DisposeAsync();
         await TestSession.SweepAsync();
         if (_runRoots is not null) await _runRoots.DisposeAsync();
+        if (_artifacts is not null) await _artifacts.DisposeAsync();
         if (_rabbitMq is not null) await _rabbitMq.DisposeAsync();
         if (_network is not null) await _network.DisposeAsync();
         // A run whose containment the stopped runner never released leaves nothing behind.

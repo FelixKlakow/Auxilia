@@ -58,6 +58,43 @@ public sealed class AdminSettingsPageTests
     }
 
     [Test]
+    public void Checkpoints_StoredRules_AreShown_AndSavingWritesThem()
+    {
+        var core = new FakeCoreClient();
+        core.PlatformSettings.Add(new PlatformSettingDto(
+            PlatformSettingKeys.CheckpointLifetimeHours, "72", DateTimeOffset.UtcNow));
+        core.PlatformSettings.Add(new PlatformSettingDto(
+            PlatformSettingKeys.CheckpointLifetimeMaxHours, "168", DateTimeOffset.UtcNow));
+        using var ctx = NewContext(core);
+        var cut = ctx.Render<AdminSettings>();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(cut.Find($"input[value='{CheckpointLifetimeOverrideModes.Run}']").HasAttribute("checked"), Is.True,
+                "unset reads as runs-and-workflows, the default");
+            Assert.That(cut.Find("input[placeholder='deployment default']").GetAttribute("value"), Is.EqualTo("72"));
+            Assert.That(cut.Find("input[placeholder='deployment maximum']").GetAttribute("value"), Is.EqualTo("168"));
+        });
+
+        cut.Find("input[placeholder='deployment default']").Change("12.5");
+        cut.Find("input[placeholder='deployment maximum']").Change("");
+        cut.FindAll("button").First(b => b.TextContent.Contains("Save lifetimes")).Click();
+        cut.WaitForAssertion(() => Assert.Multiple(() =>
+        {
+            Assert.That(core.PlatformSettings.Single(s => s.Key == PlatformSettingKeys.CheckpointLifetimeHours).Value,
+                Is.EqualTo("12.5"));
+            Assert.That(core.PlatformSettings.Select(s => s.Key), Does.Not.Contain(PlatformSettingKeys.CheckpointLifetimeMaxHours),
+                "an emptied maximum is cleared — back to the deployment's");
+        }));
+
+        cut.Find($"input[value='{CheckpointLifetimeOverrideModes.None}']").Change(CheckpointLifetimeOverrideModes.None);
+        cut.FindAll("button").First(b => b.TextContent.Contains("Save who may override")).Click();
+        cut.WaitForAssertion(() => Assert.That(
+            core.PlatformSettings.Single(s => s.Key == PlatformSettingKeys.CheckpointLifetimeOverrides).Value,
+            Is.EqualTo(CheckpointLifetimeOverrideModes.None)));
+    }
+
+    [Test]
     public void Settings_StoredOpenPosture_PreselectsOpen()
     {
         var core = new FakeCoreClient();

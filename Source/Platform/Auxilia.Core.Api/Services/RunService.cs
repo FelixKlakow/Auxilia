@@ -33,7 +33,9 @@ public sealed class RunService(
     TimeProvider clock,
     IOptions<CoreApiSettings> settings,
     ILogger<RunService> logger,
-    RunQuotaService? quotas = null)
+    RunQuotaService? quotas = null,
+    RunInputFileService? inputFileService = null,
+    CheckpointLifetimePolicy? checkpointLifetimes = null)
 {
     /// <summary>Prefix of the synthetic slot a workspace mount's auth connector is stashed under.</summary>
     internal const string MountAuthSlotPrefix = "mount-auth:";
@@ -51,7 +53,8 @@ public sealed class RunService(
             // Inline Secret-kind settings are protected the moment they enter the Core — the
             // stash never holds them in the clear; the resolver decrypts just-in-time.
             await bindingSecrets.ProtectAsync(request.SlotBindings ?? [], ct), triggeredBy, ct,
-            startedBy: startedBy);
+            startedBy: startedBy, inputFiles: request.InputFiles, requiredTools: request.RequiredTools,
+            checkpointLifetimeHours: request.CheckpointLifetimeHours);
 
     public async Task<RunAccepted> RunConfigurationAsync(
         Guid configurationId, Guid? triggeredBy, IReadOnlyDictionary<string, string>? context, CancellationToken ct,
@@ -95,6 +98,11 @@ public sealed class RunService(
             || System.Text.Json.JsonSerializer.Deserialize<RunWorkflowCommand>(commandJson) is not { } original
             || run.CommandId is not { } originalCommandId)
             throw new InvalidOperationException("this run carries no stored dispatch command to rerun from");
+        // Input files belong to one run: a failover re-dispatch continues it and takes them over
+        // (below); an operator rerun is a new run and gets new uploads, never the old ones.
+        if (original.InputFiles is { Count: > 0 } && !keepAccess)
+            throw new InvalidOperationException(
+                "this run's input files belonged to it alone — start a new run with the files uploaded again");
         var stash = await credentialResolver.GetStashAsync(originalCommandId, ct)
                     ?? throw new InvalidOperationException("this run's resolution context is no longer stored");
         var workflowType = original.WorkflowType ?? run.WorkflowType;
@@ -152,6 +160,8 @@ public sealed class RunService(
             SchemaJson = (await workflowTypes.GetRecordAsync(workflowType, ct))?.SchemaJson
                          ?? original.SchemaJson,
         };
+        if (original.InputFiles is { Count: > 0 } && inputFileService is not null)
+            await inputFileService.HandOverAsync(originalCommandId, commandId, ct);
         var rerunCommandJson = System.Text.Json.JsonSerializer.Serialize(ResolutionTokens.Redacted(command));
         var owners = keepAccess
             ? new RunOwners(run.RunsForPrincipalId, run.StartedByPrincipalId, run.GrantsJson)
@@ -244,8 +254,23 @@ public sealed class RunService(
     private async Task<RunAccepted> DispatchAsync(
         string workflowType, Dictionary<string, string> context,
         IReadOnlyList<SlotBinding> slotBindings, Guid? triggeredBy, CancellationToken ct,
-        Guid? configurationId = null, Guid? startedBy = null)
+        Guid? configurationId = null, Guid? startedBy = null,
+        IReadOnlyDictionary<string, Guid>? inputFiles = null, IReadOnlyList<string>? requiredTools = null,
+        double? checkpointLifetimeHours = null)
     {
+        // A run's required tools are checked against the image at the runner's pre-flight; here
+        // only their form, so a typo is a 400 instead of a run that can never start.
+        if (requiredTools?.FirstOrDefault(t => !ToolProvisions.TryParse(t, out _, out _)) is { } malformed)
+            throw new InvalidOperationException($"'{malformed}' is not a tool — use name or name@version");
+        if (inputFiles is { Count: > 0 } && inputFileService is null)
+            throw new InvalidOperationException("this Core does not take run input files");
+        // A run may set its checkpoints' lifetime only where the platform lets runs do that.
+        if (checkpointLifetimeHours is not null)
+        {
+            if (checkpointLifetimes is null)
+                throw new InvalidOperationException("this Core keeps no run checkpoints");
+            await checkpointLifetimes.ValidateRunRequestAsync(checkpointLifetimeHours, ct);
+        }
         // A delegated start: the run runs for the target, and the caller that started it on their
         // behalf keeps access to it. A caller starting for itself is simply the run's principal.
         var owners = new RunOwners(triggeredBy, startedBy == triggeredBy ? null : startedBy, null);
@@ -265,7 +290,8 @@ public sealed class RunService(
         // Tool matching and the catalog grant gate run per binding INSIDE the loop below, after
         // workspace expansion — a workspace reference only acquires its provider type when the
         // stored resource expands, and both checks must cover those bindings too.
-        var providedTools = await ProvidedToolsAsync(workflowType, ct);
+        var schema = await schemaReader.GetSchemaAsync(workflowType, ct);
+        IReadOnlyList<string>? providedTools = schema?.ProvidedTools;
 
         // Bindings of providers that mount into the workspace become generic workspace mounts:
         // the binding's settings are re-keyed by the provider's declared setting ROLES (a pure
@@ -408,6 +434,14 @@ public sealed class RunService(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        // The run's files bind to THIS command — the caller's own uploads, checked against what the
+        // type declares. Only their names ride the command; the runner fetches the content JIT.
+        var boundFiles = inputFileService is null
+            ? (IReadOnlyList<string>)[]
+            : await inputFileService.BindToRunAsync(
+                commandId, workflowType, inputFiles, schema?.InputFiles ?? [],
+                owners.StartedBy ?? triggeredBy, ct);
+
         var command = new RunWorkflowCommand(
             commandId, workflowType, packageUri, context,
             RequestedBy: null, WorkflowConfigurationId: null, ResolutionToken: resolutionToken,
@@ -422,7 +456,10 @@ public sealed class RunService(
             // the run's context selects (context key "pod-bases", fixable in the stored
             // configuration like any input) resolve into the map — default-deny when absent —
             // and a catalog edit never changes what an in-flight run may start.
-            PodBaseImagesJson: await SerializeSpawnableBasesAsync(context, ct));
+            PodBaseImagesJson: await SerializeSpawnableBasesAsync(context, ct),
+            InputFiles: boundFiles.Count > 0 ? boundFiles : null,
+            RequiredTools: requiredTools is { Count: > 0 } ? requiredTools : null,
+            CheckpointLifetimeHours: checkpointLifetimeHours);
 
         // Stash the resolution context AND the dispatch command itself (keyed by CommandId), so an
         // orphaned run can be re-dispatched once on failover without the Core reading the runner's
@@ -496,9 +533,8 @@ public sealed class RunService(
     /// is registered yet = nothing to check against (the same blind-trust window the registry
     /// approval surfaces).
     /// </summary>
-    private async Task<HashSet<string>?> ProvidedToolsAsync(string workflowType, CancellationToken ct)
-        => (await schemaReader.GetSchemaAsync(workflowType, ct))?
-            .ProvidedTools.ToHashSet(StringComparer.OrdinalIgnoreCase);
+    private async Task<IReadOnlyList<string>?> ProvidedToolsAsync(string workflowType, CancellationToken ct)
+        => (await schemaReader.GetSchemaAsync(workflowType, ct))?.ProvidedTools;
 
     /// <summary>
     /// The per-binding dispatch gate, shared by first dispatch and rerun. Rejects a binding whose
@@ -509,7 +545,7 @@ public sealed class RunService(
     /// run binds — slot providers, environment layers, and workspace-mounting providers alike.
     /// </summary>
     private async Task<ProviderCatalogEntry?> ValidateBindingAsync(
-        string workflowType, SlotBinding binding, IReadOnlySet<string>? providedTools,
+        string workflowType, SlotBinding binding, IReadOnlyList<string>? providedTools,
         Guid? triggeredBy, CancellationToken ct)
     {
         var providerType = await ProviderTypeOfAsync(binding, ct);
@@ -523,7 +559,8 @@ public sealed class RunService(
         }
         if (providedTools is not null && entry.RequiredTools.Count > 0)
         {
-            var missing = entry.RequiredTools.Where(t => !providedTools.Contains(t)).ToList();
+            // name = any version, name@version = exactly that one (ToolProvisions).
+            var missing = ToolProvisions.Unmet(entry.RequiredTools, providedTools);
             if (missing.Count > 0)
                 throw new InvalidOperationException(
                     $"slot '{binding.SlotName}' of '{workflowType}' cannot bind provider "

@@ -3,9 +3,12 @@ WORKDIR /repo
 COPY . .
 RUN dotnet publish Source/Platform/Auxilia.Core.Runner/Auxilia.Core.Runner.csproj \
     -c Release -o /app/publish --no-self-contained
-# Bake the credential-probe slot handler onto the runner filesystem. The runner copies the
-# *.slothandler.dll into the workflow container at launch (the workflow image already carries
-# Auxilia.Workflows.Testing, so the plugin's ICredentialProbe reference resolves there).
+
+# The credential-probe slot handler is a TEST fake — only the system-test image carries it. The
+# runner copies a *.slothandler.dll into the workflow container at launch (the test workflow
+# image already carries Auxilia.Workflows.Testing, so the plugin's ICredentialProbe reference
+# resolves there).
+FROM build AS test-slots
 RUN dotnet publish Source/Slots/Auxilia.Slots.CredentialProbe/Auxilia.Slots.CredentialProbe.csproj \
     -c Release -o /app/slots --no-self-contained
 
@@ -16,5 +19,11 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /app/publish .
-COPY --from=build /app/slots /app/slots
 ENTRYPOINT ["dotnet", "Auxilia.Core.Runner.dll"]
+
+# What the system tests run (they build this target): the runner plus the test-fake slot.
+FROM runtime AS system-test
+COPY --from=test-slots /app/slots /app/slots
+
+# The product image — the default target, the one that is published: no test plugin.
+FROM runtime

@@ -35,4 +35,10 @@ public sealed record WorkflowManifest(
 
     /// <summary>Tool names the workflow's image bundles (see <see cref="WorkflowSchema.ProvidedTools"/>).</summary>
     public IReadOnlyList<string> ProvidedTools { get; init; } = [];
+
+    /// <summary>The files a run receives (see <see cref="WorkflowSchema.InputFiles"/>).</summary>
+    public IReadOnlyList<WorkflowInputFileDescriptor> InputFiles { get; init; } = [];
+
+    /// <summary>What the workflow saves while it runs (see <see cref="WorkflowSchema.Checkpoints"/>).</summary>
+    public IReadOnlyList<WorkflowCheckpointDescriptor> Checkpoints { get; init; } = [];
 }

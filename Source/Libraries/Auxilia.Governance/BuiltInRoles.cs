@@ -68,7 +68,10 @@ public static class BuiltInRoles
                 PermissionActions.WorkflowTrigger,
                 PermissionActions.RunObserve,
                 PermissionActions.RunProvideInput,
-                PermissionActions.ViewSubscribe
+                PermissionActions.ViewSubscribe,
+                // Run access scopes artifacts to the caller's own runs — a user gets back what
+                // its runs produced and saved (a run checkpoint is handed back this way).
+                PermissionActions.ArtifactConsume
             },
             [Auditor] = new HashSet<string>
             {

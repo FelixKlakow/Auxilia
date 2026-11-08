@@ -89,6 +89,15 @@ public static class ClaudeCodeWorkflow
                 DefaultValue = "false"
             })
             .RequiresInput(new WorkflowInputDescriptor(
+                AgentSessionContext.IdleTimeoutInput, "Idle timeout (minutes)", Required: false,
+                Description: "Multi-turn only: when nobody writes for this long — no next "
+                             + "instruction after a turn, no answer to an open question — the "
+                             + "session ends by itself, as if you had ended it. Capped by the "
+                             + "platform's maximum, which also applies when this is empty.")
+            {
+                Kind = "Number"
+            })
+            .RequiresInput(new WorkflowInputDescriptor(
                 "permission-mode", "Permissions", Required: false,
                 Description: "How the agent's tool-permission requests are handled. Ask me: every "
                              + "request becomes a decision card you answer from the steering client. "
@@ -175,7 +184,8 @@ public static class ClaudeCodeWorkflow
                 provider.GetService<IViewPublisher>(),
                 context,
                 TimeProvider.System,
-                provider.GetService<IWorkflowInputs>())
+                provider.GetService<IWorkflowInputs>(),
+                provider.GetService<IRunOutcome>())
             .RunAsync(cancellationToken);
     }
 }

@@ -41,6 +41,24 @@ public static class WorkflowEnvironmentVariables
     public const string TerminalCredential = "Workflow__TerminalCredential";
     /// <summary>Directory where the workflow writes its declared outputs for persistence.</summary>
     public const string OutputDirectory = "Workflow__OutputDirectory";
+
+    /// <summary>
+    /// The platform's cap on how long a run may wait for its operator, in minutes (Core.Runner
+    /// <c>WorkflowLauncher:MaxIdleMinutes</c>); read it through <see cref="WorkflowLimits.MaxIdle"/>.
+    /// </summary>
+    public const string MaxIdleMinutes = "Workflow__MaxIdleMinutes";
+
+    /// <summary>
+    /// Prefix of one variable per input file the run received (suffixed with the upper-cased
+    /// declared name): the file's path inside the container. Read it through <see cref="IRunInputFiles"/>.
+    /// </summary>
+    public const string InputFilePrefix = "Workflow__InputFile__";
+
+    /// <summary>Where the runner places a run's input files — a directory of the run's own output bind.</summary>
+    public const string InputFileDirectory = "/workflow-output/inputs";
+
+    /// <summary>The variable naming the path of input file <paramref name="name"/>.</summary>
+    public static string InputFileVariable(string name) => InputFilePrefix + name.ToUpperInvariant();
     /// <summary>Directory containing the per-run repository workspace (ARCHITECTURE §9).</summary>
     public const string WorkspaceDirectory = "Workflow__WorkspaceDirectory";
     /// <summary>

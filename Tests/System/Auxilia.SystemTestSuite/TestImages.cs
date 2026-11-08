@@ -197,9 +197,18 @@ internal static class TestImages
             yield return file;
     }
 
+    /// <summary>The stage a Dockerfile may declare for test-only additions; the suite always builds it when present.</summary>
+    internal const string SystemTestTarget = "system-test";
+
     private static async Task BuildImageOnceAsync(string tag, string dockerfilePath, TimeSpan timeout)
     {
-        var psi = new ProcessStartInfo("docker", $"build -t {tag} -f {dockerfilePath} .")
+        // A product Dockerfile keeps test-only pieces (fake slot plugins) out of its default image
+        // and offers them in a "system-test" stage — the image these tests run.
+        var declaresTestStage = File.ReadLines(Path.Combine(RepoPaths.Root, dockerfilePath))
+            .Any(line => System.Text.RegularExpressions.Regex.IsMatch(
+                line, $@"^\s*FROM\s+\S+\s+AS\s+{SystemTestTarget}\s*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+        var target = declaresTestStage ? $" --target {SystemTestTarget}" : "";
+        var psi = new ProcessStartInfo("docker", $"build -t {tag}{target} -f {dockerfilePath} .")
         {
             WorkingDirectory = RepoPaths.Root,
             RedirectStandardOutput = true,

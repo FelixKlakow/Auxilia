@@ -14,7 +14,28 @@ public sealed record ArtifactDto(
     int Version,
     string ContentHash,
     long SizeBytes,
-    DateTimeOffset CreatedUtc);
+    DateTimeOffset CreatedUtc)
+{
+    /// <summary>What produced it (<see cref="ArtifactKinds"/>); null for a run's declared output or a platform log.</summary>
+    public string? Kind { get; init; }
+
+    /// <summary>When the Core deletes it; null when it is kept.</summary>
+    public DateTimeOffset? ExpiresUtc { get; init; }
+
+    /// <summary>The payload's media type when known — <c>application/gzip</c> for a checkpointed folder (a .tar.gz).</summary>
+    public string? MediaType { get; init; }
+}
+
+/// <summary>Kinds of artifact with their own rules.</summary>
+public static class ArtifactKinds
+{
+    /// <summary>
+    /// A run checkpoint: the latest copy of a file or folder the workflow saved while it ran
+    /// (a folder arrives as a .tar.gz). Encrypted at rest, kept for its lifetime
+    /// (<see cref="ArtifactDto.ExpiresUtc"/>), and deletable by the principals the run belongs to.
+    /// </summary>
+    public const string Checkpoint = "checkpoint";
+}
 
 /// <summary>
 /// Typed filter for artifact queries; all filters optional and combined with AND. Results are

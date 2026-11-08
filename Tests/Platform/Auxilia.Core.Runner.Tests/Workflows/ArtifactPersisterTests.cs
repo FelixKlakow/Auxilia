@@ -129,6 +129,24 @@ public class ArtifactPersisterTests
     }
 
     [Test]
+    public async Task AnOutputReachedThroughALink_IsSkippedWithoutSave()
+    {
+        var outputDir = CreateOutputDirectory();
+        var secret = Path.Combine(_tempRoot, "runner-secret.json");
+        await File.WriteAllTextAsync(secret, "the runner's own");
+        SafeRunOutputTests.LinkOrIgnore(() => File.CreateSymbolicLink(Path.Combine(outputDir, "result.json"), secret));
+
+        await _sut.PersistOutputsAsync(
+            _instanceId, "review-workflow",
+            OutputsJson(new WorkflowOutputDescriptor("review-result", "result.json", null)),
+            "WI-7");
+
+        Assert.That(await _artifactStore.GetLineageAsync("review-result", "WI-7"), Is.Empty,
+            "A link the workload planted must never become an artifact.");
+        _mockBus.VerifyNoOtherCalls();
+    }
+
+    [Test]
     public async Task PathEscapingRelativePath_IsSkippedWithoutSave()
     {
         var outputDir = CreateOutputDirectory();

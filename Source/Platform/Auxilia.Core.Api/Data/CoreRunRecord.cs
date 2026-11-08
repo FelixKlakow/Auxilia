@@ -25,6 +25,12 @@ public sealed record CoreRunRecord : IVersionedEntity
     /// <summary>When the run reached its terminal state; null while it is still in flight.</summary>
     public DateTimeOffset? CompletedUtc { get; init; }
 
+    /// <summary>How the run ended in the workflow's own words (e.g. <c>idle-timeout</c>); null while in flight or when it gave none.</summary>
+    public string? Reason { get; init; }
+
+    /// <summary>How many view items the run published, as it reported with its final state; null until then.</summary>
+    public long? LastViewSequence { get; init; }
+
     public Guid? ConfigurationId { get; init; }
     public string? ConfigurationName { get; init; }
 

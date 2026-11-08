@@ -22,4 +22,24 @@ public sealed record CoreArtifactRecord : IEntity
     public required string ContentHash { get; init; }
     public long SizeBytes { get; init; }
     public DateTimeOffset CreatedUtc { get; init; }
+
+    /// <summary>Its kind when it has its own rules (<see cref="Auxilia.Core.Contracts.ArtifactKinds"/>); null for outputs and logs.</summary>
+    public string? Kind { get; init; }
+
+    /// <summary>When the Core deletes it; null when it is kept.</summary>
+    public DateTimeOffset? ExpiresUtc { get; init; }
+
+    /// <summary>The payload is encrypted with the Core's protection key (only the Core wrote it).</summary>
+    public bool Encrypted { get; init; }
+
+    /// <summary>The payload's media type when the Core knows it (a checkpointed folder is <c>application/gzip</c>).</summary>
+    public string? MediaType { get; init; }
+
+    public Auxilia.Core.Contracts.ArtifactDto ToDto()
+        => new(Id, ArtifactType, WorkflowType, WorkItemId, RunInstanceId, Version, ContentHash, SizeBytes, CreatedUtc)
+        {
+            Kind = Kind,
+            ExpiresUtc = ExpiresUtc,
+            MediaType = MediaType,
+        };
 }

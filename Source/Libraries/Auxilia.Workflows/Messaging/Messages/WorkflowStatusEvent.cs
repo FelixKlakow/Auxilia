@@ -30,7 +30,18 @@ public sealed record WorkflowStatusEvent(
     /// to end clients, which only ever talk to the Core's authenticated terminal proxy. Stamped
     /// on the transition after launch; consumers preserve the last non-null value.
     /// </summary>
-    string? TerminalEndpoint = null) : Auxilia.Messaging.IPlatformOnlyMessage
+    string? TerminalEndpoint = null,
+    /// <summary>
+    /// How the run ended in the workflow's own words (e.g. <c>idle-timeout</c>) — terminal
+    /// transitions only, when the workflow reported one.
+    /// </summary>
+    string? Reason = null,
+    /// <summary>
+    /// How many view items the run published (their run-wide sequences are 1..n) — terminal
+    /// transitions the workflow itself reported; a stream holds the run's verdict back until it
+    /// has delivered them.
+    /// </summary>
+    long? LastViewSequence = null) : Auxilia.Messaging.IPlatformOnlyMessage
 {
     // Topic exchange (selective routing) — a NEW name, because the retired fanout
     // "workflow.status-events" cannot be redeclared with a different type in place.

@@ -42,6 +42,7 @@ public class ResourceProxyHandlerTests
             Options.Create(new WorkflowDispatcherSettings { RequireInstanceToken = requireInstanceToken }),
             NullLogger<ResourceProxyHandler>.Instance);
         await handler.StartAsync(CancellationToken.None);
+        _bus.AfterInvoke = handler.DrainAsync;
         return handler;
     }
 
@@ -112,6 +113,105 @@ public class ResourceProxyHandlerTests
     }
 
     [Test]
+    public async Task ASlowCall_DoesNotHoldUpAnotherRunsCall()
+    {
+        var slow = _tokenRegistry.Issue("TestWorkflow");
+        var fast = _tokenRegistry.Issue("TestWorkflow");
+        var release = new TaskCompletionSource();
+        var handler = await StartHandlerAsync(connectors:
+        [
+            new BlockingConnector("run-checkpoints", release.Task),
+            new StubConnector("task-source", _ => """{"ok":true}"""),
+        ]);
+
+        await _bus.AdmitAsync(Request(slow.WorkflowInstanceId, slow.Token, resourceName: "run-checkpoints", operation: "save"));
+        await _bus.AdmitAsync(Request(fast.WorkflowInstanceId, fast.Token));
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (_bus.PublishedSnapshot().Count == 0 && DateTime.UtcNow < deadline)
+            await Task.Delay(10);
+        var answeredFirst = _bus.PublishedSnapshot().Select(p => p.Topic).ToList();
+        release.SetResult();
+        await handler.DrainAsync();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(answeredFirst, Is.EqualTo(new[] { WorkflowQueues.ResourceResponseQueueFor(fast.WorkflowInstanceId) }),
+                "the other run's call is answered while the slow one still runs");
+            Assert.That(_bus.PublishedSnapshot(), Has.Count.EqualTo(2));
+        });
+    }
+
+    [Test]
+    public async Task ARun_HasAtMostTwoCallsInFlight_AFurtherOneIsRefusedAtOnce()
+    {
+        var run = _tokenRegistry.Issue("TestWorkflow");
+        var release = new TaskCompletionSource();
+        var handler = await StartHandlerAsync(connectors: new BlockingConnector("run-checkpoints", release.Task));
+        var requests = Enumerable.Range(0, 3)
+            .Select(_ => Request(run.WorkflowInstanceId, run.Token, resourceName: "run-checkpoints", operation: "save"))
+            .ToList();
+
+        foreach (var request in requests)
+            await _bus.AdmitAsync(request);
+        var refusedAtOnce = _bus.PublishedSnapshot().Select(p => (ResourceResponse)p.Message).ToList();
+        release.SetResult();
+        await handler.DrainAsync();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(refusedAtOnce.Select(r => r.RequestId), Is.EqualTo(new[] { requests[2].RequestId }),
+                "the third is answered while the first two still run");
+            Assert.That(refusedAtOnce.Single().Success, Is.False);
+            Assert.That(_bus.PublishedSnapshot().Select(p => (ResourceResponse)p.Message).Count(r => r.Success), Is.EqualTo(2));
+        });
+    }
+
+    [Test]
+    public async Task ACallPastItsDeadline_IsAnsweredAsFailed_AndFreesItsPlace()
+    {
+        var run = _tokenRegistry.Issue("TestWorkflow");
+        var handler = await StartHandlerAsync(connectors: new BlockingConnector("run-checkpoints", new TaskCompletionSource().Task));
+        handler.CallDeadline = TimeSpan.FromMilliseconds(200);
+
+        await _bus.InvokeAsync(
+            Request(run.WorkflowInstanceId, run.Token, resourceName: "run-checkpoints", operation: "save"), CancellationToken.None);
+
+        var response = (ResourceResponse)_bus.PublishedSnapshot().Single().Message;
+        Assert.Multiple(() =>
+        {
+            Assert.That(response.Success, Is.False);
+            Assert.That(response.ErrorMessage, Does.Contain("did not finish"));
+        });
+    }
+
+    [Test]
+    public async Task ACallThatFindsNoCapacityInTime_IsRefused_BeforeTheWorkflowStopsWaiting()
+    {
+        var release = new TaskCompletionSource();
+        // Calls that hold their slot past any deadline: the late call's wait alone decides.
+        var handler = await StartHandlerAsync(connectors: new StubbornConnector("run-checkpoints", release.Task));
+        handler.CallDeadline = TimeSpan.FromMilliseconds(300);
+        // Four runs fill every slot with two slow calls each.
+        for (var i = 0; i < ResourceProxyHandler.MaxConcurrentCalls / ResourceProxyHandler.MaxCallsPerInstance; i++)
+        {
+            var busy = _tokenRegistry.Issue("TestWorkflow");
+            for (var call = 0; call < ResourceProxyHandler.MaxCallsPerInstance; call++)
+                await _bus.AdmitAsync(Request(busy.WorkflowInstanceId, busy.Token, resourceName: "run-checkpoints", operation: "save"));
+        }
+        var late = _tokenRegistry.Issue("TestWorkflow");
+        var lateRequest = Request(late.WorkflowInstanceId, late.Token, resourceName: "run-checkpoints", operation: "save");
+
+        await _bus.AdmitAsync(lateRequest);
+        var refused = _bus.PublishedSnapshot().Select(p => (ResourceResponse)p.Message)
+            .SingleOrDefault(r => r.RequestId == lateRequest.RequestId);
+        release.SetResult();
+        await handler.DrainAsync();
+
+        Assert.That(refused, Is.Not.Null);
+        Assert.That(refused!.ErrorMessage, Does.Contain("too busy"));
+    }
+
+    [Test]
     public async Task HandleAsync_InvalidToken_PublishesNothingAndAuditsRejection()
     {
         var issued = _tokenRegistry.Issue("TestWorkflow");
@@ -173,11 +273,33 @@ public class ResourceProxyHandlerTests
 
     // ── Fakes ──────────────────────────────────────────────────────────────────
 
+    private sealed class StubbornConnector(string resourceName, Task release) : IResourceConnector
+    {
+        public string ResourceName => resourceName;
+
+        public async Task<string> ExecuteAsync(Guid instanceId, string operation, string payloadJson, CancellationToken ct)
+        {
+            await release;
+            return "{}";
+        }
+    }
+
+    private sealed class BlockingConnector(string resourceName, Task release) : IResourceConnector
+    {
+        public string ResourceName => resourceName;
+
+        public async Task<string> ExecuteAsync(Guid instanceId, string operation, string payloadJson, CancellationToken ct)
+        {
+            await release.WaitAsync(ct);
+            return "{}";
+        }
+    }
+
     private sealed class StubConnector(string resourceName, Func<string, string> execute) : IResourceConnector
     {
         public string ResourceName => resourceName;
 
-        public Task<string> ExecuteAsync(string operation, string payloadJson, CancellationToken ct)
+        public Task<string> ExecuteAsync(Guid instanceId, string operation, string payloadJson, CancellationToken ct)
             => Task.FromResult(execute(operation));
     }
 
@@ -200,7 +322,8 @@ public class ResourceProxyHandlerTests
 
         public Task PublishAsync<T>(string topic, T message, CancellationToken cancellationToken = default)
         {
-            Published.Add((topic, message!));
+            lock (Published)
+                Published.Add((topic, message!));
             return Task.CompletedTask;
         }
 
@@ -227,8 +350,24 @@ public class ResourceProxyHandlerTests
             CancellationToken cancellationToken = default)
             => Task.FromResult<IAsyncDisposable>(new NullDisposable());
 
-        public Task InvokeAsync(ResourceRequest request, CancellationToken cancellationToken)
-            => _handler!(request, cancellationToken);
+        /// <summary>Awaited after each delivery — the handler answers calls off the subscription.</summary>
+        public Func<Task>? AfterInvoke { get; set; }
+
+        public async Task InvokeAsync(ResourceRequest request, CancellationToken cancellationToken)
+        {
+            await _handler!(request, cancellationToken);
+            if (AfterInvoke is not null)
+                await AfterInvoke();
+        }
+
+        /// <summary>One delivery, without waiting for its answer.</summary>
+        public Task AdmitAsync(ResourceRequest request) => _handler!(request, CancellationToken.None);
+
+        public List<(string Topic, object Message)> PublishedSnapshot()
+        {
+            lock (Published)
+                return [.. Published];
+        }
 
         private sealed class NullDisposable : IAsyncDisposable
         {

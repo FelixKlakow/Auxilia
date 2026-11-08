@@ -5,6 +5,10 @@ RUN dotnet publish Source/Workflows/Auxilia.Copilot.Workflow/Auxilia.Copilot.Wor
     -c Release -o /app/publish --no-self-contained
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+# The Copilot CLI version the Copilot slot's SDK expects — written on publish by the slot's
+# CopilotCli.props — pinned, never whatever npm calls current. Copied ahead of the tooling
+# layer: that layer reinstalls exactly when the version changes and stays cached otherwise.
+COPY --from=build /app/publish/copilot-cli-version /tmp/copilot-cli-version
 # The GitHub Copilot CLI (Node-based) plus git for repository work, and tmux+ttyd for
 # console-mode runs (view-mode=console: the CLI behind the web terminal). This layer never
 # changes with source edits, so Docker caches it across rebuilds.
@@ -12,7 +16,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates git gnupg tmux \
  && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
  && apt-get install -y --no-install-recommends nodejs \
- && npm install -g @github/copilot \
+ && npm install -g "@github/copilot@$(cat /tmp/copilot-cli-version)" \
  && curl -fsSL -o /usr/local/bin/ttyd \
       https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 \
  && chmod +x /usr/local/bin/ttyd \

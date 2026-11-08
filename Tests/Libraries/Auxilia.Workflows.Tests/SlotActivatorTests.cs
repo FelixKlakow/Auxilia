@@ -125,6 +125,52 @@ public class SlotActivatorTests
     }
 
     [Test]
+    public async Task FetchAsync_AgainDuringTheRun_DeliversWhatTheConnectorHoldsNow()
+    {
+        RespondToActivationRequests(new Dictionary<string, string> { ["token"] = "first" });
+        var first = await _activator.FetchAsync("slot1");
+        RespondToActivationRequests(new Dictionary<string, string> { ["token"] = "replaced" });
+        var again = await _activator.FetchAsync("slot1");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(first.Settings["token"], Is.EqualTo("first"));
+            Assert.That(again.Settings["token"], Is.EqualTo("replaced"));
+            Assert.That(_bus.Published(ActivationQueue), Has.Count.EqualTo(2), "each fetch is its own audited activation");
+        });
+    }
+
+    [Test]
+    public async Task ConcurrentFetchesOfOneSlot_EachGetTheirAnswer()
+    {
+        // Responses are matched by slot name: two activations of one slot in flight at once would
+        // hand the first answer to the second caller and leave the first waiting forever.
+        _activator.ActivationTimeout = TimeSpan.FromSeconds(5);
+        var answered = 0;
+        _bus.OnPublish = (topic, message) =>
+        {
+            if (topic != ActivationQueue || message is not SlotActivationRequest request)
+                return;
+            var slot = EncryptFor(request.PublicKey, "stub-provider",
+                new Dictionary<string, string> { ["token"] = $"answer-{Interlocked.Increment(ref answered)}" });
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(100);
+                _bus.DeliverAsync(ResponseTopic, new SlotActivationResponse(
+                    request.WorkflowInstanceId, request.SlotName, true, null, slot));
+            });
+        };
+
+        var results = await Task.WhenAll(_activator.FetchAsync("slot1"), _activator.FetchAsync("slot1"));
+
+        Assert.That(results.Select(r => r.Settings["token"]), Is.EquivalentTo(new[] { "answer-1", "answer-2" }));
+    }
+
+    [Test]
+    public void TheActivator_ServesTheRunAsItsSlotConfigurationSource()
+        => Assert.That(_activator, Is.InstanceOf<ISlotConfigurationSource>());
+
+    [Test]
     public void FetchAsync_NoResponse_TimesOut()
     {
         _activator.ActivationTimeout = TimeSpan.FromMilliseconds(200);

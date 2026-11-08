@@ -138,19 +138,26 @@ public sealed class MultiClientStreamTests : CoreApiComponentTestBase
         foreach (var (runId, body) in results)
         {
             // The first frame is each run's Dispatched snapshot; the live frames follow.
-            var frames = body.Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
-                .Select(f => System.Text.Json.JsonSerializer.Deserialize<RunStreamEvent>(
-                    f["data: ".Length..], System.Text.Json.JsonSerializerOptions.Web)!)
+            var frames = RunStreamTests.ParseFrames(body)
                 .Skip(1)
                 .ToList();
+            // Status frames carry the run's state as the Core holds it: under this burst a
+            // Running superseded at once by Success may collapse into it.
+            var statuses = frames.Where(f => f.Kind == RunStreamEvent.StatusKind)
+                .Select(f => System.Text.Json.JsonSerializer.Deserialize<WorkflowStatusEvent>(
+                    f.PayloadJson, System.Text.Json.JsonSerializerOptions.Web)!.State)
+                .ToList();
+            var views = frames.Where(f => f.Kind == RunStreamEvent.ViewKind).ToList();
             Assert.Multiple(() =>
             {
-                Assert.That(frames, Has.Count.EqualTo(3),
-                    $"run {runId}: Running + view + Success, nothing lost, nothing foreign");
+                Assert.That(views, Has.Count.EqualTo(1), $"run {runId}: its view item, nothing lost, nothing foreign");
+                Assert.That(views.Single().PayloadJson, Does.Contain(runId.ToString()),
+                    $"run {runId}: the view frame must be its own");
+                Assert.That(statuses, Is.EqualTo(new[] { "Running", "Success" }).Or.EqualTo(new[] { "Success" }),
+                    $"run {runId}: in order, the verdict last");
+                Assert.That(frames[^1].Kind, Is.EqualTo(RunStreamEvent.StatusKind), $"run {runId}: the verdict closes the stream");
                 Assert.That(frames.All(f => f.RunId == runId), Is.True,
                     $"run {runId}: events must never cross into another run's stream");
-                Assert.That(frames[1].PayloadJson, Does.Contain(runId.ToString()),
-                    $"run {runId}: the view frame must be its own");
             });
         }
     }

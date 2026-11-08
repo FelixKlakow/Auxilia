@@ -119,5 +119,12 @@ internal static class TestStores
             => protectedValue.StartsWith("enc:", StringComparison.Ordinal)
                 ? System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(protectedValue["enc:".Length..]))
                 : throw new FormatException("value was not protected by this protector");
+
+        public byte[] ProtectBytes(ReadOnlySpan<byte> plaintext) => [.. "enc:"u8, .. plaintext];
+
+        public byte[] UnprotectBytes(ReadOnlySpan<byte> protectedValue)
+            => protectedValue.StartsWith("enc:"u8)
+                ? protectedValue["enc:".Length..].ToArray()
+                : throw new FormatException("content was not protected by this protector");
     }
 }

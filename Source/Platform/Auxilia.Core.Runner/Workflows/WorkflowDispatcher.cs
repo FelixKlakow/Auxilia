@@ -53,7 +53,8 @@ public sealed class WorkflowDispatcher(
     Pods.IPodHost podHost,
     Pods.PodControlRegistry podControlRegistry,
     RunContainment containment,
-    ILogger<WorkflowDispatcher> logger)
+    ILogger<WorkflowDispatcher> logger,
+    IRunInputFileSource? inputFileSource = null)
 {
     private IAsyncDisposable? _subscription;
 
@@ -156,6 +157,8 @@ public sealed class WorkflowDispatcher(
             [WorkflowEnvironmentVariables.InstanceId]        = instanceId.ToString("D"),
             [WorkflowEnvironmentVariables.InstanceToken]     = issued.Token,
             [WorkflowEnvironmentVariables.OutputDirectory]   = "/workflow-output",
+            [WorkflowEnvironmentVariables.MaxIdleMinutes]    =
+                settings.MaxIdleMinutes.ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
 
         // Per-run output directory: mounted into the container; declared outputs found
@@ -192,7 +195,8 @@ public sealed class WorkflowDispatcher(
         // own bus/identity variables, which only the dispatcher sets.
         if (settings.ExtraEnvironmentVariables is not null)
             foreach (var (key, value) in settings.ExtraEnvironmentVariables)
-                if (!ReservedEnvironmentVariables.Contains(key))
+                if (!ReservedEnvironmentVariables.Contains(key)
+                    && !key.StartsWith(WorkflowEnvironmentVariables.InputFilePrefix, StringComparison.OrdinalIgnoreCase))
                     env[key] = value;
 
         // Resolve slot-handler plugins for the run's provider types (sent by the Core). An
@@ -350,6 +354,37 @@ public sealed class WorkflowDispatcher(
         // schema gap). A run's own registration keeps refreshing the store afterwards.
         var schema = await schemaStore.GetSchemaAsync(workflowType, ct)
                      ?? await SeedSchemaFromCommandAsync(workflowType, command.SchemaJson, ct);
+
+        // A run that needs a tool (version) the image does not provide never starts on it: a run
+        // prepared for one tool version must not silently run on another.
+        if (command.RequiredTools is { Count: > 0 } requiredTools
+            && ToolProvisions.Unmet(requiredTools, schema?.ProvidedTools ?? []) is { Count: > 0 } unmetTools)
+        {
+            var provided = schema?.ProvidedTools is { Count: > 0 } tools ? string.Join(", ", tools) : "none";
+            var reason = $"the run requires {string.Join(", ", unmetTools)}; the workflow image provides: {provided}";
+            await auditLog.AppendAsync("core-runner", "workflow.dispatch.rejected", instanceId.ToString(), reason, ct: ct);
+            await FailPreFlightAsync(instanceId, workflowType, reason, ct);
+            return;
+        }
+
+        // The run's input files: fetched from the Core with the run's resolution token (only while
+        // the run is live) into the run's own output bind; the workflow finds each one through its
+        // variable. The content never rides the bus or the command — and dies with the run's roots.
+        foreach (var name in command.InputFiles ?? [])
+        {
+            if (!WorkflowInputFileDescriptor.IsValidName(name) || inputFileSource is null
+                || string.IsNullOrEmpty(command.ResolutionToken)
+                || !await inputFileSource.DownloadAsync(
+                    command.CommandId, command.ResolutionToken, name,
+                    Path.Combine(outputDirectory, "inputs", name), ct))
+            {
+                await FailPreFlightAsync(instanceId, workflowType,
+                    $"input file '{name}' could not be fetched from the Core", ct);
+                return;
+            }
+            env[WorkflowEnvironmentVariables.InputFileVariable(name)] =
+                $"{WorkflowEnvironmentVariables.InputFileDirectory}/{name}";
+        }
         var networkPolicy = networkPolicyResolver.Resolve(
             schema?.NetworkEndpoints ?? [], command.Context, dispatcherSettings.Value);
         await auditLog.AppendAsync(
@@ -1025,6 +1060,8 @@ public sealed class WorkflowDispatcher(
         WorkflowEnvironmentVariables.BusIngressExchange,
         WorkflowEnvironmentVariables.InstanceId, WorkflowEnvironmentVariables.InstanceToken,
         WorkflowEnvironmentVariables.TerminalCredential,
+        // A platform limit is the runner's setting, not a per-launch extra.
+        WorkflowEnvironmentVariables.MaxIdleMinutes,
         "HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "NO_PROXY", "no_proxy",
     };
 

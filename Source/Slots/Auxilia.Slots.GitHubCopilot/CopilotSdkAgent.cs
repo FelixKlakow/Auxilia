@@ -20,12 +20,20 @@ namespace Auxilia.Slots.GitHubCopilot;
 /// (<see cref="CodingAgentRequest.OnTurnEnded"/>) and idles until the operator's next guidance,
 /// which becomes the next turn's prompt; the end token finishes the session successfully.
 /// </para>
+/// <para>
+/// The session authenticates as the person whose connector the slot binds: the runtime asks
+/// <see cref="CopilotTokenSource"/> for the session's GitHub token whenever it needs one, so a
+/// session outliving its first token (a long multi-turn run) keeps going on the token the
+/// connector holds then.
+/// </para>
 /// </summary>
 public sealed class CopilotSdkAgent(
     CopilotCliOptions options,
-    TimeProvider? time = null) : ICodingAgent
+    TimeProvider? time = null,
+    CopilotTokenSource? tokens = null) : ICodingAgent
 {
     private readonly TimeProvider _time = time ?? TimeProvider.System;
+    private readonly CopilotTokenSource _tokens = tokens ?? new CopilotTokenSource(options);
 
     public async Task<CodingAgentResult> RunAsync(
         CodingAgentRequest request,
@@ -44,10 +52,13 @@ public sealed class CopilotSdkAgent(
         // as the unprivileged agent user, and every process it leaves dies with the session.
         using var agentSession = AgentSandbox.EnterAgentSession();
 
+        // Client-level calls (the model list, cached for the client's lifetime) authenticate with
+        // the token the session starts on; everything the session does asks the token source.
+        var startToken = await _tokens.CurrentAsync(sessionScope.Token);
         await using var client = new CopilotClient(new CopilotClientOptions
         {
             Connection = RuntimeConnection.ForStdio(AgentSandbox.WrapperFor(options.CliPath), null),
-            GitHubToken = options.Token,
+            GitHubToken = startToken.Value,
             WorkingDirectory = request.WorkspaceDirectory,
         });
         await client.StartAsync(sessionScope.Token);
@@ -56,6 +67,15 @@ public sealed class CopilotSdkAgent(
         var plan = new List<AgentPlanItem>();
         await using var session = await client.CreateSessionAsync(new SessionConfig
         {
+            GitHubTokenProvider = async _ =>
+            {
+                var current = await _tokens.CurrentAsync(sessionScope.Token);
+                return GitHubTokenProviderResult.FromToken(new GitHubToken
+                {
+                    AccessToken = current.Value,
+                    ExpiresIn = (int)current.Lifetime.TotalSeconds,
+                });
+            },
             WorkingDirectory = request.WorkspaceDirectory,
             Streaming = false,
             OnPermissionRequest = (permission, _) =>

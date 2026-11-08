@@ -66,16 +66,45 @@ public sealed record SteeringFormResolved(
     protected override string TypeDiscriminator => TypeName;
 }
 
-/// <summary>The session is over — no stale decision cards survive.</summary>
+/// <summary>
+/// The session is over — no stale decision cards survive. <see cref="Reason"/> says why, from
+/// <see cref="SessionEndReasons"/> (open vocabulary; the run's final status carries the same).
+/// </summary>
 public sealed record SteeringSessionEnded(
     [property: JsonPropertyName("success")] bool Success,
-    [property: JsonPropertyName("error")] string? Error = null) : SteeringFrame
+    [property: JsonPropertyName("error")] string? Error = null,
+    [property: JsonPropertyName("reason")] string? Reason = null) : SteeringFrame
 {
     public const string TypeName = "session-ended";
     protected override string TypeDiscriminator => TypeName;
 }
 
-/// <summary>One agent turn finished; the session is idle awaiting operator input.</summary>
+/// <summary>Why a session ended — the <c>reason</c> of <see cref="SteeringSessionEnded"/> and of the run's final status.</summary>
+public static class SessionEndReasons
+{
+    /// <summary>The agent finished the instruction (a single-turn session).</summary>
+    public const string Completed = "completed";
+
+    /// <summary>The operator ended the session (<see cref="SteeringEnd"/>).</summary>
+    public const string Ended = "ended";
+
+    /// <summary>Nobody wrote for the session's idle timeout; it ended as if the operator had sent <c>end</c>.</summary>
+    public const string IdleTimeout = "idle-timeout";
+
+    /// <summary>The operator halted the run (<see cref="SteeringHalt"/>).</summary>
+    public const string Halted = "halted";
+
+    /// <summary>The agent failed.</summary>
+    public const string Failed = "failed";
+}
+
+/// <summary>
+/// One agent turn finished; the session is idle awaiting the operator's next instruction —
+/// the client's cue to notify. Part of the multi-turn contract: published after every turn
+/// (never after the last one of a session that is ending), <see cref="Turn"/> counts the
+/// session's turns so far, <see cref="Summary"/> is the turn's closing message. From here the
+/// session's idle timeout runs until the operator writes.
+/// </summary>
 public sealed record SteeringTurnEnded(
     [property: JsonPropertyName("turn")] int Turn,
     [property: JsonPropertyName("summary")] string? Summary = null) : SteeringFrame

@@ -1,3 +1,4 @@
+using Auxilia.Steering.Codec;
 using Auxilia.Workflows;
 using Auxilia.Workflows.Steering;
 using Auxilia.Workflows.Views;
@@ -14,13 +15,20 @@ namespace Auxilia.Workflows.AiAgent.CodingAgent;
 /// answered), operator guidance reaches the agent mid-session, and a halt cancels the session.
 /// Without one the run is fully autonomous — same workflow, no steering surface announced.
 /// </para>
+/// <para>
+/// A multi-turn session ends when the operator sends <c>end</c>, or by itself once it waited
+/// <see cref="AgentSessionContext.IdleTimeout"/> for the operator (after a turn, or on an open
+/// question) — exactly as if <c>end</c> had been sent. How it ended (<see cref="SessionEndReasons"/>)
+/// rides the steering view's <c>session-ended</c> and the run's final status (<see cref="IRunOutcome"/>).
+/// </para>
 /// </summary>
 public sealed class AgentSessionApplication(
     ICodingAgent agent,
     IViewPublisher? views,
     AgentSessionContext context,
     TimeProvider time,
-    IWorkflowInputs? inputs = null)
+    IWorkflowInputs? inputs = null,
+    IRunOutcome? outcome = null)
 {
     public const string ChatViewName = "agent-conversation";
     public const string ProgressViewName = "progress";
@@ -36,7 +44,11 @@ public sealed class AgentSessionApplication(
         OperatorChannel? channel = null;
         if (views is not null && inputs is not null)
             channel = await OperatorChannel.StartAsync(views, inputs, cancellationToken,
-                extraCapabilities: context.MultiTurn ? ["end"] : null);
+                extraCapabilities: context.MultiTurn ? ["end"] : null,
+                idle: context.MultiTurn
+                    ? new SessionIdlePolicy(
+                        context.IdleTimeout, AwaitingFirstTurn: context.Instruction.Length == 0, time)
+                    : null);
 
         // A multi-turn session lives from operator input — without the steering surface there is
         // no way to ever send a next turn (or to end the session).
@@ -64,8 +76,11 @@ public sealed class AgentSessionApplication(
                         // The agent's plan revisions land on the "plan" view as full snapshots.
                         OnPlanUpdate = views is null
                             ? null
-                            : (items, token) => views.PublishAsync(
-                                AgentPlanUpdate.ViewName, new AgentPlanUpdate(items), token),
+                            : (items, token) =>
+                            {
+                                channel?.NoteAgentActivity();
+                                return views.PublishAsync(AgentPlanUpdate.ViewName, new AgentPlanUpdate(items), token);
+                            },
                         MultiTurn = context.MultiTurn,
                         EndToken = channel?.EndToken ?? CancellationToken.None,
                         // The agent's live model/effort vocabulary feeds the steering client dropdowns.
@@ -82,7 +97,12 @@ public sealed class AgentSessionApplication(
                             ? null
                             : (turn, summary, token) => channel.PublishTurnEndedAsync(turn, summary, token),
                     },
-                    PublishChatAsync,
+                    // Everything the agent says is the agent at work — the session is not idle.
+                    (entry, token) =>
+                    {
+                        channel?.NoteAgentActivity();
+                        return PublishChatAsync(entry, token);
+                    },
                     session.Token);
             }
             catch (OperationCanceledException) when (channel?.HaltToken.IsCancellationRequested == true)
@@ -91,7 +111,14 @@ public sealed class AgentSessionApplication(
                     Success: false, Summary: null, ErrorMessage: "The session was halted by the operator.");
             }
 
-            await PublishProgressAsync("session", result.Success ? "completed" : "failed", cancellationToken);
+            var reason = channel?.HaltToken.IsCancellationRequested == true
+                ? SessionEndReasons.Halted
+                : channel?.EndReason
+                  ?? (result.Success ? SessionEndReasons.Completed : SessionEndReasons.Failed);
+            outcome?.SetReason(reason);
+            await PublishProgressAsync("session", reason == SessionEndReasons.IdleTimeout
+                ? $"ended — nobody wrote for {context.IdleTimeout.TotalMinutes:0.##} min"
+                : result.Success ? "completed" : "failed", cancellationToken);
 
             var report = new SessionReport(
                 context.Instruction, result.Success, result.Summary, result.TurnCount,
@@ -100,7 +127,7 @@ public sealed class AgentSessionApplication(
             await PublishProgressAsync("report", "written", cancellationToken);
 
             if (channel is not null)
-                await channel.EndSessionAsync(result.Success, result.ErrorMessage, cancellationToken);
+                await channel.EndSessionAsync(result.Success, result.ErrorMessage, cancellationToken, reason);
 
             if (!result.Success)
                 throw new InvalidOperationException(

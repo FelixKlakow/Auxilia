@@ -85,6 +85,18 @@ public sealed class ArtifactChainingEngineTests
     }
 
     [Test]
+    public async Task ARunsCheckpoint_NeverFiresATrigger_ItIsNotAFinishedOutput()
+    {
+        await _store.SaveAsync(new ArtifactTriggerDefinition { ArtifactType = "session", ConfigurationId = Guid.NewGuid() });
+        var checkpoint = Event("session");
+
+        await _engine.StartAsync(CancellationToken.None);
+        await _engine.HandleAsync(checkpoint with { Artifact = checkpoint.Artifact with { Kind = ArtifactKinds.Checkpoint } });
+
+        Assert.That(_core.ConfigurationRuns, Is.Empty);
+    }
+
+    [Test]
     public async Task Start_OpensOneServerFilteredStream_PerDistinctArtifactType()
     {
         await _store.SaveAsync(new ArtifactTriggerDefinition { ArtifactType = "plan", WorkflowType = "a" });

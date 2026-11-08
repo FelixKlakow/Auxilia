@@ -27,6 +27,15 @@ public interface ICoreClient
 
     // --- Runs ---
     Task<RunAccepted> RunAsync(RunRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Uploads a file for a run you are about to start: name its <see cref="RunInputFile.Id"/> in
+    /// <see cref="RunRequest.InputFiles"/> under the input-file name the workflow declares. The Core
+    /// holds it encrypted and yours alone until a run of yours takes it (or it expires unused), and
+    /// deletes it when that run ends. Bounded by <paramref name="ct"/> only — a large file may take
+    /// longer than the unary timeout.
+    /// </summary>
+    Task<RunInputFile> UploadRunInputFileAsync(Stream content, CancellationToken ct = default);
     Task<RunStatus?> GetRunAsync(Guid id, CancellationToken ct = default);
     Task<PagedResult<RunStatus>> QueryRunsAsync(RunQuery query, CancellationToken ct = default);
     Task CancelRunAsync(Guid id, CancellationToken ct = default);
@@ -40,20 +49,35 @@ public interface ICoreClient
     Task<RunStatus> SetRunGrantsAsync(Guid runId, SetRunGrants request, CancellationToken ct = default);
 
     /// <summary>
-    /// Live-view stream for a run over Server-Sent Events, RESILIENT: the client reconnects
-    /// internally with backoff and yields <see cref="StreamConnectionFrame{TEvent}"/>s around
-    /// <see cref="StreamEventFrame{TEvent}"/> payloads (status transitions + view items as
-    /// discriminated <see cref="RunStreamEvent"/>s). The first frame after every (re)subscribe is
-    /// the server's status snapshot, so completion of the sequence reliably means the run reached
-    /// a terminal state (or <paramref name="ct"/> was cancelled). Non-transient HTTP errors
-    /// (401/403/404) throw <see cref="CoreApiException"/>; transport errors never escape.
-    /// View frames are deduped across resubscribes by sequence; status frames are idempotent.
+    /// A run's stream over Server-Sent Events from its start: the current status, every stored
+    /// view item, then the live ones — see <see cref="StreamRunAsync(Guid, string?, CancellationToken)"/>.
     /// </summary>
-    IAsyncEnumerable<ClientStreamFrame<RunStreamEvent>> StreamRunAsync(Guid runId, CancellationToken ct = default);
+    IAsyncEnumerable<ClientStreamFrame<RunStreamEvent>> StreamRunAsync(Guid runId, CancellationToken ct = default)
+        => StreamRunAsync(runId, after: null, ct);
 
-    /// <summary>A run's persisted view items (outputs) — the read-later counterpart of the stream.</summary>
+    /// <summary>
+    /// A run's stream over Server-Sent Events, RESUMABLE and RESILIENT: every
+    /// <see cref="RunStreamEvent"/> (status, view item, or a <c>gap</c> of items the Core did not
+    /// retain) carries its <see cref="RunStreamEvent.Cursor"/>; the client reconnects internally
+    /// with backoff and continues right after the last frame it yielded — every frame exactly
+    /// once, in order. <paramref name="after"/> starts from a cursor kept from an earlier stream
+    /// (null: from the run's start — its current status, every stored view item, then the live
+    /// ones). <see cref="StreamConnectionFrame{TEvent}"/>s mark the connection's ups and downs.
+    /// The sequence completes when the run reached a terminal state (its final status is the last
+    /// frame) or <paramref name="ct"/> was cancelled. Non-transient HTTP errors (400/401/403/404)
+    /// throw <see cref="CoreApiException"/>; transport errors never escape.
+    /// </summary>
+    IAsyncEnumerable<ClientStreamFrame<RunStreamEvent>> StreamRunAsync(
+        Guid runId, string? after, CancellationToken ct = default);
+
+    /// <summary>
+    /// A run's persisted view items (outputs) in publish order — the read-later counterpart of the
+    /// stream. <paramref name="after"/> returns only items after that run-wide sequence (a
+    /// previous page's last item, or a stream position's sequence).
+    /// </summary>
     Task<PagedResult<RunViewItem>> GetRunViewsAsync(
-        Guid runId, string? view = null, int skip = 0, int take = 200, CancellationToken ct = default);
+        Guid runId, string? view = null, int skip = 0, int take = 200, long? after = null,
+        CancellationToken ct = default);
 
     /// <summary>Server-side aggregate run counts for dashboards.</summary>
     Task<RunStats> GetRunStatsAsync(CancellationToken ct = default);
@@ -86,6 +110,12 @@ public interface ICoreClient
     Task<ArtifactDto?> GetArtifactAsync(Guid id, CancellationToken ct = default);
     /// <summary>Opens an artifact's payload; null when the artifact (or its payload) is unknown.</summary>
     Task<Stream?> OpenArtifactContentAsync(Guid id, CancellationToken ct = default);
+    /// <summary>
+    /// Deletes a run checkpoint (<see cref="ArtifactKinds.Checkpoint"/>) — e.g. once it was downloaded;
+    /// false when it is unknown. Only the run's own principals and administrators may; every other
+    /// artifact is kept by the platform (both refusals throw).
+    /// </summary>
+    Task<bool> DeleteArtifactAsync(Guid id, CancellationToken ct = default);
     /// <summary>
     /// Artifact events over Server-Sent Events, SERVER-SIDE FILTERED by artifact type and/or work
     /// item — the client-surface way to chain on artifacts (no message-bus access required).

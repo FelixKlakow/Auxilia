@@ -17,6 +17,12 @@ parity.
 inputs. Decoding is tolerant by design: unknown frame kinds and extra fields pass through
 without throwing, so older clients keep working against newer workflows.
 
+A multi-turn session announces each finished turn (`SteeringTurnEnded` — the session now
+waits for the operator) and its end (`SteeringSessionEnded`, whose `Reason` comes from
+`SessionEndReasons`: `completed`, `ended`, `idle-timeout`, `halted`, `failed`). It ends when
+the operator sends `SteeringEnd`, or by itself after its idle timeout without the operator
+writing.
+
 ## Package family
 
 | Package | Purpose |

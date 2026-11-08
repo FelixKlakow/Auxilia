@@ -460,7 +460,21 @@ workflow gets the full operator loop without touching the wire protocol:
   until answered; consumed forms are resolved so no stale card survives a replay.
 - `WaitForGuidanceAsync` yields operator guidance; `WaitForSettingAsync` yields live
   session-setting changes (`OperatorSetting` key/value — opaque to the channel);
-  `HaltToken` cancels on a steering client halt; `EndSessionAsync` closes the steering surface.
+  `HaltToken` cancels on a steering client halt; `EndSessionAsync` closes the steering surface
+  (its `session-ended` carries the `reason`, `SessionEndReasons`).
+- **Sessions that end by themselves** — `StartAsync(..., idle: new SessionIdlePolicy(timeout))`:
+  the channel tracks whether the session waits for its operator (after `PublishTurnEndedAsync`,
+  from a start without an instruction, and while a question is open; a consumed guidance
+  starts the next turn, `NoteAgentActivity` marks the agent at work, any operator input
+  restarts the clock) and past the timeout ends it exactly as the operator's `end` does —
+  `RequestEnd(reason)`: `EndToken` fires between turns at once; with a question open the
+  question is answered with no answer (a decline), the running turn finishes, then the session
+  ends (that last turn is not announced). `EndReason` says why. The platform caps every timeout:
+  `WorkflowLimits.MaxIdle` (the runner's `WorkflowLauncher:MaxIdleMinutes`, handed to each launch
+  as `Workflow__MaxIdleMinutes`) — no run holds its container forever.
+- **How the run ended** — `IRunOutcome.SetReason` (DI) rides the final state report
+  (`WorkflowStateMessage.Reason`, with `LastViewSequence` — the number of view items the run
+  published) through the runner to `RunStatus.Reason` and the stream's final status frame.
 
 The coding-agent session engine (`Auxilia.Workflows.AiAgent.CodingAgent.AgentSessionApplication`,
 shared by `claude-code` and `github-copilot`) bridges `IAgentInteraction` questions from the
@@ -480,6 +494,12 @@ operator permission forms. Session semantics on top of the channel (2026-07-27):
 - **Plan view** — agents publish full snapshots of their current plan (`AgentPlanUpdate` on the
   `plan` view, via `CodingAgentRequest.OnPlanUpdate`): Claude from TodoWrite (auto-approved
   bookkeeping, never a decision card), Copilot from markdown-checklist output lines.
+- **Multi-turn sessions end** — when the operator sends `end`, or by themselves after the run's
+  `idle-timeout` (minutes; capped by — and defaulting to — the platform's `WorkflowLimits.MaxIdle`)
+  without the operator writing: the session engine runs the channel with a `SessionIdlePolicy`
+  and reports every agent chat entry and plan revision as activity. The reason
+  (`completed`/`ended`/`idle-timeout`/`halted`/`failed`) goes to `session-ended` and, through
+  `IRunOutcome`, to the run's final status.
 
 Both agent providers offer the full loop: Claude over the CLI's stdio control protocol,
 Copilot via `CopilotSdkAgent` (GitHub.Copilot.SDK session protocol, opt-in per connector
@@ -512,6 +532,35 @@ never requires editing or re-signing existing workflows: the moment a workflow's
 the tool (and declares it), the provider matches. The former
 `Requires<T>(..., providerTypes: [...])` whitelist — which hard-coded provider identities into
 workflow source — is gone.
+
+**Tool versions (2026-11-08).** A tool may carry a version: `ProvidesTools("agent-cli@1.2.3")`,
+`"RequiredTools": ["agent-cli@1.2.3"]`. A requirement without a version is met by the tool in any
+version, one with a version only by exactly that version (`ToolProvisions` in the contracts).
+`ProvidedTool.Versioned(tool, assembly, metadataKey)` builds the entry from a version the build
+recorded as `[AssemblyMetadata]`, so the declaration cannot drift from what the image bundles. A
+run can require tools too (`RunRequest.RequiredTools`): the runner checks them against the image
+before launch, a mismatch is `PreFlightFailed`.
+
+**Run input files (2026-11-08).** `RequiresInputFile(name, description, required)` declares a
+file the workflow takes per run (schema `InputFiles`; names are lowercase letters, digits,
+dashes). The caller uploads it to the Core and names it in the run request; the runner places it
+into the container before launch, and `IRunInputFiles.PathOf(name)` / `RequirePath(name)` finds it
+(`Workflow__InputFile__<NAME>`, under `/workflow-output/inputs/`). An undeclared name throws — a
+typo never reads nothing. The file is the run's alone and is deleted when the run ends
+(ARCHITECTURE §9).
+
+**Run checkpoints (2026-11-08).** `DeclaresCheckpoint(name, relativePath, description, lifetime)`
+declares a file or folder inside the output directory that the workflow saves WHILE it runs
+(schema `Checkpoints`; the same name rules, a path with no `..`), and
+`IRunCheckpoints.SaveAsync(name)` saves it as it is now — e.g. a session's state folder after every
+turn and at the end. Only the name travels: the runner reads the declared path (regular files only,
+never through a link; a folder as a `.tar.gz`) and the Core keeps it encrypted as the newest
+version of the run's checkpoint, replacing the previous one only once stored — so a crash keeps
+the last save. Saves are sequential; an undeclared name, a missing path, an oversized one, a file that
+shrank while it was read, or any other refused save (e.g. before the Core recorded the run's
+claim, or a runner too busy to answer in time) throws in the workflow — the previous copy stays,
+so retrying on the next turn is enough. `lifetime` is how long the workflow wants it kept after its
+latest save — applied where the platform lets workflows set one, below its cap (ARCHITECTURE §9).
 
 ## Platform events (2026-08-08)
 

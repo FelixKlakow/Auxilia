@@ -196,8 +196,9 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task CancelRunAsync(Guid id, CancellationToken ct = default) => Nope<Task>();
     public Task<RunAccepted> RerunAsync(Guid id, CancellationToken ct = default) => Nope<Task<RunAccepted>>();
     public Task<RunStatus> SetRunGrantsAsync(Guid runId, SetRunGrants request, CancellationToken ct = default) => Nope<Task<RunStatus>>();
-    public IAsyncEnumerable<ClientStreamFrame<RunStreamEvent>> StreamRunAsync(Guid runId, CancellationToken ct = default) => Nope<IAsyncEnumerable<ClientStreamFrame<RunStreamEvent>>>();
-    public Task<PagedResult<RunViewItem>> GetRunViewsAsync(Guid runId, string? view = null, int skip = 0, int take = 200, CancellationToken ct = default) => Nope<Task<PagedResult<RunViewItem>>>();
+    public IAsyncEnumerable<ClientStreamFrame<RunStreamEvent>> StreamRunAsync(Guid runId, string? after, CancellationToken ct = default) => Nope<IAsyncEnumerable<ClientStreamFrame<RunStreamEvent>>>();
+    public Task<RunInputFile> UploadRunInputFileAsync(Stream content, CancellationToken ct = default) => Nope<Task<RunInputFile>>();
+    public Task<PagedResult<RunViewItem>> GetRunViewsAsync(Guid runId, string? view = null, int skip = 0, int take = 200, long? after = null, CancellationToken ct = default) => Nope<Task<PagedResult<RunViewItem>>>();
     public Task<RunStats> GetRunStatsAsync(CancellationToken ct = default) => Nope<Task<RunStats>>();
     public Task<IReadOnlyList<DashboardPin>> ListDashboardPinsAsync(CancellationToken ct = default) => Nope<Task<IReadOnlyList<DashboardPin>>>();
     public Task<DashboardPin> PinDashboardViewAsync(CreateDashboardPin request, CancellationToken ct = default) => Nope<Task<DashboardPin>>();
@@ -207,6 +208,7 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task<int> ClearFinishedRunsAsync(CancellationToken ct = default) => Nope<Task<int>>();
     public Task<ArtifactDto?> GetArtifactAsync(Guid id, CancellationToken ct = default) => Nope<Task<ArtifactDto?>>();
     public Task<Stream?> OpenArtifactContentAsync(Guid id, CancellationToken ct = default) => Nope<Task<Stream?>>();
+    public Task<bool> DeleteArtifactAsync(Guid id, CancellationToken ct = default) => Nope<Task<bool>>();
     public Task<PagedResult<AuditEntry>> QueryAuditAsync(AuditQuery query, CancellationToken ct = default) => Nope<Task<PagedResult<AuditEntry>>>();
     public Task<AuditIntegrityReport> VerifyAuditAsync(CancellationToken ct = default) => Nope<Task<AuditIntegrityReport>>();
     public Task<Connector> CreateConnectorAsync(CreateConnector request, CancellationToken ct = default) => Nope<Task<Connector>>();

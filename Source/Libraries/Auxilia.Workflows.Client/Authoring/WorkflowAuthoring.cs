@@ -33,7 +33,7 @@ public sealed class WorkflowAuthoring(ICoreClient core)
 
         // Tool matching: a provider that declares required tools binds only into workflows whose
         // image provides them. Lazy — the catalog is fetched on the first provider-typed binding.
-        var provided = schema.ProvidedTools.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var provided = schema.ProvidedTools;
         IReadOnlyList<ProviderCatalogEntry>? catalog = null;
 
         foreach (var binding in request.SlotBindings)
@@ -49,7 +49,7 @@ public sealed class WorkflowAuthoring(ICoreClient core)
                 var entry = catalog.FirstOrDefault(e =>
                     string.Equals(e.ProviderType, provider, StringComparison.OrdinalIgnoreCase));
                 if (entry is { RequiredTools.Count: > 0 }
-                    && entry.RequiredTools.Where(t => !provided.Contains(t)).ToList() is { Count: > 0 } missingTools)
+                    && ToolProvisions.Unmet(entry.RequiredTools, provided) is { Count: > 0 } missingTools)
                     throw new ArgumentException(
                         $"slot '{slot.SlotName}' cannot bind provider '{provider}' — it requires "
                         + $"tool(s) the workflow's image does not provide: {string.Join(", ", missingTools)}.");

@@ -191,6 +191,10 @@ public sealed class ArtifactChainingEngine(
     /// </summary>
     public async Task HandleAsync(ArtifactStreamEvent evt, CancellationToken ct = default)
     {
+        // A checkpoint is a run's in-progress copy of itself, saved again and again — chaining
+        // follows what runs produced, so it never fires on one.
+        if (evt.Artifact.Kind == ArtifactKinds.Checkpoint)
+            return;
         var matching = (await store.GetArtifactTriggersAsync(ct))
             .Where(t => t.Enabled)
             .Where(t => string.Equals(t.ArtifactType, evt.Artifact.ArtifactType, StringComparison.Ordinal))

@@ -75,4 +75,20 @@ public sealed record RunWorkflowCommand(
     /// only — deterministic per run, no mid-run catalog reads. Null when no base carries an
     /// image reference (runtime spawns then always fail their base resolution).
     /// </summary>
-    string? PodBaseImagesJson = null) : Auxilia.Messaging.IPlatformOnlyMessage;
+    string? PodBaseImagesJson = null,
+    /// <summary>
+    /// The declared names of the files this run received. Names only — the runner fetches each
+    /// one's content from the Core with the resolution token and places it into the container
+    /// (<see cref="WorkflowEnvironmentVariables.InputFileDirectory"/>) before launch.
+    /// </summary>
+    IReadOnlyList<string>? InputFiles = null,
+    /// <summary>
+    /// Tools (<c>name</c> or <c>name@version</c>) the run needs the workflow's image to provide —
+    /// the runner fails the run's pre-flight when the image's provided tools do not meet them.
+    /// </summary>
+    IReadOnlyList<string>? RequiredTools = null,
+    /// <summary>
+    /// The lifetime the run request asked for its checkpoints (hours) — the Core applies it where
+    /// the platform lets runs set one; the runner never reads it.
+    /// </summary>
+    double? CheckpointLifetimeHours = null) : Auxilia.Messaging.IPlatformOnlyMessage;

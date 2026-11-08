@@ -73,17 +73,43 @@ public class ViewPublisherTests
     }
 
     [Test]
-    public async Task PublishAsync_TwoViews_SequencesArePerView()
+    public async Task PublishAsync_TwoViews_ShareOneRunWideSequence()
     {
         await _sut.PublishAsync("progress", new ProgressItem("clone", 10));
-        await _sut.PublishAsync("progress", new ProgressItem("build", 50));
         await _sut.PublishAsync("log", new ProgressItem("first log line", 0));
+        await _sut.PublishAsync("progress", new ProgressItem("build", 50));
 
-        var logMessage = _bus.PublishedToExchange
-            .Select(p => (ViewDataMessage)p.Message)
-            .Single(m => m.ViewName == "log");
-        Assert.That(logMessage.Sequence, Is.EqualTo(1),
-            "Each view must carry its own sequence counter.");
+        var published = _bus.PublishedToExchange.Select(p => (ViewDataMessage)p.Message).ToList();
+        Assert.That(published.Select(m => (m.ViewName, m.Sequence)), Is.EqualTo(new[]
+        {
+            ("progress", 1L), ("log", 2L), ("progress", 3L),
+        }), "one counter across the run's views — a consumer resumes from a single number");
+    }
+
+    [Test]
+    public async Task PublishAsync_Concurrently_ReachesTheBusInSequenceOrder()
+    {
+        _bus.PublishDelay = TimeSpan.FromMilliseconds(2);
+
+        await Task.WhenAll(Enumerable.Range(0, 40).Select(i => Task.Run(() =>
+            _sut.PublishAsync(i % 2 == 0 ? "progress" : "log", new ProgressItem($"step {i}", i)))));
+
+        var sequences = _bus.PublishedToExchange.Select(p => ((ViewDataMessage)p.Message).Sequence).ToList();
+        Assert.That(sequences, Is.EqualTo(Enumerable.Range(1, 40).Select(i => (long)i)),
+            "contiguous and in publish order, so a gap on the consumer side means a missing item");
+    }
+
+    [Test]
+    public async Task PublishAsync_AFailedPublish_ConsumesItsSequence()
+    {
+        await _sut.PublishAsync("progress", new ProgressItem("clone", 10));
+        _bus.FailNext = true;
+        Assert.ThrowsAsync<IOException>(() => _sut.PublishAsync("progress", new ProgressItem("lost", 20)));
+        await _sut.PublishAsync("progress", new ProgressItem("build", 50));
+
+        var sequences = _bus.PublishedToExchange.Select(p => ((ViewDataMessage)p.Message).Sequence).ToList();
+        Assert.That(sequences, Is.EqualTo(new long[] { 1, 3 }),
+            "never reuse a number — consumers key items by it; the gap is visible instead");
     }
 
     [Test]
@@ -113,10 +139,20 @@ public class ViewPublisherTests
         public Task PublishAsync<T>(string topic, T message, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
-        public Task PublishToExchangeAsync<T>(string exchangeName, T message, CancellationToken cancellationToken = default)
+        public TimeSpan PublishDelay { get; set; }
+        public bool FailNext { get; set; }
+
+        public async Task PublishToExchangeAsync<T>(string exchangeName, T message, CancellationToken cancellationToken = default)
         {
-            PublishedToExchange.Add((exchangeName, message!));
-            return Task.CompletedTask;
+            if (FailNext)
+            {
+                FailNext = false;
+                throw new IOException("the broker connection dropped");
+            }
+            if (PublishDelay > TimeSpan.Zero)
+                await Task.Delay(PublishDelay, cancellationToken);
+            lock (PublishedToExchange)
+                PublishedToExchange.Add((exchangeName, message!));
         }
 
         public Task<IAsyncDisposable> SubscribeAsync<T>(

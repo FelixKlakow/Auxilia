@@ -17,12 +17,31 @@ public interface IWorkflowBuilder
 
     /// <summary>
     /// Declares the tools the workflow's IMAGE bundles (e.g. the CLIs its Dockerfile installs) —
-    /// an open vocabulary. A slot provider that declares required tools (its manifest's
-    /// <c>RequiredTools</c>) is offerable and bindable only when every one of them is provided
-    /// here; providers requiring no tools match on contract alone. Never name provider types —
-    /// name what the image contains.
+    /// an open vocabulary of <c>name</c> or <c>name@version</c> (see <see cref="ProvidedTool.Versioned"/>
+    /// for a version the build records). A slot provider that declares required tools (its
+    /// manifest's <c>RequiredTools</c>) is offerable and bindable only when every one of them is
+    /// provided here, and a run that requires a tool version starts only on an image providing
+    /// exactly that one; providers requiring no tools match on contract alone. Never name provider
+    /// types — name what the image contains.
     /// </summary>
     IWorkflowBuilder ProvidesTools(params string[] tools);
+
+    /// <summary>
+    /// Declares a file the workflow takes per run (<see cref="WorkflowInputFileDescriptor"/>):
+    /// the caller uploads it, the run request names it, and the runner places it into the
+    /// container before the workflow starts — read it through <see cref="IRunInputFiles"/>. A
+    /// <paramref name="required"/> file must come with every run.
+    /// </summary>
+    IWorkflowBuilder RequiresInputFile(string name, string? description = null, bool required = false);
+
+    /// <summary>
+    /// Declares a file or folder the workflow saves while it runs (<see cref="WorkflowCheckpointDescriptor"/>)
+    /// — save it with <see cref="IRunCheckpoints.SaveAsync"/>; each save replaces the run's previous copy.
+    /// <paramref name="relativePath"/> is inside the output directory; <paramref name="lifetime"/> is
+    /// how long the workflow wants it kept (the platform decides whether that applies).
+    /// </summary>
+    IWorkflowBuilder DeclaresCheckpoint(
+        string name, string relativePath, string? description = null, TimeSpan? lifetime = null);
 
     IWorkflowBuilder RequiresEnvironment(Action<IEnvironmentBuilder> configure);
 

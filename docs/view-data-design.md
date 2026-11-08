@@ -64,17 +64,21 @@ await viewPublisher.PublishAsync("agent-conversation", new AgentMessage(...));
 
 The SDK wraps each item in a `ViewDataMessage(WorkflowInstanceId, ViewName, Sequence, PayloadJson)`
 published to the **`workflow.views` topic exchange, routing key = instance id** (selective
-routing, ARCHITECTURE §14.1). `Sequence` is a per-(instance, view)
-monotonic counter assigned by the SDK so consumers can order and de-duplicate. Payloads are
-view items only — large blobs belong in the Artifact Store, referenced from the payload.
+routing, ARCHITECTURE §14.1). `Sequence` counts the instance's items across ALL its views
+(1, 2, 3, …), assigned and published under one gate by the SDK: it is the publish order,
+consumers order and de-duplicate by it, a missing item is visible as a gap, and a stream
+resumes from it. A publish that throws still consumes its number — a reused number would let a
+second item overwrite the first wherever the sequence is a key. With its final state the SDK
+reports how many items it published (`LastViewSequence`). Payloads are view items only — large
+blobs belong in the Artifact Store, referenced from the payload.
 
 ## 3. Persistence (Core.Api)
 
 Core.Api mirrors the exchange (`RunViewTrackingService`, shared queue bound `#`): each item is stored as a
 `CoreRunViewRecord(RunId, ViewName, Sequence, PayloadJson, TimestampUtc)` in the **Core.Api
 database** (capped per run — large data belongs in the Artifact Store) and read back over
-`GET /api/runs/{id}/views` (`ICoreClient.GetRunViewsAsync`) — so finished runs replay through
-the identical rendering path.
+`GET /api/runs/{id}/views` (`ICoreClient.GetRunViewsAsync`) in sequence order, `?after=` continuing
+from a sequence — so finished runs replay through the identical rendering path.
 
 ## 4. Live fan-out (Core.Api SSE)
 
@@ -83,10 +87,19 @@ stream) and fans each item to the run's
 open `GET /api/runs/{id}/stream` SSE subscriptions (`RunStreamBroker`) — clients (AdminConsole,
 the steering client, any `Auxilia.Core.Client` app) hold ONE stream per observed run; there is no
 SignalR backplane. Observing requires the `run.observe` policy check AND access to that run (the
-principal it runs for, its delegating starter, its grantees, administrators — ARCHITECTURE §16). Replay of a finished
-run = read the persisted views ordered by Sequence and push them through the same
-client-side renderer. (Artifact events have the analogous, server-side-filtered
-`GET /api/artifacts/stream`.)
+principal it runs for, its delegating starter, its grantees, administrators — ARCHITECTURE §16).
+
+The stream is **resumable** (`RunStreamSession`): every frame's SSE `id` is the position after it,
+and a client that comes back with it (`Last-Event-ID`, or `?after=` on a first connect) gets
+everything after it exactly once, in order — the stored items after the position first, then the
+live ones, duplicates dropped by sequence, an item ahead of its predecessors held back while the
+store is re-read for them, and predecessors the Core never retained reported as one `gap` frame.
+Status frames carry the run's state as the Core's record holds it (a bus transition only prompts a
+re-read), so a resume never shows an older state; a finished run's verdict is the last frame, sent
+once every item up to the run's reported count is through. A client connecting late without a
+position gets the run from its start: its current state, every stored item, then the live ones —
+no separate backfill needed. A position at the end of a finished run is answered 204.
+(Artifact events have the analogous, server-side-filtered `GET /api/artifacts/stream`.)
 
 ## 5. Frontend rendering (descriptor-driven)
 

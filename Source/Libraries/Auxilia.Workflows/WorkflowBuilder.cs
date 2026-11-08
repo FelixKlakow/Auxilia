@@ -29,6 +29,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
     private readonly List<string> _consumedArtifacts = new();
     private readonly List<Companions.CompanionDeclaration> _companions = new();
     private readonly List<string> _providedTools = new();
+    private readonly List<WorkflowInputFileDescriptor> _inputFiles = new();
+    private readonly List<WorkflowCheckpointDescriptor> _checkpoints = new();
     private Companions.PodControlDeclaration? _podControl;
     private readonly WorkflowMetadata _metadata = new();
     private Action<IServiceCollection>? _configureServices;
@@ -77,9 +79,42 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
         {
             ArgumentException.ThrowIfNullOrEmpty(tool);
             var normalized = tool.Trim();
+            var at = normalized.IndexOf('@');
+            if (normalized.Any(char.IsWhiteSpace)
+                || (at >= 0 && (at == 0 || at == normalized.Length - 1 || normalized.IndexOf('@', at + 1) >= 0)))
+                throw new ArgumentException($"'{tool}' is not a tool — use name or name@version.", nameof(tools));
             if (!_providedTools.Contains(normalized, StringComparer.OrdinalIgnoreCase))
                 _providedTools.Add(normalized);
         }
+        return this;
+    }
+
+    public IWorkflowBuilder RequiresInputFile(string name, string? description = null, bool required = false)
+    {
+        if (!WorkflowInputFileDescriptor.IsValidName(name))
+            throw new ArgumentException(
+                $"'{name}' is not an input-file name — lowercase letters, digits and dashes.", nameof(name));
+        if (_inputFiles.Any(f => f.Name == name))
+            throw new InvalidOperationException($"An input file named '{name}' has already been declared.");
+        _inputFiles.Add(new WorkflowInputFileDescriptor(name, description, required));
+        return this;
+    }
+
+    public IWorkflowBuilder DeclaresCheckpoint(
+        string name, string relativePath, string? description = null, TimeSpan? lifetime = null)
+    {
+        if (!WorkflowInputFileDescriptor.IsValidName(name))
+            throw new ArgumentException(
+                $"'{name}' is not a checkpoint name — lowercase letters, digits and dashes.", nameof(name));
+        if (!WorkflowCheckpointDescriptor.IsValidRelativePath(relativePath))
+            throw new ArgumentException(
+                $"'{relativePath}' is not a path inside the output directory.", nameof(relativePath));
+        if (lifetime is { } span && span <= TimeSpan.Zero)
+            throw new ArgumentException("A checkpoint lifetime must be positive.", nameof(lifetime));
+        if (_checkpoints.Any(c => c.Name == name))
+            throw new InvalidOperationException($"A checkpoint named '{name}' has already been declared.");
+        _checkpoints.Add(new WorkflowCheckpointDescriptor(
+            name, relativePath.Replace('\\', '/'), description, lifetime?.TotalHours));
         return this;
     }
 
@@ -386,6 +421,13 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 ResourceProxyClient? resourceProxyClient = null;
                 Companions.PodControlClient? podControlClient = null;
                 Workspace.GitPushGateway? pushGateway = null;
+                // Reported with the final state: the workflow's own reason, and how many view
+                // items it published (a client's stream delivers all of them before the verdict).
+                var outcome = new RunOutcome();
+                var viewPublisher = new Views.DefaultViewPublisher(context.MessageBus, instanceId, _views.AsReadOnly());
+                WorkflowStateMessage FinalState(WorkflowState state, string? error)
+                    => new(instanceId, state, error, _workflowName, instanceToken,
+                        outcome.Reason, viewPublisher.LastSequence);
                 try
                 {
                     // Containment before ANY workload-controlled code (ARCHITECTURE §7): the
@@ -447,13 +489,16 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                     services.AddSingleton(context.MessageBus);
                     services.AddSingleton<IWorkflowInputs>(workflowInputs);
                     services.AddSingleton<IRunInputs>(new EnvironmentRunInputs(_inputs.AsReadOnly()));
+                    services.AddSingleton<IRunInputFiles>(new EnvironmentRunInputFiles(_inputFiles.AsReadOnly()));
+                    services.AddSingleton<IRunCheckpoints>(
+                        new ResourceProxyRunCheckpoints(resourceProxyClient, _checkpoints.AsReadOnly()));
                     services.AddSingleton(drainSignal);
                     services.AddSingleton(resourceProxyClient);
                     if (podControlClient is not null)
                         services.AddSingleton<Companions.IPodController>(podControlClient);
                     services.AddSingleton(new Views.DeclaredViews(_views.AsReadOnly()));
-                    services.AddSingleton<Views.IViewPublisher>(
-                        new Views.DefaultViewPublisher(context.MessageBus, instanceId, _views.AsReadOnly()));
+                    services.AddSingleton<Views.IViewPublisher>(viewPublisher);
+                    services.AddSingleton<IRunOutcome>(outcome);
                     services.AddSingleton<Events.IEventPublisher>(
                         new Events.DefaultEventPublisher(
                             context.MessageBus, instanceId, _workflowName, _events.AsReadOnly()));
@@ -471,6 +516,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                                     ?? "workflow-slot-activation",
                                 responseTopic);
                             await slotActivator.StartAsync();
+                            // Handlers whose credentials outlive the start fetch their slot again.
+                            services.AddSingleton<ISlotConfigurationSource>(slotActivator);
 
                             var fetched = new Dictionary<string, SlotConfiguration>(_slots.Count);
                             foreach (var slot in _slots)
@@ -502,7 +549,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                     }
 
                     await context.MessageBus.PublishToExchangeAsync(StateExchangeName,
-                        new WorkflowStateMessage(instanceId, WorkflowState.Success, null, _workflowName, instanceToken));
+                        FinalState(WorkflowState.Success, null));
                     context.ExitService.Exit(0);
                 }
                 catch (OperationCanceledException) when (cts.IsCancellationRequested)
@@ -511,7 +558,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                     // OperationCanceledException (a provider HttpClient timeout, a child's
                     // own token) is a failure of the run and falls through to Failed.
                     await context.MessageBus.PublishToExchangeAsync(StateExchangeName,
-                        new WorkflowStateMessage(instanceId, WorkflowState.Cancelled, null, _workflowName, instanceToken));
+                        FinalState(WorkflowState.Cancelled, null));
                     context.ExitService.Exit(0);
                     return;
                 }
@@ -519,7 +566,7 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
                 {
                     context.Logger.LogError(ex, "Workflow run failed: {Message}", ex.Message);
                     await context.MessageBus.PublishToExchangeAsync(StateExchangeName,
-                        new WorkflowStateMessage(instanceId, WorkflowState.Failed, ex.Message, _workflowName, instanceToken));
+                        FinalState(WorkflowState.Failed, ex.Message));
                     context.ExitService.Exit(1);
                 }
                 finally
@@ -568,7 +615,9 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             InteractiveTerminalGate = _interactiveTerminalGate,
             Companions = ValidatedCompanions(),
             PodControl = _podControl,
-            ProvidedTools = _providedTools.AsReadOnly()
+            ProvidedTools = _providedTools.AsReadOnly(),
+            InputFiles = _inputFiles.AsReadOnly(),
+            Checkpoints = _checkpoints.AsReadOnly()
         };
 
     internal WorkflowManifest BuildManifest(Guid instanceId = default)
@@ -588,6 +637,8 @@ public sealed class WorkflowBuilder : IWorkflowBuilder
             InteractiveTerminalGate = _interactiveTerminalGate,
             Companions = ValidatedCompanions(),
             PodControl = _podControl,
-            ProvidedTools = _providedTools.AsReadOnly()
+            ProvidedTools = _providedTools.AsReadOnly(),
+            InputFiles = _inputFiles.AsReadOnly(),
+            Checkpoints = _checkpoints.AsReadOnly()
         };
 }

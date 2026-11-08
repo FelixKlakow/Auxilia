@@ -31,6 +31,9 @@ public sealed class SseScriptHandler : HttpMessageHandler
     public int ConnectionsServed { get; private set; }
     public List<Uri> Requests { get; } = [];
 
+    /// <summary>The <c>Last-Event-ID</c> each request carried (null when none).</summary>
+    public List<string?> LastEventIds { get; } = [];
+
     public SseScriptHandler Enqueue(SseConnection connection)
     {
         _script.Enqueue(connection);
@@ -41,6 +44,7 @@ public sealed class SseScriptHandler : HttpMessageHandler
         HttpRequestMessage request, CancellationToken cancellationToken)
     {
         Requests.Add(request.RequestUri!);
+        LastEventIds.Add(request.Headers.TryGetValues("Last-Event-ID", out var ids) ? ids.Single() : null);
         if (_script.Count == 0)
             throw new InvalidOperationException(
                 $"No scripted connection left for {request.RequestUri} (served {ConnectionsServed}).");

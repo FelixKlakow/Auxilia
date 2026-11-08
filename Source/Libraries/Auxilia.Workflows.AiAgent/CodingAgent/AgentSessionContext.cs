@@ -27,6 +27,17 @@ public sealed record AgentSessionContext(
     /// </summary>
     public bool MultiTurn { get; init; }
 
+    /// <summary>The run input naming a multi-turn session's idle timeout, in minutes.</summary>
+    public const string IdleTimeoutInput = "idle-timeout";
+
+    /// <summary>
+    /// How long a multi-turn session waits for the operator's next turn (or an answer) before it
+    /// ends by itself as if the operator had sent <c>end</c>: the <see cref="IdleTimeoutInput"/>
+    /// run input, capped by the platform's <see cref="WorkflowLimits.MaxIdle"/> — which is also
+    /// the timeout of a run that sets none.
+    /// </summary>
+    public TimeSpan IdleTimeout { get; init; } = WorkflowLimits.DefaultMaxIdle;
+
     /// <summary>How the operator experiences the session (see <see cref="AgentViewModes"/>).</summary>
     public string ViewMode { get; init; } = AgentViewModes.Advanced;
 
@@ -51,7 +62,9 @@ public sealed record AgentSessionContext(
             System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__PUSH-POLICY"),
             System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__MULTI-TURN"),
             System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__VIEW-MODE"),
-            System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__BASE-PROMPT"));
+            System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__BASE-PROMPT"),
+            System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__IDLE-TIMEOUT"),
+            WorkflowLimits.MaxIdle);
 
     /// <summary>
     /// The instruction is Title + Body of the dispatch context — the mail subject/body for
@@ -61,8 +74,11 @@ public sealed record AgentSessionContext(
     public static AgentSessionContext FromValues(
         string? title, string? body, string? workspaceDirectory, string? outputDirectory,
         string? permissionMode = null, string? pushPolicy = null, string? multiTurn = null,
-        string? viewMode = null, string? baseInstructions = null)
+        string? viewMode = null, string? baseInstructions = null,
+        string? idleTimeout = null, TimeSpan? maxIdle = null)
     {
+        var cap = maxIdle ?? WorkflowLimits.DefaultMaxIdle;
+        var requestedIdle = WorkflowLimits.ParseMinutes(idleTimeout);
         var isMultiTurn = IsTrue(multiTurn);
         var isConsole = string.Equals(
             viewMode?.Trim(), AgentViewModes.Console, StringComparison.OrdinalIgnoreCase);
@@ -91,6 +107,7 @@ public sealed record AgentSessionContext(
                 ? AgentPermissionModes.AutoAllow
                 : pushPolicy.Trim(),
             MultiTurn = isMultiTurn,
+            IdleTimeout = requestedIdle is { } requested && requested < cap ? requested : cap,
             ViewMode = isConsole ? AgentViewModes.Console : AgentViewModes.Advanced,
             BaseInstructions = baseInstructions is { Length: > 0 } ? baseInstructions.Trim() : null,
         };

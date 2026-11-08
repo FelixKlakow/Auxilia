@@ -155,7 +155,7 @@ public sealed class OperatorChannelTests
         Assert.That(condition(), Is.True);
     }
 
-    private sealed class FakeInputs : IWorkflowInputs
+    internal sealed class FakeInputs : IWorkflowInputs
     {
         private readonly Channel<string> _channel = Channel.CreateUnbounded<string>();
 
@@ -165,7 +165,7 @@ public sealed class OperatorChannelTests
             => await _channel.Reader.ReadAsync(ct);
     }
 
-    private sealed class RecordingViewPublisher : IViewPublisher
+    internal sealed class RecordingViewPublisher : IViewPublisher
     {
         private readonly List<(string View, string Json)> _published = [];
         private readonly Lock _gate = new();
@@ -184,6 +184,13 @@ public sealed class OperatorChannelTests
 
         public JsonElement Single(string type) => Find(type)
             ?? throw new InvalidOperationException($"No '{type}' item was published.");
+
+        public int CountOf(string type)
+        {
+            lock (_gate)
+                return _published.Count(p =>
+                    JsonDocument.Parse(p.Json).RootElement.TryGetProperty("$type", out var t) && t.GetString() == type);
+        }
 
         public JsonElement WaitForSingle(string type)
         {

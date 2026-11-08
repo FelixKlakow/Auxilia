@@ -83,6 +83,26 @@ public sealed class PlatformSettingsTests : CoreApiComponentTestBase
     }
 
     [Test]
+    public async Task AnEmptyValue_ClearsTheSetting_BackToTheDeploymentDefault()
+    {
+        var admin = await ElevatedAdminAsync();
+        var key = $"/api/platform-settings/{PlatformSettingKeys.CheckpointLifetimeMaxHours}";
+        Assert.That((await admin.PutAsJsonAsync(key, new SetPlatformSetting("24"))).StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        using var cleared = await admin.PutAsJsonAsync(key, new SetPlatformSetting(""));
+        using var unknown = await admin.PutAsJsonAsync("/api/platform-settings/no-such-setting", new SetPlatformSetting(""));
+
+        var listed = await admin.GetFromJsonAsync<IReadOnlyList<PlatformSettingDto>>("/api/platform-settings");
+        Assert.Multiple(() =>
+        {
+            Assert.That(cleared.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            Assert.That(listed!.Select(s => s.Key), Does.Not.Contain(PlatformSettingKeys.CheckpointLifetimeMaxHours),
+                "a cap, once set, can be lifted again");
+            Assert.That(unknown.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest), "clearing a typo fails loudly too");
+        });
+    }
+
+    [Test]
     public async Task DefaultResourceAccess_AcceptsOnlyTheTwoModes_AndGovernsDispatch()
     {
         var admin = await ElevatedAdminAsync();

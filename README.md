@@ -117,6 +117,18 @@ dotnet test  Auxilia.slnx        # full test suite (system tests need Docker)
                                  # variants of the environment layers
 ```
 
+To run Auxilia next to another product, use the containers — published per release to
+`ghcr.io/felixklakow/auxilia-*`, or built from this tree — with `compose.yaml`:
+
+```powershell
+Copy-Item .env.example .env      # fill in the broker password, protection key, admin API key
+docker compose build             # or, with AUXILIA_VERSION set to a release: docker compose pull
+docker compose up -d             # Core API on http://localhost:8080 + runner + Docker guard + broker
+docker compose --profile workflows build   # (or pull) the shipped workflow images
+./Scripts/Setup-Platform.ps1 -CoreUrl http://localhost:8080 -ApiKey <AUXILIA_BOOTSTRAP_API_KEY> `
+    -Registry ghcr.io/felixklakow -ImageTag <AUXILIA_VERSION>
+```
+
 ## License
 
 **Auxilia is source-available, not Open Source.**

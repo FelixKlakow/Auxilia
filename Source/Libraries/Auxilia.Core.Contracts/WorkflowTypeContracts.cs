@@ -223,12 +223,26 @@ public sealed record WorkflowSchemaDto(
     public int MaxPodContainers { get; init; }
 
     /// <summary>
-    /// Tool names the workflow's image bundles (open vocabulary, e.g. the CLIs its Dockerfile
-    /// installs) — matched against each provider's <see cref="ProviderCatalogEntry.RequiredTools"/>:
-    /// a provider is offerable and bindable only when every tool it requires is provided here.
+    /// Tools the workflow's image bundles (open vocabulary, e.g. the CLIs its Dockerfile installs;
+    /// <c>name</c> or <c>name@version</c>) — matched against each provider's
+    /// <see cref="ProviderCatalogEntry.RequiredTools"/> and a run's <see cref="RunRequest.RequiredTools"/>
+    /// (<see cref="ToolProvisions"/>): a provider is offerable and bindable only when every tool it
+    /// requires is provided here.
     /// </summary>
     public IReadOnlyList<string> ProvidedTools { get; init; } = [];
+
+    /// <summary>The files a run of this type receives (<see cref="RunRequest.InputFiles"/>).</summary>
+    public IReadOnlyList<WorkflowInputFileDto> InputFiles { get; init; } = [];
+
+    /// <summary>What a run of this type saves while it runs (artifacts of kind <see cref="ArtifactKinds.Checkpoint"/>).</summary>
+    public IReadOnlyList<WorkflowCheckpointDto> Checkpoints { get; init; } = [];
 }
+
+/// <summary>A checkpoint the workflow declares, with the lifetime it asks for (hours; null = the general one).</summary>
+public sealed record WorkflowCheckpointDto(string Name, string? Description, double? LifetimeHours);
+
+/// <summary>A file the workflow declares it takes per run, delivered into its container at launch.</summary>
+public sealed record WorkflowInputFileDto(string Name, string? Description, bool Required);
 
 /// <summary>The declared runtime-spawn envelope — part of the approval's spawn summary.</summary>
 public sealed record WorkflowPodControlDto(

@@ -1,5 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- The SDK version (also read by the images that host this slot: CopilotCli.props). -->
+  <Import Project="CopilotSdk.props" />
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>Auxilia.Slots.GitHubCopilot.slothandler</AssemblyName>
@@ -17,7 +20,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.10" />
-    <PackageReference Include="GitHub.Copilot.SDK" Version="1.0.8" />
+    <PackageReference Include="GitHub.Copilot.SDK" Version="$(CopilotSdkVersion)" />
   </ItemGroup>
 
   <ItemGroup>

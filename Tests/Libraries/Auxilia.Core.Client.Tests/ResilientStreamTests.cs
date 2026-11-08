@@ -339,6 +339,62 @@ public sealed class ResilientStreamTests
             "the caller's own cancel keeps its shape — that IS the shutdown signal");
     }
 
+    private static string WithCursor(string line, string cursor)
+        => "data: " + JsonSerializer.Serialize(
+            JsonSerializer.Deserialize<RunStreamEvent>(line["data: ".Length..], JsonSerializerOptions.Web)!
+                with { Cursor = cursor },
+            JsonSerializerOptions.Web);
+
+    [Test]
+    public async Task AReconnect_ResumesFromTheLastYieldedFramesCursor()
+    {
+        var handler = new SseScriptHandler()
+            .Enqueue(new SseConnection(HttpStatusCode.OK,
+                [WithCursor(StatusLine("Running"), "0.aaaaaaaa"), WithCursor(ViewLine(1), "1.aaaaaaaa"),
+                 WithCursor(ViewLine(2), "2.aaaaaaaa")],
+                SseConnectionEnd.ThrowMidStream))
+            .Enqueue(new SseConnection(HttpStatusCode.OK,
+                [WithCursor(ViewLine(3), "3.aaaaaaaa"), WithCursor(StatusLine("Success"), "3.bbbbbbbb")]));
+
+        var frames = await DrainAsync(NewClient(handler));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(handler.LastEventIds, Is.EqualTo(new string?[] { null, "2.aaaaaaaa" }),
+                "the Core continues right after what this client already yielded");
+            Assert.That(frames.OfType<StreamEventFrame<RunStreamEvent>>().Select(f => f.Event.Cursor),
+                Is.EqualTo(new[] { "0.aaaaaaaa", "1.aaaaaaaa", "2.aaaaaaaa", "3.aaaaaaaa", "3.bbbbbbbb" }));
+        });
+    }
+
+    [Test]
+    public async Task AKeptPosition_RidesTheFirstRequest()
+    {
+        var handler = new SseScriptHandler()
+            .Enqueue(new SseConnection(HttpStatusCode.OK, [WithCursor(StatusLine("Success"), "7.cccccccc")]));
+        var client = NewClient(handler);
+
+        await foreach (var _ in client.StreamRunAsync(Guid.NewGuid(), after: "6.cccccccc")) { }
+
+        Assert.That(handler.LastEventIds, Is.EqualTo(new string?[] { "6.cccccccc" }));
+    }
+
+    [Test]
+    public async Task NoContent_CompletesTheStream_WithoutReconnecting()
+    {
+        // 204: the client already holds everything the finished run will ever stream.
+        var handler = new SseScriptHandler()
+            .Enqueue(new SseConnection(HttpStatusCode.NoContent, []));
+
+        var frames = await DrainAsync(NewClient(handler));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(handler.ConnectionsServed, Is.EqualTo(1));
+            Assert.That(frames, Is.Empty);
+        });
+    }
+
     [Test]
     public async Task CancellingTheConsumer_ThrowsOperationCanceled()
     {

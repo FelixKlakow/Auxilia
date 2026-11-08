@@ -1,0 +1,205 @@
+# Auxilia platform — Core API, Core Runner behind its Docker API guard, and the message broker.
+#
+#   cp .env.example .env            # then fill in the three required secrets
+#   docker compose build            # from this source tree ... or, with published images:
+#   docker compose pull             #   AUXILIA_VERSION=<release> in .env (docker login ghcr.io first
+#                                   #   while the images are private)
+#   docker compose up -d
+#   ./Scripts/Setup-Platform.ps1 -CoreUrl http://localhost:8080 -ApiKey <AUXILIA_BOOTSTRAP_API_KEY> `
+#       -Registry ghcr.io/felixklakow -ImageTag <AUXILIA_VERSION>   # catalog + workflow types
+#
+# Workflow images are pulled (or built) on demand with the "workflows" profile:
+#   docker compose --profile workflows pull      (or: build)
+#
+# Linux Docker daemon (Docker Desktop's included), Engine 26+ / API 1.45+. This is the
+# evaluation posture: no trusted signing keys, so runs need no sandbox runtime. For production
+# set WorkflowDispatcher__TrustedSigningKeys__0 on the runner (it then refuses to launch without a
+# sandbox runtime such as gVisor — install it and list it in DockerGuard__Runtimes__0 and
+# WorkflowLauncher__PreferredSandboxRuntimes__0), move the Core to MongoDB
+# (PlatformData__Backend=Mongo, PlatformData__MongoConnectionString) and its audit anchor
+# (CoreApi__AuditCheckpointPath) to write-once storage. See docs/ARCHITECTURE.md §7 and §10.
+
+name: auxilia
+
+x-broker: &broker
+  RabbitMq__Host: rabbitmq
+  RabbitMq__Port: "5672"
+  RabbitMq__UserName: ${AUXILIA_BROKER_USER:-auxilia}
+  RabbitMq__Password: ${AUXILIA_BROKER_PASSWORD:?set AUXILIA_BROKER_PASSWORD in .env}
+
+services:
+  rabbitmq:
+    image: rabbitmq:4-management
+    environment:
+      # The runner's account must be an administrator: it mints one narrowly scoped broker user
+      # per workflow container and deletes it when the run ends.
+      RABBITMQ_DEFAULT_USER: ${AUXILIA_BROKER_USER:-auxilia}
+      RABBITMQ_DEFAULT_PASS: ${AUXILIA_BROKER_PASSWORD:?set AUXILIA_BROKER_PASSWORD in .env}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+    restart: unless-stopped
+
+  core-api:
+    image: ${AUXILIA_REGISTRY:-ghcr.io/felixklakow}/auxilia-core-api:${AUXILIA_VERSION:-dev}
+    build:
+      context: .
+      dockerfile: Source/Platform/Auxilia.Core.Api/Dockerfile
+    environment:
+      <<: *broker
+      ASPNETCORE_URLS: http://+:8080
+      PlatformData__Backend: Json
+      PlatformData__JsonDirectory: /data
+      # Without it every secret the Core keeps — connector credentials, run input files, run
+      # checkpoints — would be stored in the clear. 32 random bytes, base64.
+      PlatformData__ProtectionKeyBase64: ${AUXILIA_PROTECTION_KEY:?set AUXILIA_PROTECTION_KEY in .env (openssl rand -base64 32)}
+      ArtifactStore__PayloadRoot: /artifacts
+      CoreApi__AuditCheckpointPath: /audit/anchor.jsonl
+      # The Core's address as the runner and workflow packages reach it.
+      CoreApi__PublicBaseAddress: http://core-api:8080
+      # An administrator API key for the first sign-in and Setup-Platform.ps1.
+      CoreSecurity__BootstrapApiKey: ${AUXILIA_BOOTSTRAP_API_KEY:?set AUXILIA_BOOTSTRAP_API_KEY in .env}
+      # Optional: a human administrator for password sign-in (POST /auth/login).
+      Governance__BootstrapAdminUsername: ${AUXILIA_ADMIN_USERNAME:-}
+      Governance__BootstrapAdminPassword: ${AUXILIA_ADMIN_PASSWORD:-}
+    volumes:
+      - core-data:/data
+      - artifacts:/artifacts
+      - audit-anchor:/audit
+    ports:
+      # Loopback only by default — put a TLS-terminating proxy in front to expose it.
+      - "${AUXILIA_CORE_BIND:-127.0.0.1}:${AUXILIA_CORE_PORT:-8080}:8080"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # The runner's only door to Docker: it alone holds the daemon socket and admits exactly what a
+  # runner does (ARCHITECTURE §7 "Workload containment").
+  docker-guard:
+    image: ${AUXILIA_REGISTRY:-ghcr.io/felixklakow}/auxilia-docker-guard:${AUXILIA_VERSION:-dev}
+    build:
+      context: .
+      dockerfile: Source/Platform/Auxilia.DockerGuard/Dockerfile
+    environment:
+      DockerGuard__OutboundNetworks__0: ${AUXILIA_NETWORK:-auxilia}
+      # Run directories are bound into workflow containers only below this root (the daemon's
+      # own path for the run-roots volume) — and never through a link planted beneath it.
+      DockerGuard__BindRoots__0: ${AUXILIA_RUN_ROOT:-/var/lib/docker/volumes/${AUXILIA_RUN_ROOTS_VOLUME:-auxilia-run-roots}/_data}
+    volumes:
+      - ${AUXILIA_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: [/tmp]
+    restart: unless-stopped
+
+  core-runner:
+    image: ${AUXILIA_REGISTRY:-ghcr.io/felixklakow}/auxilia-core-runner:${AUXILIA_VERSION:-dev}
+    build:
+      context: .
+      dockerfile: Source/Platform/Auxilia.Core.Runner/Dockerfile
+    environment:
+      <<: *broker
+      PlatformData__Backend: Json
+      PlatformData__JsonDirectory: /data
+      PlatformData__ProtectionKeyBase64: ${AUXILIA_RUNNER_PROTECTION_KEY:-${AUXILIA_PROTECTION_KEY}}
+      ArtifactStore__PayloadRoot: /artifacts
+      WorkflowDispatcher__CoreApiBaseAddress: http://core-api:8080
+      WorkflowLauncher__DockerSocketPath: tcp://docker-guard:2375
+      # Packages, run output, workspaces and the warm cache live below the temp directory — the
+      # run roots, mounted at the daemon's own path for them.
+      TMPDIR: ${AUXILIA_RUN_ROOT:-/var/lib/docker/volumes/${AUXILIA_RUN_ROOTS_VOLUME:-auxilia-run-roots}/_data}
+      # Each run gets its own internal network and an egress gateway, the only container on it
+      # that also joins this one — the run's single route to the broker and the outside.
+      WorkflowLauncher__NetworkName: ${AUXILIA_NETWORK:-auxilia}
+      WorkflowLauncher__RabbitMqHost: rabbitmq
+      WorkflowLauncher__RabbitMqPort: "5672"
+      WorkflowLauncher__EgressGatewayImage: ${AUXILIA_REGISTRY:-ghcr.io/felixklakow}/auxilia-egress-gateway:${AUXILIA_VERSION:-dev}
+      # Platform services on that network no run may reach, whatever its allowlist says.
+      WorkflowLauncher__ProtectedEndpoints__0: core-api:8080
+      WorkflowLauncher__ProtectedEndpoints__1: docker-guard:2375
+      WorkflowLauncher__ProtectedEndpoints__2: rabbitmq:15672
+    volumes:
+      - runner-data:/data
+      - artifacts:/artifacts
+      - run-roots:${AUXILIA_RUN_ROOT:-/var/lib/docker/volumes/${AUXILIA_RUN_ROOTS_VOLUME:-auxilia-run-roots}/_data}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      core-api:
+        condition: service_started
+      docker-guard:
+        condition: service_started
+      egress-gateway:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # Not a service: the runner starts one gateway per run from this image and never pulls it
+  # itself — this only makes sure the image is on the host (pulled or built with the rest).
+  egress-gateway:
+    image: ${AUXILIA_REGISTRY:-ghcr.io/felixklakow}/auxilia-egress-gateway:${AUXILIA_VERSION:-dev}
+    build:
+      context: .
+      dockerfile: Source/Platform/Auxilia.EgressGateway/Dockerfile
+    entrypoint: ["true"]
+    restart: "no"
+
+  # The shipped workflow images (profile "workflows"): pulled or built so Setup-Platform.ps1 can
+  # register them by digest. A runner pulls a missing workflow image itself only from a public
+  # registry — private images must already be on the host.
+  wf-coding-session:
+    profiles: [workflows]
+    image: ${AUXILIA_REGISTRY:-ghcr.io/felixklakow}/auxilia-coding-session-workflow:${AUXILIA_VERSION:-dev}
+    build: { context: ., dockerfile: Source/Workflows/Auxilia.CodingSession.Workflow/Dockerfile }
+    entrypoint: ["true"]
+    restart: "no"
+  wf-claude-code:
+    profiles: [workflows]
+    image: ${AUXILIA_REGISTRY:-ghcr.io/felixklakow}/auxilia-claude-code-workflow:${AUXILIA_VERSION:-dev}
+    build: { context: ., dockerfile: Source/Workflows/Auxilia.ClaudeCode.Workflow/Dockerfile }
+    entrypoint: ["true"]
+    restart: "no"
+  wf-copilot:
+    profiles: [workflows]
+    image: ${AUXILIA_REGISTRY:-ghcr.io/felixklakow}/auxilia-copilot-workflow:${AUXILIA_VERSION:-dev}
+    build: { context: ., dockerfile: Source/Workflows/Auxilia.Copilot.Workflow/Dockerfile }
+    entrypoint: ["true"]
+    restart: "no"
+  wf-implementation:
+    profiles: [workflows]
+    image: ${AUXILIA_REGISTRY:-ghcr.io/felixklakow}/auxilia-implementation-workflow:${AUXILIA_VERSION:-dev}
+    build: { context: ., dockerfile: Source/Workflows/Auxilia.Implementation.Workflow/Dockerfile }
+    entrypoint: ["true"]
+    restart: "no"
+  wf-code-review:
+    profiles: [workflows]
+    image: ${AUXILIA_REGISTRY:-ghcr.io/felixklakow}/auxilia-code-review-workflow:${AUXILIA_VERSION:-dev}
+    build: { context: ., dockerfile: Source/Workflows/Auxilia.CodeReview.Workflow/Dockerfile }
+    entrypoint: ["true"]
+    restart: "no"
+  wf-session-notifier:
+    profiles: [workflows]
+    image: ${AUXILIA_REGISTRY:-ghcr.io/felixklakow}/auxilia-session-notifier-workflow:${AUXILIA_VERSION:-dev}
+    build: { context: ., dockerfile: Source/Workflows/Auxilia.SessionNotifier.Workflow/Dockerfile }
+    entrypoint: ["true"]
+    restart: "no"
+
+networks:
+  default:
+    # A fixed name: the runner attaches every run's egress gateway to it, the guard admits it.
+    name: ${AUXILIA_NETWORK:-auxilia}
+
+volumes:
+  rabbitmq-data:
+  core-data:
+  runner-data:
+  artifacts:
+  audit-anchor:
+  run-roots:
+    # A fixed name — its path on the daemon is the run root above.
+    name: ${AUXILIA_RUN_ROOTS_VOLUME:-auxilia-run-roots}

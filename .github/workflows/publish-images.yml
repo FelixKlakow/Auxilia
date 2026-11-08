@@ -1,0 +1,108 @@
+# Builds the platform and workflow images and pushes them to the GitHub Container Registry
+# (ghcr.io/<owner>/auxilia-<name>) when a version tag is pushed — the same tags that publish the
+# NuGet packages, so images and client libraries share one version. Images created from a
+# private repository are private packages that inherit its access; nothing here changes their
+# visibility. Each image carries its build provenance and an SBOM (BuildKit attestations in the
+# registry), and the run lists every image's digest — workflow types are approved by digest.
+#
+# Runs only when a version tag (v0.7.0, ...) is pushed — never on ordinary commits; a manual run
+# publishes the commit it runs on under sha-<commit>.
+name: publish-images
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write # push to ghcr.io with the job's own token
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Platform
+          - { name: core-api,                  dockerfile: Source/Platform/Auxilia.Core.Api/Dockerfile }
+          - { name: core-runner,               dockerfile: Source/Platform/Auxilia.Core.Runner/Dockerfile }
+          - { name: docker-guard,              dockerfile: Source/Platform/Auxilia.DockerGuard/Dockerfile }
+          - { name: egress-gateway,            dockerfile: Source/Platform/Auxilia.EgressGateway/Dockerfile }
+          - { name: admin-console,             dockerfile: Source/Platform/Auxilia.AdminConsole/Dockerfile }
+          - { name: trigger-host,              dockerfile: Source/Platform/Auxilia.TriggerHost/Dockerfile }
+          # Shipped workflows
+          - { name: coding-session-workflow,   dockerfile: Source/Workflows/Auxilia.CodingSession.Workflow/Dockerfile }
+          - { name: claude-code-workflow,      dockerfile: Source/Workflows/Auxilia.ClaudeCode.Workflow/Dockerfile }
+          - { name: copilot-workflow,          dockerfile: Source/Workflows/Auxilia.Copilot.Workflow/Dockerfile }
+          - { name: implementation-workflow,   dockerfile: Source/Workflows/Auxilia.Implementation.Workflow/Dockerfile }
+          - { name: code-review-workflow,      dockerfile: Source/Workflows/Auxilia.CodeReview.Workflow/Dockerfile }
+          - { name: session-notifier-workflow, dockerfile: Source/Workflows/Auxilia.SessionNotifier.Workflow/Dockerfile }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image name
+        id: image
+        # Registry paths are lowercase; the owner's login may not be.
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/auxilia-${{ matrix.name }}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ steps.image.outputs.name }}
+          # v0.7.0 → 0.7.0 and 0.7 (no "latest": deployments name a version — the action would
+          # otherwise add it to every semver push).
+          flavor: |
+            latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,enable=${{ github.event_name == 'workflow_dispatch' }}
+
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          # amd64 only for now: the session workflow images download an x86_64 ttyd binary.
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Record the digest
+        run: echo "${{ steps.image.outputs.name }}@${{ steps.build.outputs.digest }}" > digest.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.name }}
+          path: digest.txt
+
+  digests:
+    needs: image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+
+      - name: List every image by digest
+        run: |
+          cat digest-*/digest.txt | sort > image-digests.txt
+          { echo "## Image digests"; echo; echo '```'; cat image-digests.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-digests
+          path: image-digests.txt

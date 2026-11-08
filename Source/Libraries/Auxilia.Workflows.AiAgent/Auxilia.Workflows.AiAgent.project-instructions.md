@@ -20,6 +20,15 @@ auto-allow allows and records, ask-operator asks the operator with the action's 
 denies when the session has no operator. Slots register it for the session's lifetime; tool-permission
 decisions never classify command strings as pushes (a reworded command must not change a decision).
 
+Multi-turn sessions end (`AgentSessionApplication`): when the operator sends `end`, or by themselves after
+`AgentSessionContext.IdleTimeout` (the `idle-timeout` run input in minutes, capped by — and defaulting to —
+`WorkflowLimits.MaxIdle`) without the operator writing. The engine opens the `OperatorChannel` with a
+`SessionIdlePolicy`, reports every agent chat entry and plan revision as `NoteAgentActivity`, and turn ends
+go through `PublishTurnEndedAsync` — keep all three, they are how the channel tells a running turn from a
+session waiting for its operator. Providers must keep ending gracefully on `EndToken` (between turns at once,
+mid-turn after the turn), and must treat an answer with no selection as a decline. The end reason
+(`SessionEndReasons`) goes to `session-ended` and `IRunOutcome`.
+
 ## Architecture
 
 Named AI slots are registered as keyed services by the provider's `ISlotHandler`:

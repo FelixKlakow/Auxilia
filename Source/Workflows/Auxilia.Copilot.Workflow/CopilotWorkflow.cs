@@ -20,8 +20,9 @@ public static class CopilotWorkflow
 
     public static Task Main(string[] args) =>
         WorkflowBuilder.Create(WorkflowType)
-            // What the Dockerfile installs — agent providers match on it, not on provider names.
-            .ProvidesTools("copilot")
+            // What the image bundles — agent providers match on it, not on provider names; the
+            // Copilot CLI with the version its build recorded (the slot's CopilotCli.props).
+            .ProvidesTools(ProvidedTool.Versioned("copilot", typeof(CopilotWorkflow).Assembly, "CopilotCliVersion"))
             .Requires<ICodingAgent>("coding-agent",
                 new AiCapabilities { MinContextWindow = 128_000, SupportedModalities = [Modality.Text] },
                 "The autonomous coding agent executing the instruction (the GitHub Copilot CLI)")
@@ -90,6 +91,15 @@ public static class CopilotWorkflow
                 Kind = "Boolean",
                 DefaultValue = "false"
             })
+            .RequiresInput(new WorkflowInputDescriptor(
+                AgentSessionContext.IdleTimeoutInput, "Idle timeout (minutes)", Required: false,
+                Description: "Multi-turn only: when nobody writes for this long — no next "
+                             + "instruction after a turn, no answer to an open question — the "
+                             + "session ends by itself, as if you had ended it. Capped by the "
+                             + "platform's maximum, which also applies when this is empty.")
+            {
+                Kind = "Number"
+            })
             .DeclaresTrigger(TriggerDeclaration.Mailbox,
                 "A filtered mail starts a run; subject and body become the instruction.")
             .DeclaresTrigger(TriggerDeclaration.Artifact,
@@ -139,7 +149,8 @@ public static class CopilotWorkflow
                 provider.GetService<IViewPublisher>(),
                 context,
                 TimeProvider.System,
-                provider.GetService<IWorkflowInputs>())
+                provider.GetService<IWorkflowInputs>(),
+                provider.GetService<IRunOutcome>())
             .RunAsync(cancellationToken);
     }
 }

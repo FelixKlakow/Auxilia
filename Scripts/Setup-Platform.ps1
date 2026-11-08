@@ -17,9 +17,10 @@
         codex-cli — all three bind into the ONE coding-session workflow), the source-control
         account providers (github-account, tfs-account for TFS/Azure DevOps), and the
         workspace providers (git-repository, empty-workspace, coding-session-workspace).
-      * The default WORKFLOW TYPES (with -BuildImages the images are docker-built first):
-        coding-session, claude-code, github-copilot, implementation,
-        pull-request-code-review, session-notifier.
+      * The default WORKFLOW TYPES (with -BuildImages the images are docker-built first, with
+        -Pull they are pulled from -Registry): coding-session, claude-code, github-copilot,
+        implementation, pull-request-code-review, session-notifier. Each is registered by the
+        digest of its image and with the schema that image itself emits.
 
     NOT done here (deliberate): connectors (they carry YOUR credentials — create them in the
     console or via Setup-AzureDevOps.ps1), platform settings (security.default-resource-access
@@ -31,11 +32,18 @@
     ./Scripts/Setup-Platform.ps1 -BuildImages             # + build & register workflow images
     ./Scripts/Setup-Platform.ps1 -CoreUrl https://core.example.com -ApiKey $env:AUXILIA_KEY `
         -BuildImages -ImageTag 0.2.0 -IncludeWindows      # real deployment
+.EXAMPLE
+    ./Scripts/Setup-Platform.ps1 -CoreUrl http://localhost:8080 -ApiKey $env:AUXILIA_BOOTSTRAP_API_KEY `
+        -Registry ghcr.io/felixklakow -ImageTag 0.7.0 -Pull   # the compose stack, published images
 #>
 param(
     [string]$CoreUrl = "http://localhost:5280",
     [string]$ApiKey = "auxilia-steering-dev-key",
     [string]$ImageTag = "latest",
+    # Registry prefix of the workflow images (e.g. ghcr.io/felixklakow); empty = local names.
+    [string]$Registry = "",
+    # Pull the workflow images from -Registry first (log in to the registry beforehand).
+    [switch]$Pull,
     [switch]$BuildImages,
     [switch]$SkipWorkflows,
     [switch]$IncludeWindows
@@ -445,12 +453,22 @@ if (-not $SkipWorkflows) {
         @{ type = "pull-request-code-review"; project = "Auxilia.CodeReview.Workflow";     image = "auxilia-code-review-workflow" }
         @{ type = "session-notifier";         project = "Auxilia.SessionNotifier.Workflow"; image = "auxilia-session-notifier-workflow" }
     )
+    foreach ($workflow in $workflows) {
+        $workflow.name = if ($Registry) { "$($Registry.TrimEnd('/'))/$($workflow.image)" } else { $workflow.image }
+    }
     if ($BuildImages) {
         foreach ($workflow in $workflows) {
-            Write-Host "Building $($workflow.image):$ImageTag ..." -ForegroundColor Cyan
-            docker build -t "$($workflow.image):$ImageTag" `
+            Write-Host "Building $($workflow.name):$ImageTag ..." -ForegroundColor Cyan
+            docker build -t "$($workflow.name):$ImageTag" `
                 -f "$repo\Source\Workflows\$($workflow.project)\Dockerfile" $repo
             if ($LASTEXITCODE -ne 0) { throw "docker build failed for $($workflow.project)" }
+        }
+    }
+    elseif ($Pull) {
+        foreach ($workflow in $workflows) {
+            Write-Host "Pulling $($workflow.name):$ImageTag ..." -ForegroundColor Cyan
+            docker pull "$($workflow.name):$ImageTag"
+            if ($LASTEXITCODE -ne 0) { throw "docker pull failed for $($workflow.name):$ImageTag (logged in to the registry?)" }
         }
     }
     $registered = @((Invoke-Core GET "/api/workflow-types?take=200").items)
@@ -460,25 +478,32 @@ if (-not $SkipWorkflows) {
         # spawn summary up front, and the stored schema (incl. providedTools for the tool-match
         # gate) refreshes WITHOUT waiting for a run — a stale schema would otherwise reject
         # agent bindings until the type's first successful run, which the stale schema blocks.
+        # The schema the IMAGE itself emits (offline: --emit-schema never touches the bus) — the
+        # declarations of exactly the content being approved; the source tree's as a fallback.
+        $imageRef = "$($workflow.name):$ImageTag"
         $schemaJson = $null
-        try {
-            $emitted = & dotnet run --no-build --project "$repo\Source\Workflows\$($workflow.project)" -- --emit-schema 2>$null
-            if ($LASTEXITCODE -eq 0 -and $emitted) {
-                $schemaJson = ($emitted -join "`n").Trim()
-                $null = $schemaJson | ConvertFrom-Json  # sanity: refuse to send non-JSON output
+        foreach ($emit in @(
+                { & docker run --rm --network none $imageRef --emit-schema 2>$null },
+                { & dotnet run --no-build --project "$repo\Source\Workflows\$($workflow.project)" -- --emit-schema 2>$null })) {
+            try {
+                $emitted = & $emit
+                if ($LASTEXITCODE -eq 0 -and $emitted) {
+                    $schemaJson = ($emitted -join "`n").Trim()
+                    $null = $schemaJson | ConvertFrom-Json  # sanity: refuse to send non-JSON output
+                    break
+                }
             }
+            catch { $schemaJson = $null }
         }
-        catch { $schemaJson = $null }
         # Images are approved by CONTENT: register the exact digest of the image as it is now (its
         # registry digest, or - for a local build that never went through a registry - its image
         # ID). A later rebuild/re-push under the same tag is new content and needs a new approval.
-        $imageRef = "$($workflow.image):$ImageTag"
         $digest = (& docker image inspect $imageRef --format '{{range .RepoDigests}}{{.}} {{end}}' 2>$null) -split ' ' |
-            Where-Object { $_ -like "$($workflow.image)@sha256:*" } | Select-Object -First 1
+            Where-Object { $_ -like "$($workflow.name)@sha256:*" } | Select-Object -First 1
         $digest = if ($digest) { $digest.Substring($digest.IndexOf('@') + 1) }
                   else { (& docker image inspect $imageRef --format '{{.Id}}' 2>$null) }
         if ($LASTEXITCODE -ne 0 -or -not $digest -or $digest -notmatch '^sha256:[0-9a-f]{64}$') {
-            Write-Warning "  workflow image $imageRef not found locally - type $($workflow.type) not registered (build it with -BuildImages)."
+            Write-Warning "  workflow image $imageRef not found locally - type $($workflow.type) not registered (build it with -BuildImages, or -Pull it)."
             continue
         }
         $body = @{
@@ -508,8 +533,9 @@ Write-Host "    in the AdminConsole - they carry credentials, so they are never 
 Write-Host "  * Under the restricted default posture, new layers and providers are administrators-only:"
 Write-Host "    grant them to groups/users via Sharing, or set security.default-resource-access=open"
 Write-Host "    in /admin/settings (needs step-up elevation)."
-if (-not $BuildImages -and -not $SkipWorkflows) {
+if (-not $SkipWorkflows) {
     Write-Host "  * Workflow types were registered by digest (docker://<image>:$ImageTag@sha256:...) - every runner"
-    Write-Host "    host needs exactly that content; after rebuilding an image, re-run this script to register"
+    Write-Host "    host needs exactly that content (a runner pulls a missing image by digest only from a"
+    Write-Host "    registry it may read anonymously); after rebuilding an image, re-run this script to register"
     Write-Host "    (and approve) the new digest - a runner never starts what a tag points to now."
 }

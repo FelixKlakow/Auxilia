@@ -72,6 +72,15 @@ public sealed class CoreClient : ICoreClient
     public Task<RunAccepted> RunAsync(RunRequest request, CancellationToken ct = default)
         => PostAsync<RunRequest, RunAccepted>("/api/runs", request, ct);
 
+    public async Task<RunInputFile> UploadRunInputFileAsync(Stream content, CancellationToken ct = default)
+    {
+        using var body = new StreamContent(content);
+        body.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        using var response = await http.PostAsync("/api/run-input-files", body, ct);
+        await EnsureSuccessAsync(response, ct);
+        return (await response.Content.ReadFromJsonAsync<RunInputFile>(ct))!;
+    }
+
     public Task<RunStatus?> GetRunAsync(Guid id, CancellationToken ct = default)
         => GetOrNullAsync<RunStatus>($"/api/runs/{id}", ct);
 
@@ -94,20 +103,28 @@ public sealed class CoreClient : ICoreClient
 
     public IAsyncEnumerable<ClientStreamFrame<RunStreamEvent>> StreamRunAsync(
         Guid runId, CancellationToken ct = default)
+        => StreamRunAsync(runId, after: null, ct);
+
+    public IAsyncEnumerable<ClientStreamFrame<RunStreamEvent>> StreamRunAsync(
+        Guid runId, string? after, CancellationToken ct = default)
         => StreamResilientAsync<RunStreamEvent>(
             () => NewSseRequest($"/api/runs/{runId}/stream"),
             isTerminal: evt => evt.Kind == RunStreamEvent.StatusKind && RunStates.IsTerminal(StatusStateOf(evt)),
-            // Sequence is per-(run, VIEW) monotonic, so the dedupe key must carry the view name —
-            // a single high-water mark would drop live frames of whichever view's counter lags.
+            // The server resumes from the cursor exactly; the dedupe only guards a Core that
+            // replays (sequences are run-wide, unique per view item).
             dedupeOf: evt => evt.Kind == RunStreamEvent.ViewKind
                 ? (evt.AsView()?.ViewName ?? "", evt.Sequence)
                 : null,
-            ct);
+            ct,
+            resumeOf: evt => evt.Cursor,
+            resumeFrom: after);
 
     public Task<PagedResult<RunViewItem>> GetRunViewsAsync(
-        Guid runId, string? view = null, int skip = 0, int take = 200, CancellationToken ct = default)
+        Guid runId, string? view = null, int skip = 0, int take = 200, long? after = null,
+        CancellationToken ct = default)
         => GetAsync<PagedResult<RunViewItem>>($"/api/runs/{runId}/views?" + Query(
             ("view", view),
+            ("after", after?.ToString(System.Globalization.CultureInfo.InvariantCulture)),
             ("skip", skip.ToString()),
             ("take", take.ToString())), ct);
 
@@ -173,6 +190,15 @@ public sealed class CoreClient : ICoreClient
         return await response.Content.ReadAsStreamAsync(ct);
     }
 
+    public async Task<bool> DeleteArtifactAsync(Guid id, CancellationToken ct = default)
+    {
+        using var response = await http.DeleteAsync($"/api/artifacts/{id}", ct);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            return false;
+        await EnsureSuccessAsync(response, ct);
+        return true;
+    }
+
     public IAsyncEnumerable<ClientStreamFrame<ArtifactStreamEvent>> StreamArtifactEventsAsync(
         string? artifactType = null, string? workItemId = null, CancellationToken ct = default)
         => StreamResilientAsync<ArtifactStreamEvent>(
@@ -217,11 +243,13 @@ public sealed class CoreClient : ICoreClient
     /// <summary>
     /// Opens the SSE endpoint and reconnects with exponential backoff on any drop — an orderly
     /// close without a prior terminal event IS a drop (the Core recycled). A terminal event ends
-    /// the enumeration for good. Auth/not-found errors (non-transient) rethrow; every other
-    /// failure surfaces as a <see cref="StreamConnectionFrame{TEvent}"/> and is retried. Events
-    /// carrying a dedupe key are deduped per key across resubscribes (the server snapshot
-    /// re-delivers) — sequences are only monotonic within a key (e.g. per view name), never across
-    /// keys. Keepalive comments reset the idle watchdog; silence beyond
+    /// the enumeration for good, and so does a 204 (the server has nothing more, ever).
+    /// Auth/not-found errors (non-transient) rethrow; every other failure surfaces as a
+    /// <see cref="StreamConnectionFrame{TEvent}"/> and is retried. A resumable stream
+    /// (<paramref name="resumeOf"/>) reconnects with the last yielded event's cursor as
+    /// <c>Last-Event-ID</c>, starting from <paramref name="resumeFrom"/>. Events carrying a dedupe
+    /// key are deduped per key across resubscribes — sequences are only monotonic within a key,
+    /// never across keys. Keepalive comments reset the idle watchdog; silence beyond
     /// <see cref="CoreClientOptions.StreamIdleTimeoutSeconds"/> counts as a drop — during the
     /// connect phase too: an accepted connection that never sends response headers would otherwise
     /// hang <c>SendAsync</c> forever (observed against a live Core).
@@ -230,8 +258,11 @@ public sealed class CoreClient : ICoreClient
         Func<HttpRequestMessage> requestFactory,
         Func<TEvent, bool> isTerminal,
         Func<TEvent, (string Key, long Sequence)?> dedupeOf,
-        [EnumeratorCancellation] CancellationToken ct)
+        [EnumeratorCancellation] CancellationToken ct,
+        Func<TEvent, string?>? resumeOf = null,
+        string? resumeFrom = null)
     {
+        var cursor = resumeFrom;
         var attempt = 0;
         var initialBackoff = TimeSpan.FromSeconds(Math.Max(0, options.StreamReconnectInitialBackoffSeconds));
         var maxBackoff = TimeSpan.FromSeconds(Math.Max(1, options.StreamReconnectMaxBackoffSeconds));
@@ -249,6 +280,8 @@ public sealed class CoreClient : ICoreClient
             try
             {
                 using var request = requestFactory();
+                if (cursor is { Length: > 0 })
+                    request.Headers.TryAddWithoutValidation("Last-Event-ID", cursor);
                 // HttpClient.Timeout is disabled, so the connect phase needs its own watchdog:
                 // reuse the idle timeout — headers that never arrive are just pre-body silence.
                 using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -256,6 +289,12 @@ public sealed class CoreClient : ICoreClient
                     connectCts.CancelAfter(idleTimeout);
                 response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, connectCts.Token);
                 await EnsureSuccessAsync(response, connectCts.Token);
+                if (response.StatusCode == HttpStatusCode.NoContent)
+                {
+                    // Everything there is was already delivered — the stream is complete.
+                    response.Dispose();
+                    yield break;
+                }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -343,6 +382,8 @@ public sealed class CoreClient : ICoreClient
                                     continue; // resubscribe overlap — already delivered
                                 maxSeenSequences[dedupe.Key] = dedupe.Sequence;
                             }
+                            if (resumeOf?.Invoke(evt) is { Length: > 0 } position)
+                                cursor = position;
 
                             backoff = initialBackoff; // a live event proves the link — reset
                             yield return new StreamEventFrame<TEvent>(evt);

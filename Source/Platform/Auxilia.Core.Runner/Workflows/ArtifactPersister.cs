@@ -49,25 +49,30 @@ public sealed class ArtifactPersister(
 
         foreach (var output in declared)
         {
-            var path = Path.GetFullPath(Path.Combine(outputDir, output.RelativePath));
-            var rootWithSeparator = Path.TrimEndingDirectorySeparator(Path.GetFullPath(outputDir))
-                + Path.DirectorySeparatorChar;
-            if (!path.StartsWith(rootWithSeparator, StringComparison.Ordinal))
+            // The workload owns the output directory: a declared output is read only as a regular
+            // file inside it — never through a link it planted (to the runner's /proc, another run).
+            var kind = SafeRunOutput.KindOf(outputDir, output.RelativePath);
+            if (kind != SafeRunOutput.EntryKind.File)
             {
-                logger.LogWarning(
-                    "Declared output '{Name}' escapes the output directory — skipping.", output.Name);
+                if (kind == SafeRunOutput.EntryKind.Refused)
+                    logger.LogWarning(
+                        "Declared output '{Name}' escapes the output directory or is reached through a link — skipping.",
+                        output.Name);
+                else
+                    logger.LogInformation(
+                        "Declared output '{Name}' was not produced by run {InstanceId}.",
+                        output.Name, instanceId);
                 continue;
             }
 
-            if (!File.Exists(path))
+            await using var payload = SafeRunOutput.OpenFile(outputDir, output.RelativePath);
+            if (payload is null)
             {
-                logger.LogInformation(
-                    "Declared output '{Name}' was not produced by run {InstanceId}.",
+                logger.LogWarning(
+                    "Declared output '{Name}' of run {InstanceId} is not a regular file — skipping.",
                     output.Name, instanceId);
                 continue;
             }
-
-            await using var payload = File.OpenRead(path);
             var record = await artifactStore.SaveAsync(
                 output.Name, workflowType, workItemId, instanceId, payload, ct);
 

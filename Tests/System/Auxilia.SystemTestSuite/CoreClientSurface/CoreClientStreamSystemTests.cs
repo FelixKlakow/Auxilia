@@ -1,5 +1,6 @@
 using Auxilia.Core.Client;
 using Auxilia.Core.Contracts;
+using Auxilia.Workflows.Testing.DummyWorkflows;
 
 namespace Auxilia.SystemTestSuite.CoreClientSurface;
 
@@ -116,5 +117,101 @@ public sealed class CoreClientStreamSystemTests
             Assert.That(state, Is.EqualTo("Success"),
                 "the run outlives the Core restart (the runner never stopped) and the stream ends terminal");
         });
+    }
+
+    /// <summary>
+    /// The resumable stream end to end (real SDK, runner, bus and store): a client connecting
+    /// late gets the run's state and the items published before it came, in order; it leaves
+    /// mid-run, the run goes on to its end, and the client comes back with the position it kept —
+    /// it gets exactly the rest, the verdict (with the workflow's reason) last. A client
+    /// connecting after the end gets the whole run. No item twice, none missing, none out of order.
+    /// </summary>
+    [Test]
+    [CancelAfter(180_000)]
+    public async Task ALateAndAResumingClient_GetEveryItemExactlyOnce_InOrder(CancellationToken ct)
+    {
+        var client = CoreClientEnvironment.CreateClient();
+        var accepted = await client.RunAsync(new RunRequest(
+            CoreClientEnvironment.ViewSequenceWorkflowType,
+            CoreClientEnvironment.ContextFor(ViewSequenceWorkflow.WorkflowName)), ct);
+        const int phase = ViewSequenceWorkflow.ItemsPerPhase;
+
+        // The first phase is published — and stored — before anyone watches.
+        await AwaitStoredItemsAsync(client, accepted.RunId, phase, ct);
+
+        var late = new List<RunStreamEvent>();
+        string? kept = null;
+        using (var leave = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        {
+            await foreach (var frame in client.StreamRunAsync(accepted.RunId, leave.Token))
+            {
+                if (frame is not StreamEventFrame<RunStreamEvent> { Event: var evt })
+                    continue;
+                late.Add(evt);
+                if (evt is { Kind: RunStreamEvent.ViewKind, Sequence: 3 })
+                {
+                    kept = evt.Cursor;
+                    break; // leaves mid-run
+                }
+            }
+        }
+
+        // While it is away the run publishes its second phase and ends.
+        await client.ProvideInputAsync(accepted.RunId, "{}", ct);
+        await AwaitTerminalAsync(client, accepted.RunId, ct);
+
+        var resumed = await CollectAsync(client.StreamRunAsync(accepted.RunId, after: kept, ct), ct);
+        var whole = await CollectAsync(client.StreamRunAsync(accepted.RunId, ct), ct);
+
+        var allNumbers = Enumerable.Range(1, 2 * phase).Select(n => (long)n).ToList();
+        Assert.Multiple(() =>
+        {
+            Assert.That(kept, Is.Not.Null.And.Not.Empty, "every frame carries its position");
+            Assert.That(late.Select(Describe), Is.EqualTo(new[] { "status:Running", "view:1", "view:2", "view:3" }),
+                "a late client: where the run stands, then the stored items in order");
+            Assert.That(late.Concat(resumed).Where(f => f.Kind == RunStreamEvent.ViewKind).Select(f => f.Sequence),
+                Is.EqualTo(allNumbers), "across leaving and resuming: every item once, in order");
+            Assert.That(resumed.Select(Describe), Is.EqualTo(
+                allNumbers.Skip(3).Select(n => $"view:{n}").Append("status:Success")),
+                "the resume: exactly the rest, the verdict last");
+            Assert.That(resumed[^1].AsStatus()!.Reason, Is.EqualTo("completed"), "the verdict says how the run ended");
+            Assert.That(whole.Select(Describe), Is.EqualTo(
+                allNumbers.Select(n => $"view:{n}").Append("status:Success")),
+                "after the end: the whole run, the verdict last");
+            Assert.That(whole.Where(f => f.Kind == RunStreamEvent.ViewKind).Select(f =>
+                    (f.AsView()!.ViewName, System.Text.Json.JsonSerializer.Deserialize<ViewSequenceWorkflow.NumberedItem>(
+                        f.AsView()!.PayloadJson)!.Number)),
+                Is.EqualTo(allNumbers.Select(n => (n % 2 == 0 ? ViewSequenceWorkflow.StepsView : ViewSequenceWorkflow.LogView, (int)n))),
+                "one sequence across both views, in publish order");
+        });
+    }
+
+    private static string Describe(RunStreamEvent evt) => evt.Kind switch
+    {
+        RunStreamEvent.StatusKind => $"status:{evt.AsStatus()?.State}",
+        RunStreamEvent.ViewKind => $"view:{evt.Sequence}",
+        _ => $"{evt.Kind}:{evt.PayloadJson}",
+    };
+
+    private static async Task<List<RunStreamEvent>> CollectAsync(
+        IAsyncEnumerable<ClientStreamFrame<RunStreamEvent>> stream, CancellationToken ct)
+    {
+        var events = new List<RunStreamEvent>();
+        await foreach (var frame in stream.WithCancellation(ct))
+            if (frame is StreamEventFrame<RunStreamEvent> { Event: var evt })
+                events.Add(evt);
+        return events;
+    }
+
+    private static async Task AwaitStoredItemsAsync(ICoreClient client, Guid runId, int count, CancellationToken ct)
+    {
+        while ((await client.GetRunViewsAsync(runId, ct: ct)).Total < count)
+            await Task.Delay(250, ct);
+    }
+
+    private static async Task AwaitTerminalAsync(ICoreClient client, Guid runId, CancellationToken ct)
+    {
+        while (await client.GetRunAsync(runId, ct) is not { } status || !RunStates.IsTerminal(status.State))
+            await Task.Delay(250, ct);
     }
 }

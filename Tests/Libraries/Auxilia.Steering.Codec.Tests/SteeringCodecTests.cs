@@ -72,8 +72,13 @@ public sealed class SteeringCodecTests
                 Is.EqualTo("""{"$type":"setting","key":"model","value":"opus"}"""));
             Assert.That(SteeringCodec.Encode(new SteeringTurnEnded(1, "s")),
                 Is.EqualTo("""{"$type":"turn-ended","turn":1,"summary":"s"}"""));
+            // "reason" (2026-11-08) is additive: older clients ignore it, older workflows omit it.
             Assert.That(SteeringCodec.Encode(new SteeringSessionEnded(true, null)),
-                Is.EqualTo("""{"$type":"session-ended","success":true,"error":null}"""));
+                Is.EqualTo("""{"$type":"session-ended","success":true,"error":null,"reason":null}"""));
+            Assert.That(SteeringCodec.Encode(new SteeringSessionEnded(true, null, SessionEndReasons.IdleTimeout)),
+                Is.EqualTo("""{"$type":"session-ended","success":true,"error":null,"reason":"idle-timeout"}"""));
+            Assert.That(SteeringCodec.Decode("""{"$type":"session-ended","success":false,"error":"x"}"""),
+                Is.EqualTo(new SteeringSessionEnded(false, "x")), "a session-ended without a reason still decodes");
             Assert.That(SteeringCodec.Encode(new SteeringFormAnswer("r", [new SteeringAnswer("q", ["a"], null)])),
                 Is.EqualTo("""{"$type":"form-answer","requestId":"r","answers":[{"questionId":"q","selectedIds":["a"],"freeText":null}]}"""));
             Assert.That(SteeringCodec.Encode(new SteeringFormResolved("r")),
