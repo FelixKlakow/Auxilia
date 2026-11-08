@@ -15,6 +15,16 @@
 
 ---
 
+> **Built and planned (audited against the code 2026-11-08).** This document is the platform's design. Wherever it describes something not built yet, the claim is marked *(planned — not built)* or *(partly built: …)* in place — do not rely on those parts. The larger ones, in one list:
+> - **Execution and infrastructure:** only the Docker launcher exists (no OS-process, k3s or AKS runtime); only RabbitMQ (no Azure Service Bus, no in-process bus); only the filesystem artifact backend (no Blob/S3/database); signing keys are files loaded in-process (no Vault Transit / Key Vault); no Kubernetes or Azure deployment assets beyond `compose.yaml`.
+> - **Artifact inputs** resolved at dispatch and mounted under `/workspace/artifacts/` — not built (a run takes files as *run input files*, §9, and a chained run fetches the artifact it was started for through the Core).
+> - **Resource Proxy** beyond request/response: no async long-running pattern, no per-identity rate limits, no named resource dependencies; its only connector is the checkpoint save. Task sources and source control reach a workflow through slots, not the proxy.
+> - **AI integration layer** as described in §5 (AIAssistanceRequest routing, model adapters, AI bundles with quotas/purposes, AI decision audit) — not built; agents run inside workflows through the agent slots.
+> - **Package Proxy**, **per-tenant/multi-tenant** separation (tenant scope chain, tenant keys, per-tenant cache and quotas), **storage quotas**, **CoW workspace snapshots** (each run gets a plain copy), **operator source-control clamps** (branch patterns, PR-only, no force-push), **automatic requeue/retry** of runs, **shared dashboards**, artifact/audit **retention settings**, **Jira/Trello** task sources and **TFVC**.
+> - **MCP parity** is partial: no MCP tools yet for run input, run views, terminals or work items.
+
+---
+
 ## Table of Contents
 
 1. System Overview
@@ -40,7 +50,7 @@
 
 Auxilia is a **workflow-driven distributed system** where:
 
-- **Work items** (from Jira, Azure DevOps, Trello, etc.) are the primary trigger for workflows.
+- **Work items** (from Jira, Azure DevOps, Trello, etc.) are the primary trigger for workflows. *(partly built: Azure DevOps / TFS work items and email intake exist; Jira and Trello do not)*
 - **Workflows** are stateful, signed programs that run to completion and communicate exclusively via the platform message bus.
 - **AI agents** are first-class citizens - they can trigger, steer, observe, and complete workflows via the same interfaces as human users (MCP protocol).
 - **Security is pluggable** - runs standalone out of the box, or integrates with corporate identity providers (AAD, LDAP, OIDC).
@@ -66,7 +76,7 @@ Auxilia is a **workflow-driven distributed system** where:
 | **Artifact Store** | Pluggable persistent store (`IArtifactStore`) where named artifacts survive between runs — payloads plus a metadata index for lineage, versioning, and dispatch-time resolution |
 | **Workspace Manager** | Platform component that manages persistent per-repo warm caches and per-run isolated CoW snapshots |
 | **Network Policy** | Per-workflow declarative allowlist of permitted outbound endpoints, enforced at the kernel network namespace level |
-| **Package Proxy** | Optional platform-managed mirror of public package registries (NuGet, npm, PyPI, etc.) providing caching and security scanning |
+| **Package Proxy** | Optional platform-managed mirror of public package registries (NuGet, npm, PyPI, etc.) providing caching and security scanning *(planned — not built)* |
 | **Work Item Index** | Optional background-indexed store of historical work items enabling similarity search (deferred) |
 
 ---
@@ -76,8 +86,8 @@ Auxilia is a **workflow-driven distributed system** where:
 ```mermaid
 graph TB
     subgraph Sources["External Sources"]
-        TASKS["Task Sources (Jira, ADO, TFS, Trello, GitHub)"]
-        IDP["Identity Providers (AAD, LDAP, OIDC, Local)"]
+        TASKS["Task Sources (ADO/TFS, email; Jira, Trello planned)"]
+        IDP["Identity Providers (Local, OIDC/Entra; LDAP import)"]
         EXT["External Resources (APIs, DBs, CI, package registries)"]
     end
     subgraph Clients["Clients"]
@@ -160,70 +170,70 @@ graph TB
 
 ### Message Bus - IMessageBusClient
 - **Default: RabbitMQ** (runs locally in Docker, zero-config)
-- **Cloud swap: Azure Service Bus** (drop-in alternative via the same interface)
-- Carries run requests (Core.Api → Core.Runner), status/view events, Resource-Proxy traffic, and AI-assistance requests. Workload containers reach the platform **only** through here — never a direct call — and **each with its own broker identity** (minted per run, revoked on every terminal path): it may consume only its own queues and publish only through the runner's `workflow.ingress` exchange, the terminal-state fanout, its own view routing key and non-reserved event types. Every publish carries the broker-validated publisher (`user_id`); consumers drop a workload-scoped message whose publisher is another run's identity and any platform-only message (commands, responses, lifecycle, audit) from a workload. A container can therefore never read the run-command queue, steal another run's resolution token, or speak for another run (§7).
+- **Cloud swap: Azure Service Bus** (drop-in alternative via the same interface) *(planned — not built)* — and the per-run broker identities use the RabbitMQ management API
+- Carries run requests (Core.Api → Core.Runner), status/view events, Resource-Proxy traffic, and AI-assistance requests *(the last: planned — not built)*. Workload containers reach the platform **only** through here — never a direct call — and **each with its own broker identity** (minted per run, revoked on every terminal path): it may consume only its own queues and publish only through the runner's `workflow.ingress` exchange, the terminal-state fanout, its own view routing key and non-reserved event types. Every publish carries the broker-validated publisher (`user_id`); consumers drop a workload-scoped message whose publisher is another run's identity and any platform-only message (commands, responses, lifecycle, audit) from a workload. A container can therefore never read the run-command queue, steal another run's resolution token, or speak for another run (§7).
 
 ### Workspace Manager
-- Manages **warm cache** entries for each repository — cloned once, kept current via background fetches via the Resource Proxy
-- On workflow dispatch: checks repository access rights per repo per source system, then creates an **isolated CoW snapshot** per repository for that run
+- Manages **warm cache** entries for each repository — cloned once, kept current by an authenticated `git fetch` the runner runs itself on every reuse *(not through the Resource Proxy)*
+- On workflow dispatch: checks repository access rights per repo per source system, then creates an **isolated CoW snapshot** per repository for that run *(partly built: each run gets its own plain recursive copy — copy-on-write is a follow-up)*
 - Mounts all declared repository snapshots into the container under `/workspace/repos/<id>/` using Linux mount namespaces — the container sees only its own snapshots
-- Mounts resolved artifact inputs read-only under `/workspace/artifacts/<input-name>/` and provides the declared artifact output location, persisted to the Artifact Store on run completion
-- Supports **multiple repositories from different source systems** in a single workflow run (Git, TFVC, GitHub, ADO — each using the correct Account Bundle)
-- Source-control writes (commits, pushes, PR creation) happen **mid-run, directly from the workflow** through its source-control slots with just-in-time scoped credentials. Post-exit output collection by the platform was rejected: it would duplicate traffic and block legitimate in-run operations such as reviewing git history. What a workflow may do is bounded by its **declared slot capabilities** (e.g. read-only vs. write) clamped by the **operator configuration** (e.g. allowed branch patterns, PR-only, no force-push). Enforcement is layered: the issued credential is scoped to the configured limits wherever the provider supports it (the hard backstop, valid even against a compromised process), and the slot handler enforces the same limits uniformly for all providers before executing an operation
-- Enforces per-repo and per-tenant storage quotas
+- Mounts resolved artifact inputs read-only under `/workspace/artifacts/<input-name>/` *(planned — not built)* and provides the declared artifact output location, persisted to the Artifact Store on run completion
+- Supports **multiple repositories from different source systems** in a single workflow run (Git, TFVC, GitHub, ADO — each using the correct Account Bundle) *(partly built: git repositories only — no TFVC)*
+- Source-control writes (commits, pushes, PR creation) happen **mid-run, directly from the workflow** through its source-control slots with just-in-time scoped credentials. Post-exit output collection by the platform was rejected: it would duplicate traffic and block legitimate in-run operations such as reviewing git history. What a workflow may do is bounded by its **declared slot capabilities** (e.g. read-only vs. write) clamped by the **operator configuration** (e.g. allowed branch patterns, PR-only, no force-push) *(partly built: operations are allowed or denied whole by tool policy, and every push passes the per-action push policy; branch patterns, PR-only and force-push clamps, and credentials derived from configured limits, are planned — not built)*. Enforcement is layered: the issued credential is scoped to the configured limits wherever the provider supports it (the hard backstop, valid even against a compromised process), and the slot handler enforces the same limits uniformly for all providers before executing an operation
+- Enforces per-repo and per-tenant storage quotas *(planned — not built)*
 - Sensitive repositories can be marked `no-cache` in the workflow manifest — these are fetched fresh per run and deleted immediately after
 
 ### Artifact Store - IArtifactStore
 - Persistent, pluggable store where named artifacts survive between runs — the producing run's CoW snapshot is destroyed at exit, so artifacts must be persisted by the platform
 - **Production:** the workflow writes its declared artifacts to a dedicated output location in its workspace; on run completion the platform persists them into the store. What a workflow may produce is limited by its manifest declarations clamped by operator configuration. The runner reads that location as the workload's — only regular files inside it, never through a link the workload planted (on Linux each file is opened `O_NOFOLLOW | O_NONBLOCK` and its real path checked through `/proc/self/fd`)
 - **Checkpoints** are the one artifact kind a run produces WHILE it runs (§9 *Run checkpoints*): `ArtifactDto.Kind = "checkpoint"`, written and encrypted by the Core itself, kept for a lifetime (`ExpiresUtc`) and deletable by the run's principals — every other artifact is the platform's record and stays
-- **Consumption:** declared artifact inputs are resolved at dispatch time and mounted **read-only** into the container under `/workspace/artifacts/<input-name>/` — consumption is direct from the workflow's point of view, exactly like repository snapshots
+- **Consumption:** declared artifact inputs are resolved at dispatch time and mounted **read-only** into the container under `/workspace/artifacts/<input-name>/` — consumption is direct from the workflow's point of view, exactly like repository snapshots *(planned — not built)* — today a chained run receives the artifact's id in its context and fetches it through the Core
 - **References, not payloads, on the bus:** messages carry only artifact references (ID + content hash); payloads never travel through the message bus
 - **Identity and lineage:** an artifact is identified by artifact type + producing workflow + work item + run + version. Versions of the same lineage are ordered, enabling "latest CodeReviewResult for work item X" resolution and trend comparison against prior versions (UC7)
-- **Two concerns behind one interface:** the metadata index (lineage, versions, dispatch-time queries) and payload storage are separate concerns. Backends are pluggable per deployment: local filesystem (dev), Azure Blob / S3-compatible (cloud), or a database — a database backend can hold both payload and metadata for small structured artifacts, while blob backends pair with the platform database for metadata
-- Retention periods and consumption access (which workflows/identities may read which artifact types) are operator configuration, enforced at dispatch-time resolution
+- **Two concerns behind one interface:** the metadata index (lineage, versions, dispatch-time queries) and payload storage are separate concerns. Backends are pluggable per deployment: local filesystem (dev), Azure Blob / S3-compatible (cloud), or a database *(partly built: the filesystem backend is the only one)* — a database backend can hold both payload and metadata for small structured artifacts, while blob backends pair with the platform database for metadata
+- Retention periods and consumption access (which workflows/identities may read which artifact types) are operator configuration, enforced at dispatch-time resolution *(partly built: reads are scoped to the runs a caller may reach plus the `artifact.consume` permission; checkpoints have a lifetime — per-type retention and per-workflow read policies are planned — not built)*
 
 ### Platform Data Layer - Auxilia.UniversalDataAccess
-- The same `IDataAccess` / `PlatformData` abstraction backs every service, but each points it at a **separate backend instance** (distinct Mongo database / JSON root): the **Core.Api DB** (principals, roles, groups, connectors + provider catalog with secrets encrypted at rest, the audit log), the **Core.Runner DB** (run lifecycle / ownership, schemas, slot configurations, provider registrations), and the **Product DB** (workflow types, configurations, signal handlers, view data, dashboards, triggers). No service reads another's store.
+- The same `IDataAccess` / `PlatformData` abstraction backs every service, but each points it at a **separate backend instance** (distinct Mongo database / JSON root): the **Core.Api DB** (principals, roles, groups, connectors + provider catalog with secrets encrypted at rest, the audit log), and the **Core.Runner DB** (run lifecycle / ownership, schemas, slot configurations, provider registrations). Workflow types, configurations, persisted views and dashboard pins live in the Core.Api DB; triggers are owned by the host that runs them (`Auxilia.Workflows.Client`). (The former Product DB retired with the WorkflowStudio deployable.) No service reads another's store.
 - Storage backend is pluggable behind the abstraction (InMemory for tests, JSON for dev, MongoDB for replicated production). There is **no Redis/SignalR view backplane**: live views fan out over the **Core.Api SSE stream** (see sections 14–15), and runner liveness rides the `RunnerHeartbeat` bus beat plus the runner's own `ServiceHeartbeatRecord` store.
 - **Transition state:** consolidating the Core.Api and Core.Runner stores into a single **shared Core DB tier** (the two Core tiers are one family) is planned; today they are separate, and Core.Api hands the runner a self-contained run spec so no shared store is required.
 
 ### Audit Log
 - Append-only record of every action: human and AI operations, policy decisions (allow **and** deny), credential deliveries per slot activation, broker identities issued/revoked, Resource Proxy calls, egress (every denied attempt live, each allowed destination at first use, and a per-run summary with every destination's connection count and the SHA-256 of the complete per-attempt `egress-log` — the artifact's content hash — so every allowed and denied attempt is anchored in the chain), administrator access to someone else's run (`run.admin-access`), and workflow lifecycle transitions including retries, failovers and the egress kill switch
 - Written by platform components only — workflows can neither write nor read it directly (the forwarding message is platform-only)
-- **Centralised in the Core** as the single security trail (a deliberate exception to per-service databases: audit must not fragment): runners keep their own copy AND forward every record over `platform.audit`; the Core ingests them (idempotent per record id, `Source` stamped). Retention period and read access are operator configuration
+- **Centralised in the Core** as the single security trail (a deliberate exception to per-service databases: audit must not fragment): runners keep their own copy AND forward every record over `platform.audit`; the Core ingests them (idempotent per record id, `Source` stamped). Read access is gated by `audit.read`; an audit retention setting is planned — not built
 - **Tamper-evident:** every writer chains its records (sequence + an HMAC over the record and its predecessor, keyed from the platform protection key). `GET /api/audit/integrity` (MCP `verify_audit`, `ICoreClient.VerifyAuditAsync`) re-verifies every chain and reports edits, deletions and insertions; without a protection key the chain is unkeyed (dev) and reports only careless edits
 - Run evidence the workload cannot alter is persisted as run artifacts: the workflow container's own output (`container-log`), the egress gateway's connection log (`egress-log`), companion logs
-- Verifies every workflow artifact before execution - no unsigned execution path exists
+- Verifies every workflow artifact before execution - no unsigned execution path exists *(in the production posture: developer mode, and an empty `TrustedSigningKeys`, accept unsigned packages; docker images are approved by digest rather than signed)*
 - In dev mode signing can be disabled entirely; no dev CA ceremony required locally
-- Three production implementations depending on deployment mode (see section 12)
-- Private key never touches the application process - only hash-in / signature-out
+- Three production implementations depending on deployment mode (see section 12) *(partly built: one — a key file loaded in-process)*
+- Private key never touches the application process - only hash-in / signature-out *(planned — not built)* — today the signing key is a PEM file the Core loads
 
-### Workflow Runner - IWorkflowRunner
+### Workflow Runner - IWorkflowLauncher
 - Abstracts how workflows are launched
-- Three implementations depending on deployment mode (see section 12)
+- Three implementations depending on deployment mode (see section 12) *(partly built: the Docker launcher is the only one — no OS-process, k3s or AKS launcher)*
 
 ### Workflow C# SDK - NuGet Package
 - Reference SDK for authoring workflows in C#; other language SDKs follow the same message contract
-- Workflows declare in their manifest: required bundle types, produced artifacts, named resource dependencies, accepted artifact inputs, repository references (single or multi, multi-source), baseline network endpoints (minimum required, `package-proxy` preference), and `no-cache` flags per repository
+- Workflows declare in their manifest: required bundle types, produced artifacts, named resource dependencies, accepted artifact inputs, repository references (single or multi, multi-source), baseline network endpoints (minimum required, `package-proxy` preference), and `no-cache` flags per repository *(named resource dependencies, mounted artifact inputs and the `package-proxy` preference are planned — not built; the manifest is the C# builder's declarations, e.g. `RequiresNetworkEndpoint`, `ConsumesArtifact` as a chaining criterion)*
 - The manifest does **not** declare `allow-all` — that is a run-time operator decision resolved by the Policy Resolver at dispatch
-- WorkflowContext carries: the originating work item, resolved named artifact inputs, scoped credentials, and repository mount paths
+- WorkflowContext carries: the originating work item, resolved named artifact inputs, scoped credentials, and repository mount paths *(partly built: there is no WorkflowContext type — the run context arrives as `WORKFLOW_CONTEXT__*` variables and inputs, credentials through slot activation, repositories under `/workspace/repos/<id>`; artifact inputs are not built)*
 - Workflows compile to a self-contained executable, then are signed and pushed to the registry
 
-### AI Integration Layer
+### AI Integration Layer *(planned — not built)*
 - Routes AIAssistanceRequest messages (published by workflows) to the configured model adapter
 - Pluggable adapters: GitHub Copilot, Azure OpenAI, custom models
 - AI bundles carry usage quotas and purpose restrictions; pre-flight verifies the required bundle is available before dispatch
 - All AI decisions are written to the audit log with full context
-- See **section 5** for the full AI integration design including the MCP interface, audit contract, and bundle scoping
+- See **section 5** for the full AI integration design including the MCP interface, audit contract, and bundle scoping. What exists instead: workflows host agents themselves (`Auxilia.AI`, `Auxilia.Workflows.AiAgent`, the agent slots), an AI agent acting on the platform is a tagged service principal, and its model credential comes from a slot
 
 ### Resource Proxy
-- Platform-managed gateway through which workflows access external APIs, databases, build systems, and scan tools
-- Workflow declares named dependencies (e.g. "github-api", "customer-db", "ci-runner") at authoring time
+- Platform-managed gateway through which workflows access external APIs, databases, build systems, and scan tools *(partly built: an audited request/response channel whose only connector is the checkpoint save — task sources, source control and databases reach a workflow through its slots)*
+- Workflow declares named dependencies (e.g. "github-api", "customer-db", "ci-runner") at authoring time *(planned — not built)*
 - Workflows are **trusted by signature**: the signing authority is responsible for verifying that a workflow is correct and trustworthy before signing it. A verified workflow is therefore permitted to hold scoped credentials directly — the protection model is *who gets credentials and when*, not hiding credentials from the workflow process
 - Credentials are delivered **just-in-time**: a workflow receives a slot's credentials only at the moment it activates that slot, encrypted for that specific workflow instance — never as a blanket grant at startup, and never for slots it does not use in that run
-- Supports two call patterns: **synchronous** (request/response) and **async long-running** (submit job, receive handle, poll or await callback via message bus)
-- All proxy calls are audited; rate limiting and access policy enforced per workflow identity
+- Supports two call patterns: **synchronous** (request/response) and **async long-running** (submit job, receive handle, poll or await callback via message bus) *(partly built: request/response only)*
+- All proxy calls are audited and authenticated by the instance token; rate limiting and access policy per workflow identity *(planned — not built: today a run has at most two calls in flight and a runner eight)*
 - Calls run side by side (a bounded number per runner; past it the broker holds requests back), so one slow call — a large checkpoint — never holds up another run's. A run has at most two calls in flight (a further one is refused at once), and every call is answered within 50 s of its arrival — a wait for capacity included — so the SDK, which waits 60 s, always hears how it ended. The platform's own connector here is the checkpoint save (§9)
 
 ### Network Egress Layer
@@ -233,28 +243,31 @@ graph TB
 - Optional mode: **allow-all** — requested via run configuration; still proxied, logged and audited; platform policy can prohibit it entirely (and does by default)
 - Build tools and package managers (`dotnet restore`, `npm install`, `pip install`, git, the agent CLIs) work through the standard proxy variables (`HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY`, plus `NODE_USE_ENV_PROXY` for Node runtimes — system-verified for Claude Code and the Copilot CLI); a tool that ignores them has no route at all, and raw non-HTTP sockets have none either
 
-### Package Proxy (optional)
+### Package Proxy (optional) *(planned — not built)*
 - Platform-managed mirror of public package registries (NuGet, npm, PyPI, Cargo, Go modules, etc.)
 - When enabled: the Network Egress Layer routes all package manager traffic through the proxy rather than directly to the public registry
 - Provides: **caching** (packages fetched once, served locally on subsequent runs), **security scanning** (packages scanned before serving), and **air-gap support** (enterprise environments with no internet access)
 - Can be configured per registry — e.g. route NuGet through the proxy but allow npm direct access
-- Not required — workflows function without it as long as the registry endpoints are declared and reachable
+- Not required — workflows function without it as long as the registry endpoints are declared and reachable (today the only way: registries are reached as allowlisted endpoints through the run's egress gateway)
 
 ### MCP Server
 - MCP is a **first-class, authenticated** surface: the **Core MCP** (on Core.Api) exposes runtime / connector / identity / group / artifact tools. (The separate Product MCP retired with the WorkflowStudio deployable — authoring is a library call now; an authoring MCP can return as part of a host app if one needs it.)
-- Every tool authenticates (API-key bearer, principal-bound) and is policy-checked against the **same authority as REST** — AI and service principals get UI parity with no hidden operations and no separately maintained mirror.
+- Every tool authenticates (API-key bearer, principal-bound) and is policy-checked against the **same authority as REST** — AI and service principals get UI parity with no hidden operations and no separately maintained mirror. *(partly built: no MCP tools yet for sending run input, reading run views, the run stream, terminals or work items — those are REST only)*
 - Representative Core tools: `run_workflow`, `run_configuration`, `list_runs`, `get_run`, `cancel_run`, `list_connectors`, `create_connector`, `create_group`, `assign_group_role`.
 
 ### Integration Adapters
 - Integration adapters live in **workflow-domain hosts** (the `Auxilia.Workflows.Client` family — e.g. the email intake in `Auxilia.TriggerHost`); the host owns *which* workflow a work item should run and starts it by calling the Core **Run API**, never by publishing to the bus directly. Two adapter contracts:
 - **ITaskSourceAdapter** — read work items (full detail including linked items, history, attachments), update status, create work items, create sub-tasks, attach artifact references (`AttachArtifact`)
 - **ISourceControlAdapter** — clone, diff, branch, commit, push, create PR; plus lightweight introspection: ListDirectory, GetFileContent, DetectFrameworks (no full clone required)
+- *(partly built, under other names: workflows use `ITaskSourceAccess` / `IWorkItemAccess` — read work items, comments, attachments, states, relations, status — and `ISourceControlAccess` / `ISourceControlWriteAccess` — list and read files, changed files, branch, write, commit, push. Creating work items or sub-tasks, `AttachArtifact`, `DetectFrameworks` and creating pull requests are planned — not built.)*
 
 ---
 
 ## 5. AI Integration Layer
 
 AI agents are first-class citizens in Auxilia. They interact through the same interfaces as human users — via the MCP Server — and are subject to the same policy, audit, and identity rules.
+
+> *(planned — not built: the routing layer this section describes — `AIAssistanceRequest` messages, model adapters, AI bundles with quotas and purposes, AI-decision audit records, the AI pre-flight. What exists: an AI agent acting on the platform is a tagged service principal using the authenticated MCP server; workflows host their agents themselves through `Auxilia.AI`, `Auxilia.Workflows.AiAgent` and the agent slots, whose credentials come from connectors.)*
 
 ```mermaid
 graph TD
@@ -294,7 +307,7 @@ graph TD
 - AI bundles carry **usage quotas** and **purpose restrictions** — a bundle scoped to code review cannot be used for arbitrary queries
 - Every AI decision is written to the **immutable audit log** with full context: the request, the model used, the response, and the workflow step that requested it
 - Pre-flight check verifies the required AI bundle is present and within quota before a workflow is dispatched
-- **MCP tools** give AI agents the same operations as the human UI: trigger workflow, get status, send input, approve step, cancel, list work items — no hidden operations
+- **MCP tools** give AI agents the same operations as the human UI: trigger workflow, get status, send input, approve step, cancel, list work items — no hidden operations *(partly built: trigger, status and cancel exist; send input, approve a step and list work items are planned — not built)*
 
 ---
 
@@ -306,14 +319,14 @@ stateDiagram-v2
     Received --> PreFlight : Policy check passes
     PreFlight --> Queued : Signature valid, bundles available, resources reachable
     PreFlight --> PreFlightFailed : Required resource or bundle unavailable
-    PreFlightFailed --> Queued : Condition resolved, requeued
+    PreFlightFailed --> Queued : Condition resolved, requeued (planned)
     Queued --> Running : Core.Runner launches container / process
-    Running --> WaitingForInput : Step requires human or AI decision
+    Running --> WaitingForInput : Step requires human or AI decision (shown in the run's views, not a run state)
     WaitingForInput --> Running : Input received (human via UI or AI via MCP)
     Running --> Completed : All steps finished
     Running --> Failed : Unhandled error
     Running --> Cancelled : User or AI cancels
-    Failed --> Queued : Retry policy if configured
+    Failed --> Queued : Retry policy if configured (planned)
     Completed --> [*]
     Cancelled --> [*]
     Failed --> [*]
@@ -321,8 +334,8 @@ stateDiagram-v2
 
 **Key lifecycle properties:**
 - Workflows are **stateful and long-running** - once started they run until Completed, Failed, or explicitly Cancelled
-- A **pre-flight check** runs before any workflow is dispatched, verifying that signature, required account bundles, resource proxies, and AI accounts are all available; it also fetches and verifies the signed `*.workflow.zip` package and pre-loads the workflow schema into the schema store
-- If pre-flight fails the work item is held and the user/AI is notified; it can be requeued automatically when the condition resolves (configurable)
+- A **pre-flight check** runs before any workflow is dispatched, verifying that signature, required account bundles, resource proxies, and AI accounts are all available *(the resource-proxy and AI-account checks are planned — not built; the run's required tools and the image's environment are checked)*; it also fetches and verifies the signed `*.workflow.zip` package and pre-loads the workflow schema into the schema store
+- If pre-flight fails the work item is held and the user/AI is notified; it can be requeued automatically when the condition resolves (configurable) *(automatic requeue and retry policies are planned — not built: `PreFlightFailed` is terminal; recovery is the one guarded failover re-dispatch or an operator rerun)*
 - **Schema pre-loading**: the `WorkflowAnnouncementHandler` reads `workflow-schema.json` from the extracted ZIP package and populates `WorkflowSchemaStore` before sending the `Run` directive — no `EmitSchema` round-trip is required
 - **Workflow artifacts** are declared by the workflow and configured by the user - where they are stored and how they are linked back to the work item is a per-workflow configuration
 - **Workflows are not resumable (v1)**: the platform never restores a run's state — a retry after `Failed`, and failover after an orphaned Core.Runner, always means *kill and restart from scratch* (run checkpoints, §9, hand a run's saved state back to its principals; they never feed a re-dispatch). Because a failed run may already have performed external writes, every external write a workflow performs must be **idempotent or guarded** (branch-exists check, find-or-create PR, deduplicated comments) — this is part of the workflow SDK contract
@@ -338,7 +351,7 @@ A dispatch originates from one of five trigger sources; all of them converge on 
 | Trigger | Source |
 |---|---|
 | **Work item event** | Integration Adapters detect work item changes (created, moved to a configured state) and publish dispatch commands |
-| **Manual** | A human via the dashboard/Studio or an AI agent via the Core MCP `run_workflow` tool — both resolve to a Core Run API call |
+| **Manual** | A human via a client (the admin console, the steering client) or an AI agent via the Core MCP `run_workflow` tool — both resolve to a Core Run API call |
 | **Schedule** | The interval scheduler (in the `Auxilia.Workflows.Client` library, hosted e.g. by the TriggerHost) for recurring runs, e.g. nightly security scans — dispatched through the Core Run API |
 | **Artifact completion** | A finished run's persisted artifact triggers a configured follow-up workflow (e.g. CodeReviewResult → Selective Fixing) — workflow chaining without coupling the workflows to each other |
 | **Platform event** | A named platform event triggers a configured follow-up workflow (the `EventTriggerEngine` in `Auxilia.Workflows.Client`, over the Core's filtered event SSE stream) — see "Platform events" below |
@@ -389,7 +402,7 @@ graph TD
     end
     subgraph Identity and Policy
         REQUEST["Any request - UI or MCP"] --> SEC["Security Service"]
-        SEC --> IDP["Identity Provider (AAD / LDAP / OIDC / Local)"]
+        SEC --> IDP["Identity Provider (Local, OIDC/Entra; LDAP import)"]
         IDP --> POLICY["Policy Engine"]
         POLICY -->|Allowed| DISPATCH["Dispatch (Core.Api → Core.Runner)"]
         POLICY -->|Denied| BLOCK["Blocked"]
@@ -407,9 +420,9 @@ graph TD
 - **The registration handshake is authenticated**: channel encryption alone does not authenticate the requester. Core.Runner injects a **one-time instance token** into the container/process at launch and pre-creates an **exclusive response queue** per instance; announcements, registration requests, and terminal state reports must present the token (validated, **bound to the workflow type it was issued for**, single-use for registration, time-limited until registered), and directives/configurations are only ever delivered to that pre-created queue — the request's self-declared response topic is ignored. A terminal state report is additionally acted on only by the runner that owns the run. Token-less operation exists only behind the `RequireInstanceToken=false` setting for trusted-operator dev scenarios
 - Workflows have **no arbitrary outbound network access** — effective network policy is resolved at dispatch from three layers (manifest baseline, run configuration, platform policy ceiling) and enforced by the run's egress gateway, the container's only route out; see section 10
 - **A signature vouches for the program, not for what an agent it hosts will do** — containment (below) assumes the workload may be steered by untrusted input and holds regardless
-- Structured API calls (task sources, source control, databases) go through the Resource Proxy; build toolchain calls (package restore, etc.) go through the Network Egress Layer
+- Structured API calls (task sources, source control, databases) go through the Resource Proxy; build toolchain calls (package restore, etc.) go through the Network Egress Layer *(as built, task sources and source control are reached through slots with just-in-time credentials, over the egress gateway; the Resource Proxy carries platform calls such as checkpoint saves)*
 - Every action (human or AI) is written to an immutable audit log
-- TFVC / TFS is explicitly supported as a source control target for enterprises that have not yet migrated
+- TFVC / TFS is explicitly supported as a source control target for enterprises that have not yet migrated *(planned — not built)* — TFS / Azure DevOps git repositories and work items are supported
 
 ### Workload containment (2026-10-15)
 
@@ -518,9 +531,9 @@ graph TB
 ```
 
 **Resource Proxy (structured calls):**
-- Used for all calls where the platform mediates credentials: task sources, databases, CI triggers. (Source-control PUSH: the push credential reaches only the SDK process, whose loopback push gateway serves the workspace and puts every push in front of the per-action policy — §7 *Workload containment*, §9 write-back control.)
-- Workflow declares named dependencies in its manifest; at runtime the platform resolves the correct Account Bundle
-- Supports synchronous and async long-running patterns (trigger + poll/callback via message bus)
+- Used for all calls where the platform mediates credentials: task sources, databases, CI triggers *(planned — not built: as built these go through slots; the proxy's only connector is the checkpoint save)*. (Source-control PUSH: the push credential reaches only the SDK process, whose loopback push gateway serves the workspace and puts every push in front of the per-action policy — §7 *Workload containment*, §9 write-back control.)
+- Workflow declares named dependencies in its manifest; at runtime the platform resolves the correct Account Bundle *(planned — not built)*
+- Supports synchronous and async long-running patterns (trigger + poll/callback via message bus) *(partly built: synchronous only)*
 - The workflow holds no credentials **prior to slot activation**. Because every workflow is signature-verified before launch, it is trusted to receive scoped credentials — but only just-in-time, per slot, encrypted for that workflow instance, and only for the slots it actually activates during the run
 
 **Network Egress Layer (toolchain and direct calls):**
@@ -534,7 +547,7 @@ graph TB
 | Mode | Behaviour | When to use |
 |---|---|---|
 | **default-deny** (default) | Only declared endpoints are reachable; all else blocked and logged | All production workflows |
-| **allow-all** | All outbound traffic permitted; everything still logged | Requested via run configuration or global tenant config; platform policy can prohibit entirely |
+| **allow-all** | All outbound traffic permitted; everything still logged | Requested via run configuration (per run); platform policy can prohibit entirely (a global or per-tenant default is planned — not built) |
 
 ---
 
@@ -677,7 +690,7 @@ and a Core-side registry call would break registry neutrality and air-gapped dep
 - Entries are keyed by the credential-STRIPPED clone URL (a token rotation reuses the entry); the credential is injected per git command as `-c url.<tokened>.insteadOf=<stripped>` and never persisted in any `.git/config` — cache or per-run clone, push-enabled ones included (their push credential lives only in the SDK's push gateway; system-proven: no workspace file holds the token, and the push still lands)
 - A cache entry may only be used to create a snapshot if the requesting identity independently passes an access check for that repository
 - Repositories marked `no-cache` in the manifest are fetched fresh per run and deleted immediately after — for high-sensitivity codebases
-- Per-tenant cache storage is physically separate in multi-tenant deployments, encrypted at rest using tenant-specific keys
+- Per-tenant cache storage is physically separate in multi-tenant deployments, encrypted at rest using tenant-specific keys *(planned — not built)* — the platform is single-tenant and the warm cache is not encrypted
 
 **Run input files (2026-11-08).** A workflow may declare files it takes per run (`RequiresInputFile(name, …, required)` — a schema field, so the Core knows them before a type's first run). A caller uploads each one (`POST /api/run-input-files`, the body is the file, capped by `CoreApi:MaxRunInputFileBytes`) and names the upload in its run request (`RunRequest.InputFiles`: declared name → upload id):
 - **Held encrypted, the uploader's alone.** The content lives beside the artifact payloads (shared by every Core node), encrypted with the platform protection key; until a run takes it, only its uploader can name it — anyone else's upload is indistinguishable from a missing one — and it is deleted unused after `CoreApi:RunInputFileTtlMinutes`
@@ -726,7 +739,7 @@ flowchart TD
     CAT -->|Build toolchain call| EGRESS["Network Egress Layer\n(transparent to the tool)"]
     CAT -->|Undeclared endpoint| BLOCK["Blocked and logged"]
 
-    EGRESS --> PKG_CHECK{Package proxy enabled?}
+    EGRESS --> PKG_CHECK{"Package proxy enabled? (planned)"}
     PKG_CHECK -->|Yes| PKG_PROXY["Package Proxy\n(cache + scan)"]
     PKG_CHECK -->|No| DIRECT["Direct to declared endpoint"]
     PKG_PROXY --> REG["Public Registry"]
@@ -740,13 +753,13 @@ flowchart TD
 
 | Layer | Set by | Scope | Examples |
 |---|---|---|---|
-| **Workflow manifest** | Workflow author (signed) | Per workflow artifact | Minimum required endpoints, `no-cache` repo flags, `package-proxy` preference |
+| **Workflow manifest** | Workflow author (signed) | Per workflow artifact | Minimum required endpoints, `no-cache` repo flags, `package-proxy` preference (planned) |
 | **Run configuration** | Trigger, user, or AI at dispatch | Per run | Additional allowed endpoints for this invocation, `allow-all` for a sandbox run |
-| **Platform policy** | Administrator | Global or per-tenant | Maximum permitted mode (e.g. deny `allow-all` entirely), mandatory endpoint blocklists |
+| **Platform policy** | Administrator | Global or per-tenant (per-tenant: planned) | Maximum permitted mode (e.g. deny `allow-all` entirely), mandatory endpoint blocklists — as built, runner configuration (`AllowAllNetworkPermitted`, `BlockedEndpoints`, `PlatformEgressEndpoints`) |
 
 The effective policy is `merge(manifest_baseline, run_config)` clamped by `platform_policy`. It is computed at dispatch and written to the run audit log — not stored in the signed artifact.
 
-**Manifest declaration (baseline, signed with the workflow):**
+**Manifest declaration (baseline, signed with the workflow)** — illustrative: the manifest is built in C# (`RequiresNetworkEndpoint(endpoint, purpose)`), and `package-proxy` is planned — not built:
 ```yaml
 network:
   allow:
@@ -767,7 +780,7 @@ network:
 ```
 
 **allow-all mode:**
-- Requested in the run configuration (per-run) or in platform configuration (global default for a tenant)
+- Requested in the run configuration (per-run) or in platform configuration (global default for a tenant — planned, not built)
 - Not part of the signed workflow artifact — the same binary can run in `default-deny` in production and `allow-all` in a sandbox without re-signing
 - All traffic is still fully logged — the difference from `default-deny` is that nothing is blocked, not that nothing is observed
 - Platform policy is the hard ceiling: administrators can prohibit `allow-all` entirely, regardless of what any run configuration requests
@@ -806,7 +819,7 @@ volumes from the workflow's own signed image; there is no exec channel into comp
 
 ## 11. Multi-Account Model
 
-A user or service principal holds multiple **Account Bundles**, each scoped to a purpose.
+A user or service principal holds multiple **Account Bundles**, each scoped to a purpose. *(As built, bundles are connectors bound to a workflow's slots; there is no separate Account Manager component, no TFVC, Jira or Azure OpenAI bundle, and AI bundles have no quotas or purposes.)*
 
 ```mermaid
 graph LR
@@ -822,7 +835,7 @@ graph LR
 
 - Workflows declare *which bundle types* they need - never specific credentials
 - Bundles are encrypted at rest **in the Core** (as connectors); Core.Runner decrypts and re-encrypts the relevant scoped subset for a specific workflow instance only at slot activation time — never earlier, and never more than the activated slot requires
-- AI bundles carry usage quotas and purpose restrictions
+- AI bundles carry usage quotas and purpose restrictions *(planned — not built)*
 - Multiple bundles of the same type are supported (e.g. two ADO instances, a GitHub and a Jira account)
 
 ---
@@ -842,7 +855,11 @@ All modes share the same codebase. Runtime behaviour is driven entirely by confi
 
 Platform services (RabbitMQ, MongoDB) are deployed by Compose / k8s as they are today — the Core runs **workload containers only**, it is not a platform supervisor. There is **no Redis/SignalR view backplane**: live views fan out over the Core.Api SSE stream (see §14–§15).
 
+**Tracing and metrics (2026-11-08).** The Core API and the runner run the OpenTelemetry SDK, so a client's W3C trace continues through the platform: a request to the Core joins the caller's trace (`traceparent`), every bus message carries the current trace in its headers and its consumer continues it (the Core's dispatch → the runner; the runner's status events and audit records → the Core), and HTTP calls between them (`System.Net.Http`) pass it on. Spans come from ASP.NET Core, the HTTP client and the messaging layer (`Auxilia.Messaging`); metrics from ASP.NET Core and the messaging meter. Both export over OTLP when `Otlp:Endpoint` (gRPC) or the standard `OTEL_EXPORTER_OTLP_*` variables name a collector (`AUXILIA_OTLP_ENDPOINT` in the compose file); without one, the trace context still propagates. The runner also serves Prometheus metrics on `/metrics`. A workflow container's own process is not traced.
+
 **Images and the reference compose file (2026-11-08).** Every deployable (Core API, runner, Docker guard, egress gateway, admin console, trigger host) and every shipped workflow is published as a versioned image to the GitHub Container Registry (`ghcr.io/<owner>/auxilia-<name>:<version>`, `.github/workflows/publish-images.yml`): built on the same `v*` tags that publish the NuGet packages — one version across images and client libraries —, carrying build provenance and an SBOM, with every image's digest listed per release (workflow types are approved by digest). Images of a private repository are private packages that inherit its access. amd64 only for now. Published images are product images: test-only parts — the runner's credential-probe slot — live in a `system-test` Dockerfile stage that only the system tests build. `compose.yaml` at the repository root runs the platform from those images, or builds them from the source tree: RabbitMQ, the Core API, the Docker guard and the runner (the egress-gateway image is pulled or built with them; the shipped workflow images with the `workflows` profile, then registered by digest with `Scripts/Setup-Platform.ps1 -Registry … -Pull`). It encodes the production shape the system tests prove — the guard alone holds the daemon socket, run directories sit at the daemon's own path for them, the broker account the runner mints per-run identities with, the platform endpoints no run may reach — and refuses to start without a protection key. It runs in the evaluation posture (no trusted signing keys, so no sandbox runtime is required); the production switches (signing keys + a sandbox runtime, MongoDB, a write-once audit anchor) are named in the file. The admin console is not part of it: its browser sign-in needs OIDC behind a gateway that serves it and the Core from one origin.
+
+*(The mode table is the design. As built: RabbitMQ is the only bus, Docker the only workflow runtime — a dev runner runs containers too —, signing uses a key file loaded in-process, and sign-in is local accounts, API keys and OIDC (Entra); LDAP serves identity import only. The in-process bus, OS-process runtime, k3s/AKS, Azure Service Bus, Vault Transit and Key Vault are planned — not built.)*
 
 | Mode | Message Bus | Workflow Runtime | Signing | Identity |
 |---|---|---|---|---|
@@ -850,10 +867,10 @@ Platform services (RabbitMQ, MongoDB) are deployed by Compose / k8s as they are 
 | **On-premise** | RabbitMQ cluster | Docker / k3s — signed `*.workflow.zip` extracted and bind-mounted | HashiCorp Vault Transit | LDAP / AD / OIDC |
 | **Cloud (Azure)** | Azure Service Bus | AKS — signed `*.workflow.zip` extracted and bind-mounted | Azure Key Vault | Entra ID |
 
-Pluggable interfaces: **IMessageBusClient**, **IWorkflowRunner**, **ISigningProvider**, **IIdentityProvider**, **IResourceProxy**, **IArtifactStore**
-The core platform has no hard dependency on RabbitMQ, Docker, Vault, AAD, or a specific artifact storage backend.
+Pluggable interfaces: **IMessageBusClient**, **IWorkflowLauncher**, **ISigningProvider**, **IIdentityProvider**, **IArtifactStore** — each with one production implementation today (RabbitMQ, Docker, key file, local accounts, filesystem); an `IResourceProxy` abstraction is planned — not built.
+The design keeps the core platform free of a hard dependency on RabbitMQ, Docker, Vault, AAD, or a specific artifact storage backend; as built, the runner needs a Docker daemon and the RabbitMQ management API (per-run broker identities).
 
-**Isolation guarantees are container-only.** The workspace isolation (mount namespaces, UID isolation, CoW snapshots — section 9) and kernel-level network policy enforcement (section 10) exist only in the container runtimes (Docker / k3s / AKS). In **Local / Dev** mode the workflow runs as a plain OS process — typically on the developer's own machine, including Windows — with **no isolation and no network enforcement**. Dev mode is therefore **trusted-operator-only**: it must never be exposed to untrusted workflows, untrusted users, or production credentials. The security guarantees this document describes apply to the container-based modes.
+**Isolation guarantees are container-only.** The workspace isolation (per-run directories bound into the container, UID isolation; CoW snapshots planned — section 9) and kernel-level network policy enforcement (section 10) exist only in the container runtimes (Docker today; k3s / AKS planned). In **Local / Dev** mode *(planned — not built: every runner launches containers today)* the workflow runs as a plain OS process — typically on the developer's own machine, including Windows — with **no isolation and no network enforcement**. Dev mode is therefore **trusted-operator-only**: it must never be exposed to untrusted workflows, untrusted users, or production credentials. The security guarantees this document describes apply to the container-based modes.
 
 Endpoint-granular egress enforcement is realized by the per-run egress gateway (§10) on Linux container daemons; a runner on a Windows container daemon cannot enforce egress and runs nothing unless its operator accepts that explicitly (`WorkflowLauncher:AllowUnenforcedEgress`, then allow-all runs only; anything else fails pre-flight). Container hardening (§7 *Workload containment*) applies on every Linux daemon; the second kernel boundary is a sandboxed runtime chosen automatically when the daemon offers one (`PreferredSandboxRuntimes`), configurable (`ContainerRuntime`) and required in the production posture (`RequireSandboxRuntime`).
 
@@ -862,6 +879,8 @@ Endpoint-granular egress enforcement is realized by the per-run egress gateway (
 ## 13. Open Questions and Concerns
 
 ### Resolved from use case analysis (docs/USE-CASES.md)
+
+*(Decisions, not delivery: #1's artifact inputs, #2, #3, #4's async pattern and #8 are planned — not built; #6's CoW snapshots are plain copies so far — see "Built and planned" at the top.)*
 
 | # | Decision |
 |---|---|
@@ -889,10 +908,10 @@ Endpoint-granular egress enforcement is realized by the per-run egress gateway (
 | 10 | **Network policy is layered, not signing-time** — the manifest declares a baseline (minimum required endpoints); run configuration can extend it (e.g. `allow-all` for a sandbox run); platform policy is the hard ceiling (can prohibit `allow-all` entirely). Effective policy is resolved at dispatch and recorded in the run audit log — the signed artifact is unchanged |
 | 11 | **AI has full parity with the human UI** - MCP tools are generated from the same API layer, not maintained separately |
 | 12 | **Signing is mandatory with no bypass in non-dev modes** - dev mode can disable signing entirely |
-| 13 | IMessageBusClient, IWorkflowRunner, ISigningProvider, IIdentityProvider, and IResourceProxy are all pluggable - no hard dependency on any specific technology |
+| 13 | IMessageBusClient, IWorkflowLauncher, ISigningProvider and IIdentityProvider are pluggable (one production implementation each today; IResourceProxy planned) - no hard dependency on any specific technology by design |
 | 14 | **Workflows are trusted via signature, credentials are delivered just-in-time** — the signing authority vouches for the workflow's correctness; a verified workflow may hold scoped credentials directly, but receives each slot's credentials only at slot activation, encrypted per instance, never as an upfront bundle |
-| 15 | **Artifact persistence via pluggable `IArtifactStore`** — production is direct but manifest/config-limited; consumption is resolved at dispatch and mounted read-only into the container; the bus carries references (ID + hash), never payloads; backends (filesystem, blob, database) are a deployment choice |
-| 16 | **No separate Orchestration Service** — trigger decisions live in the Product; the dispatch authority lives in **Core.Api** (the Run API); container launch, pre-flight, and lifecycle live in **Core.Runner**. A standalone orchestrator would only forward decisions and add a failure mode without an isolation benefit |
+| 15 | **Artifact persistence via pluggable `IArtifactStore`** — production is direct but manifest/config-limited; consumption is resolved at dispatch and mounted read-only into the container (planned — not built); the bus carries references (ID + hash), never payloads; backends (filesystem, blob, database) are a deployment choice (filesystem only so far) |
+| 16 | **No separate Orchestration Service** — trigger decisions live in the workflow-domain hosts (`Auxilia.Workflows.Client`); the dispatch authority lives in **Core.Api** (the Run API); container launch, pre-flight, and lifecycle live in **Core.Runner**. A standalone orchestrator would only forward decisions and add a failure mode without an isolation benefit |
 | 17 | **Unified principal model with deny-by-default RBAC** — humans, AI agents, and services are all principals through the same Policy Engine (hosted in Core.Api); four built-in roles (Administrator, Operator, User, Auditor) plus **first-class groups** (a principal's effective roles are the union of its direct assignments and its groups'); workflow-type access lists as the primary instrument; single-tenant v1 with `TenantId` on every resource (see section 16) |
 
 ---
@@ -970,7 +989,7 @@ graph TB
         WF103[Workflow WF-103]
     end
     MON[Core.Api FailoverMonitor + RunnerLivenessTracker]
-    TRIG[Trigger sources: Product adapters, Core Run API / MCP, Studio scheduler]
+    TRIG[Trigger sources: workflow-domain hosts, Core Run API / MCP]
     TRIG -->|Dispatch command| CMD
     CMD -->|Competing consume| SI1
     CMD -->|Competing consume| SI2
@@ -1018,11 +1037,11 @@ sequenceDiagram
 
 | Component | Local / Dev | On-premise | Cloud (Azure) |
 |---|---|---|---|
-| Admin Console instances | 1 | N + sticky LB (live views via Core.Api SSE) | N + Azure Front Door (live views via Core.Api SSE) |
+| Admin Console instances | 1 | N + sticky LB (live views via Core.Api SSE) | N + Azure Front Door (live views via Core.Api SSE) — planned |
 | Core.Runner instances | 1 | Pool via competing consumers | Pool via competing consumers with auto-scale |
 | Ownership and heartbeat store | Not needed | Runner platform data layer (MongoDB) + `RunnerHeartbeat` on the bus | Runner platform data layer + `RunnerHeartbeat` on the bus |
-| Message bus | RabbitMQ single in Docker | RabbitMQ cluster | Azure Service Bus |
-| Workflow runtime | OS Process | Docker / k3s | AKS node pool |
+| Message bus | RabbitMQ single in Docker | RabbitMQ cluster | Azure Service Bus (planned) |
+| Workflow runtime | Docker (OS process planned) | Docker (k3s planned) | AKS node pool (planned) |
 
 Live-view fan-out uses the **Core.Api SSE stream**, not a Blazor/SignalR backplane, so **no Redis is required for the UI tier**. Runner ownership and liveness live in the runner's platform data layer plus the `RunnerHeartbeat` bus beat — also no Redis. (Moving the hot heartbeat path onto a cache such as Redis remains an optional later optimization.)
 
@@ -1055,7 +1074,7 @@ graph LR
     WF["Workflow"] -->|"ViewData message<br/>(instanceId, viewName, sequence, payload)"| BUS["Message Bus (IMessageBusClient)"]
     BUS -->|"workflow.views topic, key = instance id"| API["Core.Api: RunStreamPublisher → RunStreamBroker"]
     API -->|"SSE: GET /api/runs/{id}/stream"| FE["Auxilia.AdminConsole: renders view from descriptor"]
-    BUS -->|"lifecycle includes persisted"| STORE["View Store (Core.Runner / Product DB / IArtifactStore)"]
+    BUS -->|"lifecycle includes persisted"| STORE["View Store (Core.Api — persisted run views)"]
     STORE --> FE2["Auxilia.AdminConsole: re-opens views of finished runs"]
     API --> MCP["MCP — same view data exposed to AI agents"]
 ```
@@ -1065,11 +1084,11 @@ graph LR
 - **A resumable stream**: every frame's SSE `id` is the stream's position after it (`RunStreamEvent.Cursor` — the last view sequence plus a mark of the last status); a client that sends it back (`Last-Event-ID`, which a browser's `EventSource` does on every reconnect, or `?after=` on a first connect — the header wins) gets everything after it **exactly once, in order**, and a client connecting without one gets the run from its start. `RunStreamSession` subscribes BEFORE it reads the record and the store, replays the stored items after the position, then follows the bus: a duplicate is dropped by sequence, an item ahead of its predecessors is held back while the store is re-read for them, and predecessors the Core never retained (beyond `MaxPersistedViewItemsPerRun`) become one `gap` frame after `CoreApi:StreamGapWaitMilliseconds`. **Status frames carry the run's state as the record holds it** — a bus transition only prompts a re-read of the record (another node may still be writing it), so a client never sees a state the Core does not hold and never goes back to an older one on a resume; transitions closer together than that, or while no stream was open, collapse into the latest. A live run's state is the first frame, a finished run's verdict the last: before it the stream waits (bounded) until it has every item up to the count the run reported with its final state (`LastViewSequence`), the rest becomes a gap. A position at the end of a finished run is answered **204** — nothing more, ever, which also stops an `EventSource`. Idle streams carry **`: ping` keepalive comments** (`CoreApi:SseKeepaliveSeconds`, default 15s) so a dead connection is distinguishable from a quiet run. The client side lives INSIDE `Auxilia.Core.Client`: streams reconnect with exponential backoff and the last yielded frame's cursor, enforce an idle timeout, take a kept position to start from, and surface `Connected`/`Reconnecting` frames so UIs show a banner instead of freezing. `GET /api/runs/{id}/views?after=` pages the stored items in the same order. Artifact-stream consumers catch up on a reconnect via `GET /api/artifacts?createdAfterUtc=…` (oldest-first) — artifacts are persisted, so nothing is lost in the gap
 - **Persisted**: view data is stored so the Admin Console can re-open the views of completed runs — viewing finished workflow results uses the identical rendering path as live data, replayed from the store
 - **Generic rendering**: the frontend renders views purely from the descriptor (schema + rendering hint); adding a new workflow with new views requires **no frontend changes**. A `custom` rendering hint allows future pluggable visual components
-- **AI parity**: the MCP server exposes the same views to AI agents — no hidden data channel
+- **AI parity**: the MCP server exposes the same views to AI agents — no hidden data channel *(planned — not built: run views are REST/SSE only today)*
 
 ### Dashboard composition
 
-Dashboards are composed of views: per-run dashboards come from the run's workflow schema automatically; operators can pin views from multiple workflows into shared dashboards. Access to a view follows the same permission model as the workflow it belongs to.
+Dashboards are composed of views: per-run dashboards come from the run's workflow schema automatically; operators can pin views from multiple workflows into shared dashboards *(partly built: personal pins — shared dashboards are planned)*. Access to a view follows the same permission model as the workflow it belongs to.
 
 ---
 
@@ -1093,8 +1112,8 @@ not a special principal kind; it is a Service principal tagged as one.
 
 | Role | May |
 |---|---|
-| **Administrator** | Configure identity providers and group mappings, platform policy ceilings, tenants, retention, signing configuration; assign roles; manage all principals |
-| **Operator** | Install/enable workflow types, manage slot configurations and operator clamps (branch patterns, PR-only, network endpoints), approve long-living workflow deployment, configure task sources and triggers, manage shared dashboards |
+| **Administrator** | Configure identity providers and group mappings, platform policy ceilings, tenants, retention, signing configuration; assign roles; manage all principals *(tenants and audit/artifact retention are planned; ceilings and signing keys are deployment configuration today)* |
+| **Operator** | Install/enable workflow types, manage slot configurations and operator clamps (branch patterns and PR-only planned; network endpoints), approve long-living workflow deployment, configure task sources and triggers, manage shared dashboards |
 | **User** | Trigger permitted workflow types, observe permitted runs and views, answer RequestInput / approval steps routed to them, use per-run dashboards, fetch their runs' artifacts (checkpoints included — run access keeps them to the caller's own runs) |
 | **Auditor** | Read-only access to the audit log and run history — no operational permissions |
 
@@ -1105,9 +1124,9 @@ Roles are **permission sets**, not flags: v1 ships these four fixed roles; custo
 An authorization check is the triple **(principal, action, resource)** evaluated **deny-by-default**:
 
 - **Actions** are fine-grained verbs per resource type: `workflow.trigger`, `workflow.cancel`, `run.observe`, `run.provide-input`, `view.subscribe`, `artifact.consume`, `slot-config.write`, `bundle.manage`, `policy.administer`, `audit.read`, …
-- **Resources** carry a scope chain: `tenant → workflow-type → run/view/artifact`. A grant at an outer scope implies the inner ones unless explicitly narrowed
+- **Resources** carry a scope chain: `tenant → workflow-type → run/view/artifact`. A grant at an outer scope implies the inner ones unless explicitly narrowed *(planned — not built: grants are per resource — workflow-type access lists per action, per-run grants, connector and resource sharing)*
 - **Workflow-type access lists** are the primary day-to-day instrument: per workflow type, entries grant an action to a role, an individual principal, or every member of a first-class group; when entries exist for a (type, action) they are the exclusive grant source (administered via MCP and REST, gated `policy.administer`). With no entries, the `security.default-resource-access` posture decides who may trigger (restricted = administrators only; see "Resource ownership and sharing")
-- v1 is **single-tenant**, but every resource and grant carries a `TenantId` (default tenant) so multi-tenancy is a data migration, not a schema break
+- v1 is **single-tenant**, but every resource and grant carries a `TenantId` (default tenant) so multi-tenancy is a data migration, not a schema break *(partly built: principals and groups carry it; other resources and grants do not yet)*
 
 ### Policy Engine evaluation
 

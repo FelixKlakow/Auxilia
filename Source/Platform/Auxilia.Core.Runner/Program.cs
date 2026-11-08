@@ -188,8 +188,20 @@ try
     // --- Slot configuration seeding ---
     builder.Services.AddSingleton<SlotProviderRegistry>();
 
-    // --- OpenTelemetry(tracing + metrics) ---
+    // --- OpenTelemetry (tracing + metrics) ---
+    // A run's trace continues from the Core's dispatch message through everything the runner does
+    // for it — its bus messages and its HTTP calls back to the Core carry the trace context.
+    // Exported over OTLP when Otlp:Endpoint (or the standard OTEL_EXPORTER_OTLP_ENDPOINT) is set.
     var otlpEndpoint = builder.Configuration["Otlp:Endpoint"];
+    var exportsOtlp = !string.IsNullOrWhiteSpace(otlpEndpoint)
+                      || !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT"));
+    void ConfigureOtlp(OtlpExporterOptions options)
+    {
+        if (string.IsNullOrWhiteSpace(otlpEndpoint))
+            return; // the exporter reads the standard OTEL_EXPORTER_OTLP_* variables itself
+        options.Endpoint = new Uri(otlpEndpoint);
+        options.Protocol = OtlpExportProtocol.Grpc;
+    }
     var serviceVersion = Assembly.GetExecutingAssembly()
         .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
         ?.InformationalVersion ?? "0.0.0";
@@ -204,13 +216,10 @@ try
         {
             tracing
                 .AddSource(MessagingTelemetry.ActivitySourceName)
+                .AddSource("System.Net.Http")
                 .AddAspNetCoreInstrumentation();
-            if (!string.IsNullOrWhiteSpace(otlpEndpoint))
-                tracing.AddOtlpExporter(o =>
-                {
-                    o.Endpoint = new Uri(otlpEndpoint);
-                    o.Protocol = OtlpExportProtocol.Grpc;
-                });
+            if (exportsOtlp)
+                tracing.AddOtlpExporter(ConfigureOtlp);
         })
         .WithMetrics(metrics =>
         {
@@ -218,12 +227,8 @@ try
                 .AddMeter(MessagingTelemetry.MeterName)
                 .AddAspNetCoreInstrumentation()
                 .AddPrometheusExporter();
-            if (!string.IsNullOrWhiteSpace(otlpEndpoint))
-                metrics.AddOtlpExporter(o =>
-                {
-                    o.Endpoint = new Uri(otlpEndpoint);
-                    o.Protocol = OtlpExportProtocol.Grpc;
-                });
+            if (exportsOtlp)
+                metrics.AddOtlpExporter(ConfigureOtlp);
         });
 
     var app = builder.Build();

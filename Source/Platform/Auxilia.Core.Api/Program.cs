@@ -16,6 +16,10 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
+using OpenTelemetry.Exporter;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -226,6 +230,47 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<FailoverMonitor>()
 builder.Services.AddMcpServer()
     .WithHttpTransport(o => o.Stateless = true)
     .WithTools<Auxilia.Core.Api.Mcp.CoreMcpTools>();
+
+// --- OpenTelemetry (tracing + metrics) ---
+// A caller's W3C trace context continues through the Core: a request joins the caller's trace,
+// the bus messages it sends carry it on to the runner (whose own messages and calls back carry
+// it here again), and its outgoing HTTP calls pass it along. The SDK is what activates the
+// propagation at all; spans and metrics are exported over OTLP only when a collector is named
+// (Otlp:Endpoint, or the standard OTEL_EXPORTER_OTLP_ENDPOINT).
+var otlpEndpoint = builder.Configuration["Otlp:Endpoint"];
+var exportsOtlp = !string.IsNullOrWhiteSpace(otlpEndpoint)
+                  || !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT"));
+void ConfigureOtlp(OtlpExporterOptions options)
+{
+    if (string.IsNullOrWhiteSpace(otlpEndpoint))
+        return; // the exporter reads the standard OTEL_EXPORTER_OTLP_* variables itself
+    options.Endpoint = new Uri(otlpEndpoint);
+    options.Protocol = OtlpExportProtocol.Grpc;
+}
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(resource => resource.AddService(
+        serviceName: "Auxilia.Core.Api",
+        serviceVersion: System.Reflection.Assembly.GetExecutingAssembly()
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()
+            ?.InformationalVersion ?? "0.0.0"))
+    .WithTracing(tracing =>
+    {
+        tracing
+            .AddSource(MessagingTelemetry.ActivitySourceName)
+            .AddSource("System.Net.Http")
+            .AddAspNetCoreInstrumentation();
+        if (exportsOtlp)
+            tracing.AddOtlpExporter(ConfigureOtlp);
+    })
+    .WithMetrics(metrics =>
+    {
+        metrics
+            .AddMeter(MessagingTelemetry.MeterName)
+            .AddAspNetCoreInstrumentation();
+        if (exportsOtlp)
+            metrics.AddOtlpExporter(ConfigureOtlp);
+    });
 
 var app = builder.Build();
 

@@ -26,8 +26,20 @@ public sealed class FakeMessageBusClient : IMessageBusClient
 
     public Task PublishAsync<T>(string topic, T message, CancellationToken cancellationToken = default)
     {
-        lock (_publishedMessages) _publishedMessages.Add((topic, message!));
+        lock (_publishedMessages)
+        {
+            _publishedMessages.Add((topic, message!));
+            _publishedTraces.Add((message!, System.Diagnostics.Activity.Current?.TraceId.ToHexString()));
+        }
         return Task.CompletedTask;
+    }
+
+    private readonly List<(object Message, string? TraceId)> _publishedTraces = [];
+
+    /// <summary>Each published message with the trace it was published under (what the real client propagates).</summary>
+    public IReadOnlyList<(object Message, string? TraceId)> PublishedTraces
+    {
+        get { lock (_publishedMessages) return _publishedTraces.ToList(); }
     }
 
     public async Task PublishToExchangeAsync<T>(string exchangeName, T message, CancellationToken cancellationToken = default)

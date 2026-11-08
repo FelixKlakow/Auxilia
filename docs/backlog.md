@@ -86,6 +86,18 @@ containment. Outcomes (ARCHITECTURE §7, §9, §10, §16):
   lifetime and per-run rate limit; checkpoint payloads (like every artifact payload) are not
   downloadable over MCP; the Core holds a payload in memory while it encrypts or serves it
   (bounded per node — a streaming format would lift that).
+- ~~**`ARCHITECTURE.md` against the code**~~ — DONE (2026-11-08): an audit of every section against
+  the code; each claim not built is marked *(planned — not built)* or *(partly built: …)* in place
+  and listed in a "Built and planned" box at the top (the AI integration layer of §5, artifact
+  inputs, the Resource Proxy's async pattern and connectors, the Package Proxy, multi-tenancy,
+  quotas, CoW snapshots, source-control clamps, requeue/retry, shared dashboards, the non-Docker
+  runtimes, Service Bus, Vault/Key Vault, Jira/Trello/TFVC, MCP gaps); stale Product DB / Studio
+  passages corrected. Keep the markers honest: remove one when its feature lands.
+- ~~**OpenTelemetry in the Core API and the runner**~~ — DONE (2026-11-08): the Core API now runs
+  the SDK too (the runner did already), so a client's `traceparent` continues through the Core,
+  into the dispatch message and through the runner and its calls back; OTLP export via
+  `Otlp:Endpoint` / `OTEL_EXPORTER_OTLP_*`. Proven at the Core (`TracePropagationTests`); the
+  workflow container's own process is not traced, and no system test exports to a collector yet.
 - ~~**Published images, or a compose file**~~ — DONE both (2026-11-08): `publish-images.yml`
   pushes all twelve images (six platform, six workflow) to GHCR on the `v*` tags, amd64, with
   provenance + SBOM and a digest list per release; `compose.yaml` + `.env.example` run the

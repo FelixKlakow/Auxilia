@@ -66,6 +66,8 @@ services:
       # Optional: a human administrator for password sign-in (POST /auth/login).
       Governance__BootstrapAdminUsername: ${AUXILIA_ADMIN_USERNAME:-}
       Governance__BootstrapAdminPassword: ${AUXILIA_ADMIN_PASSWORD:-}
+      # Optional: an OTLP collector (gRPC) for traces and metrics — callers' traces continue here.
+      Otlp__Endpoint: ${AUXILIA_OTLP_ENDPOINT:-}
     volumes:
       - core-data:/data
       - artifacts:/artifacts
@@ -124,6 +126,7 @@ services:
       WorkflowLauncher__ProtectedEndpoints__0: core-api:8080
       WorkflowLauncher__ProtectedEndpoints__1: docker-guard:2375
       WorkflowLauncher__ProtectedEndpoints__2: rabbitmq:15672
+      Otlp__Endpoint: ${AUXILIA_OTLP_ENDPOINT:-}
     volumes:
       - runner-data:/data
       - artifacts:/artifacts
