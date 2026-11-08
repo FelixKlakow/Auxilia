@@ -44,7 +44,7 @@ public sealed class VerdictWorkflowApprovalHandlerTests
     }
 
     private static readonly WorkflowTypeRegistrationDto Registration = new(
-        "under-review", "docker://img:1", WorkflowTypeStatus.Pending, null,
+        "under-review", "docker://img:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", WorkflowTypeStatus.Pending, null,
         "publisher-key", false, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
     {
         PackageHashBase64 = "reviewed-package-hash"
@@ -145,7 +145,7 @@ public sealed class VerdictWorkflowApprovalHandlerTests
             Assert.That(result.Reason, Is.EqualTo("clean package"));
             Assert.That(_dispatcher.LastRequest!.WorkflowType, Is.EqualTo("safety-check"));
             Assert.That(_dispatcher.LastRequest.Context!["approval-workflow-type"], Is.EqualTo("under-review"));
-            Assert.That(_dispatcher.LastRequest.Context!["approval-package-uri"], Is.EqualTo("docker://img:1"));
+            Assert.That(_dispatcher.LastRequest.Context!["approval-package-uri"], Is.EqualTo("docker://img:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
         });
     }
 

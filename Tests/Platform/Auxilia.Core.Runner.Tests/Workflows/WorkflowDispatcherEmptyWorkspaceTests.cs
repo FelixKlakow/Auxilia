@@ -230,6 +230,6 @@ public class WorkflowDispatcherEmptyWorkspaceTests
     // ------------------------------------------------------------------ helpers
 
     private static RunWorkflowCommand NewRunCommand(params WorkspaceMountDispatch[] mounts)
-        => new(Guid.NewGuid(), WorkflowType, "docker://empty-workspace-workflow:test",
+        => new(Guid.NewGuid(), WorkflowType, "docker://empty-workspace-workflow:test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             new Dictionary<string, string>(), WorkspaceMounts: mounts);
 }

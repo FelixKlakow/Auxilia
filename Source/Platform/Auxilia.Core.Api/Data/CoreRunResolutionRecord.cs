@@ -28,6 +28,13 @@ public sealed record CoreRunResolutionRecord : IEntity
     public Guid? TriggeredByPrincipalId { get; init; }
 
     /// <summary>
+    /// The principal that started the run on <see cref="TriggeredByPrincipalId"/>'s behalf, when
+    /// different — with the triggering principal, the run's access owners (recovered from here when
+    /// a status event finds no dispatch record to merge).
+    /// </summary>
+    public Guid? StartedByPrincipalId { get; init; }
+
+    /// <summary>
     /// The serialized <see cref="Auxilia.Workflows.Messaging.Messages.RunWorkflowCommand"/> dispatched for
     /// this run (keyed by its <c>CommandId</c>). Kept so an orphaned run can be re-dispatched once on
     /// failover; the resolution token and the token-authorized package URL are redacted before

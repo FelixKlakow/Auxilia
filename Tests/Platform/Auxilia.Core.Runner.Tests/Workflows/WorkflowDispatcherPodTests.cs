@@ -96,7 +96,7 @@ public sealed class WorkflowDispatcherPodTests
     private static RunWorkflowCommand Command(
         IReadOnlyList<CompanionDeclaration> companions,
         Dictionary<string, string>? context = null)
-        => new(Guid.NewGuid(), "pod-workflow", "docker://pod-workflow:1",
+        => new(Guid.NewGuid(), "pod-workflow", "docker://pod-workflow:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             context ?? new Dictionary<string, string>(),
             SchemaJson: JsonSerializer.Serialize(
                 new WorkflowSchema("pod-workflow", [], []) { Companions = companions }));
@@ -166,7 +166,7 @@ public sealed class WorkflowDispatcherPodTests
             ["sim-base/24.04"] = Image
         };
         var command = new RunWorkflowCommand(
-            Guid.NewGuid(), "pod-workflow", "docker://pod-workflow:1",
+            Guid.NewGuid(), "pod-workflow", "docker://pod-workflow:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             new Dictionary<string, string>(),
             SchemaJson: JsonSerializer.Serialize(new WorkflowSchema("pod-workflow", [], [])
             {
@@ -196,7 +196,7 @@ public sealed class WorkflowDispatcherPodTests
     public async Task PodControl_WithoutPinnedBases_RegistersAnEmptyMap()
     {
         var command = new RunWorkflowCommand(
-            Guid.NewGuid(), "pod-workflow", "docker://pod-workflow:1",
+            Guid.NewGuid(), "pod-workflow", "docker://pod-workflow:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             new Dictionary<string, string>(),
             SchemaJson: JsonSerializer.Serialize(new WorkflowSchema("pod-workflow", [], [])
             {

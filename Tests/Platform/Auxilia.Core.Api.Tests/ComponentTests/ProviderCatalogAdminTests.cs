@@ -22,7 +22,7 @@ namespace Auxilia.Core.Api.Tests.ComponentTests;
 public sealed class ProviderCatalogAdminTests : CoreApiComponentTestBase
 {
     [SetUp]
-    public Task RegisterRunTypeAsync() => RegisterActiveTypeAsync(CreateClient(), "wt", "docker://img");
+    public Task RegisterRunTypeAsync() => RegisterActiveTypeAsync(CreateClient(), "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 
     private static readonly SettingDescriptor[] EmailDescriptors =
     [
@@ -167,7 +167,7 @@ public sealed class ProviderCatalogAdminTests : CoreApiComponentTestBase
         var response = await CreateClient().PostAsJsonAsync("/api/runs", new
         {
             workflowType = "wt",
-            packageUri = "docker://img",
+            packageUri = "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             slotBindings = new[] { new { slotName = "src", providerType = "email-work-items" } }
         });
 

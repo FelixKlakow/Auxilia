@@ -126,7 +126,7 @@ public sealed class RunServiceTests
     public async Task RunInline_PublishesCommand_WithRegistryPackage_WithoutRequestedBy()
     {
         var (service, bus, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 
         await service.RunInlineAsync(
             new RunRequest("wt",
@@ -135,7 +135,7 @@ public sealed class RunServiceTests
 
         var command = bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>().Single();
         Assert.That(command.WorkflowType, Is.EqualTo("wt"));
-        Assert.That(command.WorkflowPackageUri, Is.EqualTo("docker://img"),
+        Assert.That(command.WorkflowPackageUri, Is.EqualTo("docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             "The registry — not the caller — supplies the package coordinate.");
         Assert.That(command.RequestedBy, Is.Null,
             "The Core is the auth authority and dispatches with RequestedBy=null.");
@@ -148,7 +148,7 @@ public sealed class RunServiceTests
     {
         var (service, bus, _, registry, _) = New();
         var schemaJson = ToolSchemaJson();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img", schemaJson);
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", schemaJson);
 
         await service.RunInlineAsync(
             new RunRequest("wt", new Dictionary<string, string>()),
@@ -164,7 +164,7 @@ public sealed class RunServiceTests
     public async Task RunInline_WithoutARegistrySchema_DispatchesANullSchema()
     {
         var (service, bus, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 
         await service.RunInlineAsync(
             new RunRequest("wt", new Dictionary<string, string>()),
@@ -178,7 +178,7 @@ public sealed class RunServiceTests
     public async Task RunInline_WritesTheDispatchedRecord_BeforePublishingTheCommand()
     {
         var (service, bus, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 
         var accepted = await service.RunInlineAsync(
             new RunRequest("wt", new Dictionary<string, string>()),
@@ -222,7 +222,7 @@ public sealed class RunServiceTests
         var (service, _, _, registry, _) = New();
         // A docker registration has no verifiable signature — it enters Pending, not Active.
         var outcome = await registry.RegisterAsync(
-            new RegisterWorkflowTypeRequest("wt", "docker://img"), null, CancellationToken.None);
+            new RegisterWorkflowTypeRequest("wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), null, CancellationToken.None);
         Assert.That(outcome.Registration!.Status, Is.EqualTo(WorkflowTypeStatus.Pending));
 
         Assert.ThrowsAsync<InvalidOperationException>(() => service.RunInlineAsync(
@@ -233,7 +233,7 @@ public sealed class RunServiceTests
     public async Task RunInline_ProviderRequiringAToolTheImageLacks_Throws()
     {
         var (service, _, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img", ToolSchemaJson());
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ToolSchemaJson());
         await RegisterAgentProviderAsync("github-copilot-cli", "copilot");
 
         var ex = Assert.ThrowsAsync<InvalidOperationException>(() => service.RunInlineAsync(
@@ -248,7 +248,7 @@ public sealed class RunServiceTests
     public async Task RunInline_ProviderWhoseToolsTheImageProvides_Dispatches()
     {
         var (service, bus, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img", ToolSchemaJson());
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ToolSchemaJson());
         await RegisterAgentProviderAsync("claude-code-cli", "claude");
 
         await service.RunInlineAsync(
@@ -265,7 +265,7 @@ public sealed class RunServiceTests
     public async Task RunInline_EnvironmentComposingBindings_RideAsCapabilities_NotAsPlugins()
     {
         var (service, bus, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
             "dotnet-10", "environment", null, ["exec-env"], [], ComposesEnvironment: true),
             CancellationToken.None);
@@ -292,7 +292,7 @@ public sealed class RunServiceTests
     public async Task RunInline_EnvironmentLayersOfMixedBases_FailTheDispatch()
     {
         var (service, _, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
             "dotnet-10", "environment", null, ["exec-env"], [],
             ComposesEnvironment: true, EnvironmentBases: [new EnvironmentBaseRef("linux")]), CancellationToken.None);
@@ -317,7 +317,7 @@ public sealed class RunServiceTests
     public async Task RunInline_MultiBaseLayer_ComposesWithASingleBaseSibling()
     {
         var (service, bus, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
             "dotnet-10", "environment", null, ["exec-env"], [],
             ComposesEnvironment: true,
@@ -346,7 +346,7 @@ public sealed class RunServiceTests
     public async Task RunInline_WorkspaceReference_ExpandsToTheStoredResource()
     {
         var (service, bus, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
             "git-repository", "workspace", null, ["src-ctl"],
             [
@@ -392,7 +392,7 @@ public sealed class RunServiceTests
     public async Task RunInline_PersonalWorkspaceOfAnotherUser_FailsTheDispatch()
     {
         var (service, _, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
             "git-repository", "workspace", null, ["src-ctl"],
             [new RegisterProviderSetting("CloneUrl", "Repository", "Text", Required: true, Role: "clone-url")],
@@ -416,7 +416,7 @@ public sealed class RunServiceTests
     public async Task RunInline_AnUncataloguedProvider_IsGatedLikeOneWithoutGrants()
     {
         var (service, _, _, registry, _) = New(restrictedDefaultAccess: true);
-        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 
         var ex = Assert.ThrowsAsync<RunAccessDeniedException>(() => service.RunInlineAsync(
             new RunRequest("wt", SlotBindings:
@@ -431,7 +431,7 @@ public sealed class RunServiceTests
     public async Task RunInline_EnvironmentLayersOfMixedBaseVersions_FailTheDispatch()
     {
         var (service, _, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
             "dotnet-10", "environment", null, ["exec-env"], [],
             ComposesEnvironment: true, EnvironmentBases: [new EnvironmentBaseRef("linux", "ubuntu-22.04")]),
@@ -458,7 +458,7 @@ public sealed class RunServiceTests
     public async Task RunInline_PinnedAndUnpinnedBaseVersions_Dispatch()
     {
         var (service, bus, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
             "dotnet-10", "environment", null, ["exec-env"], [],
             ComposesEnvironment: true, EnvironmentBases: [new EnvironmentBaseRef("linux", "ubuntu-24.04")]),
@@ -484,7 +484,7 @@ public sealed class RunServiceTests
     public async Task RunInline_EnvironmentLayersOfOneBase_Dispatch()
     {
         var (service, bus, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
             "dotnet-10", "environment", null, ["exec-env"], [],
             ComposesEnvironment: true, EnvironmentBases: [new EnvironmentBaseRef("linux")]), CancellationToken.None);
@@ -509,7 +509,7 @@ public sealed class RunServiceTests
     public async Task Cancel_OfAnUnclaimedDispatch_IsSettledByTheCore_NotForwardedToARunner()
     {
         var (service, bus, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         var accepted = await service.RunInlineAsync(new RunRequest("wt"), triggeredBy: null, CancellationToken.None);
 
         await service.CancelAsync(accepted.RunId, CancellationToken.None);
@@ -556,7 +556,7 @@ public sealed class RunServiceTests
     public async Task Rerun_RedispatchesWithFreshIdAndToken_AndRestashesTheBindings()
     {
         var (service, bus, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         await service.RunInlineAsync(
             new RunRequest("wt", new Dictionary<string, string> { ["K"] = "V" }),
             triggeredBy: null, CancellationToken.None);
@@ -586,7 +586,7 @@ public sealed class RunServiceTests
     public async Task RunInline_InlineSecretSetting_IsStashedProtected()
     {
         var (service, _, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
             "local-agent", "coding-agent", null, ["ICodingAgent"],
             [new RegisterProviderSetting("apiKey", "API key", "Secret", Required: true)]), CancellationToken.None);
@@ -611,7 +611,7 @@ public sealed class RunServiceTests
     public async Task Rerun_PersonalWorkspaceOfAnotherUser_IsDenied()
     {
         var (service, bus, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
             "git-repository", "workspace", null, ["src-ctl"],
             [new RegisterProviderSetting("CloneUrl", "Repository", "Text", Required: true, Role: "clone-url")],
@@ -640,7 +640,7 @@ public sealed class RunServiceTests
     public async Task Rerun_OfAPersonalConfigurationsRun_RequiresTheConfigurationsVisibility()
     {
         var (service, bus, configs, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         var owner = Guid.NewGuid();
         var config = await configs.CreateAsync(
             new CreateRunConfiguration("mine", "wt", Scope: ResourceScope.Personal), owner, CancellationToken.None);
@@ -673,7 +673,7 @@ public sealed class RunServiceTests
     public async Task RunInline_ConnectorResolvedProviderRequiringAToolTheImageLacks_Throws()
     {
         var (service, _, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img", ToolSchemaJson());
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ToolSchemaJson());
         await RegisterAgentProviderAsync("github-copilot-cli", "copilot");
         var connector = await _connectors.CreateAsync(
             new CreateConnector("copilot-account", "github-copilot-cli",
@@ -693,7 +693,7 @@ public sealed class RunServiceTests
     public async Task RunInline_ConnectorResolvedProviderWhoseToolsTheImageProvides_Dispatches()
     {
         var (service, bus, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img", ToolSchemaJson());
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ToolSchemaJson());
         await RegisterAgentProviderAsync("claude-code-cli", "claude");
         var connector = await _connectors.CreateAsync(
             new CreateConnector("claude-account", "claude-code-cli",
@@ -714,7 +714,7 @@ public sealed class RunServiceTests
     public async Task RunInline_WorkspaceResolvedProviderRequiringAToolTheImageLacks_Throws()
     {
         var (service, _, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img", ToolSchemaJson());
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ToolSchemaJson());
         await _providerCatalog.RegisterAsync("test", new RegisterSlotProvider(
             "svn-repository", "workspace", null, ["src-ctl"],
             [new RegisterProviderSetting("CloneUrl", "Repository", "Text", Required: true, Role: "clone-url")],
@@ -737,7 +737,7 @@ public sealed class RunServiceTests
     public async Task RunInline_CaseVariantProviderType_IsToolValidatedAgainstTheCatalogEntry()
     {
         var (service, _, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img", ToolSchemaJson());
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ToolSchemaJson());
         await RegisterAgentProviderAsync("github-copilot-cli", "copilot");
 
         var ex = Assert.ThrowsAsync<InvalidOperationException>(() => service.RunInlineAsync(
@@ -753,7 +753,7 @@ public sealed class RunServiceTests
     public async Task RunInline_CaseVariantProviderTypeWhoseToolsTheImageProvides_Dispatches()
     {
         var (service, bus, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img", ToolSchemaJson());
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ToolSchemaJson());
         await RegisterAgentProviderAsync("claude-code-cli", "claude");
 
         await service.RunInlineAsync(
@@ -770,7 +770,7 @@ public sealed class RunServiceTests
     public async Task Rerun_ProviderWhoseRequiredToolsAreNoLongerSatisfied_Throws()
     {
         var (service, bus, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img", ToolSchemaJson());
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ToolSchemaJson());
         await RegisterAgentProviderAsync("claude-code-cli", "claude");
         await service.RunInlineAsync(
             new RunRequest("wt",
@@ -792,7 +792,7 @@ public sealed class RunServiceTests
     public async Task Rerun_WithoutAGrantForACatalogGatedProvider_Throws()
     {
         var (service, bus, _, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img", ToolSchemaJson());
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ToolSchemaJson());
         await RegisterAgentProviderAsync("claude-code-cli", "claude");
         await service.RunInlineAsync(
             new RunRequest("wt",
@@ -814,7 +814,7 @@ public sealed class RunServiceTests
     public async Task RunConfiguration_ResolvesTypePackageAndContext()
     {
         var (service, bus, configs, registry, _) = New();
-        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         var config = await configs.CreateAsync(
             new CreateRunConfiguration("c", "wt",
                 new Dictionary<string, string> { ["WORKFLOW_NAME"] = "x" }), ownerPrincipalId: null, CancellationToken.None);
@@ -823,7 +823,7 @@ public sealed class RunServiceTests
 
         var command = bus.PublishedMessages.Select(m => m.Message).OfType<RunWorkflowCommand>().Single();
         Assert.That(command.WorkflowType, Is.EqualTo("wt"));
-        Assert.That(command.WorkflowPackageUri, Is.EqualTo("docker://img"));
+        Assert.That(command.WorkflowPackageUri, Is.EqualTo("docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
         Assert.That(command.Context["WORKFLOW_NAME"], Is.EqualTo("x"));
     }
 
@@ -839,7 +839,7 @@ public sealed class RunServiceTests
     public async Task Dispatch_WithoutALiveRunner_FailsFast()
     {
         var (service, _, _, registry, _) = New(allowDispatchWithoutRunner: false);
-        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 
         var ex = Assert.ThrowsAsync<InvalidOperationException>(() => service.RunInlineAsync(
             new RunRequest("wt"), triggeredBy: null, CancellationToken.None));
@@ -850,7 +850,7 @@ public sealed class RunServiceTests
     public async Task Dispatch_WithAFreshRunnerHeartbeat_Succeeds()
     {
         var (service, bus, _, registry, liveness) = New(allowDispatchWithoutRunner: false);
-        await SeedActiveTypeAsync(registry, "wt", "docker://img");
+        await SeedActiveTypeAsync(registry, "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         liveness.Record(Guid.NewGuid(), TimeProvider.System.GetUtcNow());
 
         await service.RunInlineAsync(new RunRequest("wt"), triggeredBy: null, CancellationToken.None);

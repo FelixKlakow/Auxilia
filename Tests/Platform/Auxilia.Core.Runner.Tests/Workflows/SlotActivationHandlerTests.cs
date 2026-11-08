@@ -78,7 +78,7 @@ public class SlotActivationHandlerTests
     {
         var coreRunId = Guid.NewGuid();
         var command = new RunWorkflowCommand(
-            coreRunId, workflowType, "docker://img",
+            coreRunId, workflowType, "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             new Dictionary<string, string>(), ResolutionToken: resolutionToken);
         await _instanceRegistry.CreateAsync(
             instanceId, workflowType, "Queued",

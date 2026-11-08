@@ -49,7 +49,7 @@ public sealed class WorkflowTypeApprovalPipelineTests
     {
         var registry = NewRegistry(settings);
         var outcome = await registry.RegisterAsync(
-            new RegisterWorkflowTypeRequest(type, "docker://img:1"), null, CancellationToken.None);
+            new RegisterWorkflowTypeRequest(type, "docker://img:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), null, CancellationToken.None);
         Assert.That(outcome.Registration!.Status, Is.EqualTo(WorkflowTypeStatus.Pending));
         return registry;
     }
@@ -120,7 +120,7 @@ public sealed class WorkflowTypeApprovalPipelineTests
         var registry = await RegistryWithPendingAsync(settings, "wf");
         var checker = new RacingHandler("checker",
             async () => await registry.RegisterAsync(
-                new RegisterWorkflowTypeRequest("wf", "docker://img:2"), null, CancellationToken.None),
+                new RegisterWorkflowTypeRequest("wf", "docker://img:2@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), null, CancellationToken.None),
             new ApprovalHandlerResult(ApprovalHandlerResult.Approve, "the OLD package looked safe"));
         var pipeline = NewPipeline(registry, settings, checker);
 
@@ -131,7 +131,7 @@ public sealed class WorkflowTypeApprovalPipelineTests
         {
             Assert.That(registration!.Status, Is.EqualTo(WorkflowTypeStatus.Pending),
                 "the verdict was reached over a package that is no longer the registered one");
-            Assert.That(registration.PackageUri, Is.EqualTo("docker://img:2"));
+            Assert.That(registration.PackageUri, Is.EqualTo("docker://img:2@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
         });
     }
 
@@ -161,7 +161,7 @@ public sealed class WorkflowTypeApprovalPipelineTests
         var settings = new CoreApiSettings { ApprovalHandlers = { "checker" } };
         var registry = NewRegistry(settings);
         await registry.EnsureSeededAsync(
-            new StaticWorkflowType { WorkflowType = "wf", PackageUri = "docker://img" }, CancellationToken.None);
+            new StaticWorkflowType { WorkflowType = "wf", PackageUri = "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }, CancellationToken.None);
         var checker = new StubHandler("checker", new ApprovalHandlerResult(ApprovalHandlerResult.Deny, "nope"));
         var pipeline = NewPipeline(registry, settings, checker);
 

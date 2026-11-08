@@ -29,6 +29,11 @@ public sealed class DockerWorkflowLauncher(
 
         using var client = clientFactory.CreateClient(settings.DockerSocketPath);
 
+        // An approved image is approved by digest: resolve the pin to the exact local content
+        // before anything starts — never to whatever its tag points at now.
+        if (request.DockerImageUri is { } pinned)
+            request = request with { DockerImageUri = await ResolvePinnedImageAsync(client, pinned, ct) };
+
         // Environment capabilities layer ON TOP of the workflow image: the composed image is
         // content-addressed (base + fragments), so every distinct combination builds once and
         // every later run with the same selection starts instantly from the cache.
@@ -79,9 +84,11 @@ public sealed class DockerWorkflowLauncher(
         var createParams = request.DockerImageUri is not null
             ? BuildBakedImageContainerParameters(request, settings)
             : BuildCreateContainerParameters(request, settings);
-        // Linux confinement (capabilities, no-new-privileges, pids) is meaningless, and rejected,
-        // for Windows containers; resource ceilings and the runtime class apply everywhere.
-        ApplyConfinement(createParams.HostConfig, settings, linux: await IsLinuxDaemonAsync(client, ct));
+        // Linux confinement (capabilities, no-new-privileges, pids, read-only root) is meaningless,
+        // and rejected, for Windows containers; resource ceilings and the runtime class apply everywhere.
+        var daemon = await DaemonFactsAsync(client, ct);
+        ApplyConfinement(createParams.HostConfig, settings, linux: daemon.Linux, daemon.Cpus,
+            ApplicationDirectoryOf(request), createParams.Labels);
         createParams.HostConfig.Runtime = await SandboxRuntime.ResolveAsync(client, settings, ct);
 
         logger.LogInformation(
@@ -197,6 +204,18 @@ public sealed class DockerWorkflowLauncher(
             using var client = clientFactory.CreateClient(settings.DockerSocketPath);
             var wait = await client.Containers.WaitContainerAsync(containerId, CancellationToken.None);
 
+            // A container the kernel stopped at its memory ceiling says so in its failure reason.
+            var outOfMemory = false;
+            try
+            {
+                var inspected = await client.Containers.InspectContainerAsync(containerId, CancellationToken.None);
+                outOfMemory = inspected?.State?.OOMKilled == true;
+            }
+            catch (DockerApiException ex)
+            {
+                logger.LogDebug(ex, "Could not inspect exited container {ContainerId}.", containerId);
+            }
+
             string? logTail = null;
             string? fullLog = null;
             try
@@ -225,8 +244,7 @@ public sealed class DockerWorkflowLauncher(
 
             try
             {
-                await client.Containers.RemoveContainerAsync(
-                    containerId, new ContainerRemoveParameters { Force = true }, CancellationToken.None);
+                await client.Containers.RemoveContainerAsync(containerId, RemoveWithScratch, CancellationToken.None);
             }
             catch (DockerContainerNotFoundException)
             {
@@ -234,11 +252,11 @@ public sealed class DockerWorkflowLauncher(
             }
 
             logger.LogInformation(
-                "Workflow container exited. ContainerId={ContainerId} ExitCode={ExitCode}",
-                containerId[..Math.Min(12, containerId.Length)], wait.StatusCode);
+                "Workflow container exited. ContainerId={ContainerId} ExitCode={ExitCode} OutOfMemory={OutOfMemory}",
+                containerId[..Math.Min(12, containerId.Length)], wait.StatusCode, outOfMemory);
 
             if (onExited is not null)
-                await onExited(new ContainerExit(wait.StatusCode, logTail, fullLog));
+                await onExited(new ContainerExit(wait.StatusCode, logTail, fullLog) { OutOfMemory = outOfMemory });
         }
         catch (Exception ex)
         {
@@ -339,17 +357,84 @@ public sealed class DockerWorkflowLauncher(
         }
     }
 
+    /// <summary>Force-removal that takes the container's anonymous scratch volumes (agent home, app copy) with it.</summary>
+    private static readonly ContainerRemoveParameters RemoveWithScratch = new() { Force = true, RemoveVolumes = true };
+
     private async Task TryRemoveContainerAsync(IDockerClient client, string containerId)
     {
         try
         {
-            await client.Containers.RemoveContainerAsync(
-                containerId, new ContainerRemoveParameters { Force = true }, CancellationToken.None);
+            await client.Containers.RemoveContainerAsync(containerId, RemoveWithScratch, CancellationToken.None);
         }
         catch (DockerApiException ex)
         {
             logger.LogWarning(ex, "Could not remove container {ContainerId} after a failed launch.", containerId);
         }
+    }
+
+    /// <summary>
+    /// The exact local image a digest-pinned coordinate (<c>image[:tag]@sha256:…</c>) names — by
+    /// content only: an image carrying that registry digest (pulled by the digest when absent), or
+    /// an image built on this host whose image ID is the digest (a local build has no registry
+    /// digest). The tag never decides anything. Throws when no such content is available.
+    /// </summary>
+    internal async Task<string> ResolvePinnedImageAsync(IDockerClient client, string reference, CancellationToken ct)
+    {
+        if (!Auxilia.Core.Contracts.DockerPackageCoordinate.IsDigestPinned(reference))
+            throw new InvalidOperationException(
+                $"workflow image '{reference}' is not pinned by digest (image@sha256:…) — it never runs");
+        var at = reference.LastIndexOf('@');
+        var digest = reference[(at + 1)..];
+        var repository = WithoutTag(reference[..at]);
+        var byRegistryDigest = $"{repository}@{digest}";
+
+        if (await TryInspectImageAsync(client, byRegistryDigest, ct) is not null)
+            return byRegistryDigest;
+        if (await TryInspectImageAsync(client, digest, ct) is { } local
+            && string.Equals(local.ID, digest, StringComparison.OrdinalIgnoreCase))
+            return local.ID;
+
+        logger.LogInformation("Pulling workflow image {Image} by its approved digest.", byRegistryDigest);
+        string? pullError = null;
+        var progress = new Progress<JSONMessage>(m =>
+        {
+            if (m.ErrorMessage is { Length: > 0 } error)
+                pullError = error;
+        });
+        try
+        {
+            await client.Images.CreateImageAsync(
+                new ImagesCreateParameters { FromImage = byRegistryDigest }, null, progress, ct);
+        }
+        catch (DockerApiException ex)
+        {
+            pullError ??= ex.Message;
+        }
+        if (pullError is null && await TryInspectImageAsync(client, byRegistryDigest, ct) is not null)
+            return byRegistryDigest;
+        throw new InvalidOperationException(
+            $"workflow image '{reference}' is not available by its approved digest on this runner"
+            + (pullError is null ? "" : $" ({pullError})")
+            + " — whatever its tag points to now is not what was approved");
+    }
+
+    private static async Task<ImageInspectResponse?> TryInspectImageAsync(IDockerClient client, string image, CancellationToken ct)
+    {
+        try
+        {
+            return await client.Images.InspectImageAsync(image, ct);
+        }
+        catch (DockerImageNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary><c>registry:5000/repo:tag</c> → <c>registry:5000/repo</c> (a port is not a tag).</summary>
+    internal static string WithoutTag(string name)
+    {
+        var colon = name.LastIndexOf(':');
+        return colon > name.LastIndexOf('/') ? name[..colon] : name;
     }
 
     /// <summary>
@@ -530,8 +615,7 @@ public sealed class DockerWorkflowLauncher(
         using var client = clientFactory.CreateClient(settings.DockerSocketPath);
         try
         {
-            await client.Containers.RemoveContainerAsync(
-                containerId, new ContainerRemoveParameters { Force = true }, ct);
+            await client.Containers.RemoveContainerAsync(containerId, RemoveWithScratch, ct);
         }
         catch (DockerContainerNotFoundException)
         {
@@ -604,7 +688,8 @@ public sealed class DockerWorkflowLauncher(
         }
 
         ApplyTerminalPort(parameters, request, settings);
-        ApplyConfinement(parameters.HostConfig, settings, linux: true);
+        ApplyConfinement(parameters.HostConfig, settings, linux: true,
+            applicationDirectory: ApplicationDirectoryOf(request), volumeLabels: parameters.Labels);
         return parameters;
     }
 
@@ -674,7 +759,8 @@ public sealed class DockerWorkflowLauncher(
         }
 
         ApplyTerminalPort(parameters, request, settings);
-        ApplyConfinement(parameters.HostConfig, settings, linux: true);
+        ApplyConfinement(parameters.HostConfig, settings, linux: true,
+            applicationDirectory: ApplicationDirectoryOf(request), volumeLabels: parameters.Labels);
         return parameters;
     }
 
@@ -688,13 +774,61 @@ public sealed class DockerWorkflowLauncher(
     internal static readonly IReadOnlyList<string> RetainedCapabilities =
         ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID", "KILL"];
 
+    /// <summary>Where the SDK writes its launcher wrappers (AgentSandbox): root-written, executable.</summary>
+    internal const string SandboxWrapperDirectory = "/var/lib/auxilia-sandbox";
+
+    /// <summary>
+    /// The scratch places of a workflow container whose root filesystem is read-only, as tmpfs
+    /// (counted against its memory ceiling): temporary files, the SDK's private home, and the
+    /// SDK's launcher wrappers.
+    /// </summary>
+    internal static Dictionary<string, string> ScratchTmpfs(DockerWorkflowLauncherSettings settings) => new()
+    {
+        ["/tmp"] = $"rw,nosuid,nodev,mode=1777,size={Math.Max(64, settings.ContainerTmpfsMb)}m",
+        ["/var/tmp"] = "rw,nosuid,nodev,mode=1777,size=256m",
+        ["/run"] = "rw,nosuid,nodev,noexec,mode=755,size=64m",
+        ["/root"] = "rw,nosuid,nodev,mode=700,size=256m",
+        [SandboxWrapperDirectory] = "rw,nosuid,nodev,mode=755,size=16m",
+    };
+
+    /// <summary>
+    /// Disk-backed writable directories of a workflow container — anonymous volumes, filled from
+    /// the image at creation and removed with the container: the agent's home (its CLI state and
+    /// package caches can be large) and, for a baked image, the application directory the runner
+    /// injects slot plugins into before start.
+    /// </summary>
+    internal static List<Mount> WritableVolumes(string? applicationDirectory, IDictionary<string, string>? labels)
+    {
+        var targets = new List<string> { Auxilia.Workflows.Sandbox.AgentSandbox.Home };
+        if (applicationDirectory is { Length: > 0 })
+            targets.Add(applicationDirectory);
+        return targets.Select(target => new Mount
+        {
+            Type = "volume",
+            Target = target,
+            VolumeOptions = new VolumeOptions
+            {
+                Labels = labels is null ? null : new Dictionary<string, string>(labels)
+            }
+        }).ToList();
+    }
+
+    /// <summary>The baked image's application directory (the slot-plugin target); null for a package launch.</summary>
+    private static string? ApplicationDirectoryOf(WorkflowLaunchRequest request)
+        => request.DockerImageUri is not null ? request.PluginDirectory ?? "/app" : null;
+
     /// <summary>
     /// Applies the runner's confinement to a workflow container: every capability dropped except
     /// <see cref="RetainedCapabilities"/>, <c>no-new-privileges</c> (no setuid/file-capability
-    /// escalation), a pids ceiling, memory/CPU ceilings and the configured OCI runtime. Docker's
-    /// default seccomp and AppArmor profiles stay in force (never <c>unconfined</c>).
+    /// escalation), a read-only root filesystem (writable only: its binds, the
+    /// <see cref="ScratchTmpfs"/>, and the <see cref="WritableVolumes"/>), a pids ceiling, memory
+    /// (without swap beyond it) and CPU ceilings (clamped to the daemon's cores), and the
+    /// configured OCI runtime. Docker's default seccomp and AppArmor profiles stay in force
+    /// (never <c>unconfined</c>).
     /// </summary>
-    internal static void ApplyConfinement(HostConfig? hostConfig, DockerWorkflowLauncherSettings settings, bool linux)
+    internal static void ApplyConfinement(
+        HostConfig? hostConfig, DockerWorkflowLauncherSettings settings, bool linux, int? daemonCpus = null,
+        string? applicationDirectory = null, IDictionary<string, string>? volumeLabels = null)
     {
         if (hostConfig is null)
             return;
@@ -706,6 +840,11 @@ public sealed class DockerWorkflowLauncher(
             hostConfig.SecurityOpt = ["no-new-privileges:true"];
             if (settings.ContainerPidsLimit > 0)
                 hostConfig.PidsLimit = settings.ContainerPidsLimit;
+            // The image stays exactly what was approved for the whole run: nothing but the binds,
+            // the scratch tmpfs and the writable volumes can be written.
+            hostConfig.ReadonlyRootfs = true;
+            hostConfig.Tmpfs = ScratchTmpfs(settings);
+            hostConfig.Mounts = WritableVolumes(applicationDirectory, volumeLabels);
         }
         else
         {
@@ -713,32 +852,50 @@ public sealed class DockerWorkflowLauncher(
             hostConfig.CapAdd = null;
             hostConfig.SecurityOpt = null;
             hostConfig.PidsLimit = null;
+            hostConfig.ReadonlyRootfs = false;
+            hostConfig.Tmpfs = null;
+            hostConfig.Mounts = null;
         }
         if (settings.ContainerMemoryMb > 0)
+        {
             hostConfig.Memory = settings.ContainerMemoryMb * 1024L * 1024L;
+            // No swap beyond the ceiling: the kernel stops the container AT its memory limit.
+            hostConfig.MemorySwap = hostConfig.Memory;
+        }
         if (settings.ContainerCpus > 0)
-            hostConfig.NanoCPUs = (long)(settings.ContainerCpus * 1_000_000_000);
+        {
+            // The daemon refuses a ceiling above the cores it has.
+            var cpus = daemonCpus is > 0 ? Math.Min(settings.ContainerCpus, daemonCpus.Value) : settings.ContainerCpus;
+            hostConfig.NanoCPUs = (long)(cpus * 1_000_000_000);
+        }
         if (!string.IsNullOrWhiteSpace(settings.ContainerRuntime))
             hostConfig.Runtime = settings.ContainerRuntime;
     }
 
-    private bool? _linuxDaemon;
+    private (bool Linux, int? Cpus)? _daemonFacts;
 
-    /// <summary>The daemon's container OS (cached); an unanswerable probe assumes Linux, the strict side.</summary>
-    private async Task<bool> IsLinuxDaemonAsync(IDockerClient client, CancellationToken ct)
+    /// <summary>
+    /// The daemon's container OS and core count (cached); an unanswerable probe assumes Linux —
+    /// the strict side — and an unknown core count.
+    /// </summary>
+    private async Task<(bool Linux, int? Cpus)> DaemonFactsAsync(IDockerClient client, CancellationToken ct)
     {
-        if (_linuxDaemon is { } known)
+        if (_daemonFacts is { } known)
             return known;
         try
         {
             var info = await client.System.GetSystemInfoAsync(ct);
-            _linuxDaemon = !string.Equals(info?.OSType, "windows", StringComparison.OrdinalIgnoreCase);
+            if (info is null)
+                return (true, null);
+            var facts = (!string.Equals(info.OSType, "windows", StringComparison.OrdinalIgnoreCase),
+                info.NCPU > 0 ? (int?)info.NCPU : null);
+            _daemonFacts = facts;
+            return facts;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return true;
+            return (true, null);
         }
-        return _linuxDaemon.Value;
     }
 
     /// <summary>

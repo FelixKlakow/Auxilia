@@ -93,6 +93,70 @@ public sealed class RepositoryWorkspaceSystemTests
 
     [Test]
     [CancelAfter(180_000)]
+    public async Task APushableWorkspace_HoldsNoCredentialAnywhere_AndAPushStillLands(CancellationToken cancellationToken)
+    {
+        var registerProvider = new RegisterSlotProvider(
+            ProviderType: "git-repository",
+            Category: "workspace",
+            Description: "A git repository materialized into the run's workspace.",
+            Contracts: ["Auxilia.Workflows.SourceControl.ISourceControlAccess"],
+            Settings:
+            [
+                new RegisterProviderSetting("CloneUrl", "Repository", "Text", Required: true, Role: "clone-url"),
+                new RegisterProviderSetting("NoCache", "Fresh clone per run", "Boolean", Role: "no-cache"),
+                new RegisterProviderSetting("AllowPush", "Allow pushing", "Boolean", Role: "allow-push"),
+            ],
+            RequiredCredentialContract: "git-credential",
+            MountsIntoWorkspace: true);
+        (await Client.PostAsJsonAsync("/api/provider-catalog", registerProvider, cancellationToken)).EnsureSuccessStatusCode();
+        var connectorResp = await Client.PostAsJsonAsync("/api/connectors", new CreateConnector(
+            Name: "git-auth-" + Guid.NewGuid().ToString("N"),
+            ProviderType: "azure-devops",
+            Settings: new Dictionary<string, string>
+            {
+                ["username"] = CoreApiDispatchEnvironment.GitUsername,
+                ["token"] = CoreApiDispatchEnvironment.GitPassword
+            }), cancellationToken);
+        connectorResp.EnsureSuccessStatusCode();
+        var connector = await connectorResp.Content.ReadFromJsonAsync<Connector>(cancellationToken);
+
+        await using var success = await SubscribeSuccessAsync(cancellationToken);
+        var marker = "push-probe-" + Guid.NewGuid().ToString("N")[..12];
+        var run = new RunRequest(
+            WorkflowType: CoreApiDispatchEnvironment.RepositoryWorkflowType,
+            Context: new Dictionary<string, string>
+            {
+                ["WORKFLOW_NAME"] = CoreApiDispatchEnvironment.RepositoryWorkflowType,
+                ["EXPECTED_REPO_FILE"] = "repos/main/README.md",
+                // The verifier fails the run if the token is in ANY workspace file (.git included)…
+                ["FORBIDDEN_SECRET"] = CoreApiDispatchEnvironment.GitPassword,
+                // …then commits and pushes as the agent identity through the push gateway.
+                ["PUSH_MARKER"] = marker
+            },
+            SlotBindings:
+            [
+                new SlotBinding("main", ProviderType: "git-repository", ConnectorId: connector!.Id,
+                    Settings: new Dictionary<string, string>
+                    {
+                        ["CloneUrl"] = CoreApiDispatchEnvironment.RepositoryCloneUrl,
+                        ["NoCache"] = "true",
+                        ["AllowPush"] = "true"
+                    })
+            ]);
+        (await Client.PostAsJsonAsync("/api/runs", run, cancellationToken)).EnsureSuccessStatusCode();
+
+        var state = await success.Task.WaitAsync(TimeSpan.FromSeconds(150), cancellationToken);
+        Assert.That(state.State, Is.EqualTo(WorkflowState.Success),
+            $"Push run ended {state.State}. Error: {state.ErrorMessage}");
+
+        var branches = await CoreApiDispatchEnvironment.GitServer.ExecAsync(
+            ["git", "--git-dir=/git/test.git", "log", "--all", "--format=%s"], cancellationToken);
+        Assert.That(branches.Stdout, Does.Contain(marker),
+            $"the push must land on the authenticated remote, through the gateway that alone holds the credential.\n{branches.Stderr}");
+    }
+
+    [Test]
+    [CancelAfter(180_000)]
     public async Task MountBoundSetupScript_RunsInTheContainer_BeforeTheApplication(CancellationToken cancellationToken)
     {
         // The provider additionally declares the 'setup-script' role: the runner ANNOUNCES the

@@ -73,7 +73,7 @@ public sealed class DispatchTimeoutSystemTests
             .WithEnvironment("CoreApi__DispatchClaimTimeoutSeconds", "5")
             .WithEnvironment("CoreApi__FailoverScanIntervalSeconds", "2")
             .WithEnvironment("CoreApi__StaticWorkflowTypes__0__WorkflowType", "sleeping-workflow")
-            .WithEnvironment("CoreApi__StaticWorkflowTypes__0__PackageUri", "docker://never-runs:latest")
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__0__PackageUri", "docker://never-runs:latest@sha256:" + new string('0', 64))
             .WithPortBinding(8080, true)
             .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("FailoverMonitor started"))
             .Build();

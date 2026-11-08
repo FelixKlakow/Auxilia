@@ -45,9 +45,9 @@ public sealed class ResolutionTokensTests
     public void Redacted_LeavesAPlainPackageUriAlone()
     {
         var command = new RunWorkflowCommand(
-            Guid.NewGuid(), "wf", "docker://image:tag",
+            Guid.NewGuid(), "wf", "docker://image:tag@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             new Dictionary<string, string>(), ResolutionToken: "t");
 
-        Assert.That(ResolutionTokens.Redacted(command).WorkflowPackageUri, Is.EqualTo("docker://image:tag"));
+        Assert.That(ResolutionTokens.Redacted(command).WorkflowPackageUri, Is.EqualTo("docker://image:tag@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
     }
 }

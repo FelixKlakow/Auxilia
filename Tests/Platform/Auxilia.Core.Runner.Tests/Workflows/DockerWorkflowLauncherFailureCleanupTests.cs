@@ -53,6 +53,11 @@ public class DockerWorkflowLauncherFailureCleanupTests
         _mockClient = new Mock<IDockerClient>();
         _mockClient.Setup(c => c.Containers).Returns(_mockContainers.Object);
         _mockClient.Setup(c => c.Networks).Returns(_mockNetworks.Object);
+        // The approved image is present by its digest (the pin resolves without a pull).
+        var images = new Mock<IImageOperations>();
+        images.Setup(i => i.InspectImageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ImageInspectResponse { ID = "sha256:" + new string('a', 64) });
+        _mockClient.Setup(c => c.Images).Returns(images.Object);
 
         _mockFactory = new Mock<IDockerClientFactory>();
         _mockFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(_mockClient.Object);
@@ -69,7 +74,7 @@ public class DockerWorkflowLauncherFailureCleanupTests
     private static WorkflowLaunchRequest BakedImageRequest(PodPlan? pod = null)
         => new(string.Empty, new Dictionary<string, string>(), [])
         {
-            DockerImageUri = "example/workflow:1",
+            DockerImageUri = "example/workflow:1@sha256:" + new string('a', 64),
             Pod = pod
         };
 
@@ -143,7 +148,7 @@ public class DockerWorkflowLauncherFailureCleanupTests
                 string.Empty, new Dictionary<string, string>(),
                 [new SlotPluginFile(dllPath, manifestPath)])
             {
-                DockerImageUri = "example/workflow:1"
+                DockerImageUri = "example/workflow:1@sha256:" + new string('a', 64)
             };
 
             Assert.ThrowsAsync<IOException>(() => _sut.LaunchAsync(request, CancellationToken.None));

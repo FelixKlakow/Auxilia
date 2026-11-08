@@ -18,6 +18,7 @@ await (workflowName switch
     WorkspaceRepositoryWorkflow.WorkflowName => WorkspaceRepositoryWorkflow.RunAsync(args),
     PodScenarioWorkflow.WorkflowName => PodScenarioWorkflow.RunAsync(args),
     PodRestartWorkflow.WorkflowName => PodRestartWorkflow.RunAsync(args),
+    ContainmentProbeWorkflow.WorkflowName => ContainmentProbeWorkflow.RunAsync(args),
     _ => throw new InvalidOperationException($"Unknown dummy workflow name: '{workflowName}'")
 });
 

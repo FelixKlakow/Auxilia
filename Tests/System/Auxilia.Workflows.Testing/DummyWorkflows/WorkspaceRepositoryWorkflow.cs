@@ -37,6 +37,49 @@ public static class WorkspaceRepositoryWorkflow
                 throw new InvalidOperationException($"Repository file content mismatch at '{path}'.");
         }
 
+        // A pushable workspace holds the credential NOWHERE — no file, no git configuration.
+        if (System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__FORBIDDEN_SECRET") is { Length: > 0 } secret)
+        {
+            var needle = System.Text.Encoding.UTF8.GetBytes(secret);
+            foreach (var file in Directory.EnumerateFiles(workspace, "*", SearchOption.AllDirectories))
+                if (File.ReadAllBytes(file).AsSpan().IndexOf(needle) >= 0)
+                    throw new InvalidOperationException($"The workspace holds the credential in '{file}'.");
+            Console.WriteLine("[WorkspaceRepositoryWorkflow] No credential anywhere in the workspace.");
+        }
+
+        // ...and a push still lands: committed and pushed as the agent identity (workspace git
+        // runs sandboxed) to its origin — the push gateway, the only holder of the credential.
+        if (System.Environment.GetEnvironmentVariable("WORKFLOW_CONTEXT__PUSH_MARKER") is { Length: > 0 } marker)
+        {
+            var repository = Path.GetDirectoryName(path)!;
+            await File.WriteAllTextAsync(Path.Combine(repository, "pushed.txt"), marker, ct);
+            await AgentGitAsync(repository, ct, "add", "pushed.txt");
+            await AgentGitAsync(repository, ct, "commit", "-m", marker);
+            await AgentGitAsync(repository, ct, "push", "origin", $"HEAD:refs/heads/{marker}");
+            Console.WriteLine($"[WorkspaceRepositoryWorkflow] Pushed {marker}.");
+        }
+
         Console.WriteLine($"[WorkspaceRepositoryWorkflow] Verified mounted repository file {path}.");
+    }
+
+    private static async Task AgentGitAsync(string repository, CancellationToken ct, params string[] arguments)
+    {
+        var startInfo = new System.Diagnostics.ProcessStartInfo("git")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        startInfo.ArgumentList.Add("-C");
+        startInfo.ArgumentList.Add(repository);
+        foreach (var argument in arguments)
+            startInfo.ArgumentList.Add(argument);
+        using var process = System.Diagnostics.Process.Start(Sandbox.AgentSandbox.Confine(startInfo))!;
+        var stdout = process.StandardOutput.ReadToEndAsync(ct);
+        var stderr = process.StandardError.ReadToEndAsync(ct);
+        await process.WaitForExitAsync(ct);
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException(
+                $"git {string.Join(' ', arguments)} failed ({process.ExitCode}): {await stderr} {await stdout}");
     }
 }

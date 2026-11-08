@@ -48,7 +48,8 @@ public class WorkflowDispatchSystemTests
         var command = new RunWorkflowCommand(
             CommandId:     Guid.NewGuid(),
             WorkflowType:  SimpleGitCommitWorkflow.WorkflowName,
-            WorkflowPackageUri: SimpleGitCommitWorkflow.ImageName,
+            // Images run by content: the dummy image as built, never what its tag names now.
+            WorkflowPackageUri: await TestImages.PinnedCoordinateAsync(WorkflowDispatchEnvironment.DummyWorkflowsImageName),
             Context: new Dictionary<string, string>
             {
                 // Tells Program.cs which dummy workflow to run.

@@ -96,10 +96,10 @@ public sealed class WorkflowDispatcher(
         await statusPublisher.PublishAsync(instanceId, workflowType, "Received",
             ownerServiceId: instanceInfo.ServiceId, commandId: command.CommandId, ct: ct);
 
-        // A tag can be re-pointed by whoever can push to the registry; a signature-trusting
-        // runner (trusted keys configured) runs a docker:// coordinate only when pinned by digest.
-        if (dispatcherSettings.Value.TrustedSigningKeys.Count > 0
-            && packageUri.StartsWith("docker://", StringComparison.OrdinalIgnoreCase)
+        // A tag can be re-pointed by whoever can push to the registry: a docker:// coordinate runs
+        // only when pinned by digest (the registry approves images by digest; this is the runner's
+        // own check of that rule) — and the launcher starts exactly the content the digest names.
+        if (packageUri.StartsWith("docker://", StringComparison.OrdinalIgnoreCase)
             && !IsDigestPinned(packageUri))
         {
             var reason = $"docker:// workflow image '{packageUri["docker://".Length..]}' is not pinned by digest (image@sha256:…)";
@@ -825,6 +825,7 @@ public sealed class WorkflowDispatcher(
             var reason = (draining
                     ? $"workflow container crashed while draining (code {exit.ExitCode})"
                     : $"workflow container exited (code {exit.ExitCode}) before completing")
+                + (exit.OutOfMemory ? " — stopped at its memory limit" : "")
                 + (string.IsNullOrWhiteSpace(exit.LogTail)
                     ? " — the container produced no output"
                     : $" — last output: {Truncate(exit.LogTail, 2000)}");
@@ -988,7 +989,7 @@ public sealed class WorkflowDispatcher(
 
     /// <summary>Whether a docker:// coordinate names an immutable image (<c>@sha256:</c> + 64 hex digits).</summary>
     internal static bool IsDigestPinned(string packageUri)
-        => System.Text.RegularExpressions.Regex.IsMatch(packageUri, "@sha256:[0-9a-fA-F]{64}$");
+        => Auxilia.Core.Contracts.DockerPackageCoordinate.IsDigestPinned(packageUri);
 
     /// <summary>The Core-reachable terminal endpoint carrying the run's terminal credential as userinfo.</summary>
     internal static string? WithTerminalCredential(string? endpoint, string? credential)

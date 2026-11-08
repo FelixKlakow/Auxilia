@@ -47,15 +47,16 @@ public class EndToEndEnvironment
 {
     internal const string WorkflowType        = "pull-request-code-review";
     internal const string WorkflowImageName   = "auxilia-code-review-workflow:system-test";
-    internal const string WorkflowPackageUri  = "docker://" + WorkflowImageName;
+    // The workflow images by their content (images are approved by digest) — set once built.
+    internal static string WorkflowPackageUri { get; private set; } = "";
     public   const string ClaudeWorkflowType       = "claude-code";
     public   const string ClaudeWorkflowImageName  = "auxilia-claude-code-workflow:system-test";
-    public   const string ClaudeWorkflowPackageUri = "docker://" + ClaudeWorkflowImageName;
+    public   static string ClaudeWorkflowPackageUri { get; private set; } = "";
     /// <summary>In-image stand-in CLI — system tests never call real AI (cost rule).</summary>
     public   const string ClaudeStubCliPath        = "/usr/local/bin/claude-stub";
     public   const string ImplementationWorkflowType       = "implementation";
     public   const string ImplementationWorkflowImageName  = "auxilia-implementation-workflow:system-test";
-    public   const string ImplementationWorkflowPackageUri = "docker://" + ImplementationWorkflowImageName;
+    public   static string ImplementationWorkflowPackageUri { get; private set; } = "";
     /// <summary>In-image DRIVEN stand-in author CLI (tmux + hook Stop protocol; never real AI).</summary>
     public   const string DrivenStubCliPath        = "/usr/local/bin/driven-stub";
 
@@ -179,6 +180,9 @@ public class EndToEndEnvironment
             ImplementationWorkflowImageName, "Source/Workflows/Auxilia.Implementation.Workflow/Dockerfile");
         await WorkflowDispatchEnvironment.BuildImageAsync(
             GitServerImageName, "Tests/System/Auxilia.SystemTestSuite/GitServer/Dockerfile");
+        WorkflowPackageUri = await TestImages.PinnedCoordinateAsync(WorkflowImageName);
+        ClaudeWorkflowPackageUri = await TestImages.PinnedCoordinateAsync(ClaudeWorkflowImageName);
+        ImplementationWorkflowPackageUri = await TestImages.PinnedCoordinateAsync(ImplementationWorkflowImageName);
 
         _network = new NetworkBuilder().WithName(NetworkName).Build();
         await _network.CreateAsync();

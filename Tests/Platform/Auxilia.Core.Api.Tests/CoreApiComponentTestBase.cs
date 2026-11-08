@@ -85,12 +85,37 @@ public abstract class CoreApiComponentTestBase
                 Auxilia.Core.Contracts.DefaultResourceAccessModes.Open, CancellationToken.None);
 
     /// <summary>
+    /// Records a run the way dispatch does (the run exists from its dispatch on — every run surface
+    /// authorizes per run, so an id nobody dispatched is unknown to every caller).
+    /// <paramref name="runsFor"/> null = a platform dispatch, reachable by administrators only —
+    /// the bootstrap test key is one.
+    /// </summary>
+    protected async Task SeedRunAsync(
+        Guid runId, Guid? runsFor = null, string state = Auxilia.Core.Contracts.RunStates.Dispatched,
+        string workflowType = "simple-git-commit-workflow", Guid? startedBy = null)
+    {
+        var now = DateTimeOffset.UtcNow;
+        await Factory.Services.GetRequiredService<Auxilia.UniversalDataAccess.IDataAccess<Auxilia.Core.Api.Data.CoreRunRecord>>()
+            .SaveAsync(new Auxilia.Core.Api.Data.CoreRunRecord
+            {
+                Id = runId,
+                WorkflowType = workflowType,
+                State = state,
+                CreatedUtc = now,
+                UpdatedUtc = now,
+                CommandId = runId,
+                RunsForPrincipalId = runsFor,
+                StartedByPrincipalId = startedBy,
+            }, CancellationToken.None);
+    }
+
+    /// <summary>
     /// Registers <paramref name="workflowType"/> as an Active registry entry (register + approve —
     /// a docker package has no signature, so approval is the trust act). Runs dispatch by type only,
     /// so most run-path tests need this before acting.
     /// </summary>
     protected async Task RegisterActiveTypeAsync(
-        HttpClient adminClient, string workflowType, string packageUri = "docker://auxilia-dummy-workflows:system-test")
+        HttpClient adminClient, string workflowType, string packageUri = "docker://auxilia-dummy-workflows:system-test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
     {
         var register = await adminClient.PostAsJsonAsync(
             "/api/workflow-types",

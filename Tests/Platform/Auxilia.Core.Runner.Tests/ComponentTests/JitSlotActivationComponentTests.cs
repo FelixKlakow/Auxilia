@@ -123,7 +123,7 @@ public class JitSlotActivationComponentTests
     private async Task<(Guid InstanceId, string Token)> DispatchAsync(string workflowType = "jit-wf")
     {
         var command = new RunWorkflowCommand(
-            Guid.NewGuid(), workflowType, "docker://jit-wf:test", new Dictionary<string, string>(),
+            Guid.NewGuid(), workflowType, "docker://jit-wf:test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", new Dictionary<string, string>(),
             ResolutionToken: "jit-run-token");
 
         await _bus.SimulateReceivedAsync("workflow.run-commands", command);

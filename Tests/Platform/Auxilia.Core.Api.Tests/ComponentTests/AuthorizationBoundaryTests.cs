@@ -18,7 +18,7 @@ namespace Auxilia.Core.Api.Tests.ComponentTests;
 public sealed class AuthorizationBoundaryTests : CoreApiComponentTestBase
 {
     [SetUp]
-    public Task RegisterRunTypeAsync() => RegisterActiveTypeAsync(CreateClient(), "wt", "docker://img");
+    public Task RegisterRunTypeAsync() => RegisterActiveTypeAsync(CreateClient(), "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 
     private async Task<HttpClient> ClientForRolesAsync(params string[] roles)
     {
@@ -233,7 +233,7 @@ public sealed class AuthorizationBoundaryTests : CoreApiComponentTestBase
         await OpenDefaultResourceAccessAsync();
         var client = await ClientForRolesAsync(role);
         var response = await client.PostAsJsonAsync("/api/runs",
-            new { workflowType = "wt", packageUri = "docker://img" });
+            new { workflowType = "wt", packageUri = "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" });
         Assert.That(response.StatusCode, Is.EqualTo(expected));
     }
 
@@ -272,7 +272,7 @@ public sealed class AuthorizationBoundaryTests : CoreApiComponentTestBase
         var administer = await client.PostAsJsonAsync("/api/groups", new { name = "denied" });
         var configure = await client.PostAsJsonAsync("/api/connectors", NewConnector("Company"));
         var trigger = await client.PostAsJsonAsync("/api/runs",
-            new { workflowType = "wt", packageUri = "docker://img" });
+            new { workflowType = "wt", packageUri = "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" });
 
         Assert.Multiple(() =>
         {

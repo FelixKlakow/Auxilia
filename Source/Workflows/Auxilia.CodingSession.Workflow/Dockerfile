@@ -21,6 +21,10 @@ RUN apt-get update \
  && curl -fsSL -o /usr/local/bin/ttyd \
       https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 \
  && chmod +x /usr/local/bin/ttyd
+# The unprivileged identity agent processes run as (AgentSandbox, uid/gid 10001): workflow
+# containers run on a read-only root filesystem, so it is provisioned here, at build time.
+RUN groupadd --gid 10001 auxilia-agent \
+ && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/auxilia-agent --shell /bin/bash auxilia-agent
 WORKDIR /app
 COPY --from=build /app/publish .
 # Stand-in CLI for system tests (cost rule: never real AI in system tests). The sed strips

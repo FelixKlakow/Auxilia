@@ -104,7 +104,7 @@ public class ReAdoptionEnvironment
             .WithEnvironment("CoreApi__DispatchClaimTimeoutSeconds", "300")
             .WithEnvironment("CoreApi__StaticWorkflowTypes__0__WorkflowType", "sleeping-workflow")
             .WithEnvironment("CoreApi__StaticWorkflowTypes__0__PackageUri",
-                $"docker://{WorkflowDispatchEnvironment.DummyWorkflowsImageName}")
+                await TestImages.PinnedCoordinateAsync(WorkflowDispatchEnvironment.DummyWorkflowsImageName))
             .WithPortBinding(8080, true)
             .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("FailoverMonitor started"))
             .Build();

@@ -15,7 +15,12 @@ namespace Auxilia.Workflows.Sandbox;
 /// <remarks>
 /// Active only where it means something — Linux, running as root (the platform's container);
 /// a dev/test process on Windows or as a normal user runs children unchanged except for the
-/// environment scrub. The user is created on demand, so every SDK-built image gets it.
+/// environment scrub. Where it means something it is never silently off: a root process on
+/// Linux that cannot establish the agent identity (no <c>setpriv</c>, or no
+/// <see cref="UserName"/> and a read-only <c>/etc</c> to create it in) refuses to start rather
+/// than run agent code as root. Workflow containers run on a read-only root filesystem, so
+/// images provision the user at build time (uid/gid <see cref="Uid"/>, home <see cref="Home"/>);
+/// it is created on demand only where <c>/etc</c> is writable.
 /// </remarks>
 public static class AgentSandbox
 {
@@ -250,8 +255,13 @@ public static class AgentSandbox
 
     private static bool ProbeActive()
     {
-        if (!OperatingSystem.IsLinux() || System.Environment.UserName != "root" || !File.Exists("/usr/bin/setpriv"))
+        if (!OperatingSystem.IsLinux() || System.Environment.UserName != "root")
             return false;
+        // Root on Linux is the platform's container: agent code must never run with this identity.
+        if (!File.Exists("/usr/bin/setpriv"))
+            throw new InvalidOperationException(
+                $"The agent sandbox cannot be established: /usr/bin/setpriv is missing from this image, so agent "
+                + $"processes could not drop to '{UserName}' — refusing to run them as root. Install util-linux.");
         try
         {
             EnsureUser();
@@ -259,11 +269,18 @@ public static class AgentSandbox
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return false;
+            throw new InvalidOperationException(
+                $"The agent sandbox cannot be established: the '{UserName}' user (uid/gid {Uid}) is not provisioned in "
+                + $"this image and cannot be created here ({ex.Message}) — refusing to run agent processes as root. "
+                + $"Provision it at image build time: groupadd --gid {Gid} {UserName} && useradd --uid {Uid} --gid {Gid} "
+                + $"--create-home --home-dir {Home} --shell /bin/bash {UserName}", ex);
         }
     }
 
-    /// <summary>Creates the agent user and group (no password, no login shell needed) when absent.</summary>
+    /// <summary>
+    /// Ensures the agent user and group (no password, no login shell needed) and its home: read-only
+    /// when the image provisions them (a read-only root filesystem), created on demand otherwise.
+    /// </summary>
     private static void EnsureUser()
     {
         const string passwd = "/etc/passwd";

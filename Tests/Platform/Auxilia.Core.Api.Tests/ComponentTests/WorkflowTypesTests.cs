@@ -66,7 +66,7 @@ public sealed class WorkflowTypesTests : CoreApiComponentTestBase
         var client = CreateClient();
 
         var register = await client.PostAsJsonAsync("/api/workflow-types",
-            new RegisterWorkflowTypeRequest("pull-request-code-review", "docker://review:1"));
+            new RegisterWorkflowTypeRequest("pull-request-code-review", "docker://review:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
         Assert.That(register.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         var registration = await register.Content.ReadFromJsonAsync<WorkflowTypeRegistrationDto>();
         Assert.That(registration!.Status, Is.EqualTo(WorkflowTypeStatus.Pending),
@@ -84,13 +84,13 @@ public sealed class WorkflowTypesTests : CoreApiComponentTestBase
         var client = CreateClient();
 
         var blind = await (await client.PostAsJsonAsync("/api/workflow-types",
-                new RegisterWorkflowTypeRequest("blind-wf", "docker://blind:1")))
+                new RegisterWorkflowTypeRequest("blind-wf", "docker://blind:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")))
             .Content.ReadFromJsonAsync<WorkflowTypeRegistrationDto>();
         Assert.That(blind!.StatusReason, Does.Contain("no declared schema"),
             "the approver must see that this is a blind trust decision");
 
         var declared = await (await client.PostAsJsonAsync("/api/workflow-types",
-                new RegisterWorkflowTypeRequest("declared-wf", "docker://declared:1",
+                new RegisterWorkflowTypeRequest("declared-wf", "docker://declared:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     SchemaJson: """{"WorkflowName":"declared-wf","Slots":[],"EnvironmentRequirements":[]}""")))
             .Content.ReadFromJsonAsync<WorkflowTypeRegistrationDto>();
         Assert.That(declared!.StatusReason, Does.Not.Contain("no declared schema"),
@@ -102,7 +102,7 @@ public sealed class WorkflowTypesTests : CoreApiComponentTestBase
     {
         var client = CreateClient();
         await client.PostAsJsonAsync("/api/workflow-types",
-            new RegisterWorkflowTypeRequest("evil-wf", "docker://evil:1"));
+            new RegisterWorkflowTypeRequest("evil-wf", "docker://evil:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
 
         var deny = await client.PostAsJsonAsync("/api/workflow-types/evil-wf/deny",
             new DenyWorkflowTypeRequest("failed the security review"));
@@ -128,7 +128,7 @@ public sealed class WorkflowTypesTests : CoreApiComponentTestBase
     public async Task Unregister_RemovesTheType()
     {
         var client = CreateClient();
-        await RegisterActiveTypeAsync(client, "short-lived", "docker://x:1");
+        await RegisterActiveTypeAsync(client, "short-lived", "docker://x:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 
         var delete = await client.DeleteAsync("/api/workflow-types/short-lived");
         Assert.That(delete.StatusCode, Is.EqualTo(HttpStatusCode.NoContent));
@@ -154,7 +154,7 @@ public sealed class WorkflowTypesTests : CoreApiComponentTestBase
     public async Task PublishedSchema_RefreshesARegisteredType()
     {
         var client = CreateClient();
-        await RegisterActiveTypeAsync(client, "pull-request-code-review", "docker://review:1");
+        await RegisterActiveTypeAsync(client, "pull-request-code-review", "docker://review:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         await PublishSchemaAsync(SampleSchema());
 
         var page = await client.GetFromJsonAsync<PagedResult<WorkflowTypeDto>>("/api/workflow-types");
@@ -166,7 +166,7 @@ public sealed class WorkflowTypesTests : CoreApiComponentTestBase
             Assert.That(type.Version, Is.EqualTo("2.1.0"));
             Assert.That(type.Lifetime, Is.EqualTo("OneShot"));
             Assert.That(type.Tags, Is.EquivalentTo(new[] { "review", "ai" }));
-            Assert.That(type.PackageUri, Is.EqualTo("docker://review:1"));
+            Assert.That(type.PackageUri, Is.EqualTo("docker://review:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
             Assert.That(type.Status, Is.EqualTo(WorkflowTypeStatus.Active));
         });
     }
@@ -175,7 +175,7 @@ public sealed class WorkflowTypesTests : CoreApiComponentTestBase
     public async Task GetSchema_ReturnsSlotsCapabilitiesInputsAndViews()
     {
         var client = CreateClient();
-        await RegisterActiveTypeAsync(client, "pull-request-code-review", "docker://review:1");
+        await RegisterActiveTypeAsync(client, "pull-request-code-review", "docker://review:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         await PublishSchemaAsync(SampleSchema());
 
         var schema = await client.GetFromJsonAsync<WorkflowSchemaDto>(
@@ -200,7 +200,7 @@ public sealed class WorkflowTypesTests : CoreApiComponentTestBase
     public async Task Republish_UpsertsInPlace_NoDuplicate()
     {
         var client = CreateClient();
-        await RegisterActiveTypeAsync(client, "pull-request-code-review", "docker://review:1");
+        await RegisterActiveTypeAsync(client, "pull-request-code-review", "docker://review:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         await PublishSchemaAsync(SampleSchema());
         await PublishSchemaAsync(SampleSchema() with { Version = "3.0.0" });
 
@@ -237,7 +237,7 @@ public sealed class WorkflowTypesTests : CoreApiComponentTestBase
     {
         var client = await ClientForRolesAsync(role);
         var response = await client.PostAsJsonAsync("/api/workflow-types",
-            new RegisterWorkflowTypeRequest($"wf-{Guid.NewGuid():N}", "docker://img:1"));
+            new RegisterWorkflowTypeRequest($"wf-{Guid.NewGuid():N}", "docker://img:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
         Assert.That(response.StatusCode, Is.EqualTo(expected));
     }
 
@@ -245,7 +245,7 @@ public sealed class WorkflowTypesTests : CoreApiComponentTestBase
     public async Task Approve_IsTheSigningAuthority_OperatorIsForbidden()
     {
         await CreateClient().PostAsJsonAsync("/api/workflow-types",
-            new RegisterWorkflowTypeRequest("wf-sign", "docker://img:1"));
+            new RegisterWorkflowTypeRequest("wf-sign", "docker://img:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
 
         var operatorClient = await ClientForRolesAsync(BuiltInRoles.Operator);
         var response = await operatorClient.PostAsync("/api/workflow-types/wf-sign/approve", null);

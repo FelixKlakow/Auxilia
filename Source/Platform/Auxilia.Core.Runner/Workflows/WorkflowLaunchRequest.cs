@@ -95,7 +95,11 @@ public sealed record WorkflowLaunchRequest(
 /// How a workflow container ended: the exit code, the last lines it wrote (for the failure
 /// message), and its bounded full output (persisted as run evidence).
 /// </summary>
-public sealed record ContainerExit(long ExitCode, string? LogTail, string? Log = null);
+public sealed record ContainerExit(long ExitCode, string? LogTail, string? Log = null)
+{
+    /// <summary>The kernel stopped the container at its memory ceiling.</summary>
+    public bool OutOfMemory { get; init; }
+}
 
 /// <summary>What a launch produced: the container-network "name:port" of the web terminal, when any.</summary>
 public sealed record WorkflowLaunchResult(string? TerminalEndpoint = null);

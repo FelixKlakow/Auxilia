@@ -20,7 +20,7 @@ namespace Auxilia.Core.Api.Tests.ComponentTests;
 public sealed class RunOnBehalfOfTests : CoreApiComponentTestBase
 {
     private const string DummyType = "simple-git-commit-workflow";
-    private const string DummyImage = "docker://auxilia-dummy-workflows:system-test";
+    private const string DummyImage = "docker://auxilia-dummy-workflows:system-test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
     [SetUp]
     public async Task RegisterDummyTypeAsync()

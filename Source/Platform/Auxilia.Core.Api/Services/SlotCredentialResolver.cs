@@ -42,13 +42,14 @@ public sealed class SlotCredentialResolver(
         Guid runId, string resolutionToken, IReadOnlyList<SlotBinding> bindings,
         Guid? triggeredBy, string? dispatchCommandJson = null,
         IReadOnlyList<Guid>? workspaceIds = null, Guid? configurationId = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default, Guid? startedBy = null)
         => store.SaveAsync(new CoreRunResolutionRecord
         {
             Id = runId,
             ResolutionTokenHash = ResolutionTokens.Hash(resolutionToken),
             SlotBindingsJson = JsonSerializer.Serialize(bindings),
             TriggeredByPrincipalId = triggeredBy,
+            StartedByPrincipalId = startedBy,
             DispatchCommandJson = dispatchCommandJson,
             WorkspaceIdsJson = JsonSerializer.Serialize(workspaceIds ?? []),
             ConfigurationId = configurationId,

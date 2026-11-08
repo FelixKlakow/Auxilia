@@ -256,6 +256,9 @@ internal sealed class FakeCoreClient : ICoreClient
         return Task.FromResult(new RunAccepted(commandId, commandId));
     }
 
+    public Task<RunStatus> SetRunGrantsAsync(Guid runId, SetRunGrants request, CancellationToken ct = default)
+        => throw new NotSupportedException("the console does not share runs yet");
+
     public Task CancelRunAsync(Guid id, CancellationToken ct = default)
     {
         CancelledRuns.Add(id);

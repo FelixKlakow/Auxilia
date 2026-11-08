@@ -4,6 +4,7 @@ using System.Text.Json;
 using Auxilia.Core.Client;
 using Auxilia.Core.Contracts;
 using Auxilia.Workflows.Messaging.Messages;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Auxilia.Core.Api.Tests.ComponentTests;
 
@@ -23,6 +24,7 @@ public sealed class RunStreamTests : CoreApiComponentTestBase
     {
         var client = CreateClient();
         var runId = Guid.NewGuid();
+        await SeedRunAsync(runId);
 
         // ResponseHeadersRead returns after the endpoint flushed its headers — i.e. after the
         // broker subscription is registered — so no event published below is missed.
@@ -39,7 +41,8 @@ public sealed class RunStreamTests : CoreApiComponentTestBase
         await MessageBus.SimulateReceivedAsync(WorkflowStatusEvent.ExchangeName,
             new WorkflowStatusEvent(runId, DummyType, "Success", null, DateTimeOffset.UtcNow));
 
-        var frames = ParseFrames(await response.Content.ReadAsStringAsync());
+        // The first frame is the Dispatched snapshot; the live frames follow.
+        var frames = ParseFrames(await response.Content.ReadAsStringAsync()).Skip(1).ToList();
 
         Assert.That(frames, Has.Count.EqualTo(3));
 
@@ -74,6 +77,7 @@ public sealed class RunStreamTests : CoreApiComponentTestBase
         // (terminal) instead of leaving the client hanging.
         var client = CreateClient();
         var runId = Guid.NewGuid();
+        await SeedRunAsync(runId);
 
         using var response = await client.GetAsync(
             $"/api/runs/{runId}/stream", HttpCompletionOption.ResponseHeadersRead);
@@ -87,7 +91,8 @@ public sealed class RunStreamTests : CoreApiComponentTestBase
                 DateTimeOffset.UtcNow));
 
         // ReadAsStringAsync completes only because the Failed status terminated the stream.
-        var frames = ParseFrames(await response.Content.ReadAsStringAsync());
+        // (The first frame is the Dispatched snapshot.)
+        var frames = ParseFrames(await response.Content.ReadAsStringAsync()).Skip(1).ToList();
 
         Assert.That(frames, Has.Count.EqualTo(2));
         var failed = JsonSerializer.Deserialize<WorkflowStatusEvent>(
@@ -107,6 +112,7 @@ public sealed class RunStreamTests : CoreApiComponentTestBase
         // and queryable after the fact — no live subscription required.
         var client = CreateClient();
         var runId = Guid.NewGuid();
+        await SeedRunAsync(runId);
 
         await MessageBus.SimulateReceivedAsync(ViewDataMessage.ExchangeName,
             new ViewDataMessage(runId, "output", 1, """{"line":"first"}"""));
@@ -197,8 +203,12 @@ public sealed class RunStreamTests : CoreApiComponentTestBase
         var runs = await client.GetFromJsonAsync<PagedResult<RunStatus>>("/api/runs");
         Assert.That(runs!.Items.Select(r => r.RunId), Is.EquivalentTo(new[] { live }),
             "finished runs go, live ones stay");
-        var views = await client.GetFromJsonAsync<PagedResult<RunViewItem>>($"/api/runs/{finished}/views");
-        Assert.That(views!.Items, Is.Empty, "the cleared run's persisted views go with it");
+        Assert.That((await client.GetAsync($"/api/runs/{finished}/views")).StatusCode, Is.EqualTo(HttpStatusCode.NotFound),
+            "a cleared run no longer exists for any reader");
+        var storedViews = await Factory.Services
+            .GetRequiredService<Auxilia.UniversalDataAccess.IDataAccess<Auxilia.Core.Api.Data.CoreRunViewRecord>>()
+            .ReadAsync(CancellationToken.None);
+        Assert.That(storedViews.Where(v => v.RunId == finished), Is.Empty, "the cleared run's persisted views go with it");
     }
 
     [Test]
@@ -231,6 +241,8 @@ public sealed class RunStreamTests : CoreApiComponentTestBase
         var client = CreateClient();
         var commandId = Guid.NewGuid();
         var instanceId = Guid.NewGuid();
+        // Exactly what the Run API leaves behind on accept: a Dispatched record under the command id.
+        await SeedRunAsync(commandId);
 
         using var response = await client.GetAsync(
             $"/api/runs/{commandId}/stream", HttpCompletionOption.ResponseHeadersRead);
@@ -246,15 +258,15 @@ public sealed class RunStreamTests : CoreApiComponentTestBase
 
         var frames = ParseFrames(await response.Content.ReadAsStringAsync());
 
-        Assert.That(frames, Has.Count.EqualTo(3),
-            "claim status + view + terminal status must all reach the dispatch-id subscriber");
+        Assert.That(frames, Has.Count.EqualTo(4),
+            "the Dispatched snapshot, then claim status + view + terminal status must all reach the dispatch-id subscriber");
         Assert.Multiple(() =>
         {
             Assert.That(frames.All(f => f.RunId == commandId), Is.True);
-            Assert.That(frames[0].Kind, Is.EqualTo(RunStreamEvent.StatusKind));
-            Assert.That(frames[1].Kind, Is.EqualTo(RunStreamEvent.ViewKind));
-            Assert.That(frames[1].PayloadJson, Does.Contain("from the instance"));
-            Assert.That(frames[2].Kind, Is.EqualTo(RunStreamEvent.StatusKind));
+            Assert.That(frames[1].Kind, Is.EqualTo(RunStreamEvent.StatusKind));
+            Assert.That(frames[2].Kind, Is.EqualTo(RunStreamEvent.ViewKind));
+            Assert.That(frames[2].PayloadJson, Does.Contain("from the instance"));
+            Assert.That(frames[3].Kind, Is.EqualTo(RunStreamEvent.StatusKind));
         });
     }
 
@@ -264,6 +276,7 @@ public sealed class RunStreamTests : CoreApiComponentTestBase
         var client = CreateClient();
         var runId = Guid.NewGuid();
         var otherRun = Guid.NewGuid();
+        await SeedRunAsync(runId);
 
         using var response = await client.GetAsync(
             $"/api/runs/{runId}/stream", HttpCompletionOption.ResponseHeadersRead);
@@ -275,8 +288,8 @@ public sealed class RunStreamTests : CoreApiComponentTestBase
             new WorkflowStatusEvent(runId, DummyType, "Success", null, DateTimeOffset.UtcNow));
 
         var frames = ParseFrames(await response.Content.ReadAsStringAsync());
-        Assert.That(frames, Has.Count.EqualTo(1));
-        Assert.That(frames[0].RunId, Is.EqualTo(runId));
+        Assert.That(frames, Has.Count.EqualTo(2), "the snapshot and this run's terminal transition — nothing foreign");
+        Assert.That(frames.All(f => f.RunId == runId), Is.True);
     }
 
     [Test]
@@ -292,6 +305,7 @@ public sealed class RunStreamTests : CoreApiComponentTestBase
     {
         ICoreClient core = new CoreClient(CreateClient());
         var runId = Guid.NewGuid();
+        await SeedRunAsync(runId);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         await using var stream = core.StreamRunAsync(runId, cts.Token).GetAsyncEnumerator(cts.Token);

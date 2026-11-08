@@ -363,7 +363,7 @@ public class WorkflowStateHandlerTests
         await handler.StartAsync(CancellationToken.None);
 
         var stored = new RunWorkflowCommand(
-            Guid.NewGuid(), "service-workflow", "docker://svc",
+            Guid.NewGuid(), "service-workflow", "docker://svc@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             new Dictionary<string, string>(),
             ResolutionToken: protector.Protect("plain-resolution-token"));
         var issued = await OwnedRunAsync(
@@ -405,7 +405,7 @@ public class WorkflowStateHandlerTests
     public async Task WhenSuccessWithDeclaredOutputs_PersistsArtifactWithWorkItemIdFromDispatchContext()
     {
         var command = new RunWorkflowCommand(
-            Guid.NewGuid(), "review-workflow", "docker://review-workflow:test",
+            Guid.NewGuid(), "review-workflow", "docker://review-workflow:test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             new Dictionary<string, string> { ["WorkItemId"] = "WI-1" });
         var issued = await OwnedRunAsync(
             "review-workflow", "Running", JsonSerializer.Serialize(command));

@@ -62,8 +62,17 @@ public sealed class DockerWorkflowLauncherSettings
     /// <summary>Lines of the workflow container's own output kept as the <c>container-log</c> run artifact.</summary>
     public int ContainerLogLines { get; set; } = 20000;
 
-    /// <summary>CPU ceiling per workflow container (fractional cores). Zero or negative = unlimited.</summary>
-    public double ContainerCpus { get; set; }
+    /// <summary>
+    /// CPU ceiling per workflow container (fractional cores), clamped to the cores the Docker
+    /// daemon has. Zero or negative = unlimited.
+    /// </summary>
+    public double ContainerCpus { get; set; } = 4;
+
+    /// <summary>
+    /// Size of a workflow container's <c>/tmp</c> in MiB. The root filesystem is read-only, so
+    /// <c>/tmp</c> is a tmpfs — its contents count against <see cref="ContainerMemoryMb"/>.
+    /// </summary>
+    public long ContainerTmpfsMb { get; set; } = 2048;
 
     /// <summary>
     /// OCI runtime for workflow containers, e.g. <c>runsc</c> (gVisor) or <c>kata-runtime</c> for a
@@ -119,17 +128,20 @@ public sealed class DockerWorkflowLauncherSettings
     public bool AllowUnenforcedEgress { get; set; }
 
     /// <summary>
-    /// URI of the Docker daemon socket used to launch workflow containers. Defaults to the
+    /// URI of the Docker daemon endpoint used to launch workflow containers. Defaults to the
     /// host OS's standard local daemon endpoint (named pipe on Windows, Unix socket elsewhere).
-    /// Override in config or env for remote daemons.
+    /// In production this is the Docker API guard (<c>tcp://docker-guard:2375</c>), which alone
+    /// holds the daemon socket and allows exactly the calls a runner makes.
     /// </summary>
     public string DockerSocketPath { get; set; } = OperatingSystem.IsWindows()
         ? "npipe://./pipe/docker_engine"
         : "unix:///var/run/docker.sock";
 
     /// <summary>
-    /// Base container image used to run workflow assemblies.
-    /// The extracted package is bind-mounted over the container filesystem.
+    /// Base container image used to run workflow assemblies (package launches). The extracted
+    /// package is bind-mounted over the container filesystem. Workflow containers run on a
+    /// read-only root filesystem, so this image must provision the <c>auxilia-agent</c> user
+    /// (uid/gid 10001) like every workflow image — the SDK refuses to start without it.
     /// </summary>
     public string RuntimeImage { get; set; } = "mcr.microsoft.com/dotnet/runtime:8.0";
 

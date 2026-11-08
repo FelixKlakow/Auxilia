@@ -99,7 +99,7 @@ public sealed class PlatformSettingsTests : CoreApiComponentTestBase
             new SetPlatformSetting(DefaultResourceAccessModes.Open));
         Assert.That(set.StatusCode, Is.EqualTo(HttpStatusCode.OK));
 
-        await RegisterActiveTypeAsync(CreateClient(), "settings-open-wt", "docker://img");
+        await RegisterActiveTypeAsync(CreateClient(), "settings-open-wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         var directory = Factory.Services.GetRequiredService<PrincipalDirectory>();
         var (principal, apiKey) = await directory.CreateApiKeyPrincipalAsync($"svc-{Guid.NewGuid():N}");
         await directory.AssignRoleAsync(principal.Id, BuiltInRoles.User);

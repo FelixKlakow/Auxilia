@@ -21,8 +21,18 @@ enforces arrives as data.
   proxy; a declared name counts as an explicit entry, so internal addresses are admitted).
 
 ## Behaviour
-- HTTP proxy: `CONNECT host:port` tunnels and absolute-form `http://` requests (re-issued in
-  origin form, `Proxy-*` headers stripped, the connection pinned to the checked destination).
+- HTTP proxy: `CONNECT host:port` tunnels and absolute-form `http://` requests. A tunnel's first
+  client bytes are read before anything reaches the destination (the server's direction flows
+  meanwhile, so server-first protocols work): a TLS ClientHello (`TlsClientHello` — fragmented
+  records reassembled, malformed or duplicate server names refused, a stalled handshake refused
+  after `HelloTimeout`) must name the tunnel's destination in its SNI or the tunnel is refused
+  and logged as a denial (`sni` field) — no domain fronting; a handshake naming no server (an
+  address literal) and non-TLS bytes pass, pinned to the admitted address. A plain request is
+  re-issued in origin form with the TARGET's `Host` (the client's is ignored), hop-by-hop headers
+  and `Proxy-*` dropped, and `Connection: close`, followed by exactly its `Content-Length` body —
+  nothing the client sends after that (a pipelined second request, perhaps for another site on
+  the same address) reaches the destination. A body framed by `Transfer-Encoding` has no length
+  to hold it to and is refused (411, logged as a denial), as are conflicting lengths (400).
 - Names are resolved by the gateway; a destination resolving only to loopback / link-local
   (cloud metadata) / multicast / unspecified addresses is refused even under allow-all — such an
   address is reachable only as an explicitly listed IP literal. Private and internal addresses
@@ -41,7 +51,8 @@ enforces arrives as data.
 Source/Platform/Auxilia.EgressGateway/
 ├── Program.cs          # Env → policy, proxy, relays; "listening" event
 ├── EgressPolicy.cs     # Allowlist parsing/matching + special-purpose address guard
-├── EgressProxy.cs      # CONNECT / absolute-form proxy, TcpForward relays, the byte pipe
+├── EgressProxy.cs      # CONNECT / absolute-form proxy, tunnel SNI check, TcpForward relays, the byte pipe
+├── TlsClientHello.cs   # Strict ClientHello reader (server name for the tunnel check)
 ├── ForwardSpec.cs      # EGRESS_FORWARDS parsing
 ├── EgressLog.cs        # JSON-lines event writer
 └── Dockerfile          # runtime:10.0, USER app, EXPOSE 3128

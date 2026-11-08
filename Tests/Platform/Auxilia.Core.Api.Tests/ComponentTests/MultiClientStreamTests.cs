@@ -102,6 +102,8 @@ public sealed class MultiClientStreamTests : CoreApiComponentTestBase
         const int runCount = 20;
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var runIds = Enumerable.Range(0, runCount).Select(_ => Guid.NewGuid()).ToList();
+        foreach (var runId in runIds)
+            await SeedRunAsync(runId);
 
         // Phase 1: open all twenty SSE connections and WAIT for their headers — the endpoint
         // flushes headers only after its broker subscription is registered, so completion here
@@ -135,9 +137,11 @@ public sealed class MultiClientStreamTests : CoreApiComponentTestBase
 
         foreach (var (runId, body) in results)
         {
+            // The first frame is each run's Dispatched snapshot; the live frames follow.
             var frames = body.Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
                 .Select(f => System.Text.Json.JsonSerializer.Deserialize<RunStreamEvent>(
                     f["data: ".Length..], System.Text.Json.JsonSerializerOptions.Web)!)
+                .Skip(1)
                 .ToList();
             Assert.Multiple(() =>
             {

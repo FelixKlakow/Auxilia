@@ -13,7 +13,7 @@ public sealed class EgressLog(TextWriter output)
 
     public void Write(string evt, string? kind = null, string? host = null, int? port = null,
         string? decision = null, string? reason = null, long? bytesOut = null, long? bytesIn = null,
-        long? durationMs = null)
+        long? durationMs = null, string? serverName = null)
     {
         var line = JsonSerializer.Serialize(new Dictionary<string, object?>
         {
@@ -22,6 +22,7 @@ public sealed class EgressLog(TextWriter output)
             ["kind"] = kind,
             ["host"] = host,
             ["port"] = port,
+            ["sni"] = serverName,
             ["decision"] = decision,
             ["reason"] = reason,
             ["bytesOut"] = bytesOut,

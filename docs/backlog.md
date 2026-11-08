@@ -3,6 +3,79 @@
 > Live tracker of known follow-ups (open items only). Delivered programs and their decision
 > records live in `docs/delivered/` and the git history.
 
+## Security review 2026-11-08 — multi-user integration
+
+An application integrating Auxilia for many people of one organization (one Operator principal
+that starts runs on their behalf, in repositories it manages) reviewed run isolation and
+containment. Outcomes (ARCHITECTURE §7, §9, §10, §16):
+
+- ~~**Runs visible and steerable by every principal holding the role**~~ — DONE: per-run access
+  (`RunAccessService`): the principal a run runs for, the one that started it on their behalf,
+  its grants (the connector sharing model — `PUT /api/runs/{id}/grants`, MCP `set_run_grants`,
+  `ICoreClient.SetRunGrantsAsync`) and administrators (audited `run.admin-access`). Status,
+  list/stats, SSE stream, stored views, inputs, terminal ticket, cancel/rerun/pins, the run's
+  artifacts (incl. `container-log`/`egress-log`) and events, and the MCP tools all answer 404 for
+  someone else's run. Component-proven: `RunAccessTests`.
+- ~~**Tunnels checked by their CONNECT host only; plain requests forwarded the client's Host
+  over a pinned keep-alive connection**~~ — DONE: a tunnel's TLS server name must name its
+  destination (ClientHello parsed, fragmented records reassembled, malformed refused — domain
+  fronting is refused before a handshake byte leaves); plain requests are re-issued with the
+  target's Host, hop-by-hop headers dropped, one request per connection. System-proven:
+  `EgressIsolationSystemTests` (`curl --connect-to` fronting).
+- ~~**Allowed egress audited per destination only**~~ — DONE: the run's audited egress summary
+  counts every allowed connection per destination and carries the SHA-256 of the complete
+  per-attempt log (= the `egress-log` artifact's content hash), so every allowed and denied
+  attempt is anchored in the chain; denials stay audited individually and live. Run-level proof:
+  `RunContainmentSystemTests` — the declared endpoint is reachable, any other host refused AND
+  audited, nothing reachable around the gateway, a run without endpoints reaches nothing.
+- ~~**Agent CLIs' proxy support unverified**~~ — verified: Claude Code and the Copilot CLI dial
+  their services through the gateway (`AgentCliProxySystemTests`); no transparent routing needed.
+- ~~**Writable image, swap beyond the memory ceiling, unlimited CPU; a root SDK that could not
+  create the agent user silently ran agents as root**~~ — DONE: read-only root filesystem
+  (tmpfs `/tmp` `/var/tmp` `/run` `/root` and the wrapper directory; anonymous volumes for the
+  agent's home and a baked image's application directory), no swap beyond the memory ceiling
+  (the run fails "stopped at its memory limit"), CPU ceiling 4 by default, clamped to the daemon;
+  workflow images provision `auxilia-agent` at build time and a root SDK that cannot establish
+  the sandbox refuses to start. System-proven: `RunContainmentSystemTests` (agent uid 10001,
+  read-only image, OOM stop).
+- ~~**Docker images approved by tag**~~ — DONE: the registry accepts `docker://` only by digest
+  (`DockerPackageCoordinate`), host-configured static types included (they follow their
+  configured digest); a record stored by tag never dispatches; every runner refuses tags and
+  starts exactly the pinned content (registry digest, pulled by digest when absent, or a local
+  build's image ID).
+- ~~**A failed warm-cache refresh fell back to the stale copy**~~ — DONE: the run fails
+  preparation (`PreFlightFailed` with the reason); refresh, checkout and copy of one entry are
+  serialized (no torn copies); a first clone goes through a staging directory.
+- ~~**Credentials in a pushable workspace**~~ — fixed by the 2026-10-15 push gateway; now proven
+  end to end: `RepositoryWorkspaceSystemTests` scans every workspace file for the token, then
+  pushes through the gateway to the authenticated remote.
+
+- ~~**The runner held an unrestricted Docker socket**~~ — a compromised runner process (e.g. a
+  git vulnerability hit while cloning an untrusted repository) controlled the daemon. DONE: the
+  Docker API guard (`Source/Platform/Auxilia.DockerGuard`, image `auxilia-docker-guard`) holds
+  the socket, the runner holds the guard's endpoint: exactly the calls a runner makes, create
+  bodies held to the confinement policy (ownership label, no-new-privileges and no other security
+  option, no privileged/host namespaces/devices/sysctls/extra caps/unmasked paths, owned volumes
+  without driver options, owned internal bridge networks), operations only on owned objects (the
+  daemon's answer), builds and deletions only of composed environments, no imports, no
+  exec/attach; bodies, paths and queries read exactly as the daemon reads them. Host binds are
+  allowed only below the run roots and are carried out as subpath mounts of a guard-owned volume
+  per root, so the DAEMON resolves them beneath the root: a symlink the runner plants in its run
+  roots fails the start instead of mounting the host (a plain bind follows it — verified against
+  Docker 29), with no check-then-use race. Needs Docker 26+ (Engine API 1.45). Contract-tested
+  against the runner's real requests (`RunnerCompatibilityTests`) and system-proven with a real
+  runner behind it (`CoreClientEnvironment`, `DockerGuardSystemTests`). (Rootless Docker remains
+  an alternative where no sandboxed runtime is required — gVisor/Kata need a rootful daemon.)
+
+Open:
+- **Container root on the host.** Agent code runs as uid 10001; the SDK stays root inside its
+  container (it needs `CAP_SETUID` to drop to the agent user and keep its secrets from it). On
+  the host, that root is unprivileged under a sandboxed runtime (gVisor/Kata — required in the
+  production posture) or daemon user-namespace remapping; a plain runc host shares root's uid.
+- **Run sharing in the AdminConsole** — runs are shared over REST/MCP/the client library; the
+  console has no grant editor for runs yet.
+- **Warm-cache copy-on-write** — per-run copies are still plain recursive copies.
+
 ## Security review 2026-10-15 — workload containment (agent breakout)
 
 Review question: does the platform ensure full audit and restriction when an agent inside a
@@ -411,10 +484,9 @@ Open:
   package swapped post-registration fails its run at the runner's signature verification.
   (Executing a zip payload stays uncovered: the containerized runner's extraction path is not
   daemon-resolvable — see the fixture doc.)
-- **Docker packages: pin the digest at approval.** A `docker://` image has no verifiable
-  package signature, so trust is the approval act — but the approved TAG is mutable: it can be
-  repointed after approval and the runner would run different code under the approved name.
-  Resolve the tag to `docker://image@sha256:…` at approval time and dispatch by digest.
+- ~~**Docker packages: pin the digest at approval.**~~ — DONE 2026-11-08: images are registered
+  and approved by digest only; runners start exactly the pinned content (see the 2026-11-08
+  security review above).
 
 ## Hardening wave 2026-08-04 — dispatch truth, container re-adoption, stream/UI resilience
 Delivered (see ARCHITECTURE §6/§14.2/§15): dispatch-time `Dispatched` run record + claim-timeout

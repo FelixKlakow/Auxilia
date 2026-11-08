@@ -34,6 +34,14 @@ snapshot-first frames); unary calls run under a per-call timeout that surfaces a
 `TimeoutException`, never as your own cancellation. Every Core surface is on
 `ICoreClient`, so test doubles are one interface away.
 
+Runs are private to their principals: a run is reachable — status, list, stream, views,
+inputs, terminal, its artifacts and events — only by the principal it runs for, the
+principal that started it on that one's behalf (`RunRequest.RequestedBy`, needs
+`run.on-behalf-of`), the subjects it is shared with, and administrators; anyone else gets
+404. Share a run with `SetRunGrantsAsync(runId, new SetRunGrants([...]))` (principals,
+groups or directory groups; an empty list makes it private again). Docker workflow images
+are registered by digest (`docker://image[:tag]@sha256:…`, see `DockerPackageCoordinate`).
+
 ## Package family
 
 | Package | Purpose |

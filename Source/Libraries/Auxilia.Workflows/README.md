@@ -25,7 +25,11 @@ parity.
   without any platform secret (`AgentSandbox`); a push reaches its remote only through the
   SDK's loopback push gateway, where a per-action policy (`ActionGate`, kind `git.push`)
   decides it from the push's actual ref updates. The bus is reached with the run's own
-  broker identity through the platform's ingress exchange.
+  broker identity through the platform's ingress exchange. Workflow containers run on a
+  read-only root filesystem, so a workflow image provisions the sandbox user at build time
+  (`groupadd --gid 10001 auxilia-agent && useradd --uid 10001 --gid 10001 --create-home
+  --home-dir /home/auxilia-agent --shell /bin/bash auxilia-agent`) — an SDK running as root
+  that cannot establish it refuses to start rather than run agent code as root.
 - **Tool-provision matching** — `ProvidesTools("claude", "copilot")` declares the CLIs the
   workflow's image bundles; slot handlers declare what they need (`RequiredTools` in their
   manifest) and match data-driven — no provider names in workflow source.

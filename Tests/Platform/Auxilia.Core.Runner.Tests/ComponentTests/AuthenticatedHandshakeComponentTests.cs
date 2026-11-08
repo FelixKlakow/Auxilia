@@ -118,7 +118,7 @@ public class AuthenticatedHandshakeComponentTests
     private async Task<(Guid InstanceId, string Token)> DispatchAsync(string workflowType = "auth-wf")
     {
         var command = new RunWorkflowCommand(
-            Guid.NewGuid(), workflowType, "docker://auth-wf:test", new Dictionary<string, string>());
+            Guid.NewGuid(), workflowType, "docker://auth-wf:test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", new Dictionary<string, string>());
 
         await _bus.SimulateReceivedAsync("workflow.run-commands", command);
         await _bus.WaitForConditionAsync(() => _launcher.Calls.Count > 0, Timeout);

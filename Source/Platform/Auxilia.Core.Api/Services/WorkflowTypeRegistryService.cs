@@ -39,8 +39,13 @@ public sealed class WorkflowTypeRegistryService(
     TimeProvider clock,
     ILogger<WorkflowTypeRegistryService> logger)
 {
-    private const string DockerScheme = "docker://";
+    private const string DockerScheme = DockerPackageCoordinate.Scheme;
     private const string CoreScheme = "core://";
+
+    internal const string UnpinnedDockerImageError =
+        "a docker image is registered by its content digest — docker://image[:tag]@sha256:<64 hex> (the registry "
+        + "digest, or the image ID of an image built on the runner host) — because an approval vouches for what "
+        + "it reviewed, and a tag can be re-pointed at content nobody reviewed.";
 
     private static readonly JsonSerializerOptions SchemaReadOptions = new()
     {
@@ -87,6 +92,11 @@ public sealed class WorkflowTypeRegistryService(
         byte[]? packageBytes = null;
         string? packageUri = request.PackageUri?.Trim();
         string? storedPath = null;
+
+        // An approval vouches for CONTENT: a docker image is registered by its digest, so what was
+        // reviewed is exactly what runs — re-pushing the tag can never smuggle new code under it.
+        if (DockerPackageCoordinate.IsDocker(packageUri) && !DockerPackageCoordinate.IsDigestPinned(packageUri))
+            return RegistryOutcome.Fail(UnpinnedDockerImageError);
 
         if (hasUpload)
         {
@@ -360,6 +370,10 @@ public sealed class WorkflowTypeRegistryService(
                 + (record.StatusReason is { Length: > 0 } r ? $" — {r}" : "") + ")");
         if (string.IsNullOrEmpty(record.PackageUri))
             throw new InvalidOperationException($"workflow type '{workflowType}' has no package coordinate");
+        // A record stored before images were approved by digest never dispatches by its tag.
+        if (DockerPackageCoordinate.IsDocker(record.PackageUri) && !DockerPackageCoordinate.IsDigestPinned(record.PackageUri))
+            throw new InvalidOperationException(
+                $"workflow type '{workflowType}' names its image by tag only — re-register it by digest. {UnpinnedDockerImageError}");
 
         if (!record.PackageUri.StartsWith(CoreScheme, StringComparison.OrdinalIgnoreCase))
             return record.PackageUri;
@@ -391,15 +405,40 @@ public sealed class WorkflowTypeRegistryService(
         return true;
     }
 
-    /// <summary>Idempotently seeds a static (operator-configured) type as Active; an existing type is left untouched.</summary>
+    private const string SeededReason = "seeded from host configuration";
+
+    /// <summary>
+    /// Seeds a static (operator-configured) type as Active. Host configuration is the operator's
+    /// trust act, held to the registry's content rule: a docker image named by tag only is a
+    /// configuration error that stops the Core from starting. A type the configuration seeded
+    /// follows the configuration — a changed coordinate (a rebuilt image's new digest) replaces the
+    /// seeded one, audited; a type registered through the signing authority is never touched.
+    /// </summary>
     public async Task EnsureSeededAsync(StaticWorkflowType seed, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(seed.WorkflowType))
             return;
+        if (DockerPackageCoordinate.IsDocker(seed.PackageUri) && !DockerPackageCoordinate.IsDigestPinned(seed.PackageUri))
+            throw new InvalidOperationException(
+                $"CoreApi:StaticWorkflowTypes entry '{seed.WorkflowType}' ({seed.PackageUri}): {UnpinnedDockerImageError}");
         var id = CoreWorkflowTypeRecord.IdFor(seed.WorkflowType);
-        if (await store.ReadAsync(id, ct) is not null)
-            return;
         var now = clock.GetUtcNow();
+        if (await store.ReadAsync(id, ct) is { } existing)
+        {
+            if (existing.StatusReason != SeededReason
+                || string.Equals(existing.PackageUri, seed.PackageUri, StringComparison.Ordinal))
+                return;
+            await store.SaveAsync(existing with
+            {
+                PackageUri = seed.PackageUri,
+                SchemaJson = seed.SchemaJson ?? existing.SchemaJson,
+                PackageHashBase64 = ComputePackageHash(null, seed.PackageUri ?? "", seed.SchemaJson ?? existing.SchemaJson),
+                UpdatedUtc = now
+            }, ct);
+            await auditLog.AppendAsync("core-api", "workflow-type.reseeded", seed.WorkflowType, "Active",
+                $"{existing.PackageUri} -> {seed.PackageUri} (host configuration)", ct);
+            return;
+        }
         await store.SaveAsync(new CoreWorkflowTypeRecord
         {
             Id = id,
@@ -407,7 +446,7 @@ public sealed class WorkflowTypeRegistryService(
             PackageUri = seed.PackageUri,
             SchemaJson = seed.SchemaJson,
             Status = WorkflowTypeStatus.Active,
-            StatusReason = "seeded from host configuration",
+            StatusReason = SeededReason,
             RegisteredUtc = now,
             UpdatedUtc = now
         }, ct);

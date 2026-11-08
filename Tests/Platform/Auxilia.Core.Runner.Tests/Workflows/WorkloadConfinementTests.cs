@@ -116,7 +116,69 @@ public sealed class WorkloadConfinementTests
 
         Assert.That(hostConfig.CapDrop, Is.Null);
         Assert.That(hostConfig.SecurityOpt, Is.Null);
+        Assert.That(hostConfig.ReadonlyRootfs, Is.False);
+        Assert.That(hostConfig.Tmpfs, Is.Null);
         Assert.That(hostConfig.Memory, Is.EqualTo(8192L * 1024 * 1024));
+    }
+
+    [Test]
+    public void Confinement_TheRootFilesystemIsReadOnly_WritableOnlyThroughScratchAndTheAgentsHome()
+    {
+        var p = DockerWorkflowLauncher.BuildBakedImageContainerParameters(
+            new WorkflowLaunchRequest(string.Empty, new Dictionary<string, string>(), [], DockerImageUri: "img"),
+            new DockerWorkflowLauncherSettings());
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(p.HostConfig.ReadonlyRootfs, Is.True, "the image stays exactly what was approved for the whole run");
+            Assert.That(p.HostConfig.Tmpfs.Keys, Is.EquivalentTo(new[] { "/tmp", "/var/tmp", "/run", "/root", "/var/lib/auxilia-sandbox" }));
+            Assert.That(p.HostConfig.Tmpfs["/root"], Does.Contain("mode=700"), "the SDK's private home stays root-only");
+            Assert.That(p.HostConfig.Tmpfs["/tmp"], Does.Contain("mode=1777").And.Contain("size=2048m"));
+            Assert.That(p.HostConfig.Mounts.Select(m => (m.Type, m.Target)), Is.EquivalentTo(new[]
+            {
+                ("volume", Auxilia.Workflows.Sandbox.AgentSandbox.Home),
+                ("volume", "/app"),
+            }), "the agent's home and the baked application directory (slot-plugin target) are disk-backed scratch");
+            Assert.That(p.HostConfig.Mounts.All(m => string.IsNullOrEmpty(m.Source)), Is.True,
+                "anonymous volumes — created per container, removed with it");
+            Assert.That(p.HostConfig.Mounts.All(m => m.VolumeOptions.Labels.ContainsKey("auxilia.workflow")), Is.True,
+                "the volumes carry the runner's labels like everything it creates");
+        });
+    }
+
+    [Test]
+    public void Confinement_APackageLaunch_HasNoWritableApplicationDirectory()
+    {
+        var extracted = Path.Combine(Path.GetTempPath(), $"auxilia-confinement-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(extracted);
+        try
+        {
+            File.WriteAllText(Path.Combine(extracted, "package-manifest.json"),
+                """{"workflowName":"wf","executableRelativePath":"wf.dll","files":[]}""");
+            var p = DockerWorkflowLauncher.BuildCreateContainerParameters(
+                new WorkflowLaunchRequest(extracted, new Dictionary<string, string>(), []),
+                new DockerWorkflowLauncherSettings());
+
+            Assert.That(p.HostConfig.ReadonlyRootfs, Is.True);
+            Assert.That(p.HostConfig.Mounts.Select(m => m.Target), Is.EqualTo(new[] { Auxilia.Workflows.Sandbox.AgentSandbox.Home }),
+                "the package itself is a read-only bind; plugins are copied beside it on the runner");
+        }
+        finally
+        {
+            Directory.Delete(extracted, recursive: true);
+        }
+    }
+
+    [Test]
+    public void Confinement_TheMemoryCeilingAllowsNoSwap_AndTheCpuCeilingFitsTheDaemon()
+    {
+        var hostConfig = new Docker.DotNet.Models.HostConfig();
+        DockerWorkflowLauncher.ApplyConfinement(hostConfig,
+            new DockerWorkflowLauncherSettings { ContainerMemoryMb = 512, ContainerCpus = 8 }, linux: true, daemonCpus: 2);
+
+        Assert.That(hostConfig.Memory, Is.EqualTo(512L * 1024 * 1024));
+        Assert.That(hostConfig.MemorySwap, Is.EqualTo(hostConfig.Memory), "the container is stopped AT its memory limit");
+        Assert.That(hostConfig.NanoCPUs, Is.EqualTo(2_000_000_000), "the daemon refuses a ceiling above its cores");
     }
 
     [Test]

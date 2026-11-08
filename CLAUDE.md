@@ -37,7 +37,7 @@ dotnet test <Project>.Tests/ --filter "FullyQualifiedName~<TestName>"  # single 
 
 ## Layout
 
-`Source/Platform` (the deployables: Core.Api, Core.Runner, AdminConsole, TriggerHost, and the runner-managed per-run EgressGateway image) ·
+`Source/Platform` (the deployables: Core.Api, Core.Runner, AdminConsole, TriggerHost, the runner-managed per-run EgressGateway image, and the DockerGuard the runner reaches Docker through) ·
 `Source/Libraries` (contracts, clients, workflow SDK, messaging, data, governance) ·
 `Source/Slots` (provider plugins) · `Source/Workflows` (the shipped workflow images) ·
 `Tests/{Platform,Libraries,Slots,Workflows}` (mirroring test projects) · `Tests/System`

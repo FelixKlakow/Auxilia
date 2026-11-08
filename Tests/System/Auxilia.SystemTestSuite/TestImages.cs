@@ -31,6 +31,31 @@ internal static class TestImages
     /// <summary>The per-run egress gateway every launched workflow container sits behind.</summary>
     internal const string EgressGatewayImageName = "auxilia-egress-gateway:system-test";
 
+    /// <summary>
+    /// The coordinate a locally built image is registered and run by: <c>docker://name@&lt;image id&gt;</c>.
+    /// Images are approved by content (a tag can be re-pointed); an image built here never went
+    /// through a registry, so its image ID — the digest of its configuration, which fixes every
+    /// layer — is the pin. Call it after the image is built.
+    /// </summary>
+    internal static async Task<string> PinnedCoordinateAsync(string imageName)
+    {
+        var psi = new ProcessStartInfo("docker", $"image inspect --format {{{{.Id}}}} {imageName}")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException("docker did not start");
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        var id = (await stdout).Trim();
+        if (process.ExitCode != 0 || !System.Text.RegularExpressions.Regex.IsMatch(id, "^sha256:[0-9a-f]{64}$"))
+            throw new InvalidOperationException(
+                $"could not read the image ID of {imageName} (exit {process.ExitCode}): {id} {await stderr}");
+        return $"docker://{imageName}@{id}";
+    }
+
     internal static Task BuildEgressGatewayAsync()
         => BuildImageAsync(EgressGatewayImageName, "Source/Platform/Auxilia.EgressGateway/Dockerfile");
 

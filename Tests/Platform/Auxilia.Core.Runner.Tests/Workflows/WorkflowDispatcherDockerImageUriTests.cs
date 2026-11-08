@@ -127,30 +127,41 @@ public class WorkflowDispatcherDockerImageUriTests
         return failed;
     }
 
-    [Test]
-    public async Task ASignatureTrustingRunner_RefusesADockerTag_AndRunsADigestPinnedImage()
+    /// <summary>A digest pin (any 64 hex digits — the launcher is mocked here).</summary>
+    private static readonly string Pin = "@sha256:" + new string('a', 64);
+
+    private static readonly string Img = "docker://img:1" + Pin;
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task EveryRunner_RefusesADockerTag_AndRunsADigestPinnedImage(bool trustsSigningKeys)
     {
-        var trusting = new WorkflowDispatcherSettings { ContainerExitGraceSeconds = 0, TrustedSigningKeys = ["key"] };
+        // Images are approved by digest; a runner — whatever its posture — never runs a tag.
+        var settings = new WorkflowDispatcherSettings
+        {
+            ContainerExitGraceSeconds = 0,
+            TrustedSigningKeys = trustsSigningKeys ? ["key"] : []
+        };
 
-        var refused = await DispatchOnAsync(BuildDispatcher(dispatcherSettings: trusting), "docker://img:1");
+        var refused = await DispatchOnAsync(BuildDispatcher(dispatcherSettings: settings), "docker://img:1");
         Assert.That(refused?.ErrorMessage, Does.Contain("not pinned by digest"));
+        _mockLauncher.Verify(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()), Times.Never);
 
-        var pinned = await DispatchOnAsync(BuildDispatcher(dispatcherSettings: trusting),
-            "docker://img@sha256:" + new string('a', 64));
+        var pinned = await DispatchOnAsync(BuildDispatcher(dispatcherSettings: settings), "docker://img" + Pin);
         Assert.That(pinned, Is.Null);
     }
 
     [Test]
     public async Task ADaemonThatCannotEnforceEgress_RunsNothing_UntilTheOperatorAcceptsIt()
     {
-        var refused = await DispatchOnAsync(BuildDispatcher(daemonOs: "windows"), "docker://img:1");
+        var refused = await DispatchOnAsync(BuildDispatcher(daemonOs: "windows"), Img);
         Assert.That(refused?.ErrorMessage, Does.Contain("AllowUnenforcedEgress"));
         _mockLauncher.Verify(l => l.LaunchAsync(It.IsAny<WorkflowLaunchRequest>(), It.IsAny<CancellationToken>()), Times.Never);
 
         var accepted = DefaultLauncherSettings();
         accepted.AllowUnenforcedEgress = true;
         var allowAll = await DispatchOnAsync(BuildDispatcher(launcherSettings: accepted, daemonOs: "windows"),
-            "docker://img:1");
+            Img);
         Assert.That(allowAll?.ErrorMessage, Does.Contain("only execute allow-all runs"),
             "even when accepted, a non-allow-all run is never launched without enforcement");
     }
@@ -190,7 +201,7 @@ public class WorkflowDispatcherDockerImageUriTests
             .ReturnsAsync(new WorkflowLaunchResult());
 
         await _capturedHandler!(new RunWorkflowCommand(
-            Guid.NewGuid(), "wf", "docker://img:1", new Dictionary<string, string>()), CancellationToken.None);
+            Guid.NewGuid(), "wf", Img, new Dictionary<string, string>()), CancellationToken.None);
 
         var instanceId = Guid.Parse(captured!.EnvironmentVariables["Workflow__InstanceId"]);
         var user = WorkloadBusIdentity.UserNameFor(instanceId);
@@ -210,7 +221,7 @@ public class WorkflowDispatcherDockerImageUriTests
             .ThrowsAsync(new InvalidOperationException("docker down"));
 
         await _capturedHandler!(new RunWorkflowCommand(
-            Guid.NewGuid(), "wf", "docker://img:1", new Dictionary<string, string>()), CancellationToken.None);
+            Guid.NewGuid(), "wf", Img, new Dictionary<string, string>()), CancellationToken.None);
 
         Assert.That(_brokerIssuer.Active, Is.Empty, "a run that never started must not leave a live credential");
         Assert.That(_brokerIssuer.Revoked, Has.Count.EqualTo(1));
@@ -225,7 +236,7 @@ public class WorkflowDispatcherDockerImageUriTests
             .Callback<WorkflowLaunchRequest, CancellationToken>((req, _) => captured = req)
             .ReturnsAsync(new WorkflowLaunchResult());
         await _capturedHandler!(new RunWorkflowCommand(
-            Guid.NewGuid(), "wf", "docker://img:1", new Dictionary<string, string>()), CancellationToken.None);
+            Guid.NewGuid(), "wf", Img, new Dictionary<string, string>()), CancellationToken.None);
         Assert.That(_brokerIssuer.Active, Has.Count.EqualTo(1));
 
         await captured!.OnExited!(new ContainerExit(0, null));
@@ -243,13 +254,13 @@ public class WorkflowDispatcherDockerImageUriTests
             .ReturnsAsync(new WorkflowLaunchResult());
 
         var command = new RunWorkflowCommand(
-            Guid.NewGuid(), "my-workflow", "docker://my-image:1.0",
+            Guid.NewGuid(), "my-workflow", "docker://my-image:1.0" + Pin,
             new Dictionary<string, string>());
 
         await _capturedHandler!(command, CancellationToken.None);
 
         Assert.That(captured, Is.Not.Null);
-        Assert.That(captured!.DockerImageUri, Is.EqualTo("my-image:1.0"));
+        Assert.That(captured!.DockerImageUri, Is.EqualTo("my-image:1.0" + Pin), "the launcher resolves the pin to exact content");
         Assert.That(string.IsNullOrEmpty(captured.ExtractedContentDirectory), Is.True);
 
         // No HTTP call should have been made
@@ -273,7 +284,7 @@ public class WorkflowDispatcherDockerImageUriTests
             .ReturnsAsync(new WorkflowLaunchResult());
 
         var command = new RunWorkflowCommand(
-            Guid.NewGuid(), "my-workflow", "docker://my-image:1.0",
+            Guid.NewGuid(), "my-workflow", "docker://my-image:1.0" + Pin,
             new Dictionary<string, string>(),
             SlotProviderTypes: new[] { "MyProvider" });
 
@@ -329,7 +340,7 @@ public class WorkflowDispatcherDockerImageUriTests
             .ReturnsAsync(new WorkflowLaunchResult());
 
         var command = new RunWorkflowCommand(
-            Guid.NewGuid(), "my-workflow", "docker://my-image:1.0",
+            Guid.NewGuid(), "my-workflow", "docker://my-image:1.0" + Pin,
             new Dictionary<string, string>());
 
         await _capturedHandler!(command, CancellationToken.None);

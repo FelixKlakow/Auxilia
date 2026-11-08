@@ -214,7 +214,7 @@ public sealed class WorkflowTypeRegistryServiceTests
     {
         var service = NewService();
         await service.RegisterAsync(
-            new RegisterWorkflowTypeRequest("bad-wf", "docker://bad:1"), null, CancellationToken.None);
+            new RegisterWorkflowTypeRequest("bad-wf", "docker://bad:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), null, CancellationToken.None);
 
         var denied = await service.DenyAsync("bad-wf", "unsafe network use", "signer", CancellationToken.None);
 
@@ -231,7 +231,7 @@ public sealed class WorkflowTypeRegistryServiceTests
             new RegisterWorkflowTypeRequest("active-wf", PackageBase64: Convert.ToBase64String(package)),
             null, CancellationToken.None);
         await service.RegisterAsync(
-            new RegisterWorkflowTypeRequest("denied-wf", "docker://bad:1"), null, CancellationToken.None);
+            new RegisterWorkflowTypeRequest("denied-wf", "docker://bad:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), null, CancellationToken.None);
         await service.DenyAsync("denied-wf", "unsafe", "signer", CancellationToken.None);
 
         var approveActive = await service.ApproveAsync("active-wf", "signer", CancellationToken.None);
@@ -260,12 +260,12 @@ public sealed class WorkflowTypeRegistryServiceTests
     {
         var service = NewService();
         var reviewed = (await service.RegisterAsync(
-            new RegisterWorkflowTypeRequest("swap-wf", "docker://img:1"), null, CancellationToken.None)).Registration!;
+            new RegisterWorkflowTypeRequest("swap-wf", "docker://img:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), null, CancellationToken.None)).Registration!;
         Assert.That(reviewed.PackageHashBase64, Is.Not.Null.And.Not.Empty);
 
         // A replacement package lands while the reviewer evaluates the first one.
         var replaced = (await service.RegisterAsync(
-            new RegisterWorkflowTypeRequest("swap-wf", "docker://img:2"), null, CancellationToken.None)).Registration!;
+            new RegisterWorkflowTypeRequest("swap-wf", "docker://img:2@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), null, CancellationToken.None)).Registration!;
         Assert.That(replaced.PackageHashBase64, Is.Not.EqualTo(reviewed.PackageHashBase64));
 
         var staleApprove = await service.ApproveReviewedAsync(reviewed, "approval-pipeline:x", CancellationToken.None);
@@ -345,7 +345,7 @@ public sealed class WorkflowTypeRegistryServiceTests
     {
         var service = NewService();
         await service.RegisterAsync(
-            new RegisterWorkflowTypeRequest("pending-wf", "docker://img:1"), null, CancellationToken.None);
+            new RegisterWorkflowTypeRequest("pending-wf", "docker://img:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), null, CancellationToken.None);
 
         var disablePending = await service.SetEnabledAsync("pending-wf", enabled: false, "admin", CancellationToken.None);
         var enablePending = await service.SetEnabledAsync("pending-wf", enabled: true, "admin", CancellationToken.None);
@@ -364,9 +364,98 @@ public sealed class WorkflowTypeRegistryServiceTests
         Assert.That(updatedGhost, Is.False);
 
         await service.EnsureSeededAsync(
-            new StaticWorkflowType { WorkflowType = "seeded", PackageUri = "docker://x" }, CancellationToken.None);
+            new StaticWorkflowType { WorkflowType = "seeded", PackageUri = "docker://x@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }, CancellationToken.None);
         var updatedSeeded = await service.UpdateSchemaAsync(
             "seeded", "{\"workflowName\":\"seeded\"}", CancellationToken.None);
         Assert.That(updatedSeeded, Is.True);
+    }
+
+    // ------------------------------------------------------------------ images are approved by digest
+
+    private static string Image(char digit, string tag = "stable")
+        => $"docker://registry.example/team/wf:{tag}@sha256:{new string(digit, 64)}";
+
+    [TestCase("docker://registry.example/team/wf:stable")]
+    [TestCase("docker://registry.example/team/wf")]
+    [TestCase("docker://registry.example/team/wf@sha256:abc")]
+    public async Task ADockerImageNotNamedByItsDigest_IsRefused(string coordinate)
+    {
+        var outcome = await NewService().RegisterAsync(
+            new RegisterWorkflowTypeRequest("tag-wf", coordinate), null, CancellationToken.None);
+
+        Assert.That(outcome.Registration, Is.Null);
+        Assert.That(outcome.Error, Does.Contain("digest").And.Contain("tag can be re-pointed"),
+            "an approval vouches for content — a tag names whatever was pushed last");
+    }
+
+    [Test]
+    public void AStaticTypeNamedByTagOnly_IsAConfigurationErrorThatStopsTheCore()
+        => Assert.ThrowsAsync<InvalidOperationException>(() => NewService().EnsureSeededAsync(
+            new StaticWorkflowType { WorkflowType = "seeded", PackageUri = "docker://x:latest" }, CancellationToken.None));
+
+    [Test]
+    public async Task AnApprovedImage_RePushedUnderItsTag_RunsNothingNew_UntilTheNewContentIsApproved()
+    {
+        var ct = CancellationToken.None;
+        var service = NewService();
+        await service.RegisterAsync(new RegisterWorkflowTypeRequest("wf", Image('a')), null, ct);
+        await service.ApproveAsync("wf", "signer", ct);
+        Assert.That(await service.ResolvePackageUriForDispatchAsync("wf", Guid.NewGuid(), "token", ct), Is.EqualTo(Image('a')),
+            "runs dispatch the approved digest — the tag is informational");
+
+        // The publisher pushed new content under the same tag and registers it (digest b): the type
+        // is pending again, and NO run starts until the signing authority approves the new content.
+        var reRegistered = await service.RegisterAsync(new RegisterWorkflowTypeRequest("wf", Image('b')), null, ct);
+        Assert.That(reRegistered.Registration!.Status, Is.EqualTo(WorkflowTypeStatus.Pending));
+        Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.ResolvePackageUriForDispatchAsync("wf", Guid.NewGuid(), "token", ct));
+
+        await service.ApproveAsync("wf", "signer", ct);
+        Assert.That(await service.ResolvePackageUriForDispatchAsync("wf", Guid.NewGuid(), "token", ct), Is.EqualTo(Image('b')));
+    }
+
+    [Test]
+    public async Task AConfigurationSeededType_FollowsTheConfiguredDigest_ARegisteredTypeIsNeverOverwritten()
+    {
+        var ct = CancellationToken.None;
+        var service = NewService();
+        await service.EnsureSeededAsync(new StaticWorkflowType { WorkflowType = "seeded", PackageUri = Image('a') }, ct);
+        await service.RegisterAsync(new RegisterWorkflowTypeRequest("registered", Image('a')), null, ct);
+        await service.ApproveAsync("registered", "signer", ct);
+
+        // The operator rebuilt the image and configured its new digest.
+        await service.EnsureSeededAsync(new StaticWorkflowType { WorkflowType = "seeded", PackageUri = Image('b') }, ct);
+        await service.EnsureSeededAsync(new StaticWorkflowType { WorkflowType = "registered", PackageUri = Image('b') }, ct);
+
+        Assert.That(await service.ResolvePackageUriForDispatchAsync("seeded", Guid.NewGuid(), "token", ct), Is.EqualTo(Image('b')),
+            "host configuration is the operator's trust act for the types it seeds");
+        Assert.That(await service.ResolvePackageUriForDispatchAsync("registered", Guid.NewGuid(), "token", ct), Is.EqualTo(Image('a')),
+            "a type the signing authority approved changes content only through a new approval");
+    }
+
+    [Test]
+    public async Task ATypeStoredByTagBeforeImagesWereApprovedByDigest_NeverDispatches()
+    {
+        var store = new InMemoryDataAccess<CoreWorkflowTypeRecord>();
+        await store.SaveAsync(new CoreWorkflowTypeRecord
+        {
+            Id = CoreWorkflowTypeRecord.IdFor("legacy-wf"),
+            WorkflowType = "legacy-wf",
+            PackageUri = "docker://registry.example/team/wf:stable",
+            Status = WorkflowTypeStatus.Active,
+            RegisteredUtc = DateTimeOffset.UtcNow,
+            UpdatedUtc = DateTimeOffset.UtcNow
+        }, CancellationToken.None);
+        var service = new WorkflowTypeRegistryService(
+            store,
+            new StubHttpClientFactory(new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound))),
+            Options.Create(new CoreApiSettings { PackageStoreDirectory = Path.Combine(_tempDir, "packages") }),
+            new AuditLog(new InMemoryDataAccess<AuditRecord>(), TimeProvider.System),
+            TimeProvider.System,
+            NullLogger<WorkflowTypeRegistryService>.Instance);
+
+        var refusal = Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.ResolvePackageUriForDispatchAsync("legacy-wf", Guid.NewGuid(), "token", CancellationToken.None));
+        Assert.That(refusal!.Message, Does.Contain("re-register it by digest"));
     }
 }

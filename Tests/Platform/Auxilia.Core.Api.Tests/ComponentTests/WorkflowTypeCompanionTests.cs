@@ -31,7 +31,7 @@ public sealed class WorkflowTypeCompanionTests : CoreApiComponentTestBase
     public async Task Register_UnpinnedCompanionImage_IsRefused()
     {
         var response = await CreateClient().PostAsJsonAsync("/api/workflow-types",
-            new RegisterWorkflowTypeRequest("pod-test", "docker://pod-test:1",
+            new RegisterWorkflowTypeRequest("pod-test", "docker://pod-test:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 SchemaJson: SchemaJsonWith(new CompanionDeclaration("db", "postgres:17"))));
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest),
@@ -43,7 +43,7 @@ public sealed class WorkflowTypeCompanionTests : CoreApiComponentTestBase
     public async Task Register_CompanionStartOrderCycle_IsRefused()
     {
         var response = await CreateClient().PostAsJsonAsync("/api/workflow-types",
-            new RegisterWorkflowTypeRequest("pod-test", "docker://pod-test:1",
+            new RegisterWorkflowTypeRequest("pod-test", "docker://pod-test:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 SchemaJson: SchemaJsonWith(
                     new CompanionDeclaration("a", PinnedImage) { StartAfter = ["b"] },
                     new CompanionDeclaration("b", PinnedImage) { StartAfter = ["a"] })));
@@ -80,7 +80,7 @@ public sealed class WorkflowTypeCompanionTests : CoreApiComponentTestBase
             new UpsertEnvironmentBase("other-base", "1", ImageReference: PinnedImage));
 
         await client.PostAsJsonAsync("/api/workflow-types",
-            new RegisterWorkflowTypeRequest("pod-ctl", "docker://pod-ctl:1",
+            new RegisterWorkflowTypeRequest("pod-ctl", "docker://pod-ctl:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 SchemaJson: JsonSerializer.Serialize(new WorkflowSchema("pod-ctl", [], [])
                 {
                     PodControl = new PodControlDeclaration(8)
@@ -109,7 +109,7 @@ public sealed class WorkflowTypeCompanionTests : CoreApiComponentTestBase
         await client.PostAsJsonAsync("/api/environment-bases",
             new UpsertEnvironmentBase("sim-base", "24.04", ImageReference: PinnedImage));
         await client.PostAsJsonAsync("/api/workflow-types",
-            new RegisterWorkflowTypeRequest("pod-ctl", "docker://pod-ctl:1",
+            new RegisterWorkflowTypeRequest("pod-ctl", "docker://pod-ctl:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 SchemaJson: JsonSerializer.Serialize(new WorkflowSchema("pod-ctl", [], [])
                 {
                     PodControl = new PodControlDeclaration(8)
@@ -129,7 +129,7 @@ public sealed class WorkflowTypeCompanionTests : CoreApiComponentTestBase
     {
         var client = CreateClient();
         await client.PostAsJsonAsync("/api/workflow-types",
-            new RegisterWorkflowTypeRequest("pod-ctl", "docker://pod-ctl:1",
+            new RegisterWorkflowTypeRequest("pod-ctl", "docker://pod-ctl:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 SchemaJson: JsonSerializer.Serialize(new WorkflowSchema("pod-ctl", [], [])
                 {
                     Companions = [new CompanionDeclaration("rabbit", PinnedImage)],
@@ -152,7 +152,7 @@ public sealed class WorkflowTypeCompanionTests : CoreApiComponentTestBase
     {
         var client = CreateClient();
         var register = await client.PostAsJsonAsync("/api/workflow-types",
-            new RegisterWorkflowTypeRequest("pod-test", "docker://pod-test:1",
+            new RegisterWorkflowTypeRequest("pod-test", "docker://pod-test:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 SchemaJson: SchemaJsonWith(
                     new CompanionDeclaration("rabbit", PinnedImage),
                     new CompanionDeclaration("machine", PinnedImage)

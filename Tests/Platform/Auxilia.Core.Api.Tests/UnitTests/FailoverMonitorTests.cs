@@ -194,12 +194,12 @@ public sealed class FailoverMonitorTests
         var runId = Guid.NewGuid();
         var commandId = Guid.NewGuid();
         var command = new RunWorkflowCommand(
-            commandId, "wf-type", "docker://wf:test",
+            commandId, "wf-type", "docker://wf:test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             commandContext ?? new Dictionary<string, string>(), ResolutionToken: "token-1");
         // A redispatch goes through RerunAsync: the type must be registered Active and the
         // original resolution context stashed — exactly like a real dispatch leaves behind.
         await _registry.EnsureSeededAsync(
-            new StaticWorkflowType { WorkflowType = "wf-type", PackageUri = "docker://wf:test" },
+            new StaticWorkflowType { WorkflowType = "wf-type", PackageUri = "docker://wf:test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
             CancellationToken.None);
         await _resolver.StashAsync(commandId, "token-1", bindings ?? [], triggeredBy);
         var run = new CoreRunRecord
@@ -449,10 +449,10 @@ public sealed class FailoverMonitorTests
     {
         var commandId = Guid.NewGuid();
         var command = new RunWorkflowCommand(
-            commandId, "wf-type", "docker://wf:test",
+            commandId, "wf-type", "docker://wf:test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             commandContext ?? new Dictionary<string, string>(), ResolutionToken: "token-d");
         await _registry.EnsureSeededAsync(
-            new StaticWorkflowType { WorkflowType = "wf-type", PackageUri = "docker://wf:test" },
+            new StaticWorkflowType { WorkflowType = "wf-type", PackageUri = "docker://wf:test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
             CancellationToken.None);
         await _resolver.StashAsync(commandId, "token-d", [], triggeredBy: null);
         var run = new CoreRunRecord

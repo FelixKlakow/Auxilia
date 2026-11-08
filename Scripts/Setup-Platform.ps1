@@ -469,9 +469,21 @@ if (-not $SkipWorkflows) {
             }
         }
         catch { $schemaJson = $null }
+        # Images are approved by CONTENT: register the exact digest of the image as it is now (its
+        # registry digest, or - for a local build that never went through a registry - its image
+        # ID). A later rebuild/re-push under the same tag is new content and needs a new approval.
+        $imageRef = "$($workflow.image):$ImageTag"
+        $digest = (& docker image inspect $imageRef --format '{{range .RepoDigests}}{{.}} {{end}}' 2>$null) -split ' ' |
+            Where-Object { $_ -like "$($workflow.image)@sha256:*" } | Select-Object -First 1
+        $digest = if ($digest) { $digest.Substring($digest.IndexOf('@') + 1) }
+                  else { (& docker image inspect $imageRef --format '{{.Id}}' 2>$null) }
+        if ($LASTEXITCODE -ne 0 -or -not $digest -or $digest -notmatch '^sha256:[0-9a-f]{64}$') {
+            Write-Warning "  workflow image $imageRef not found locally - type $($workflow.type) not registered (build it with -BuildImages)."
+            continue
+        }
         $body = @{
             workflowType = $workflow.type
-            packageUri   = "docker://$($workflow.image):$ImageTag"
+            packageUri   = "docker://$imageRef@$digest"
         }
         if ($schemaJson) { $body.schemaJson = $schemaJson }
         elseif ($existing) {
@@ -484,7 +496,7 @@ if (-not $SkipWorkflows) {
             # administrator IS the signing authority here, so approve in the same breath.
             Invoke-Core POST "/api/workflow-types/$($workflow.type)/approve" @{} | Out-Null
         }
-        Write-Host "  workflow type $($workflow.type) $(if ($existing) { 'schema refreshed' } else { 'registered' }) ($($workflow.image):$ImageTag)" -ForegroundColor Green
+        Write-Host "  workflow type $($workflow.type) $(if ($existing) { 'schema refreshed' } else { 'registered' }) ($imageRef@$digest)" -ForegroundColor Green
     }
 }
 
@@ -497,6 +509,7 @@ Write-Host "  * Under the restricted default posture, new layers and providers a
 Write-Host "    grant them to groups/users via Sharing, or set security.default-resource-access=open"
 Write-Host "    in /admin/settings (needs step-up elevation)."
 if (-not $BuildImages -and -not $SkipWorkflows) {
-    Write-Host "  * Workflow types were registered against docker://<image>:$ImageTag - make sure those"
-    Write-Host "    images exist on every runner host (re-run with -BuildImages to build them here)."
+    Write-Host "  * Workflow types were registered by digest (docker://<image>:$ImageTag@sha256:...) - every runner"
+    Write-Host "    host needs exactly that content; after rebuilding an image, re-run this script to register"
+    Write-Host "    (and approve) the new digest - a runner never starts what a tag points to now."
 }

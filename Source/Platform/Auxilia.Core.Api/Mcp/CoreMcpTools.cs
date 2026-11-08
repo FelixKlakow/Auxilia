@@ -45,7 +45,9 @@ public sealed class CoreMcpTools(
     Microsoft.Extensions.Options.IOptions<CoreApiSettings> apiSettings,
     TimeProvider clock,
     Auxilia.UniversalDataAccess.IDataAccess<Data.CoreArtifactRecord> artifacts,
-    Auxilia.UniversalDataAccess.IDataAccess<Data.CoreEventRecord> events)
+    Auxilia.UniversalDataAccess.IDataAccess<Data.CoreEventRecord> events,
+    Auxilia.UniversalDataAccess.IDataAccess<Data.CoreRunRecord> runRecords,
+    RunAccessService runAccess)
 {
     private static readonly JsonSerializerOptions JsonOptions = JsonSerializerOptions.Web;
 
@@ -86,7 +88,9 @@ public sealed class CoreMcpTools(
     public async Task<CallToolResult> RegisterWorkflowTypeAsync(
         RequestContext<CallToolRequestParams> context,
         [Description("Workflow type name (must match the packaged schema's workflow name).")] string workflowType,
-        [Description("Package coordinate: docker://image:tag or an https .workflow.zip URL.")] string? packageUri = null,
+        [Description("Package coordinate: an image by its digest, docker://image[:tag]@sha256:<64 hex> " +
+                     "(an approval vouches for that content — a tag alone is refused), or an https .workflow.zip URL.")]
+        string? packageUri = null,
         [Description("Alternatively, the package ZIP transferred as base64 (stored and served by the Core).")]
         string? packageBase64 = null,
         CancellationToken cancellationToken = default)
@@ -332,34 +336,37 @@ public sealed class CoreMcpTools(
         context.User is { } user && CoreClaims.HasRolePermission(user, PermissionActions.SlotConfigWrite));
 
     [McpServerTool(Name = "list_runs")]
-    [Description("Lists runs, newest first.")]
+    [Description("Lists the runs you may see, newest first: runs that run for you, that you started on " +
+                 "someone's behalf, or that were shared with you (administrators see all).")]
     public async Task<CallToolResult> ListRunsAsync(
         RequestContext<CallToolRequestParams> context,
         [Description("Maximum runs to return (default 50, max 500).")] int limit = 50,
         CancellationToken cancellationToken = default)
     {
-        if (CoreClaims.PrincipalIdOf(context.User) is null)
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
             return NoPrincipal();
-        return JsonResult(await runView.QueryAsync(new RunQuery(Take: Math.Clamp(limit, 1, 500)), cancellationToken));
+        var viewer = await runAccess.ViewerForAsync(principalId, cancellationToken);
+        return JsonResult(await runView.QueryAsync(new RunQuery(Take: Math.Clamp(limit, 1, 500)), viewer, cancellationToken));
     }
 
     [McpServerTool(Name = "get_run")]
-    [Description("Returns a run's status by id.")]
+    [Description("Returns a run's status by id (a run you may see).")]
     public async Task<CallToolResult> GetRunAsync(
         RequestContext<CallToolRequestParams> context,
         [Description("Run id (GUID).")] string runId,
         CancellationToken cancellationToken = default)
     {
-        if (CoreClaims.PrincipalIdOf(context.User) is null)
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
             return NoPrincipal();
         if (!Guid.TryParse(runId, out var id))
             return Error("runId must be a GUID.");
-        var status = await runView.GetAsync(id, cancellationToken);
-        return status is null ? Error("run not found.") : JsonResult(status);
+        var viewer = await runAccess.ViewerForAsync(principalId, cancellationToken);
+        var run = await runAccess.FindAsync(viewer, id, surface: null, cancellationToken);
+        return run is null ? Error("run not found.") : JsonResult(RunReadService.ToStatus(run));
     }
 
     [McpServerTool(Name = "cancel_run")]
-    [Description("Requests cancellation of a running workflow by run id.")]
+    [Description("Requests cancellation of a running workflow by run id (a run you may see).")]
     public async Task<CallToolResult> CancelRunAsync(
         RequestContext<CallToolRequestParams> context,
         [Description("Run id (GUID).")] string runId,
@@ -369,12 +376,58 @@ public sealed class CoreMcpTools(
             return NoPrincipal();
         if (!Guid.TryParse(runId, out var id))
             return Error("runId must be a GUID.");
-        var run = await runView.GetAsync(id, cancellationToken);
-        if (await DenyAsync(principalId, PermissionActions.WorkflowCancel, run?.WorkflowType, cancellationToken) is { } denial)
+        var viewer = await runAccess.ViewerForAsync(principalId, cancellationToken);
+        if (await runAccess.FindAsync(viewer, id, "cancel", cancellationToken) is not { } run)
+            return Error("run not found.");
+        if (await DenyAsync(principalId, PermissionActions.WorkflowCancel, run.WorkflowType, cancellationToken) is { } denial)
             return denial;
         // Callers may hold the DISPATCH id; cancel by the resolved run's id like the REST endpoint.
-        await runs.CancelAsync(run?.RunId ?? id, cancellationToken);
-        return JsonResult(new { runId = run?.RunId ?? id, cancelRequested = true });
+        await runs.CancelAsync(run.Id, cancellationToken);
+        return JsonResult(new { runId = run.Id, cancelRequested = true });
+    }
+
+    [McpServerTool(Name = "set_run_grants")]
+    [Description("Shares a run (or stops sharing it): replaces who else may observe and steer it. Allowed for " +
+                 "the principal it runs for, the one that started it on their behalf, and administrators. " +
+                 "An empty list makes the run private again.")]
+    public async Task<CallToolResult> SetRunGrantsAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("Run id (GUID).")] string runId,
+        [Description("JSON array of grants, each {\"kind\": \"Principal\"|\"Group\"|\"DirectoryGroup\", \"id\": \"...\"}.")]
+        string grantsJson,
+        CancellationToken cancellationToken = default)
+    {
+        if (CoreClaims.PrincipalIdOf(context.User) is not { } principalId)
+            return NoPrincipal();
+        if (!Guid.TryParse(runId, out var id))
+            return Error("runId must be a GUID.");
+        List<AccessGrant>? grants;
+        try
+        {
+            grants = JsonSerializer.Deserialize<List<AccessGrant>>(grantsJson, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return Error("grantsJson must be a JSON array of {kind, id} grants.");
+        }
+        var viewer = await runAccess.ViewerForAsync(principalId, cancellationToken);
+        if (await runAccess.FindAsync(viewer, id, "grants", cancellationToken) is not { } run)
+            return Error("run not found.");
+        if (!viewer.MayShare(run))
+            return Error("only the principal the run runs for, its starter, or an administrator may share it.");
+        try
+        {
+            var updated = await runAccess.SetGrantsAsync(run.Id, grants ?? [], cancellationToken);
+            if (updated is null)
+                return Error("run not found.");
+            await auditLog.AppendAsync(principalId.ToString("D"), "run.grants-set", run.Id.ToString(),
+                JsonSerializer.Serialize(grants ?? []), ct: cancellationToken);
+            return JsonResult(RunReadService.ToStatus(updated));
+        }
+        catch (ArgumentException ex)
+        {
+            return Error(ex.Message);
+        }
     }
 
     [McpServerTool(Name = "list_artifacts")]
@@ -393,7 +446,11 @@ public sealed class CoreMcpTools(
             return NoPrincipal();
         if (await DenyAsync(principalId, PermissionActions.ArtifactConsume, artifactType, cancellationToken) is { } denial)
             return denial;
-        var all = (await artifacts.ReadAsync(cancellationToken)).AsEnumerable();
+        // Artifacts of runs the caller may not reach stay invisible, exactly like the REST surface.
+        var viewer = await runAccess.ViewerForAsync(principalId, cancellationToken);
+        var visibleRuns = (await runRecords.ReadAsync(cancellationToken)).Where(viewer.CanSee).Select(r => r.Id).ToHashSet();
+        var all = (await artifacts.ReadAsync(cancellationToken)).AsEnumerable()
+            .Where(a => viewer.IsAdministrator || visibleRuns.Contains(a.RunInstanceId));
         if (!string.IsNullOrWhiteSpace(artifactType))
             all = all.Where(a => string.Equals(a.ArtifactType, artifactType, StringComparison.Ordinal));
         if (!string.IsNullOrWhiteSpace(workItemId))
@@ -428,7 +485,8 @@ public sealed class CoreMcpTools(
         if (await DenyAsync(principalId, PermissionActions.ArtifactConsume, artifactId, cancellationToken) is { } denial)
             return denial;
         var a = await artifacts.ReadAsync(id, cancellationToken);
-        return a is null
+        var viewer = await runAccess.ViewerForAsync(principalId, cancellationToken);
+        return a is null || !await runAccess.CanSeeRunAsync(viewer, a.RunInstanceId, cancellationToken)
             ? Error("artifact not found.")
             : JsonResult(new ArtifactDto(
                 a.Id, a.ArtifactType, a.WorkflowType, a.WorkItemId, a.RunInstanceId,
@@ -458,7 +516,11 @@ public sealed class CoreMcpTools(
                 return Error("sourceRunId must be a GUID.");
             runFilter = run;
         }
-        var all = (await events.ReadAsync(cancellationToken)).AsEnumerable();
+        // Events a run published belong to that run — visible only with access to it (REST parity).
+        var viewer = await runAccess.ViewerForAsync(principalId, cancellationToken);
+        var visibleRuns = (await runRecords.ReadAsync(cancellationToken)).Where(viewer.CanSee).Select(r => r.Id).ToHashSet();
+        var all = (await events.ReadAsync(cancellationToken)).AsEnumerable()
+            .Where(e => e.SourceRunId is not { } source || viewer.IsAdministrator || visibleRuns.Contains(source));
         if (!string.IsNullOrWhiteSpace(eventType))
             all = all.Where(e => string.Equals(e.EventType, eventType, StringComparison.Ordinal));
         if (!string.IsNullOrWhiteSpace(workItemId))

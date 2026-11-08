@@ -135,6 +135,11 @@ public class DockerWorkflowLauncherBakedImageTests
 
         var mockClient = new Mock<IDockerClient>();
         mockClient.Setup(c => c.Containers).Returns(mockContainers.Object);
+        // The approved image is present by its registry digest.
+        var mockImages = new Mock<IImageOperations>();
+        mockImages.Setup(i => i.InspectImageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ImageInspectResponse { ID = "sha256:" + new string('b', 64) });
+        mockClient.Setup(c => c.Images).Returns(mockImages.Object);
 
         var mockFactory = new Mock<IDockerClientFactory>();
         mockFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(mockClient.Object);
@@ -157,17 +162,19 @@ public class DockerWorkflowLauncherBakedImageTests
             File.WriteAllText(manifestPath, "{}");
             var pluginFile = new SlotPluginFile(dllPath, manifestPath);
 
+            var digest = "sha256:" + new string('a', 64);
             var request = MakeBakedRequest(
-                imageUri: "my-image:tag",
+                imageUri: $"my-image:tag@{digest}",
                 pluginFiles: [pluginFile]);
 
             // Act
             await sut.LaunchAsync(request, CancellationToken.None);
 
-            // Assert: container created with baked-image params (no /workflow bind)
+            // Assert: container created with baked-image params (no /workflow bind), from the
+            // approved content — the pin, never the tag.
             mockContainers.Verify(c => c.CreateContainerAsync(
                 It.Is<CreateContainerParameters>(p =>
-                    p.Image == "my-image:tag" &&
+                    p.Image == $"my-image@{digest}" &&
                     (p.HostConfig.Binds == null || !p.HostConfig.Binds.Any(b => b.Contains("/workflow")))),
                 It.IsAny<CancellationToken>()),
                 Times.Once);

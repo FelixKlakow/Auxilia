@@ -35,9 +35,32 @@ public sealed record WorkflowTypeDto(
 public sealed record WorkflowTypeQuery(int Skip = 0, int Take = 50, string? Status = null);
 
 /// <summary>
+/// A <c>docker://</c> workflow package coordinate. The registry accepts only images named by
+/// their content — <c>docker://image[:tag]@sha256:&lt;64 hex&gt;</c> — because an approval vouches
+/// for what it reviewed and a tag can be re-pointed at content nobody reviewed. The digest is the
+/// image's registry (manifest) digest, or, for an image built on the runner host that never went
+/// through a registry, its image ID; either identifies exactly one content. The tag is
+/// informational only: whatever it points to later never runs under the approval.
+/// </summary>
+public static class DockerPackageCoordinate
+{
+    public const string Scheme = "docker://";
+
+    private static readonly System.Text.RegularExpressions.Regex Pinned =
+        new("@sha256:[0-9a-fA-F]{64}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    public static bool IsDocker(string? coordinate)
+        => coordinate?.StartsWith(Scheme, StringComparison.OrdinalIgnoreCase) == true;
+
+    /// <summary>Whether <paramref name="coordinate"/> names immutable content (<c>…@sha256:</c> + 64 hex digits).</summary>
+    public static bool IsDigestPinned(string? coordinate) => coordinate is not null && Pinned.IsMatch(coordinate);
+}
+
+/// <summary>
 /// Register a workflow type into the Core registry. Exactly one package source: a
 /// <see cref="PackageUri"/> (an https .workflow.zip the Core downloads and verifies, or a
-/// docker:// image which carries no verifiable signature and therefore always needs approval), or
+/// docker:// image — named by digest, see <see cref="DockerPackageCoordinate"/> — which carries
+/// no verifiable signature and therefore always needs approval), or
 /// <see cref="PackageBase64"/> — the package transferred to the Core (the signing instance), which
 /// stores it and serves it to the runner itself. A package signed by a trusted publisher key
 /// activates immediately; anything else enters <see cref="WorkflowTypeStatus.Pending"/> until the

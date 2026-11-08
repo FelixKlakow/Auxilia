@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -9,11 +10,12 @@ namespace Auxilia.Core.Runner.Workflows;
 
 /// <summary>
 /// Prepares per-run workspaces (ARCHITECTURE §9). Cached repositories are cloned once into
-/// the warm cache, refreshed via <c>git fetch</c> on reuse (the checkout advanced to the
+/// the warm cache, refreshed via <c>git fetch</c> on every reuse (the checkout advanced to the
 /// fetched tip of the requested branch), and copied into an isolated per-run directory the
-/// launcher bind-mounts at <c>/workspace</c>. The copy is a plain recursive copy — CoW
-/// snapshots on non-overlayfs hosts are a documented follow-up. The cache is keyed by the
-/// credential-stripped URL; a clone credential is injected per git command
+/// launcher bind-mounts at <c>/workspace</c> — the cache itself is never mounted. A refresh that
+/// fails fails the run's preparation: no run ever starts on a stale copy. The copy is a plain
+/// recursive copy — CoW snapshots on non-overlayfs hosts are a documented follow-up. The cache
+/// is keyed by the credential-stripped URL; a clone credential is injected per git command
 /// (<c>-c url.&lt;tokened&gt;.insteadOf=&lt;stripped&gt;</c>) and never persisted in any
 /// <c>.git/config</c>.
 /// <c>NoCache</c> repositories are cloned straight into the run directory and never touch
@@ -25,6 +27,13 @@ public sealed class WorkspaceManager(
     ILogger<WorkspaceManager> logger)
 {
     private static readonly TimeSpan GitCommandTimeout = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// One gate per cache entry: the refresh, the checkout and the per-run copy of an entry never
+    /// interleave — two runs of one repository would otherwise race on git's lock files, or copy a
+    /// tree another run is checking out. Entries of different repositories proceed in parallel.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> CacheGates = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Creates the run workspace and returns its root, or null when no mounts are declared.
@@ -68,8 +77,7 @@ public sealed class WorkspaceManager(
             }
             else
             {
-                var cacheDir = await EnsureWarmCacheAsync(repository, ct);
-                CopyDirectory(cacheDir, runRepoDir);
+                await CopyFromWarmCacheAsync(repository, runRepoDir, ct);
             }
 
             // The commit identity is provisioned, never guessed by the agent: the binding's
@@ -141,20 +149,50 @@ public sealed class WorkspaceManager(
         => Path.Combine(settings.Value.WorkspaceRootDirectory, instanceId.ToString("N"));
 
     /// <summary>
-    /// Clones the repository into the warm cache on first use; refreshes an existing entry via
-    /// an authenticated <c>git fetch</c> and advances the checkout to the fetched tip of the
-    /// requested (or default) branch, so runs start on the current commit. A failed fetch logs
-    /// a warning and proceeds with the stale cache — availability over freshness; the branch
-    /// checkout still happens from the refs the cache already holds.
+    /// Fills the run's own copy of a cached repository: the entry is brought to the remote's
+    /// current state and copied while its gate is held, so the copy is never stale and never torn.
     /// </summary>
-    private async Task<string> EnsureWarmCacheAsync(RepositoryDeclaration repository, CancellationToken ct)
+    private async Task CopyFromWarmCacheAsync(RepositoryDeclaration repository, string runRepoDir, CancellationToken ct)
     {
-        var cacheDir = Path.Combine(settings.Value.WarmCacheDirectory, CacheKeyFor(repository.CloneUrl));
+        var cacheDir = Path.GetFullPath(Path.Combine(settings.Value.WarmCacheDirectory, CacheKeyFor(repository.CloneUrl)));
+        var gate = CacheGates.GetOrAdd(cacheDir, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        try
+        {
+            await RefreshWarmCacheAsync(repository, cacheDir, ct);
+            CopyDirectory(cacheDir, runRepoDir);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Brings a warm-cache entry to the remote's current state. A first use clones it — into a
+    /// staging directory moved into place only once complete, so an interrupted clone never leaves
+    /// a half entry behind. Every reuse runs an authenticated <c>git fetch</c> and advances the
+    /// checkout to the fetched tip of the requested (or default) branch. A fetch that fails fails
+    /// the run's preparation (the dispatcher reports it as <c>PreFlightFailed</c> with this
+    /// reason): a run never proceeds on a copy that may be outdated without anyone knowing.
+    /// </summary>
+    private async Task RefreshWarmCacheAsync(RepositoryDeclaration repository, string cacheDir, CancellationToken ct)
+    {
         if (!Directory.Exists(cacheDir))
         {
             Directory.CreateDirectory(settings.Value.WarmCacheDirectory);
-            await CloneAsync(repository, cacheDir, settings.Value.EffectiveCloneTransports, ct);
-            return cacheDir;
+            var staging = $"{cacheDir}.staging-{Guid.NewGuid():N}";
+            try
+            {
+                await CloneAsync(repository, staging, settings.Value.EffectiveCloneTransports, ct);
+                Directory.Move(staging, cacheDir);
+            }
+            finally
+            {
+                if (Directory.Exists(staging))
+                    DeleteDirectory(staging);
+            }
+            return;
         }
 
         try
@@ -166,15 +204,17 @@ public sealed class WorkspaceManager(
         catch (InvalidOperationException ex)
         {
             logger.LogWarning(ex,
-                "Warm-cache fetch failed for repository {RepositoryId} ({CloneUrl}) — proceeding with the stale cache.",
+                "Warm-cache refresh failed for repository {RepositoryId} ({CloneUrl}) — the run does not start on the cached copy.",
                 repository.Id, StripUserInfo(repository.CloneUrl));
+            throw new InvalidOperationException(
+                $"repository '{repository.Id}' could not be refreshed from {StripUserInfo(repository.CloneUrl)}, "
+                + $"so the run does not start on its possibly outdated cached copy — {ex.Message}", ex);
         }
 
         var branch = repository.Branch ?? await DefaultBranchAsync(cacheDir, repository.CloneUrl, ct);
         await RunGitAsync(
             ["-C", cacheDir, "checkout", "--force", "-B", branch, $"refs/remotes/origin/{branch}"],
             repository.CloneUrl, ct);
-        return cacheDir;
     }
 
     /// <summary>The origin's default branch as recorded at clone time (<c>origin/HEAD</c>).</summary>

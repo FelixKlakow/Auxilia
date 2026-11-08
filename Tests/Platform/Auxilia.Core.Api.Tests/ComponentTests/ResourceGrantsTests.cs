@@ -29,7 +29,7 @@ public sealed class ResourceGrantsTests : CoreApiComponentTestBase
 
     private async Task<string> RegisterTypeAsync(string type)
     {
-        await RegisterActiveTypeAsync(CreateClient(), type, "docker://img");
+        await RegisterActiveTypeAsync(CreateClient(), type, "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         return type;
     }
 

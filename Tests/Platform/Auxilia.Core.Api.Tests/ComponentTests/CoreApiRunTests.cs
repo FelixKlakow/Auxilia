@@ -14,7 +14,7 @@ namespace Auxilia.Core.Api.Tests.ComponentTests;
 public sealed class CoreApiRunTests : CoreApiComponentTestBase
 {
     private const string DummyType = "simple-git-commit-workflow";
-    private const string DummyImage = "docker://auxilia-dummy-workflows:system-test";
+    private const string DummyImage = "docker://auxilia-dummy-workflows:system-test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
     [SetUp]
     public Task RegisterDummyTypeAsync() => RegisterActiveTypeAsync(CreateClient(), DummyType, DummyImage);
@@ -96,6 +96,7 @@ public sealed class CoreApiRunTests : CoreApiComponentTestBase
     {
         var client = CreateClient();
         var runId = Guid.NewGuid();
+        await SeedRunAsync(runId, state: "Running");
 
         var response = await client.PostAsync($"/api/runs/{runId}/cancel", null);
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));

@@ -98,8 +98,21 @@ public sealed class RunTrackingService(
         // resolution store via the command id, never from the runner's database.
         var ownerServiceId = statusEvent.OwnerServiceId ?? mergeBase?.OwnerServiceId;
         var dispatchCommandJson = mergeBase?.DispatchCommandJson;
-        if (dispatchCommandJson is null && statusEvent.CommandId is { } commandId)
-            dispatchCommandJson = (await resolutions.ReadAsync(commandId, ct))?.DispatchCommandJson;
+        // Who may reach the run travels with it from dispatch through the rekey; a run first seen
+        // without its dispatch record recovers its principals from the resolution stash (keyed by
+        // the command id), so it never becomes reachable by anyone it was not dispatched for.
+        var runsFor = mergeBase?.RunsForPrincipalId;
+        var startedBy = mergeBase?.StartedByPrincipalId;
+        if ((dispatchCommandJson is null || mergeBase is null) && statusEvent.CommandId is { } commandId
+            && await resolutions.ReadAsync(commandId, ct) is { } resolution)
+        {
+            dispatchCommandJson ??= resolution.DispatchCommandJson;
+            if (mergeBase is null)
+            {
+                runsFor = resolution.TriggeredByPrincipalId;
+                startedBy = resolution.StartedByPrincipalId;
+            }
+        }
 
         // Conditional save against the version just read (0 = the record must still be absent):
         // a concurrent write by another node fails the swap instead of being silently overwritten.
@@ -120,7 +133,10 @@ public sealed class RunTrackingService(
             OwnerServiceId = ownerServiceId,
             CommandId = statusEvent.CommandId ?? mergeBase?.CommandId,
             DispatchCommandJson = dispatchCommandJson,
-            TerminalEndpoint = statusEvent.TerminalEndpoint ?? mergeBase?.TerminalEndpoint
+            TerminalEndpoint = statusEvent.TerminalEndpoint ?? mergeBase?.TerminalEndpoint,
+            RunsForPrincipalId = runsFor,
+            StartedByPrincipalId = startedBy,
+            GrantsJson = mergeBase?.GrantsJson
         }, existing?.Version ?? 0, ct);
         if (!saved)
             return false;

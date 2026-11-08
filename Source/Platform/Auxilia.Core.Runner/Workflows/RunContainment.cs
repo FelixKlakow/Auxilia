@@ -33,8 +33,9 @@ public sealed class RunContainment(
 
     /// <summary>
     /// The live audit of a run's egress: every denial is audited the moment it happens (they are
-    /// breakout signals), each allowed destination once (first use); past the configured denial
-    /// limit the run is reported for termination.
+    /// breakout signals), each allowed destination at its first use, and every allowed connection
+    /// is counted for the run's summary; past the configured denial limit the run is reported for
+    /// termination.
     /// </summary>
     public async Task OnEgressEventAsync(Guid instanceId, EgressEvent evt)
     {
@@ -51,7 +52,8 @@ public sealed class RunContainment(
             if (limit > 0 && denials == limit && EgressDenialLimitExceeded is { } handler)
                 await handler(instanceId, denials);
         }
-        else if (evt.Decision == "allow" && tally.Allowed.TryAdd(destination, 0))
+        else if (evt.Decision == "allow"
+                 && tally.Allowed.AddOrUpdate(destination, 1, (_, connections) => connections + 1) == 1)
         {
             await auditLog.AppendAsync("core-runner", "workflow.egress.allowed", instanceId.ToString(), destination,
                 JsonSerializer.Serialize(new { kind = evt.Kind }));
@@ -60,8 +62,11 @@ public sealed class RunContainment(
 
     /// <summary>
     /// Releases the run's containment: the broker identity always; the egress topology (its log
-    /// persisted as the <c>egress-log</c> artifact) once the workflow container is gone.
-    /// Best-effort and idempotent — every failure is logged, never thrown.
+    /// persisted as the <c>egress-log</c> artifact) once the workflow container is gone. The
+    /// run's audited egress summary carries every destination with its connection count and the
+    /// SHA-256 of the complete per-attempt log, so that log — every allowed and denied attempt —
+    /// is anchored in the tamper-evident audit chain. Best-effort and idempotent — every failure
+    /// is logged, never thrown.
     /// </summary>
     public async Task ReleaseAsync(Guid instanceId, bool containerGone, CancellationToken ct = default)
     {
@@ -74,7 +79,17 @@ public sealed class RunContainment(
             if (_tallies.TryRemove(instanceId, out var tally) || log is not null)
                 await auditLog.AppendAsync("core-runner", "workflow.egress.summary", instanceId.ToString(),
                     $"{tally?.Allowed.Count ?? 0} destination(s) used, {tally?.Denials ?? 0} denied attempt(s)",
-                    JsonSerializer.Serialize(new { allowed = tally?.Allowed.Keys.Order().ToList(), denials = tally?.Denials ?? 0 }),
+                    JsonSerializer.Serialize(new
+                    {
+                        allowed = tally?.Allowed.Keys.Order().ToList(),
+                        connections = tally?.Allowed.OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                            .ToDictionary(kv => kv.Key, kv => kv.Value),
+                        denials = tally?.Denials ?? 0,
+                        // The same digest the egress-log artifact's ContentHash carries.
+                        egressLogSha256 = log is { Length: > 0 }
+                            ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(log)))
+                            : null
+                    }),
                     ct);
             if (log is { Length: > 0 })
                 await PersistLogAsync(instanceId, "egress-log", log, ct);
@@ -113,6 +128,8 @@ public sealed class RunContainment(
     private sealed class EgressTally
     {
         public int Denials;
-        public readonly ConcurrentDictionary<string, byte> Allowed = new();
+
+        /// <summary>Allowed destinations with their connection counts.</summary>
+        public readonly ConcurrentDictionary<string, int> Allowed = new();
     }
 }

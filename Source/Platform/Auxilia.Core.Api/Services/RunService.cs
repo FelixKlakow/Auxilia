@@ -38,16 +38,24 @@ public sealed class RunService(
     /// <summary>Prefix of the synthetic slot a workspace mount's auth connector is stashed under.</summary>
     internal const string MountAuthSlotPrefix = "mount-auth:";
 
-    public async Task<RunAccepted> RunInlineAsync(RunRequest request, Guid? triggeredBy, CancellationToken ct)
+    /// <summary>
+    /// Dispatches a run of <paramref name="request"/>'s type for <paramref name="triggeredBy"/>;
+    /// <paramref name="startedBy"/> names the caller when it started the run on that principal's
+    /// behalf — both may reach the run afterwards (<see cref="RunAccessService"/>).
+    /// </summary>
+    public async Task<RunAccepted> RunInlineAsync(
+        RunRequest request, Guid? triggeredBy, CancellationToken ct, Guid? startedBy = null)
         => await DispatchAsync(
             request.WorkflowType,
             new Dictionary<string, string>(request.Context ?? new Dictionary<string, string>()),
             // Inline Secret-kind settings are protected the moment they enter the Core — the
             // stash never holds them in the clear; the resolver decrypts just-in-time.
-            await bindingSecrets.ProtectAsync(request.SlotBindings ?? [], ct), triggeredBy, ct);
+            await bindingSecrets.ProtectAsync(request.SlotBindings ?? [], ct), triggeredBy, ct,
+            startedBy: startedBy);
 
     public async Task<RunAccepted> RunConfigurationAsync(
-        Guid configurationId, Guid? triggeredBy, IReadOnlyDictionary<string, string>? context, CancellationToken ct)
+        Guid configurationId, Guid? triggeredBy, IReadOnlyDictionary<string, string>? context, CancellationToken ct,
+        Guid? startedBy = null)
     {
         var config = await configurations.GetForDispatchAsync(configurationId, ct)
                      ?? throw new KeyNotFoundException($"configuration '{configurationId}' not found");
@@ -62,7 +70,7 @@ public sealed class RunService(
                 merged[key] = value;
 
         return await DispatchAsync(
-            config.WorkflowType, merged, config.SlotBindings, triggeredBy, ct, configurationId);
+            config.WorkflowType, merged, config.SlotBindings, triggeredBy, ct, configurationId, startedBy);
     }
 
     /// <summary>
@@ -71,12 +79,15 @@ public sealed class RunService(
     /// resolution works — reusing the old token against a new command id could not resolve),
     /// and the package coordinate re-resolved from the registry. The caller's eligibility for
     /// every bound connector, the tool matching, and the catalog grant gate are all re-checked
-    /// against the fresh schema — a rerun is a new run, not a replay of old trust.
+    /// against the fresh schema — a rerun is a new run, not a replay of old trust. An operator
+    /// rerun runs for the rerunning principal; a failover re-dispatch (<paramref name="keepAccess"/>)
+    /// continues the same logical run and keeps who it runs for, who started it, and its grants.
     /// </summary>
     public async Task<RunAccepted> RerunAsync(
         Data.CoreRunRecord run, Guid? triggeredBy, CancellationToken ct,
         IReadOnlyDictionary<string, string>? contextOverlay = null,
-        bool seesAllConfigurations = false)
+        bool seesAllConfigurations = false,
+        bool keepAccess = false)
     {
         if (quotas is not null)
             await quotas.EnsureCanDispatchAsync(triggeredBy, ct);
@@ -142,10 +153,13 @@ public sealed class RunService(
                          ?? original.SchemaJson,
         };
         var rerunCommandJson = System.Text.Json.JsonSerializer.Serialize(ResolutionTokens.Redacted(command));
+        var owners = keepAccess
+            ? new RunOwners(run.RunsForPrincipalId, run.StartedByPrincipalId, run.GrantsJson)
+            : new RunOwners(triggeredBy ?? stash.TriggeredBy, null, null);
         await credentialResolver.StashAsync(
             commandId, resolutionToken, stash.Bindings, triggeredBy ?? stash.TriggeredBy,
-            rerunCommandJson, stash.WorkspaceIds, stash.ConfigurationId, ct);
-        await RecordDispatchedAsync(commandId, command.WorkflowType ?? run.WorkflowType, rerunCommandJson, ct);
+            rerunCommandJson, stash.WorkspaceIds, stash.ConfigurationId, ct, owners.StartedBy);
+        await RecordDispatchedAsync(commandId, command.WorkflowType ?? run.WorkflowType, rerunCommandJson, owners, ct);
         await bus.PublishAsync(settings.Value.RunCommandQueue, command, ct);
         logger.LogInformation(
             "Re-dispatched run. OriginalRunId={OriginalRunId} NewCommandId={CommandId} WorkflowType={WorkflowType}",
@@ -230,8 +244,11 @@ public sealed class RunService(
     private async Task<RunAccepted> DispatchAsync(
         string workflowType, Dictionary<string, string> context,
         IReadOnlyList<SlotBinding> slotBindings, Guid? triggeredBy, CancellationToken ct,
-        Guid? configurationId = null)
+        Guid? configurationId = null, Guid? startedBy = null)
     {
+        // A delegated start: the run runs for the target, and the caller that started it on their
+        // behalf keeps access to it. A caller starting for itself is simply the run's principal.
+        var owners = new RunOwners(triggeredBy, startedBy == triggeredBy ? null : startedBy, null);
         if (quotas is not null)
             await quotas.EnsureCanDispatchAsync(triggeredBy, ct);
 
@@ -414,8 +431,8 @@ public sealed class RunService(
         var storedCommandJson = System.Text.Json.JsonSerializer.Serialize(ResolutionTokens.Redacted(command));
         await credentialResolver.StashAsync(
             commandId, resolutionToken, stashedBindings, triggeredBy, storedCommandJson,
-            workspaceIds, configurationId, ct);
-        await RecordDispatchedAsync(commandId, workflowType, storedCommandJson, ct);
+            workspaceIds, configurationId, ct, owners.StartedBy);
+        await RecordDispatchedAsync(commandId, workflowType, storedCommandJson, owners, ct);
 
         await bus.PublishAsync(settings.Value.RunCommandQueue, command, ct);
         logger.LogInformation(
@@ -450,10 +467,11 @@ public sealed class RunService(
     /// never-claimed dispatch visible to every read surface and to the failover monitor's
     /// claim-timeout sweep, instead of leaving no trace. The runner's claim event rekeys it to the
     /// instance id. Record before bus publish: a publish that never happens still leaves a
-    /// sweepable Dispatched row, never a silent loss.
+    /// sweepable Dispatched row, never a silent loss. The run's access owners are stamped here,
+    /// from its very first moment — there is no window in which anyone else may reach it.
     /// </summary>
     private async Task RecordDispatchedAsync(
-        Guid commandId, string workflowType, string commandJson, CancellationToken ct)
+        Guid commandId, string workflowType, string commandJson, RunOwners owners, CancellationToken ct)
     {
         var now = clock.GetUtcNow();
         await runs.SaveAsync(new Data.CoreRunRecord
@@ -464,7 +482,10 @@ public sealed class RunService(
             CreatedUtc = now,
             UpdatedUtc = now,
             CommandId = commandId,
-            DispatchCommandJson = commandJson
+            DispatchCommandJson = commandJson,
+            RunsForPrincipalId = owners.RunsFor,
+            StartedByPrincipalId = owners.StartedBy,
+            GrantsJson = owners.GrantsJson
         }, ct);
         await statusPublisher.PublishAsync(
             commandId, workflowType, RunStates.Dispatched, commandId: commandId, ct: ct);
@@ -521,6 +542,9 @@ public sealed class RunService(
             providerType = (await connectors.GetAsync(connectorId, ct))?.ProviderType;
         return providerType;
     }
+
+    /// <summary>Who may reach a run: the principal it runs for, the one that started it for them, its grants.</summary>
+    private sealed record RunOwners(Guid? RunsFor, Guid? StartedBy, string? GrantsJson);
 
     /// <summary>A slot bound several times (AllowMultiple) gets suffixed mount ids: slot, slot-2, …</summary>
     private static string UniqueMountId(IReadOnlyList<WorkspaceMountDispatch> mounts, string slotName)

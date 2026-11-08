@@ -32,6 +32,12 @@ public interface ICoreClient
     Task CancelRunAsync(Guid id, CancellationToken ct = default);
     /// <summary>Re-dispatches a past run from its stored dispatch command as a NEW run.</summary>
     Task<RunAccepted> RerunAsync(Guid id, CancellationToken ct = default);
+    /// <summary>
+    /// Replaces who else may observe and steer a run (the principal it runs for, its starter, or
+    /// an administrator); an empty list makes it private again. Runs are otherwise reachable only
+    /// by those two principals and administrators.
+    /// </summary>
+    Task<RunStatus> SetRunGrantsAsync(Guid runId, SetRunGrants request, CancellationToken ct = default);
 
     /// <summary>
     /// Live-view stream for a run over Server-Sent Events, RESILIENT: the client reconnects

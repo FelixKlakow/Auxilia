@@ -820,7 +820,7 @@ public class WorkflowDispatcherTests
 
         var instanceId = Guid.NewGuid();
         var original = new RunWorkflowCommand(
-            Guid.NewGuid(), "service-workflow", "docker://svc",
+            Guid.NewGuid(), "service-workflow", "docker://svc@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             new Dictionary<string, string> { ["KEY"] = "value" },
             ResolutionToken: protector.Protect("plain-run-token"));
         await _instanceRegistry.CreateAsync(

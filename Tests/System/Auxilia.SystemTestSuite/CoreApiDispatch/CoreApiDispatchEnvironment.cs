@@ -30,7 +30,8 @@ public class CoreApiDispatchEnvironment
     internal const string DummyWorkflowsImageName = "auxilia-dummy-workflows:system-test";
     internal const string RunnerImageName        = "auxilia-core-runner:system-test";
     internal const string CoreApiImageName         = "auxilia-core-api:system-test";
-    internal const string DummyPackageUri          = "docker://auxilia-dummy-workflows:system-test";
+    /// <summary>The dummy image by its content (images are approved by digest) — set once it is built.</summary>
+    internal static string DummyPackageUri { get; private set; } = "";
     internal const string DummyWorkflowType        = "simple-git-commit-workflow";
     internal const string StaticConfigurationName  = "static-dummy";
     internal const string BootstrapApiKey          = "aux-system-test-key-abcdef0123456789";
@@ -72,7 +73,9 @@ public class CoreApiDispatchEnvironment
         return string.Join("\n", (stdout + "\n" + stderr).Split('\n').TakeLast(120));
     }
     private IContainer _coreApi = null!;
-    private IContainer _gitServer = null!;
+    private static IContainer _gitServer = null!;
+    /// <summary>The authenticated git server — tests read what reached it.</summary>
+    internal static IContainer GitServer => _gitServer;
     private string _runOutputDir = null!;
     private string _workspaceDir = null!;
     private INetwork _network = null!;
@@ -90,6 +93,7 @@ public class CoreApiDispatchEnvironment
             BuildImageAsync(DummyWorkflowsImageName, "Tests/System/Auxilia.Workflows.Testing/Dockerfile"),
             BuildImageAsync(CoreApiImageName, "Source/Platform/Auxilia.Core.Api/Dockerfile"),
             BuildImageAsync(GitServerImageName, "Tests/System/Auxilia.SystemTestSuite/GitServer/Dockerfile"));
+        DummyPackageUri = await TestImages.PinnedCoordinateAsync(DummyWorkflowsImageName);
 
         _network = new NetworkBuilder().WithName(NetworkName).Build();
         await _network.CreateAsync();

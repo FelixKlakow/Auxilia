@@ -82,7 +82,8 @@ Core.Api's `RunStreamPublisher` consumes the same exchange (bound only to runs w
 stream) and fans each item to the run's
 open `GET /api/runs/{id}/stream` SSE subscriptions (`RunStreamBroker`) — clients (AdminConsole,
 the steering client, any `Auxilia.Core.Client` app) hold ONE stream per observed run; there is no
-SignalR backplane. Observing requires the `run.observe` policy check. Replay of a finished
+SignalR backplane. Observing requires the `run.observe` policy check AND access to that run (the
+principal it runs for, its delegating starter, its grantees, administrators — ARCHITECTURE §16). Replay of a finished
 run = read the persisted views ordered by Sequence and push them through the same
 client-side renderer. (Artifact events have the analogous, server-side-filtered
 `GET /api/artifacts/stream`.)

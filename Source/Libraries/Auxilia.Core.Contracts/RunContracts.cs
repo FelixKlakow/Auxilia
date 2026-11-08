@@ -36,7 +36,26 @@ public sealed record RunStatus(
 {
     /// <summary>Wall-clock duration; null until the run completes.</summary>
     public TimeSpan? Duration => CompletedUtc - CreatedUtc;
+
+    /// <summary>
+    /// The principal the run runs for — on a delegated start (<see cref="RunRequest.RequestedBy"/>)
+    /// the one it was started for. Null for a platform dispatch (only administrators see those).
+    /// </summary>
+    public Guid? RunsFor { get; init; }
+
+    /// <summary>The principal that started the run on <see cref="RunsFor"/>'s behalf; null when they are the same.</summary>
+    public Guid? StartedBy { get; init; }
+
+    /// <summary>Who else may observe and steer the run (set by <see cref="RunsFor"/>, <see cref="StartedBy"/> or an administrator).</summary>
+    public IReadOnlyList<AccessGrant> Grants { get; init; } = [];
 }
+
+/// <summary>
+/// Replaces the subjects a run is shared with — principals, platform groups or directory groups,
+/// exactly like a connector's grants. A run is otherwise visible and steerable only by the
+/// principal it runs for, the one that started it on their behalf, and administrators.
+/// </summary>
+public sealed record SetRunGrants(IReadOnlyList<AccessGrant> Grants);
 
 /// <summary>
 /// Short-lived access to a run's interactive web terminal: open <see cref="Url"/> (relative to

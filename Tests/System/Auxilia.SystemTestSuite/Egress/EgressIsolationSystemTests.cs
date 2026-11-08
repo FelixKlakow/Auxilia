@@ -144,6 +144,46 @@ public sealed class EgressIsolationSystemTests
     }
 
     [Test]
+    public async Task ATunnelNamingAnotherServerInItsTlsHandshake_IsRefused_AndLogged()
+    {
+        // Domain fronting: the tunnel is requested to the ALLOWED destination, the TLS handshake
+        // inside it names another server. curl --connect-to does exactly that (CONNECT goes to
+        // allowed-target, the ClientHello's server name is fronted.example).
+        var status = await CurlFromTheRunNetworkAsync("-x", "http://egress:3128", "-k",
+            "--connect-to", "fronted.example:443:allowed-target:80", "https://fronted.example/");
+
+        Assert.That(status, Is.Not.EqualTo("200"));
+        var (log, _) = await _gateway.GetLogsAsync();
+        Assert.That(log.Split('\n'), Has.Some.Contains("\"sni\":\"fronted.example\"").And.Contains("\"decision\":\"deny\""),
+            "the gateway reads the handshake's server name and refuses a tunnel that names another destination");
+    }
+
+    [Test]
+    public async Task ATunnelWhoseTlsHandshakeNamesItsDestination_PassesTheGateway()
+    {
+        // The positive control: the handshake names the admitted destination, so the gateway
+        // forwards it (the plain-HTTP target then rejects TLS — what matters is the decision).
+        await CurlFromTheRunNetworkAsync("-x", "http://egress:3128", "-k",
+            "--connect-to", "allowed-target:443:allowed-target:80", "https://allowed-target/");
+
+        var (log, _) = await _gateway.GetLogsAsync();
+        Assert.That(log.Split('\n'), Has.Some.Contains("\"sni\":\"allowed-target\"").And.Contains("\"decision\":\"allow\""));
+    }
+
+    [Test]
+    public async Task APlainRequestWithAForgedHostHeader_ReachesItsTargetUnderTheTargetsOwnName()
+    {
+        // nginx answers 200 for its default server whatever the Host — the assertion is the
+        // gateway's: it re-issued the request to the checked target, not to the forged name.
+        Assert.That(await CurlFromTheRunNetworkAsync("-x", "http://egress:3128",
+                "-H", "Host: denied-target", "http://allowed-target/"),
+            Is.EqualTo("200"));
+        var (log, _) = await _gateway.GetLogsAsync();
+        Assert.That(log.Split('\n'), Has.None.Contains("\"host\":\"denied-target\"").And.Contains("\"decision\":\"allow\""),
+            "the forged Host header never decides where a request goes");
+    }
+
+    [Test]
     public async Task AnAllowedTlsDestination_IsTunnelledWithConnect_AndAnUnlistedOneIsNot()
     {
         // CONNECT to a plain-HTTP port is enough to prove the tunnel decision both ways.

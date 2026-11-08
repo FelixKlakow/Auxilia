@@ -19,11 +19,13 @@ public static class SseWriter
     /// <summary>
     /// Pumps <paramref name="reader"/> to the response until the channel completes,
     /// <paramref name="isTerminal"/> matches an event, or the client disconnects. A keepalive of
-    /// zero/negative disables the pings.
+    /// zero/negative disables the pings. Events <paramref name="include"/> rejects are skipped —
+    /// the per-subscriber authorization of a shared feed (e.g. events of runs the caller may not see).
     /// </summary>
     public static async Task PumpAsync<T>(
         HttpResponse response, ChannelReader<T> reader, TimeSpan keepalive,
-        Func<T, bool> isTerminal, CancellationToken ct)
+        Func<T, bool> isTerminal, CancellationToken ct,
+        Func<T, CancellationToken, Task<bool>>? include = null)
     {
         Task<bool>? pendingRead = null;
         while (true)
@@ -46,6 +48,8 @@ public static class SseWriter
                 return;
             while (reader.TryRead(out var evt))
             {
+                if (include is not null && !await include(evt, ct))
+                    continue;
                 await WriteEventAsync(response, evt, ct);
                 if (isTerminal(evt))
                     return;

@@ -23,7 +23,7 @@ namespace Auxilia.Core.Api.Tests.ComponentTests;
 public sealed class ClaudeCodeRepositoryScenarioTests : CoreApiComponentTestBase
 {
     private const string ClaudeCode = "claude-code";
-    private const string Package = "docker://auxilia-claude-code:latest";
+    private const string Package = "docker://auxilia-claude-code:latest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     private const string RepositorySlot = "repository";
 
     [SetUp]

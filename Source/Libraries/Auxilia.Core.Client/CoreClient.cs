@@ -89,6 +89,9 @@ public sealed class CoreClient : ICoreClient
     public Task<RunAccepted> RerunAsync(Guid id, CancellationToken ct = default)
         => PostAsync<RunAccepted>($"/api/runs/{id}/rerun", ct);
 
+    public Task<RunStatus> SetRunGrantsAsync(Guid runId, SetRunGrants request, CancellationToken ct = default)
+        => PutAsync<SetRunGrants, RunStatus>($"/api/runs/{runId}/grants", request, ct);
+
     public IAsyncEnumerable<ClientStreamFrame<RunStreamEvent>> StreamRunAsync(
         Guid runId, CancellationToken ct = default)
         => StreamResilientAsync<RunStreamEvent>(

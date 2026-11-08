@@ -149,6 +149,7 @@ builder.Services.AddSingleton<RunConfigurationService>();
 builder.Services.AddSingleton<RunQuotaService>();
 builder.Services.AddSingleton<RunService>();
 builder.Services.AddSingleton<RunReadService>();
+builder.Services.AddSingleton<RunAccessService>();
 builder.Services.AddSingleton<DashboardPinService>();
 builder.Services.AddSingleton<AuditReadService>();
 builder.Services.AddSingleton<ProviderCatalogService>();
@@ -447,7 +448,9 @@ app.MapPost("/api/runs", async (
         return Results.Json(new { error = decision.Reason }, statusCode: StatusCodes.Status403Forbidden);
     try
     {
-        var accepted = await runs.RunInlineAsync(request, triggeringPrincipal, ct);
+        // A delegated run runs for the target; its starter keeps access to it (run access, §16).
+        var accepted = await runs.RunInlineAsync(request, triggeringPrincipal, ct,
+            startedBy: onBehalfOf ? principalId : null);
         if (onBehalfOf)
             await audit.AppendAsync(principalId.ToString(), PermissionActions.RunOnBehalfOf,
                 triggeringPrincipal.ToString(), "granted",
@@ -472,22 +475,64 @@ app.MapPost("/api/runs", async (
     }
 }).RequireAuthorization();
 
+// Run reads are scoped per run (ARCHITECTURE §16 "Run access"): a caller sees the runs it runs
+// for, started on someone's behalf, or was granted — administrators see all. Someone else's run is
+// indistinguishable from a missing one.
 app.MapGet("/api/runs", async (
-        string? state, string? workflowType, Guid? configurationId,
-        RunReadService svc, CancellationToken ct, int skip = 0, int take = 50) =>
-    Results.Ok(await svc.QueryAsync(
-        new RunQuery(state, workflowType, configurationId, skip, take == 0 ? 50 : take), ct)))
+        string? state, string? workflowType, Guid? configurationId, HttpContext http,
+        RunAccessService access, RunReadService svc, CancellationToken ct, int skip = 0, int take = 50) =>
+    await access.ViewerForAsync(http.User, ct) is { } viewer
+        ? Results.Ok(await svc.QueryAsync(
+            new RunQuery(state, workflowType, configurationId, skip, take == 0 ? 50 : take), viewer, ct))
+        : Results.Unauthorized())
     .RequireAuthorization();
 
-// Server-side aggregate counts — the dashboard's stat tiles, no page scraping. (Must be mapped
-// before the {id:guid} route only by convention; the guid constraint already disambiguates.)
-app.MapGet("/api/runs/stats", async (RunReadService svc, CancellationToken ct) =>
-        Results.Ok(await svc.GetStatsAsync(ct)))
+// Server-side aggregate counts over the caller's visible runs — the dashboard's stat tiles, no
+// page scraping. (Must be mapped before the {id:guid} route only by convention; the guid
+// constraint already disambiguates.)
+app.MapGet("/api/runs/stats", async (
+        HttpContext http, RunAccessService access, RunReadService svc, CancellationToken ct) =>
+    await access.ViewerForAsync(http.User, ct) is { } viewer
+        ? Results.Ok(await svc.GetStatsAsync(viewer, ct))
+        : Results.Unauthorized())
     .RequireAuthorization();
 
-app.MapGet("/api/runs/{id:guid}", async (Guid id, RunReadService svc, CancellationToken ct) =>
-        await svc.GetAsync(id, ct) is { } status ? Results.Ok(status) : Results.NotFound())
-    .RequireAuthorization();
+app.MapGet("/api/runs/{id:guid}", async (
+        Guid id, HttpContext http, RunAccessService access, CancellationToken ct) =>
+{
+    if (await access.ViewerForAsync(http.User, ct) is not { } viewer)
+        return Results.Unauthorized();
+    return await access.FindAsync(viewer, id, surface: null, ct) is { } run
+        ? Results.Ok(RunReadService.ToStatus(run))
+        : Results.NotFound();
+}).RequireAuthorization();
+
+// Share a run (or stop sharing it): the principal it runs for, the one that started it on their
+// behalf, or an administrator replaces its grants — the connector sharing model. Audited.
+app.MapPut("/api/runs/{id:guid}/grants", async (
+        Guid id, SetRunGrants request, HttpContext http, RunAccessService access, AuditLog audit,
+        CancellationToken ct) =>
+{
+    if (await access.ViewerForAsync(http.User, ct) is not { } viewer)
+        return Results.Unauthorized();
+    if (await access.FindAsync(viewer, id, "grants", ct) is not { } run)
+        return Results.NotFound();
+    if (!viewer.MayShare(run))
+        return Results.Json(new { error = "only the principal the run runs for, its starter, or an administrator may share it" },
+            statusCode: StatusCodes.Status403Forbidden);
+    try
+    {
+        if (await access.SetGrantsAsync(run.Id, request.Grants ?? [], ct) is not { } updated)
+            return Results.NotFound();
+        await audit.AppendAsync(viewer.PrincipalId.ToString("D"), "run.grants-set", run.Id.ToString(),
+            System.Text.Json.JsonSerializer.Serialize(request.Grants ?? []), ct: ct);
+        return Results.Ok(RunReadService.ToStatus(updated));
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+}).RequireAuthorization();
 
 // --- Dashboard pins (personal): a principal keeps chosen run views on their dashboard ---
 
@@ -499,11 +544,15 @@ app.MapGet("/api/dashboard/pins", async (
     .RequireAuthorization();
 
 app.MapPost("/api/dashboard/pins", async (
-        CreateDashboardPin request, HttpContext http, DashboardPinService svc, CancellationToken ct) =>
+        CreateDashboardPin request, HttpContext http, RunAccessService access, DashboardPinService svc,
+        CancellationToken ct) =>
 {
-    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+    if (await access.ViewerForAsync(http.User, ct) is not { } viewer)
         return Results.Unauthorized();
-    return await svc.PinAsync(principalId, request, ct) is { } pin
+    // Only a run the caller may see can be pinned.
+    if (await access.FindAsync(viewer, request.RunId, surface: null, ct) is null)
+        return Results.NotFound();
+    return await svc.PinAsync(viewer.PrincipalId, request, ct) is { } pin
         ? Results.Ok(pin)
         : Results.NotFound();
 }).RequireAuthorization();
@@ -517,33 +566,36 @@ app.MapDelete("/api/dashboard/pins/{id:guid}", async (
 }).RequireAuthorization();
 
 app.MapPost("/api/runs/{id:guid}/cancel", async (
-        Guid id, HttpContext http, IPolicyEngine policy, RunService runs, RunReadService runView,
+        Guid id, HttpContext http, IPolicyEngine policy, RunService runs, RunAccessService access,
         CancellationToken ct) =>
 {
-    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+    if (await access.ViewerForAsync(http.User, ct) is not { } viewer)
         return Results.Unauthorized();
-    var run = await runView.GetAsync(id, ct);
+    if (await access.FindAsync(viewer, id, "cancel", ct) is not { } run)
+        return Results.NotFound();
     var decision = await policy.EvaluateAsync(
-        new PolicyContext(principalId, PermissionActions.WorkflowCancel, id.ToString())
-        { WorkflowType = run?.WorkflowType }, ct);
+        new PolicyContext(viewer.PrincipalId, PermissionActions.WorkflowCancel, id.ToString())
+        { WorkflowType = run.WorkflowType }, ct);
     if (!decision.Allowed)
         return Results.Json(new { error = decision.Reason }, statusCode: StatusCodes.Status403Forbidden);
     // Callers may hold the DISPATCH id; the runner stops containers by INSTANCE id — cancel
-    // with the resolved run's id (the read service already de-aliased it). A still-Dispatched
-    // run is cancelled by the Core itself inside CancelAsync (no runner owns it yet).
-    await runs.CancelAsync(run?.RunId ?? id, ct);
+    // with the resolved run's id. A still-Dispatched run is cancelled by the Core itself inside
+    // CancelAsync (no runner owns it yet).
+    await runs.CancelAsync(run.Id, ct);
     return Results.Accepted($"/api/runs/{id}");
 }).RequireAuthorization();
 
 // Rerun: re-dispatch a past run from its stored dispatch command (fresh id + token, bindings
-// re-stashed, connector eligibility re-checked). Authorized like any trigger. Audited.
+// re-stashed, connector eligibility re-checked). Only a run the caller may reach; authorized like
+// any trigger. Audited.
 app.MapPost("/api/runs/{id:guid}/rerun", async (
-        Guid id, HttpContext http, IPolicyEngine policy, RunService runs, RunReadService runView,
+        Guid id, HttpContext http, IPolicyEngine policy, RunService runs, RunAccessService access,
         AuditLog audit, CancellationToken ct) =>
 {
-    if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
+    if (await access.ViewerForAsync(http.User, ct) is not { } viewer)
         return Results.Unauthorized();
-    if (await runView.GetRecordAsync(id, ct) is not { } record)
+    var principalId = viewer.PrincipalId;
+    if (await access.FindAsync(viewer, id, "rerun", ct) is not { } record)
         return Results.NotFound();
     var decision = await policy.EvaluateAsync(
         new PolicyContext(principalId, PermissionActions.WorkflowTrigger, id.ToString())
@@ -578,7 +630,7 @@ app.MapPost("/api/runs/{id:guid}/rerun", async (
 // RunStreamBroker, until the run reaches a terminal state or the client disconnects. Replaces the
 // BackendService SignalR /hubs/views live push.
 app.MapGet("/api/runs/{id:guid}/stream", async (
-        Guid id, HttpContext http, IPolicyEngine policy, RunStreamBroker broker,
+        Guid id, HttpContext http, IPolicyEngine policy, RunAccessService access, RunStreamBroker broker,
         RunStreamPublisher streamPublisher, Auxilia.UniversalDataAccess.IDataAccess<CoreRunRecord> runRecords,
         Microsoft.Extensions.Options.IOptions<CoreApiSettings> apiSettings, CancellationToken ct) =>
 {
@@ -587,30 +639,44 @@ app.MapGet("/api/runs/{id:guid}/stream", async (
         await fail.ExecuteAsync(http);
         return;
     }
-
-    http.Response.Headers.ContentType = "text/event-stream";
-    http.Response.Headers.CacheControl = "no-cache";
-    http.Response.Headers["X-Accel-Buffering"] = "no";
+    if (await access.ViewerForAsync(http.User, ct) is not { } viewer)
+    {
+        await Results.Unauthorized().ExecuteAsync(http);
+        return;
+    }
 
     // SUBSCRIBE FIRST, then read the snapshot: a transition landing between the two is delivered
     // live (duplicated at worst — the client dedupes by (view, sequence) and status frames are
     // idempotent), never lost. Reading before subscribing would drop every non-terminal
-    // transition in the gap.
+    // transition in the gap. Nothing is written to the response before the run is authorized.
     using var subscription = await broker.SubscribeAsync(id, ct);
 
     // The id may be the dispatch COMMAND id rather than the runner's instance id. Selective
     // routing binds by key, so resolve the pairing from the tracked runs and prime the alias —
     // a late subscriber cannot rely on observing the claim transition on the bus.
     var record = await runRecords.ReadAsync(id, ct);
-    if (record is null)
+    var aliasOf = (Guid?)null;
+    if (record is null
+        && (await runRecords.ReadAsync(ct)).FirstOrDefault(r => r.CommandId == id) is { } byCommand)
     {
-        var byCommand = (await runRecords.ReadAsync(ct)).FirstOrDefault(r => r.CommandId == id);
-        if (byCommand is not null)
-        {
-            await streamPublisher.RegisterAliasAsync(id, byCommand.Id, ct);
-            record = byCommand;
-        }
+        aliasOf = byCommand.Id;
+        record = byCommand;
     }
+
+    // Per-run authorization before a single frame: the stream carries the run's content
+    // (conversations, repository excerpts). A run exists from its dispatch on, so an id without a
+    // record is unknown — and someone else's run is indistinguishable from one.
+    if (record is null || !await access.AdmitAsync(viewer, record, "stream", ct))
+    {
+        await Results.NotFound().ExecuteAsync(http);
+        return;
+    }
+    if (aliasOf is { } instanceId)
+        await streamPublisher.RegisterAliasAsync(id, instanceId, ct);
+
+    http.Response.Headers.ContentType = "text/event-stream";
+    http.Response.Headers.CacheControl = "no-cache";
+    http.Response.Headers["X-Accel-Buffering"] = "no";
 
     // Flush headers so the client's SendAsync completes with the subscription already registered —
     // no live event published after this point is lost.
@@ -620,21 +686,17 @@ app.MapGet("/api/runs/{id:guid}/stream", async (
     {
         // SNAPSHOT first frame: the tracked record's current state, so a (re)subscriber never
         // depends on a future transition to learn where the run stands — after a Core restart a
-        // reconnecting client is current immediately. No record (subscribe before dispatch) → no
-        // snapshot, the stream just stays open.
-        if (record is not null)
-        {
-            // TerminalEndpoint stays Core-internal — presence rides RunStatus.HasTerminal.
-            var snapshot = new Auxilia.Workflows.Messaging.Messages.WorkflowStatusEvent(
-                record.Id, record.WorkflowType, record.State, record.ErrorMessage,
-                record.UpdatedUtc, record.OwnerServiceId, record.CommandId);
-            await SseWriter.WriteEventAsync(http.Response, new RunStreamEvent(
-                RunStreamEvent.StatusKind, id, 0,
-                System.Text.Json.JsonSerializer.Serialize(snapshot, System.Text.Json.JsonSerializerOptions.Web),
-                record.UpdatedUtc), ct);
-            if (CoreRunStates.IsTerminal(record.State))
-                return;
-        }
+        // reconnecting client is current immediately. TerminalEndpoint stays Core-internal —
+        // presence rides RunStatus.HasTerminal.
+        var snapshot = new Auxilia.Workflows.Messaging.Messages.WorkflowStatusEvent(
+            record.Id, record.WorkflowType, record.State, record.ErrorMessage,
+            record.UpdatedUtc, record.OwnerServiceId, record.CommandId);
+        await SseWriter.WriteEventAsync(http.Response, new RunStreamEvent(
+            RunStreamEvent.StatusKind, id, 0,
+            System.Text.Json.JsonSerializer.Serialize(snapshot, System.Text.Json.JsonSerializerOptions.Web),
+            record.UpdatedUtc), ct);
+        if (CoreRunStates.IsTerminal(record.State))
+            return;
 
         await SseWriter.PumpAsync(
             http.Response, subscription.Reader,
@@ -652,8 +714,7 @@ app.MapGet("/api/runs/{id:guid}/stream", async (
 // into a running workflow. The Core authorizes + audits and publishes it to the instance's
 // dedicated INPUT queue — it never interprets the payload (no decision semantics here).
 app.MapPost("/api/runs/{id:guid}/inputs", async (
-        Guid id, ProvideRunInput request, HttpContext http, IPolicyEngine policy,
-        Auxilia.UniversalDataAccess.IDataAccess<CoreRunRecord> runStore,
+        Guid id, ProvideRunInput request, HttpContext http, IPolicyEngine policy, RunAccessService access,
         IMessageBusClient bus, AuditLog audit, CancellationToken ct) =>
 {
     if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
@@ -663,10 +724,10 @@ app.MapPost("/api/runs/{id:guid}/inputs", async (
     if (!decision.Allowed)
         return Results.Json(new { error = decision.Reason }, statusCode: StatusCodes.Status403Forbidden);
 
-    // The caller may hold the dispatch CommandId (what run-accept returned) or the instance id.
-    var run = await runStore.ReadAsync(id, ct)
-              ?? (await runStore.ReadAsync(ct)).FirstOrDefault(r => r.CommandId == id);
-    if (run is null)
+    // The caller may hold the dispatch CommandId (what run-accept returned) or the instance id —
+    // and may steer only a run it may reach.
+    var viewer = await access.ViewerForAsync(principalId, ct);
+    if (await access.FindAsync(viewer, id, "inputs", ct) is not { } run)
         return Results.NotFound(new { error = "run not found" });
     if (CoreRunStates.IsTerminal(run.State))
         return Results.BadRequest(new { error = $"the run has ended ({run.State}) — it accepts no input" });
@@ -684,8 +745,7 @@ app.MapPost("/api/runs/{id:guid}/inputs", async (
 // interactive web terminal. The ticket (not the API bearer) then authenticates the proxy's
 // page/asset/websocket requests — a browser surface cannot attach bearer headers to those.
 app.MapPost("/api/runs/{id:guid}/terminal-ticket", async (
-        Guid id, HttpContext http, IPolicyEngine policy,
-        Auxilia.UniversalDataAccess.IDataAccess<CoreRunRecord> runStore,
+        Guid id, HttpContext http, IPolicyEngine policy, RunAccessService access,
         TerminalTicketService tickets, AuditLog audit, CancellationToken ct) =>
 {
     if (CoreClaims.PrincipalIdOf(http.User) is not { } principalId)
@@ -695,9 +755,9 @@ app.MapPost("/api/runs/{id:guid}/terminal-ticket", async (
     if (!decision.Allowed)
         return Results.Json(new { error = decision.Reason }, statusCode: StatusCodes.Status403Forbidden);
 
-    var run = await runStore.ReadAsync(id, ct)
-              ?? (await runStore.ReadAsync(ct)).FirstOrDefault(r => r.CommandId == id);
-    if (run is null)
+    // A ticket is the terminal's only key: issued for a run the caller may reach, nothing else.
+    var viewer = await access.ViewerForAsync(principalId, ct);
+    if (await access.FindAsync(viewer, id, "terminal", ct) is not { } run)
         return Results.NotFound(new { error = "run not found" });
     if (CoreRunStates.IsTerminal(run.State))
         return Results.BadRequest(new { error = $"the run has ended ({run.State}) — its terminal is gone" });
@@ -766,7 +826,7 @@ app.Map("/api/runs/{id:guid}/terminal/{**path}", async (
 // missed (e.g. Core downtime) and that have not updated for staleMinutes; genuinely live runs
 // keep receiving status events and therefore never look stale.
 app.MapDelete("/api/runs", async (
-        HttpContext http, IPolicyEngine policy,
+        HttpContext http, IPolicyEngine policy, RunAccessService access,
         Auxilia.UniversalDataAccess.IDataAccess<CoreRunRecord> runStore,
         Auxilia.UniversalDataAccess.IDataAccess<CoreRunViewRecord> viewStore,
         AuditLog audit, TimeProvider clock, CancellationToken ct,
@@ -774,8 +834,11 @@ app.MapDelete("/api/runs", async (
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.WorkflowConfigurationManage, ct) is { } fail)
         return fail;
+    // Only runs the caller may see are cleared — administrators clear everyone's.
+    var viewer = await access.ViewerForAsync(CoreClaims.PrincipalIdOf(http.User)!.Value, ct);
     var staleCutoff = clock.GetUtcNow() - TimeSpan.FromMinutes(Math.Max(1, staleMinutes));
     var doomed = (await runStore.ReadAsync(ct))
+        .Where(viewer.CanSee)
         .Where(r => CoreRunStates.IsTerminal(r.State)
                     || (includeStale && r.UpdatedUtc < staleCutoff))
         .ToList();
@@ -794,19 +857,19 @@ app.MapDelete("/api/runs", async (
 // The read-later counterpart of the live stream: a run's persisted view items (outputs), so a
 // client can inspect results after the run finished. Gated like observing the live stream.
 app.MapGet("/api/runs/{id:guid}/views", async (
-        Guid id, string? view, HttpContext http, IPolicyEngine policy,
+        Guid id, string? view, HttpContext http, IPolicyEngine policy, RunAccessService access,
         Auxilia.UniversalDataAccess.IDataAccess<CoreRunViewRecord> views,
-        Auxilia.UniversalDataAccess.IDataAccess<CoreRunRecord> runStore,
         CancellationToken ct, int skip = 0, int take = 200) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.RunObserve, ct) is { } fail)
         return fail;
-    // Callers may hold the DISPATCH id (RunAccepted.RunId) — resolve to the instance id like
-    // every other run read (the runner records views under its own instance id).
-    var runId = id;
-    if (await runStore.ReadAsync(id, ct) is null
-        && (await runStore.ReadAsync(ct)).FirstOrDefault(r => r.CommandId == id) is { } aliased)
-        runId = aliased.Id;
+    // Callers may hold the DISPATCH id (RunAccepted.RunId) — resolved to the instance id like
+    // every other run read (the runner records views under its own instance id) — and read only
+    // a run they may reach.
+    if (await access.ViewerForAsync(http.User, ct) is not { } viewer
+        || await access.FindAsync(viewer, id, "views", ct) is not { } run)
+        return Results.NotFound();
+    var runId = run.Id;
     var all = (await views.ReadAsync(ct)).Where(v => v.RunId == runId);
     if (!string.IsNullOrWhiteSpace(view))
         all = all.Where(v => string.Equals(v.ViewName, view, StringComparison.Ordinal));
@@ -820,16 +883,22 @@ app.MapGet("/api/runs/{id:guid}/views", async (
 
 // --- Artifacts (client surface; metadata mirrored from the bus, payloads from the shared backend) ---
 
+// Artifacts are run output (incl. the platform-captured container and egress logs): every
+// artifact surface shows only artifacts of runs the caller may reach (§16 "Run access").
 app.MapGet("/api/artifacts", async (
         string? artifactType, string? workItemId, Guid? runId, DateTimeOffset? createdAfterUtc,
-        HttpContext http, IPolicyEngine policy,
+        HttpContext http, IPolicyEngine policy, RunAccessService access,
         Auxilia.UniversalDataAccess.IDataAccess<CoreArtifactRecord> artifacts,
+        Auxilia.UniversalDataAccess.IDataAccess<CoreRunRecord> runStore,
         RunReadService runReads,
         CancellationToken ct, int skip = 0, int take = 50) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ArtifactConsume, ct) is { } fail)
         return fail;
-    var all = (await artifacts.ReadAsync(ct)).AsEnumerable();
+    var viewer = await access.ViewerForAsync(CoreClaims.PrincipalIdOf(http.User)!.Value, ct);
+    var visibleRuns = (await runStore.ReadAsync(ct)).Where(viewer.CanSee).Select(r => r.Id).ToHashSet();
+    var all = (await artifacts.ReadAsync(ct)).AsEnumerable()
+        .Where(a => viewer.IsAdministrator || visibleRuns.Contains(a.RunInstanceId));
     if (!string.IsNullOrWhiteSpace(artifactType))
         all = all.Where(a => string.Equals(a.ArtifactType, artifactType, StringComparison.Ordinal));
     if (!string.IsNullOrWhiteSpace(workItemId))
@@ -856,12 +925,13 @@ app.MapGet("/api/artifacts", async (
 }).RequireAuthorization();
 
 app.MapGet("/api/artifacts/{id:guid}", async (
-        Guid id, HttpContext http, IPolicyEngine policy,
+        Guid id, HttpContext http, IPolicyEngine policy, RunAccessService access,
         Auxilia.UniversalDataAccess.IDataAccess<CoreArtifactRecord> artifacts, CancellationToken ct) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ArtifactConsume, ct) is { } fail)
         return fail;
-    return await artifacts.ReadAsync(id, ct) is { } a
+    var viewer = await access.ViewerForAsync(CoreClaims.PrincipalIdOf(http.User)!.Value, ct);
+    return await artifacts.ReadAsync(id, ct) is { } a && await access.CanSeeRunAsync(viewer, a.RunInstanceId, ct)
         ? Results.Ok(new ArtifactDto(
             a.Id, a.ArtifactType, a.WorkflowType, a.WorkItemId, a.RunInstanceId,
             a.Version, a.ContentHash, a.SizeBytes, a.CreatedUtc))
@@ -871,7 +941,7 @@ app.MapGet("/api/artifacts/{id:guid}", async (
 // Payload download: metadata must be mirrored AND the payload present in the shared backend
 // (ArtifactStore:PayloadRoot); a missing payload is a deployment wiring gap, logged as such.
 app.MapGet("/api/artifacts/{id:guid}/content", async (
-        Guid id, HttpContext http, IPolicyEngine policy,
+        Guid id, HttpContext http, IPolicyEngine policy, RunAccessService access,
         Auxilia.UniversalDataAccess.IDataAccess<CoreArtifactRecord> artifacts,
         Auxilia.PlatformData.Artifacts.IArtifactPayloadReader payloads,
         AuditLog audit, ILogger<Program> logger, CancellationToken ct) =>
@@ -879,6 +949,13 @@ app.MapGet("/api/artifacts/{id:guid}/content", async (
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ArtifactConsume, ct) is { } fail)
         return fail;
     if (await artifacts.ReadAsync(id, ct) is not { } artifact)
+        return Results.NotFound();
+    // The payload is the run's content: only for a caller who may reach that run (an
+    // administrator reading someone else's is audited).
+    var viewer = await access.ViewerForAsync(CoreClaims.PrincipalIdOf(http.User)!.Value, ct);
+    if (await access.ResolveAsync(artifact.RunInstanceId, ct) is { } producingRun
+            ? !await access.AdmitAsync(viewer, producingRun, "artifact", ct)
+            : !viewer.IsAdministrator)
         return Results.NotFound();
     if (await payloads.OpenReadAsync(id, ct) is not { } payload)
     {
@@ -897,7 +974,7 @@ app.MapGet("/api/artifacts/{id:guid}/content", async (
 // replacement for a bus subscription — chaining libraries react to artifacts through this.
 app.MapGet("/api/artifacts/stream", async (
         string? artifactType, string? workItemId, HttpContext http, IPolicyEngine policy,
-        ArtifactStreamBroker broker,
+        RunAccessService access, ArtifactStreamBroker broker,
         Microsoft.Extensions.Options.IOptions<CoreApiSettings> apiSettings, CancellationToken ct) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.ArtifactConsume, ct) is { } fail)
@@ -905,6 +982,7 @@ app.MapGet("/api/artifacts/stream", async (
         await fail.ExecuteAsync(http);
         return;
     }
+    var viewer = await access.ViewerForAsync(CoreClaims.PrincipalIdOf(http.User)!.Value, ct);
 
     http.Response.Headers.ContentType = "text/event-stream";
     http.Response.Headers.CacheControl = "no-cache";
@@ -917,10 +995,12 @@ app.MapGet("/api/artifacts/stream", async (
 
     try
     {
+        // The feed is shared; each subscriber receives only artifacts of runs it may reach.
         await SseWriter.PumpAsync(
             http.Response, subscription.Reader,
             TimeSpan.FromSeconds(apiSettings.Value.SseKeepaliveSeconds),
-            isTerminal: _ => false, ct);
+            isTerminal: _ => false, ct,
+            include: (evt, token) => access.CanSeeRunAsync(viewer, evt.Artifact.RunInstanceId, token));
     }
     catch (OperationCanceledException)
     {
@@ -930,16 +1010,22 @@ app.MapGet("/api/artifacts/stream", async (
 
 // --- Platform events: queryable mirror + server-side-filtered SSE (event type / work item).
 // Published by workflows (SDK) and the platform itself (run lifecycle) — never via REST.
+// Events a run published (and its run.* lifecycle events) belong to that run: only callers who
+// may reach the run see them (§16 "Run access"); events without a source run stay role-gated.
 app.MapGet("/api/events", async (
         string? eventType, string? workItemId, Guid? sourceRunId, DateTimeOffset? createdAfterUtc,
         DateTimeOffset? createdBeforeUtc,
-        HttpContext http, IPolicyEngine policy,
+        HttpContext http, IPolicyEngine policy, RunAccessService access,
         Auxilia.UniversalDataAccess.IDataAccess<CoreEventRecord> events,
+        Auxilia.UniversalDataAccess.IDataAccess<CoreRunRecord> runStore,
         CancellationToken ct, int skip = 0, int take = 50) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.EventConsume, ct) is { } fail)
         return fail;
-    var all = (await events.ReadAsync(ct)).AsEnumerable();
+    var viewer = await access.ViewerForAsync(CoreClaims.PrincipalIdOf(http.User)!.Value, ct);
+    var visibleRuns = (await runStore.ReadAsync(ct)).Where(viewer.CanSee).Select(r => r.Id).ToHashSet();
+    var all = (await events.ReadAsync(ct)).AsEnumerable()
+        .Where(e => e.SourceRunId is not { } source || viewer.IsAdministrator || visibleRuns.Contains(source));
     if (!string.IsNullOrWhiteSpace(eventType))
         all = all.Where(e => string.Equals(e.EventType, eventType, StringComparison.Ordinal));
     if (!string.IsNullOrWhiteSpace(workItemId))
@@ -962,12 +1048,14 @@ app.MapGet("/api/events", async (
 }).RequireAuthorization();
 
 app.MapGet("/api/events/{id:guid}", async (
-        Guid id, HttpContext http, IPolicyEngine policy,
+        Guid id, HttpContext http, IPolicyEngine policy, RunAccessService access,
         Auxilia.UniversalDataAccess.IDataAccess<CoreEventRecord> events, CancellationToken ct) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.EventConsume, ct) is { } fail)
         return fail;
+    var viewer = await access.ViewerForAsync(CoreClaims.PrincipalIdOf(http.User)!.Value, ct);
     return await events.ReadAsync(id, ct) is { } e
+           && (e.SourceRunId is not { } source || await access.CanSeeRunAsync(viewer, source, ct))
         ? Results.Ok(new EventDto(
             e.Id, e.EventType, e.WorkflowType, e.WorkItemId, e.SourceRunId, e.PayloadJson, e.CreatedUtc))
         : Results.NotFound();
@@ -977,7 +1065,7 @@ app.MapGet("/api/events/{id:guid}", async (
 // replacement for a bus subscription — event-trigger libraries react to events through this.
 app.MapGet("/api/events/stream", async (
         string? eventType, string? workItemId, HttpContext http, IPolicyEngine policy,
-        EventStreamBroker broker,
+        RunAccessService access, EventStreamBroker broker,
         Microsoft.Extensions.Options.IOptions<CoreApiSettings> apiSettings, CancellationToken ct) =>
 {
     if (await CoreAuthorization.AuthorizeAsync(http.User, policy, PermissionActions.EventConsume, ct) is { } fail)
@@ -985,6 +1073,7 @@ app.MapGet("/api/events/stream", async (
         await fail.ExecuteAsync(http);
         return;
     }
+    var viewer = await access.ViewerForAsync(CoreClaims.PrincipalIdOf(http.User)!.Value, ct);
 
     http.Response.Headers.ContentType = "text/event-stream";
     http.Response.Headers.CacheControl = "no-cache";
@@ -997,10 +1086,13 @@ app.MapGet("/api/events/stream", async (
 
     try
     {
+        // The feed is shared; each subscriber receives only events of runs it may reach.
         await SseWriter.PumpAsync(
             http.Response, subscription.Reader,
             TimeSpan.FromSeconds(apiSettings.Value.SseKeepaliveSeconds),
-            isTerminal: _ => false, ct);
+            isTerminal: _ => false, ct,
+            include: async (evt, token) => evt.Event.SourceRunId is not { } source
+                                           || await access.CanSeeRunAsync(viewer, source, token));
     }
     catch (OperationCanceledException)
     {
@@ -1180,7 +1272,8 @@ app.MapPost("/api/configurations/{id:guid}/run", async (
         return Results.Json(new { error = decision.Reason }, statusCode: StatusCodes.Status403Forbidden);
     try
     {
-        var accepted = await runs.RunConfigurationAsync(id, triggeringPrincipal, context, ct);
+        var accepted = await runs.RunConfigurationAsync(id, triggeringPrincipal, context, ct,
+            startedBy: delegated ? principalId : null);
         if (delegated)
             await audit.AppendAsync(principalId.ToString(), PermissionActions.RunOnBehalfOf,
                 triggeringPrincipal.ToString(), "granted",

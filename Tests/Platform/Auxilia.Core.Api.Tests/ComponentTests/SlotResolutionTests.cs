@@ -23,7 +23,7 @@ public sealed class SlotResolutionTests : CoreApiComponentTestBase
 
     [SetUp]
     public Task RegisterCredentialedTypeAsync()
-        => RegisterActiveTypeAsync(CreateClient(), "credentialed-wf", "docker://img");
+        => RegisterActiveTypeAsync(CreateClient(), "credentialed-wf", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 
 
     /// <summary>Creates a connector + a config bound to it, dispatches, and returns (runId, token).</summary>

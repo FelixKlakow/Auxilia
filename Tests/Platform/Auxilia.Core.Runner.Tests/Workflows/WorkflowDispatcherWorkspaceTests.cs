@@ -262,7 +262,7 @@ public class WorkflowDispatcherWorkspaceTests
 
         // No schema repo — the repository is supplied per run on the command, its auth in a slot.
         var command = new RunWorkflowCommand(
-            Guid.NewGuid(), WorkflowType, "docker://workspace-workflow:test",
+            Guid.NewGuid(), WorkflowType, "docker://workspace-workflow:test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             new Dictionary<string, string>(),
             ResolutionToken: "run-token",
             WorkspaceMounts:
@@ -298,7 +298,7 @@ public class WorkflowDispatcherWorkspaceTests
         var originalPrepare = _originRepo;
 
         var command = new RunWorkflowCommand(
-            Guid.NewGuid(), WorkflowType, "docker://workspace-workflow:test",
+            Guid.NewGuid(), WorkflowType, "docker://workspace-workflow:test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             new Dictionary<string, string>(),
             ResolutionToken: "run-token",
             WorkspaceMounts:
@@ -328,7 +328,7 @@ public class WorkflowDispatcherWorkspaceTests
             .ReturnsAsync((RepositoryAuth?)null);
 
         var command = new RunWorkflowCommand(
-            Guid.NewGuid(), WorkflowType, "docker://workspace-workflow:test",
+            Guid.NewGuid(), WorkflowType, "docker://workspace-workflow:test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             new Dictionary<string, string>(),
             ResolutionToken: "run-token",
             WorkspaceMounts:
@@ -356,7 +356,7 @@ public class WorkflowDispatcherWorkspaceTests
             .ReturnsAsync(new WorkflowLaunchResult());
 
         var command = new RunWorkflowCommand(
-            Guid.NewGuid(), WorkflowType, "docker://workspace-workflow:test",
+            Guid.NewGuid(), WorkflowType, "docker://workspace-workflow:test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             new Dictionary<string, string>(),
             WorkspaceMounts:
             [
@@ -392,7 +392,7 @@ public class WorkflowDispatcherWorkspaceTests
             new WorkflowSchema(WorkflowType, [], []) { Repositories = repositories });
 
     private static RunWorkflowCommand NewRunCommand()
-        => new(Guid.NewGuid(), WorkflowType, "docker://workspace-workflow:test",
+        => new(Guid.NewGuid(), WorkflowType, "docker://workspace-workflow:test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             new Dictionary<string, string>());
 
     private static void CreateOriginRepo(string path)

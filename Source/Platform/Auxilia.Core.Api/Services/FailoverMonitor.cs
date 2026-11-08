@@ -294,12 +294,14 @@ public sealed class FailoverMonitor(
             var triggeredBy = orphan.CommandId is { } commandId
                 ? (await resolutions.ReadAsync(commandId, ct))?.TriggeredByPrincipalId
                 : null;
+            // The same logical run continues: whoever could reach the orphan reaches its successor.
             var accepted = await runService.RerunAsync(
                 orphan, triggeredBy, ct,
                 contextOverlay: new Dictionary<string, string>
                 {
                     [FailoverContextKey] = orphan.Id.ToString("D")
-                });
+                },
+                keepAccess: true);
             await auditLog.AppendAsync("core-api", "workflow.redispatched",
                 orphan.Id.ToString(), accepted.RunId.ToString(), ct: ct);
             logger.LogInformation(

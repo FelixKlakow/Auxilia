@@ -1,9 +1,11 @@
 using System.Security.Cryptography;
 using Auxilia.Core.Client;
 using Auxilia.Messaging;
+using Docker.DotNet;
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
 using DotNet.Testcontainers.Networks;
+using DotNet.Testcontainers.Volumes;
 using Testcontainers.RabbitMq;
 
 namespace Auxilia.SystemTestSuite.CoreClientSurface;
@@ -23,7 +25,11 @@ public class CoreClientEnvironment
     internal const string SleepingWorkflowType = "sleeping-workflow";
     internal const string EchoWorkflowType = "echo-workflow";
     internal const string EchoDecisionWorkflowType = "echo-decision-workflow";
-    internal const string DummyPackageUri = "docker://auxilia-dummy-workflows:system-test";
+    internal const string ContainmentProbeWorkflowType = "containment-probe-workflow";
+    /// <summary>The runner's per-container memory ceiling here (small enough to reach on purpose).</summary>
+    internal const int ContainerMemoryMb = 512;
+    /// <summary>The dummy image by its content (images are approved by digest) — set once it is built.</summary>
+    internal static string DummyPackageUri { get; private set; } = "";
     /// <summary>The Core's SSE keepalive cadence — client idle timeouts must exceed this.</summary>
     internal const int KeepaliveSeconds = 5;
 
@@ -38,6 +44,18 @@ public class CoreClientEnvironment
     private static INetwork _network = null!;
     private RabbitMqContainer _rabbitMq = null!;
     private static IContainer _runner = null!;
+    /// <summary>The Docker API guard: it alone holds the daemon socket, the runner talks to it.</summary>
+    private static IContainer _dockerGuard = null!;
+    internal const string DockerGuardImageName = "auxilia-docker-guard:system-test";
+    /// <summary>The guard as the test host reaches it (a Docker endpoint URI).</summary>
+    internal static string DockerGuardEndpoint { get; private set; } = "";
+    /// <summary>
+    /// The runner's run roots (packages, run output, workspaces — its temp directory): a volume
+    /// mounted into the runner at the very path the DAEMON sees it under, so every directory the
+    /// runner prepares is the one its containers bind. The guard's only bind root.
+    /// </summary>
+    private static IVolume _runRoots = null!;
+    internal static string RunRootsPath { get; private set; } = "";
     private static IContainer _coreApi = null!;
     private static readonly List<HttpClient> HttpClients = [];
 
@@ -46,6 +64,15 @@ public class CoreClientEnvironment
 
     /// <summary>The test network — signing fixtures attach their package server to it.</summary>
     internal static INetwork Network => _network;
+
+    /// <summary>Runs a command inside the runner container — what a compromised runner process could do.</summary>
+    internal static async Task<string> ExecInRunnerAsync(IList<string> command, CancellationToken ct)
+    {
+        var result = await _runner.ExecAsync(command, ct);
+        if (result.ExitCode != 0)
+            throw new InvalidOperationException($"'{string.Join(' ', command)}' failed in the runner: {result.Stderr}");
+        return result.Stdout;
+    }
 
     /// <summary>
     /// The runner's combined log so far — the observable for runner-INTERNAL steps that have no
@@ -133,7 +160,10 @@ public class CoreClientEnvironment
             TestImages.BuildImageAsync(CoreApiDispatch.CoreApiDispatchEnvironment.DummyWorkflowsImageName,
                 "Tests/System/Auxilia.Workflows.Testing/Dockerfile"),
             TestImages.BuildImageAsync(CoreApiDispatch.CoreApiDispatchEnvironment.CoreApiImageName,
-                "Source/Platform/Auxilia.Core.Api/Dockerfile"));
+                "Source/Platform/Auxilia.Core.Api/Dockerfile"),
+            TestImages.BuildImageAsync(DockerGuardImageName, "Source/Platform/Auxilia.DockerGuard/Dockerfile"));
+        DummyPackageUri = await TestImages.PinnedCoordinateAsync(
+            CoreApiDispatch.CoreApiDispatchEnvironment.DummyWorkflowsImageName);
 
         _network = new NetworkBuilder().WithName(NetworkName).Build();
         await _network.CreateAsync();
@@ -144,10 +174,49 @@ public class CoreClientEnvironment
             .Build();
         await _rabbitMq.StartAsync();
 
+        _runRoots = new VolumeBuilder()
+            .WithName($"auxilia-run-roots-{TestSession.Id}")
+            .WithLabel(TestSession.LabelKey, TestSession.Id)
+            .Build();
+        await _runRoots.CreateAsync();
+        using (var daemon = new DockerClientConfiguration().CreateClient())
+            RunRootsPath = (await daemon.Volumes.InspectAsync(_runRoots.Name)).Mountpoint;
+
+        // The production shape: the runner never holds the daemon socket — the Docker API guard
+        // does, and allows exactly what a runner does. Every run in this environment (the
+        // containment probe included) goes through it.
         const string dockerSocket = "/var/run/docker.sock";
+        _dockerGuard = new ContainerBuilder(DockerGuardImageName)
+            .WithNetwork(_network)
+            .WithNetworkAliases("docker-guard")
+            .WithBindMount(dockerSocket, dockerSocket)
+            .WithEnvironment("DockerGuard__OutboundNetworks__0", NetworkName)
+            .WithEnvironment("DockerGuard__OutboundNetworks__1", "bridge")
+            // Every run directory lives below the run roots; the guard carries their binds out
+            // beneath them (its root volume carries the session label the teardown sweeps).
+            .WithEnvironment("DockerGuard__BindRoots__0", RunRootsPath)
+            .WithEnvironment($"DockerGuard__RootVolumeLabels__{TestSession.LabelKey}", TestSession.Id)
+            .WithPortBinding(2375, assignRandomHostPort: true)
+            // Deployed as recommended: read-only, every capability dropped, scratch on tmpfs.
+            .WithTmpfsMount("/tmp")
+            .WithCreateParameterModifier(create =>
+            {
+                create.HostConfig.ReadonlyRootfs = true;
+                create.HostConfig.CapDrop = ["ALL"];
+                create.HostConfig.SecurityOpt = ["no-new-privileges:true"];
+            })
+            .WithWaitStrategy(Wait.ForUnixContainer().UntilInternalTcpPortIsAvailable(2375))
+            .Build();
+        await _dockerGuard.StartAsync();
+        DockerGuardEndpoint = $"tcp://localhost:{_dockerGuard.GetMappedPublicPort(2375)}";
+
         _runner = new ContainerBuilder(CoreApiDispatch.CoreApiDispatchEnvironment.RunnerImageName)
             .WithNetwork(_network)
-            .WithBindMount(dockerSocket, dockerSocket)
+            .WithEnvironment("WorkflowLauncher__DockerSocketPath", "tcp://docker-guard:2375")
+            // Packages, run output, workspaces and the warm cache all default below the temp
+            // directory — here the run roots, at the daemon's own path for them.
+            .WithVolumeMount(_runRoots, RunRootsPath)
+            .WithEnvironment("TMPDIR", RunRootsPath)
             .WithEnvironment("RabbitMq__Host", RabbitMqAlias)
             .WithEnvironment("RabbitMq__Port", "5672")
             .WithEnvironment("RabbitMq__UserName", "guest")
@@ -161,6 +230,7 @@ public class CoreClientEnvironment
             .WithEnvironment("WorkflowLauncher__RabbitMqHost", RabbitMqAlias)
             .WithEnvironment("WorkflowLauncher__RabbitMqPort", "5672")
             .WithEnvironment("WorkflowLauncher__EgressGatewayImage", TestImages.EgressGatewayImageName)
+            .WithEnvironment("WorkflowLauncher__ContainerMemoryMb", ContainerMemoryMb.ToString())
             // Everything this runner creates carries the session label the teardown sweeps.
             .WithEnvironment(TestSession.RunnerVariable, TestSession.Id)
             .WithWaitStrategy(
@@ -192,6 +262,8 @@ public class CoreClientEnvironment
             .WithEnvironment("CoreApi__StaticWorkflowTypes__1__PackageUri", DummyPackageUri)
             .WithEnvironment("CoreApi__StaticWorkflowTypes__2__WorkflowType", EchoDecisionWorkflowType)
             .WithEnvironment("CoreApi__StaticWorkflowTypes__2__PackageUri", DummyPackageUri)
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__3__WorkflowType", ContainmentProbeWorkflowType)
+            .WithEnvironment("CoreApi__StaticWorkflowTypes__3__PackageUri", DummyPackageUri)
             // The package-trust roundtrip: a trusted publisher key (auto-Active uploads), the
             // platform signing key (approve-time re-sign), and the network-internal base address
             // core:// package URIs resolve to — the RUNNER must be able to reach it.
@@ -249,6 +321,7 @@ public class CoreClientEnvironment
         // test process's console is swallowed by vstest, so persist them next to the repo.
         await DumpLogsAsync(_coreApi, "core-api");
         await DumpLogsAsync(_runner, "core-runner");
+        await DumpLogsAsync(_dockerGuard, "docker-guard");
 
         foreach (var http in HttpClients) http.Dispose();
         HttpClients.Clear();
@@ -256,6 +329,9 @@ public class CoreClientEnvironment
         if (MessageBusClient is IAsyncDisposable d) await d.DisposeAsync();
         if (_coreApi is not null) await _coreApi.DisposeAsync();
         if (_runner is not null) await _runner.DisposeAsync();
+        if (_dockerGuard is not null) await _dockerGuard.DisposeAsync();
+        await TestSession.SweepAsync();
+        if (_runRoots is not null) await _runRoots.DisposeAsync();
         if (_rabbitMq is not null) await _rabbitMq.DisposeAsync();
         if (_network is not null) await _network.DisposeAsync();
         // A run whose containment the stopped runner never released leaves nothing behind.

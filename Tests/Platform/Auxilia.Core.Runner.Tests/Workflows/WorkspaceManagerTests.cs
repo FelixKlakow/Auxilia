@@ -80,21 +80,64 @@ public class WorkspaceManagerTests
     }
 
     [Test]
-    public async Task Prepare_SecondInstance_ReusesCacheAfterOriginDeleted()
+    public async Task Prepare_RemoteUnreachable_RefusesToStartOnTheCachedCopy()
     {
         await _sut.PrepareAsync(
             Guid.NewGuid(), [new RepositoryDeclaration("main", _originRepo)], ct: CancellationToken.None);
 
-        // The origin disappears — only the warm cache can satisfy the next run.
-        // The fetch fails, is logged as a warning, and the stale cache is used.
+        // The origin becomes unreachable: the cache can no longer be proven current, so the next
+        // run must fail its preparation instead of silently working on a possibly outdated copy.
         DeleteDirectory(_originRepo);
 
         var secondInstance = Guid.NewGuid();
-        var runRoot = await _sut.PrepareAsync(
-            secondInstance, [new RepositoryDeclaration("main", _originRepo)], ct: CancellationToken.None);
+        var refusal = Assert.ThrowsAsync<InvalidOperationException>(() => _sut.PrepareAsync(
+            secondInstance, [new RepositoryDeclaration("main", _originRepo)], ct: CancellationToken.None));
 
-        Assert.That(File.Exists(Path.Combine(runRoot!, "repos", "main", "test.txt")), Is.True,
-            "The second run must be served from the warm cache when the origin is gone.");
+        Assert.That(refusal!.Message, Does.Contain("could not be refreshed").And.Contain("'main'"),
+            "the reason names the repository and why the run did not start");
+    }
+
+    [Test]
+    public void Prepare_FailedFirstClone_LeavesNoHalfCacheEntryBehind()
+    {
+        var missingOrigin = Path.Combine(_tempRoot, "not-a-repository");
+
+        Assert.ThrowsAsync<InvalidOperationException>(() => _sut.PrepareAsync(
+            Guid.NewGuid(), [new RepositoryDeclaration("main", missingOrigin)], ct: CancellationToken.None));
+
+        Assert.That(
+            Directory.Exists(_settings.WarmCacheDirectory) ? Directory.GetFileSystemEntries(_settings.WarmCacheDirectory) : [],
+            Is.Empty, "a later run must clone afresh, never 'refresh' a half-written entry");
+    }
+
+    [Test]
+    public async Task Prepare_ConcurrentRunsOfOneRepository_EachGetAWholeCopyOfTheirOwnBranch()
+    {
+        await _sut.PrepareAsync(
+            Guid.NewGuid(), [new RepositoryDeclaration("main", _originRepo)], ct: CancellationToken.None);
+        var defaultBranch = GitOutput(_originRepo, "rev-parse", "--abbrev-ref", "HEAD");
+        RunGit(_originRepo, "checkout", "-b", "feature");
+        File.WriteAllText(Path.Combine(_originRepo, "feature.txt"), "only on the feature branch");
+        RunGit(_originRepo, "add", "feature.txt");
+        RunGit(_originRepo, "commit", "-m", "test: add feature.txt");
+        RunGit(_originRepo, "checkout", defaultBranch);
+
+        // Both runs share ONE cache entry but want different branches checked out of it.
+        var runs = Enumerable.Range(0, 6).Select(i => (Branch: i % 2 == 0 ? "feature" : defaultBranch, Id: Guid.NewGuid())).ToList();
+        var roots = await Task.WhenAll(runs.Select(run => _sut.PrepareAsync(
+            run.Id, [new RepositoryDeclaration("main", _originRepo, Branch: run.Branch)], ct: CancellationToken.None)));
+
+        Assert.Multiple(() =>
+        {
+            for (var i = 0; i < runs.Count; i++)
+            {
+                var repoDir = Path.Combine(roots[i]!, "repos", "main");
+                Assert.That(GitOutput(repoDir, "rev-parse", "--abbrev-ref", "HEAD"), Is.EqualTo(runs[i].Branch));
+                Assert.That(File.Exists(Path.Combine(repoDir, "feature.txt")), Is.EqualTo(runs[i].Branch == "feature"),
+                    "each run's copy is the whole tree of its own branch, never a mix of two checkouts");
+                Assert.That(GitOutput(repoDir, "status", "--porcelain"), Is.Empty, "the copy is a clean checkout");
+            }
+        });
     }
 
     [Test]

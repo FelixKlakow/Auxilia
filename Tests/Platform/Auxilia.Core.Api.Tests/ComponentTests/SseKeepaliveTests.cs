@@ -19,8 +19,10 @@ public sealed class SseKeepaliveTests : CoreApiComponentTestBase
     public async Task IdleRunStream_EmitsKeepalivePings()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var runId = Guid.NewGuid();
+        await SeedRunAsync(runId);
         using var response = await CreateClient().GetAsync(
-            $"/api/runs/{Guid.NewGuid()}/stream", HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            $"/api/runs/{runId}/stream", HttpCompletionOption.ResponseHeadersRead, cts.Token);
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
 
         await using var body = await response.Content.ReadAsStreamAsync(cts.Token);

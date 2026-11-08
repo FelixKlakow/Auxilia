@@ -53,4 +53,17 @@ public sealed record CoreRunRecord : IVersionedEntity
     /// the address itself never leaves the Core.
     /// </summary>
     public string? TerminalEndpoint { get; init; }
+
+    /// <summary>
+    /// The principal the run runs for (the triggering principal; on a delegated start, the one it
+    /// was started for). Stamped at dispatch and preserved through the claim rekey. Null for a
+    /// platform dispatch — such a run is visible to administrators only.
+    /// </summary>
+    public Guid? RunsForPrincipalId { get; init; }
+
+    /// <summary>The principal that started the run on <see cref="RunsForPrincipalId"/>'s behalf; null when they are the same.</summary>
+    public Guid? StartedByPrincipalId { get; init; }
+
+    /// <summary>Explicit grants (serialized <c>AccessGrant</c> list): who else may observe and steer the run.</summary>
+    public string? GrantsJson { get; init; }
 }

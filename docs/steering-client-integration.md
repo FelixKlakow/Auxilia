@@ -87,7 +87,7 @@ sequenceDiagram
     participant CoreApi as Core.Api
     participant Runner as Core.Runner
     participant Workflow
-    steering client->>CoreApi: subscribe to run stream over SSE - authz run.observe
+    steering client->>CoreApi: subscribe to run stream over SSE - authz run.observe + run access
     Workflow->>Runner: publish view item - opaque
     Runner->>CoreApi: view event over the bus
     CoreApi-->>steering client: SSE - opaque item

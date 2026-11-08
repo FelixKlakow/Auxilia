@@ -247,7 +247,7 @@ public sealed class WorkflowReadoptionTests
             ContainerId = containerId,
             ProtectedInstanceToken = token,
             DispatchCommandJson = JsonSerializer.Serialize(new RunWorkflowCommand(
-                commandId, "wf-type", "docker://wf:test",
+                commandId, "wf-type", "docker://wf:test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 new Dictionary<string, string>(), ResolutionToken: "rt",
                 PodBaseImagesJson: podBaseImagesJson))
         };

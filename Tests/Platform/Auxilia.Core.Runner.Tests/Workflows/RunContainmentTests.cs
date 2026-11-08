@@ -86,6 +86,33 @@ public sealed class RunContainmentTests
     }
 
     [Test]
+    public async Task TheSummary_CountsEveryAllowedConnection_AndAnchorsTheFullLogByItsDigest()
+    {
+        var records = new InMemoryDataAccess<AuditRecord>();
+        const string log = "{\"event\":\"connect\",\"decision\":\"allow\",\"host\":\"api.nuget.org\"}\n";
+        var containment = TestStores.NewContainment(
+            egressHost: new FakeEgressHost { TeardownLog = log }, auditLog: new AuditLog(records, TimeProvider.System));
+
+        for (var i = 0; i < 3; i++)
+            await containment.OnEgressEventAsync(Run, new EgressEvent("connect", "connect", "api.nuget.org", 443, "allow", null));
+        await containment.OnEgressEventAsync(Run, new EgressEvent("connect", "connect", "github.com", 443, "allow", null));
+        await containment.OnEgressEventAsync(Run, new EgressEvent("connect", "connect", "exfil.example", 443, "deny", "x"));
+        await containment.ReleaseAsync(Run, containerGone: true);
+
+        var summary = (await records.ReadAsync()).Single(r => r.Action == "workflow.egress.summary");
+        var details = System.Text.Json.JsonDocument.Parse(summary.DetailJson!).RootElement;
+        Assert.Multiple(() =>
+        {
+            Assert.That(details.GetProperty("connections").GetProperty("api.nuget.org:443").GetInt32(), Is.EqualTo(3));
+            Assert.That(details.GetProperty("connections").GetProperty("github.com:443").GetInt32(), Is.EqualTo(1));
+            Assert.That(details.GetProperty("denials").GetInt32(), Is.EqualTo(1));
+            Assert.That(details.GetProperty("egressLogSha256").GetString(), Is.EqualTo(
+                Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(log)))),
+                "the audit chain anchors the per-attempt log: the digest equals the egress-log artifact's content hash");
+        });
+    }
+
+    [Test]
     public async Task TheDenialLimit_TripsTheKillSwitch_Once()
     {
         var containment = TestStores.NewContainment(settings: new WorkflowDispatcherSettings { EgressDenialLimit = 2 });

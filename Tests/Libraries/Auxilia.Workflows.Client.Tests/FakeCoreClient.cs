@@ -195,6 +195,7 @@ internal sealed class FakeCoreClient : ICoreClient
     public Task<PagedResult<RunStatus>> QueryRunsAsync(RunQuery query, CancellationToken ct = default) => Nope<Task<PagedResult<RunStatus>>>();
     public Task CancelRunAsync(Guid id, CancellationToken ct = default) => Nope<Task>();
     public Task<RunAccepted> RerunAsync(Guid id, CancellationToken ct = default) => Nope<Task<RunAccepted>>();
+    public Task<RunStatus> SetRunGrantsAsync(Guid runId, SetRunGrants request, CancellationToken ct = default) => Nope<Task<RunStatus>>();
     public IAsyncEnumerable<ClientStreamFrame<RunStreamEvent>> StreamRunAsync(Guid runId, CancellationToken ct = default) => Nope<IAsyncEnumerable<ClientStreamFrame<RunStreamEvent>>>();
     public Task<PagedResult<RunViewItem>> GetRunViewsAsync(Guid runId, string? view = null, int skip = 0, int take = 200, CancellationToken ct = default) => Nope<Task<PagedResult<RunViewItem>>>();
     public Task<RunStats> GetRunStatsAsync(CancellationToken ct = default) => Nope<Task<RunStats>>();

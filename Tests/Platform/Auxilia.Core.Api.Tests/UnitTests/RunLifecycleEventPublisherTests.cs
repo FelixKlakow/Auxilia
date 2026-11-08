@@ -105,7 +105,7 @@ public sealed class RunLifecycleEventPublisherTests
 
     private static string CommandJsonWithContext(IReadOnlyDictionary<string, string> context)
         => System.Text.Json.JsonSerializer.Serialize(new RunWorkflowCommand(
-            Guid.NewGuid(), "wf-type", "docker://img", context));
+            Guid.NewGuid(), "wf-type", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", context));
 
     [Test]
     public async Task WorkItemIdInTheDispatchContext_EnrichesTheEvent()

@@ -243,7 +243,7 @@ public class PodFabricEnvironment
 
         (await CoreApiClient.PostAsJsonAsync("/api/workflow-types",
             new RegisterWorkflowTypeRequest(WorkflowType,
-                PackageUri: "docker://" + DummyWorkflowsImageName,
+                PackageUri: await TestImages.PinnedCoordinateAsync(DummyWorkflowsImageName),
                 SchemaJson: JsonSerializer.Serialize(schema)))).EnsureSuccessStatusCode();
         (await CoreApiClient.PostAsync($"/api/workflow-types/{WorkflowType}/approve", null))
             .EnsureSuccessStatusCode();
@@ -258,7 +258,7 @@ public class PodFabricEnvironment
         };
         (await CoreApiClient.PostAsJsonAsync("/api/workflow-types",
             new RegisterWorkflowTypeRequest(RestartWorkflowType,
-                PackageUri: "docker://" + DummyWorkflowsImageName,
+                PackageUri: await TestImages.PinnedCoordinateAsync(DummyWorkflowsImageName),
                 SchemaJson: JsonSerializer.Serialize(restartSchema)))).EnsureSuccessStatusCode();
         (await CoreApiClient.PostAsync($"/api/workflow-types/{RestartWorkflowType}/approve", null))
             .EnsureSuccessStatusCode();

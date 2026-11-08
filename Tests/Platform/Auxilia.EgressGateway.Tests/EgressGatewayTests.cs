@@ -150,6 +150,79 @@ public sealed class EgressGatewayTests
         Assert.That(received, Does.Not.Contain("Proxy-Authorization"));
     }
 
+    [Test]
+    public async Task PlainHttp_CarriesExactlyOneRequest_APipelinedSecondNeverReachesTheDestination()
+    {
+        using var origin = new CollectingHttpServer();
+        var output = new StringWriter();
+        using var gateway = await StartAsync($"127.0.0.1:{origin.Port}", output);
+
+        using var client = await ConnectToProxyAsync(gateway.Port);
+        var stream = client.GetStream();
+        // One write: the second request (another site on the same address) rides behind the first.
+        await WriteAsync(stream,
+            $"GET http://127.0.0.1:{origin.Port}/first HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+            + "GET /second HTTP/1.1\r\nHost: other-site.example\r\n\r\n");
+
+        Assert.That(await ReadLineAsync(stream), Does.Contain("200"));
+        var received = await origin.Received.Task;
+        Assert.That(received, Does.StartWith("GET /first HTTP/1.1"));
+        Assert.That(received, Does.Not.Contain("/second").And.Not.Contain("other-site.example"));
+    }
+
+    [Test]
+    public async Task PlainHttp_ABody_IsForwardedToItsDeclaredLength_AndNoFurther()
+    {
+        using var origin = new CollectingHttpServer();
+        var output = new StringWriter();
+        using var gateway = await StartAsync($"127.0.0.1:{origin.Port}", output);
+
+        using var client = await ConnectToProxyAsync(gateway.Port);
+        var stream = client.GetStream();
+        await WriteAsync(stream,
+            $"POST http://127.0.0.1:{origin.Port}/upload HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 5\r\n\r\nhello"
+            + "GET /smuggled HTTP/1.1\r\nHost: other-site.example\r\n\r\n");
+
+        Assert.That(await ReadLineAsync(stream), Does.Contain("200"));
+        var received = await origin.Received.Task;
+        Assert.That(received, Does.EndWith("\r\n\r\nhello"), "the body, exactly");
+        Assert.That(received, Does.Not.Contain("smuggled"));
+    }
+
+    [Test]
+    public async Task PlainHttp_ABodyWithoutADeclaredLength_IsRefused_AndRecordedAsBlocked()
+    {
+        using var origin = new CollectingHttpServer();
+        var output = new StringWriter();
+        using var gateway = await StartAsync($"127.0.0.1:{origin.Port}", output);
+
+        using var client = await ConnectToProxyAsync(gateway.Port);
+        var stream = client.GetStream();
+        await WriteAsync(stream,
+            $"POST http://127.0.0.1:{origin.Port}/upload HTTP/1.1\r\nHost: 127.0.0.1\r\nTransfer-Encoding: chunked\r\n\r\n"
+            + "5\r\nhello\r\n0\r\n\r\n");
+
+        Assert.That(await ReadLineAsync(stream), Does.Contain("411"));
+        Assert.That(Events(output).Any(e => e is { Event: "connect", Decision: "deny" } && e.Port == origin.Port), Is.True,
+            "a refused attempt is recorded like every other");
+        Assert.That(origin.Accepted, Is.False, "nothing reached the destination");
+    }
+
+    [TestCase("Content-Length: 5", 5L, 0)]
+    [TestCase("Content-Length: 5, 5", 5L, 0)]
+    [TestCase("Content-Length: 5|Content-Length: 5", 5L, 0)]
+    [TestCase("Content-Length: 5|Content-Length: 6", 0L, 400)]
+    [TestCase("Content-Length: +5", 0L, 400)]
+    [TestCase("Content-Length: 0x10", 0L, 400)]
+    [TestCase("Transfer-Encoding: chunked", 0L, 411)]
+    [TestCase("Transfer-Encoding: chunked|Content-Length: 5", 0L, 411)]
+    [TestCase("Accept: */*", 0L, 0)]
+    public void ARequestsBodyFraming_IsReadStrictly(string headers, long length, int status)
+    {
+        var framing = EgressProxy.FramingOf(headers.Split('|'));
+        Assert.That((framing.Length, framing.Status), Is.EqualTo((length, status)), headers);
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private sealed record LogEvent(string Event, string? Decision, string? Host, int? Port);
@@ -218,6 +291,48 @@ public sealed class EgressGatewayTests
                 int n;
                 while ((n = await stream.ReadAsync(buffer)) > 0)
                     await stream.WriteAsync(buffer.AsMemory(0, n));
+            });
+        }
+
+        public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
+        public void Dispose() => _listener.Stop();
+    }
+
+    /// <summary>
+    /// An origin that collects EVERYTHING the proxy sends it for a moment before answering — so a
+    /// second request or extra body bytes the proxy let through would show up in <see cref="Received"/>.
+    /// </summary>
+    private sealed class CollectingHttpServer : IDisposable
+    {
+        private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
+        public TaskCompletionSource<string> Received { get; } = new();
+        public bool Accepted { get; private set; }
+
+        public CollectingHttpServer()
+        {
+            _listener.Start();
+            _ = Task.Run(async () =>
+            {
+                using var client = await _listener.AcceptTcpClientAsync();
+                Accepted = true;
+                var stream = client.GetStream();
+                var collected = new MemoryStream();
+                var buffer = new byte[4096];
+                using (var window = new CancellationTokenSource(TimeSpan.FromMilliseconds(700)))
+                {
+                    try
+                    {
+                        int n;
+                        while ((n = await stream.ReadAsync(buffer, window.Token)) > 0)
+                            collected.Write(buffer, 0, n);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // The collection window is over.
+                    }
+                }
+                Received.TrySetResult(Encoding.ASCII.GetString(collected.ToArray()));
+                await stream.WriteAsync("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"u8.ToArray());
             });
         }
 

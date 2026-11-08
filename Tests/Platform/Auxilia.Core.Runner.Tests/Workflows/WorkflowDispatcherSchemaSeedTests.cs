@@ -94,7 +94,7 @@ public sealed class WorkflowDispatcherSchemaSeedTests
             new WorkflowSchema("my-workflow", [], []) { InteractiveTerminalPort = port }, options);
 
     private static RunWorkflowCommand Command(string? schemaJson)
-        => new(Guid.NewGuid(), "my-workflow", "docker://my-image:1.0",
+        => new(Guid.NewGuid(), "my-workflow", "docker://my-image:1.0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             new Dictionary<string, string>(), SchemaJson: schemaJson);
 
     [Test]

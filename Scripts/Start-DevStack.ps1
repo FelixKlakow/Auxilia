@@ -73,15 +73,23 @@ $runnerEnv = @{
 
 # The bootstrap key seeds the dev admin principal idempotently (by hash) — without it a fresh
 # core-data store would have NO principal matching the scripts' bearer key. The static workflow
-# type registers "implementation" as Active on a fresh store (EnsureSeededAsync — idempotent).
+# type registers "implementation" as Active (EnsureSeededAsync) — BY CONTENT: images are approved
+# by digest, so the image as it is built right now is pinned by its ID (a rebuild re-pins it on the
+# next start; what a tag points to is never what runs).
 # NOTE: "auxilia-steering-dev-key" is a well-known LOCAL DEV bootstrap key, not a secret —
 # never deploy a Core with it.
 $apiEnv = @{
     ASPNETCORE_URLS                                  = "http://localhost:5280"
     CoreSecurity__BootstrapApiKey                    = "auxilia-steering-dev-key"
-    CoreApi__StaticWorkflowTypes__0__WorkflowType    = "implementation"
-    CoreApi__StaticWorkflowTypes__0__PackageUri      = "docker://auxilia-implementation-workflow:system-test"
     ArtifactStore__PayloadRoot                       = "$repo\.devstack\artifacts"
+}
+$implementationImage = "auxilia-implementation-workflow:system-test"
+$implementationId = (& docker image inspect $implementationImage --format '{{.Id}}' 2>$null)
+if ($LASTEXITCODE -eq 0 -and $implementationId -match '^sha256:[0-9a-f]{64}$') {
+    $apiEnv.CoreApi__StaticWorkflowTypes__0__WorkflowType = "implementation"
+    $apiEnv.CoreApi__StaticWorkflowTypes__0__PackageUri   = "docker://$implementationImage@$implementationId"
+} else {
+    Write-Warning "$implementationImage is not built - the 'implementation' workflow type is not seeded."
 }
 
 New-Item -ItemType Directory -Force $stateDir | Out-Null

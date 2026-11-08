@@ -98,7 +98,7 @@ public class FailoverEnvironment
             .WithEnvironment("CoreApi__FailoverScanIntervalSeconds",  "2")
             .WithEnvironment("CoreApi__StaticWorkflowTypes__0__WorkflowType", "sleeping-workflow")
             .WithEnvironment("CoreApi__StaticWorkflowTypes__0__PackageUri",
-                $"docker://{WorkflowDispatch.WorkflowDispatchEnvironment.DummyWorkflowsImageName}")
+                await TestImages.PinnedCoordinateAsync(WorkflowDispatch.WorkflowDispatchEnvironment.DummyWorkflowsImageName))
             .WithPortBinding(8080, true)
             .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("FailoverMonitor started"))
             .Build();

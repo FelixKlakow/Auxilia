@@ -35,7 +35,7 @@ public sealed class ConnectorAccessComponentTests : CoreApiComponentTestBase
     }
 
     [SetUp]
-    public Task RegisterTypeAsync() => RegisterActiveTypeAsync(CreateClient(), "wt", "docker://img");
+    public Task RegisterTypeAsync() => RegisterActiveTypeAsync(CreateClient(), "wt", "docker://img@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 
     private static object RunBinding(Guid connectorId) => new
     {
